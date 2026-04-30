@@ -167,14 +167,27 @@ function onProgressClick(e: MouseEvent) {
 /** 进度条悬停提示 */
 const hoverPct = ref(-1)
 const hoverClientX = ref(0)
+/** 悬停缩略图 URL */
+const hoverThumbUrl = ref('')
+let hoverThumbDebounce: ReturnType<typeof setTimeout> | null = null
 function onProgressHover(e: MouseEvent) {
   if (!progressEl.value) return
   const rect = progressEl.value.getBoundingClientRect()
   hoverPct.value = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
   hoverClientX.value = e.clientX
+  /** 延迟加载悬停缩略图（200ms 防抖） */
+  if (hoverThumbDebounce) clearTimeout(hoverThumbDebounce)
+  hoverThumbDebounce = setTimeout(() => {
+    if (!selectedRecording.value || hoverPct.value < 0) return
+    const durationMs = selectedRecording.value.endTime - selectedRecording.value.startTime
+    const timeSec = Math.max(0, hoverPct.value * durationMs / 1000)
+    hoverThumbUrl.value = authUrl(`/api/recordings/thumb?file=${encodeURIComponent(selectedRecording.value.filename)}&time=${timeSec.toFixed(1)}`)
+  }, 200)
 }
 function onProgressLeave() {
   hoverPct.value = -1
+  hoverThumbUrl.value = ''
+  if (hoverThumbDebounce) { clearTimeout(hoverThumbDebounce); hoverThumbDebounce = null }
 }
 /** 悬停位置的绝对时间 */
 const hoverAbsTime = computed(() => {
@@ -768,7 +781,8 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
             <div v-if="hoverPct >= 0 && selectedRecording" class="progress-tooltip" :style="{ left: (hoverPct * 100) + '%' }">
-              {{ formatAbsTime(hoverAbsTime) }}
+              <img v-if="hoverThumbUrl" :src="hoverThumbUrl" alt="" class="tooltip-thumb" />
+              <span>{{ formatAbsTime(hoverAbsTime) }}</span>
             </div>
           </div>
           <div class="time-display">
@@ -1397,13 +1411,27 @@ defineExpose({ loadRecordings, playAtTime })
   color: #e0e0e0;
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  padding: 2px 6px;
-  border-radius: 3px;
+  padding: 3px 6px;
+  border-radius: 4px;
   border: 1px solid #4ECDC4;
   white-space: nowrap;
   pointer-events: none;
   margin-bottom: 4px;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.tooltip-thumb {
+  width: 128px;
+  height: 72px;
+  object-fit: cover;
+  display: block;
+  border-radius: 2px;
+  background: #0a0a1a;
 }
 
 .time-display {
