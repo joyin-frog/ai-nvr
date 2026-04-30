@@ -160,6 +160,7 @@ function closePlayer() {
   selectedRecording.value = null
   showExport.value = false
   exportFilename.value = ''
+  gifFilename.value = ''
 }
 
 /** 打开导出面板 */
@@ -169,6 +170,7 @@ function openExport() {
   exportEndSec.value = totalDurationSec.value
   showExport.value = true
   exportFilename.value = ''
+  gifFilename.value = ''
 }
 
 /** 执行导出 */
@@ -198,12 +200,52 @@ async function doExport() {
   }
 }
 
+/** GIF 导出状态 */
+const gifExporting = ref(false)
+const gifFilename = ref('')
+
+/** 导出 GIF 动图 */
+async function doGifExport() {
+  if (!selectedRecording.value) return
+  gifExporting.value = true
+  gifFilename.value = ''
+  try {
+    const res = await authFetch('/api/recordings/gif', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file: selectedRecording.value.filename,
+        cameraId: selectedRecording.value.cameraId,
+        startSec: exportStartSec.value,
+        endSec: exportEndSec.value,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      gifFilename.value = data.filename
+    }
+  } catch {
+    // ignore
+  } finally {
+    gifExporting.value = false
+  }
+}
+
 /** 下载导出文件 */
 function downloadExport() {
   if (!exportFilename.value) return
   const link = document.createElement('a')
   link.href = authUrl(`/api/recordings/export/${exportFilename.value}`)
   link.download = exportFilename.value
+  link.click()
+}
+
+/** 下载 GIF 导出文件 */
+function downloadGif() {
+  if (!gifFilename.value) return
+  const link = document.createElement('a')
+  link.href = authUrl(`/api/recordings/export/${gifFilename.value}`)
+  link.download = gifFilename.value
   link.click()
 }
 
@@ -335,10 +377,14 @@ defineExpose({ loadRecordings, playAtTime })
           </div>
           <div class="export-actions">
             <span class="export-duration">时长: {{ exportDurationText }}</span>
-            <button v-if="!exportFilename" class="export-btn" @click="doExport" :disabled="exporting || exportEndSec <= exportStartSec">
-              {{ exporting ? '导出中...' : '导出片段' }}
+            <button v-if="!exportFilename && !gifFilename" class="export-btn" @click="doExport" :disabled="exporting || exportEndSec <= exportStartSec">
+              {{ exporting ? '导出中...' : '导出 MP4' }}
             </button>
-            <button v-else class="download-btn" @click="downloadExport">下载 ({{ exportDurationText }})</button>
+            <button v-if="!exportFilename && !gifFilename" class="gif-btn" @click="doGifExport" :disabled="gifExporting || exportEndSec <= exportStartSec">
+              {{ gifExporting ? '生成中...' : '导出 GIF' }}
+            </button>
+            <button v-if="exportFilename" class="download-btn" @click="downloadExport">下载 MP4 ({{ exportDurationText }})</button>
+            <button v-if="gifFilename" class="download-btn" @click="downloadGif">下载 GIF ({{ exportDurationText }})</button>
           </div>
         </div>
       </div>
@@ -759,6 +805,27 @@ defineExpose({ loadRecordings, playAtTime })
 
 .download-btn:hover {
   opacity: 0.85;
+}
+
+.gif-btn {
+  background: #FFD93D;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.gif-btn:hover {
+  opacity: 0.85;
+}
+
+.gif-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* 合并操作栏 */

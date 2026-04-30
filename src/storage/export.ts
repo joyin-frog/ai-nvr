@@ -153,6 +153,55 @@ export class RecordingExporter {
     return results.sort((a, b) => b.createdAt - a.createdAt);
   }
 
+  /**
+   * 将视频片段导出为 GIF 动图
+   * 使用 ffmpeg palettegen/paletteuse 双 pass 生成高质量调色板
+   */
+  toGif(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string, maxWidth = 480): ExportResult | null {
+    if (!existsSync(sourcePath)) return null;
+
+    const duration = endTimeSec - startTimeSec;
+    if (duration <= 0) return null;
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const filename = `export_${cameraId}_${dateStr}_${timeStr}.gif`;
+    const outputPath = join(this.exportDir, filename);
+    const palettePath = join(this.exportDir, `_palette_${dateStr}_${timeStr}.png`);
+
+    /** Pass 1: 生成调色板 */
+    const paletteArgs = [
+      "-ss", String(Math.max(0, startTimeSec)),
+      "-to", String(endTimeSec),
+      "-i", sourcePath,
+      "-vf", `fps=10,scale=${maxWidth}:-1:flags=lanczos,palettegen=max_colors=128`,
+      "-y",
+      palettePath,
+    ];
+    const paletteResult = spawnSync(this.ffmpegPath, paletteArgs, { timeout: 30_000, stdio: "ignore" });
+    if (paletteResult.status !== 0 || !existsSync(palettePath)) return null;
+
+    /** Pass 2: 使用调色板生成 GIF */
+    const gifArgs = [
+      "-ss", String(Math.max(0, startTimeSec)),
+      "-to", String(endTimeSec),
+      "-i", sourcePath,
+      "-i", palettePath,
+      "-lavfi", `fps=10,scale=${maxWidth}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer`,
+      "-y",
+      outputPath,
+    ];
+    const gifResult = spawnSync(this.ffmpegPath, gifArgs, { timeout: 60_000, stdio: "ignore" });
+
+    /** 清理临时调色板 */
+    try { unlinkSync(palettePath); } catch { /* ignore */ }
+
+    if (gifResult.status !== 0 || !existsSync(outputPath)) return null;
+
+    return { filePath: outputPath, size: statSync(outputPath).size };
+  }
+
   /** 清理超过指定小时的导出文件 */
   purge(maxAgeHours: number): number {
     const cutoff = Date.now() - maxAgeHours * 3600_000;

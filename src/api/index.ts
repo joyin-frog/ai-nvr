@@ -327,8 +327,35 @@ export function startServer(
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
+      /** GIF 导出：将视频片段转为 GIF 动图 */
+      if (url.pathname === "/api/recordings/gif" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const file = obj.file as string | undefined;
+          const startSec = obj.startSec as number | undefined;
+          const endSec = obj.endSec as number | undefined;
+          const cameraId = obj.cameraId as string | undefined;
+          if (!file || startSec === undefined || endSec === undefined) {
+            return new Response("Missing file, startSec, endSec", { status: 400 });
+          }
+
+          const videoPath = recorder.getRecordingPath(file);
+          if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
+
+          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const resolved = realpathSync(videoPath);
+          if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+
+          const result = exporter.toGif(resolved, startSec, endSec, cameraId ?? "unknown");
+          if (!result) return new Response("GIF export failed", { status: 500 });
+
+          const gifFilename = result.filePath.split("/").pop()!;
+          return Response.json({ filename: gifFilename, size: result.size });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
       /** 下载导出文件 */
-      const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.mp4)$/);
+      const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.(mp4|gif))$/);
       if (exportDownloadMatch && req.method === "GET") {
         const filename = exportDownloadMatch[1]!;
         const exportRoot = realpathSync(exporter.getExportPath("."));
@@ -339,9 +366,10 @@ export function startServer(
 
         const stat = statSync(filePath);
         const file = Bun.file(filePath);
+        const contentType = filename.endsWith(".gif") ? "image/gif" : "video/mp4";
         return new Response(file, {
           headers: {
-            "Content-Type": "video/mp4",
+            "Content-Type": contentType,
             "Content-Length": String(stat.size),
             "Content-Disposition": `attachment; filename="${filename}"`,
           },
