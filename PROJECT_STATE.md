@@ -189,4 +189,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 双击全屏：CameraView 画面区域双击进入全屏，cursor:pointer 提示可交互
 - 快捷键描述国际化：App.vue registerShortcut 的 description 全部使用 t() 调用
 - 摄像头拖拽排序：HTML5 Drag & Drop API 实现网格拖拽重排，排序持久化到 localStorage，sortedCameras computed 应用排序
-- 下一步优先：PTZ 控制、摄像头画面亮度/对比度调节
+- 画面亮度/对比度/饱和度调节：CameraView 头部星号按钮展开调节面板，CSS filter 实时预览，亮度(50-200%)、对比度(50-200%)、饱和度(0-200%)，重置按钮
+- 下一步优先：PTZ 控制、摄像头画面数字放大（pinch zoom）
