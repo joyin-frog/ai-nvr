@@ -188,4 +188,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像连续播放：播放器头部 ▶▶ 连续播放开关，视频结束后自动播放同摄像头下一段录像（按时间排序），默认开启
 - 双击全屏：CameraView 画面区域双击进入全屏，cursor:pointer 提示可交互
 - 快捷键描述国际化：App.vue registerShortcut 的 description 全部使用 t() 调用
-- 下一步优先：摄像头拖拽排序、PTZ 控制
+- 摄像头拖拽排序：HTML5 Drag & Drop API 实现网格拖拽重排，排序持久化到 localStorage，sortedCameras computed 应用排序
+- 下一步优先：PTZ 控制、摄像头画面亮度/对比度调节
