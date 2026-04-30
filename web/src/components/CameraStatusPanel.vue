@@ -28,6 +28,8 @@ const props = defineProps<{
 }>()
 
 const metrics = ref<SystemMetrics | null>(null)
+/** 今日事件统计 */
+const todayStats = ref<{ motionCount: number; detectCount: number; onlineCount: number; offlineCount: number; topLabels: string[] } | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 
 /** 摄像头 ID → 名称 */
@@ -61,9 +63,36 @@ async function loadMetrics() {
   }
 }
 
+/** 加载今日事件统计 */
+async function loadTodayStats() {
+  const startOfDay = new Date()
+  startOfDay.setHours(0, 0, 0, 0)
+  const since = startOfDay.getTime()
+  try {
+    const [motionRes, detectRes] = await Promise.all([
+      fetch(`/api/events/history?type=motion&since=${since}&limit=1`),
+      fetch(`/api/events/history?type=detect&since=${since}&limit=1`),
+    ])
+    const motionData = motionRes.ok ? await motionRes.json() : { total: 0 }
+    const detectData = detectRes.ok ? await detectRes.json() : { total: 0 }
+    todayStats.value = {
+      motionCount: motionData.total ?? 0,
+      detectCount: detectData.total ?? 0,
+      onlineCount: 0,
+      offlineCount: 0,
+      topLabels: [],
+    }
+  } catch {
+    // ignore
+  }
+}
+
 onMounted(() => {
   loadMetrics()
+  loadTodayStats()
   timer = setInterval(loadMetrics, 5000)
+  /** 每30秒刷新今日统计 */
+  setInterval(loadTodayStats, 30000)
 })
 
 onUnmounted(() => {
@@ -91,6 +120,21 @@ onUnmounted(() => {
           <span class="online-count">{{ metrics.onlineCameras }}</span>
           <span class="dim"> / {{ metrics.cameraCount }}</span>
         </span>
+      </div>
+    </div>
+
+    <!-- 今日统计 -->
+    <div v-if="todayStats" class="today-stats">
+      <div class="stats-title">今日统计</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-num motion">{{ todayStats.motionCount }}</span>
+          <span class="stat-desc">变动</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num detect">{{ todayStats.detectCount }}</span>
+          <span class="stat-desc">检测</span>
+        </div>
       </div>
     </div>
 
@@ -259,5 +303,51 @@ onUnmounted(() => {
   text-align: center;
   padding: 20px;
   font-size: 13px;
+}
+
+/* 今日统计 */
+.today-stats {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.stats-title {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.stat-card {
+  background: #16213e;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.stat-num {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.stat-num.motion {
+  color: #FFEAA7;
+}
+
+.stat-num.detect {
+  color: #4ECDC4;
+}
+
+.stat-desc {
+  font-size: 11px;
+  color: #666;
 }
 </style>
