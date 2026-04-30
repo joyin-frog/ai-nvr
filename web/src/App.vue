@@ -484,7 +484,7 @@ function setupEventListeners() {
 
   client.on('alert', (payload) => {
     eventPanel.value?.addEvent('alert', payload.cameraId, `${t('notify.alertPrefix')}: ${payload.ruleName}`)
-    alertPanel.value?.loadAlerts()
+    alertPanel.value?.addAlert(payload)
     notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId)
     flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })

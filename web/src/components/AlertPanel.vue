@@ -235,6 +235,27 @@ function eventTypeLabel(type: string): string {
   return eventTypes.value.find(e => e.value === type)?.label ?? type
 }
 
+/** 实时追加告警（WebSocket 推送时调用，替代全量刷新） */
+function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }) {
+  /** 如果当前筛选不匹配则忽略 */
+  if (filterCamera.value && filterCamera.value !== payload.cameraId) return
+  if (filterDate.value) {
+    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+    const until = since + 86_400_000
+    if (payload.timestamp < since || payload.timestamp > until) return
+  }
+  const record: AlertRecord = {
+    id: -(Date.now()),
+    ruleId: payload.ruleId,
+    ruleName: payload.ruleName,
+    cameraId: payload.cameraId,
+    timestamp: payload.timestamp,
+    detail: payload.detail,
+  }
+  alerts.value.unshift(record)
+  alertTotal.value++
+}
+
 /** Tab 切换 */
 const activeView = ref<'rules' | 'history'>('rules')
 
@@ -243,7 +264,7 @@ onMounted(() => {
   loadAlerts()
 })
 
-defineExpose({ loadAlerts })
+defineExpose({ loadAlerts, addAlert })
 </script>
 
 <template>
