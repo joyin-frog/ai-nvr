@@ -152,4 +152,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 全局键盘快捷键：useKeyboard composable，1-6 切换侧边栏标签、F 全屏、Esc 退出、? 帮助面板
 - 录像片段导出：RecordingExporter 使用 ffmpeg -ss/-to 裁剪 MP4，API POST /api/recordings/export + GET /api/recordings/export/:filename 下载，前端播放器弹窗内双滑块选择起止时间一键导出下载
 - 告警静默时段：告警规则支持配置静默时段（如 22:00-06:00），静默期内不触发告警，支持跨午夜时段，前端 AlertPanel 添加时间选择器
+- 摄像头画面数字时钟：CameraView 在线画面左下角实时显示 YYYY-MM-DD HH:MM:SS，半透明背景+等宽字体，专业 NVR 视觉
+- 告警规则编辑：AlertPanel 规则列表内联编辑，支持修改所有字段（名称/事件类型/摄像头/标签/窗口/阈值/冷却/静默时段）
 - 下一步优先：告警推送渠道（邮件/钉钉）、多段录像合并导出
