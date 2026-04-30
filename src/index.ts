@@ -9,6 +9,7 @@ import { AiDetector } from "@/ai/detector";
 import { Annotator } from "@/ai/annotator";
 import { startServer } from "@/api";
 import { EventStorage } from "@/storage/events";
+import { MotionRecorder } from "@/storage/recorder";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -45,7 +46,9 @@ aiDetector.init().then(() => {
 
 /** 启动 HTTP 服务 */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage);
+const recorder = new MotionRecorder(join(import.meta.dir, "../data/recordings"), config.ffmpegPath, eventBus);
+recorder.start();
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline"] as const;
@@ -65,6 +68,7 @@ for (const eventType of RECORDED_EVENTS) {
 /** 优雅退出 */
 process.on("SIGINT", () => {
   console.log("\n[App] 正在关闭...");
+  recorder.stop();
   cameraManager.stop();
   eventBus.clear();
   process.exit(0);

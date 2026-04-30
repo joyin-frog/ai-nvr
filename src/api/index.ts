@@ -2,6 +2,8 @@ import { type CameraManager } from "@/camera/manager";
 import { type EventBus, type EventName } from "@/event-bus";
 import { type Annotator } from "@/ai/annotator";
 import { type EventStorage } from "@/storage/events";
+import { type MotionRecorder } from "@/storage/recorder";
+import { existsSync, statSync } from "node:fs";
 
 /** WebSocket 客户端集合 */
 const wsClients = new Set<import("bun").ServerWebSocket>();
@@ -18,6 +20,7 @@ export function startServer(
   eventBus: EventBus,
   annotator: Annotator,
   eventStorage: EventStorage,
+  recorder: MotionRecorder,
 ): void {
   Bun.serve({
     port,
@@ -39,6 +42,8 @@ export function startServer(
           endpoints: [
             "GET /api/cameras",
             "GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=",
+            "GET /api/recordings?cameraId=",
+            "GET /api/recordings/:cameraId/:filename",
             "GET /api/detection/annotated/:cameraId",
             "WS  /api/events",
           ],
@@ -78,6 +83,30 @@ export function startServer(
           headers: {
             "Content-Type": "image/jpeg",
             "Cache-Control": "no-cache, no-store",
+          },
+        });
+      }
+
+      /** 录像列表 */
+      if (url.pathname === "/api/recordings") {
+        const cameraId = url.searchParams.get("cameraId") ?? undefined;
+        return Response.json(recorder.listRecordings(cameraId));
+      }
+
+      /** 录像文件播放 */
+      const recordingMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/(.+\.mp4)$/);
+      if (recordingMatch) {
+        const camId = recordingMatch[1]!;
+        const filename = recordingMatch[2]!;
+        const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        const stat = statSync(filePath);
+        const file = Bun.file(filePath);
+        return new Response(file, {
+          headers: {
+            "Content-Type": "video/mp4",
+            "Content-Length": String(stat.size),
+            "Accept-Ranges": "bytes",
           },
         });
       }
