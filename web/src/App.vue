@@ -108,8 +108,10 @@ onMounted(() => {
     eventPanel.value?.addEvent('motion', payload.cameraId, `变动 ${(payload.ratio * 100).toFixed(1)}%`)
   })
 
-  /** 监听帧事件：实时推送帧图片 */
+  /** 监听帧事件：实时推送帧图片（blob URL），释放旧的避免内存泄漏 */
   client.on('frame', (payload) => {
+    const old = frameImages.value[payload.cameraId]
+    if (old) URL.revokeObjectURL(old)
     frameImages.value[payload.cameraId] = payload.image
     frameImages.value = { ...frameImages.value }
   })
