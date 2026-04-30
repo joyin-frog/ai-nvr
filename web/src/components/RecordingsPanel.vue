@@ -45,6 +45,21 @@ const STORAGE_KEY = 'nvr-starred-recordings'
 const starredFiles = ref<Set<string>>(new Set(
   JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
 ))
+/** 时间轴视图模式：auto 自动 / multi 多路 / single 单路 */
+const timelineMode = ref<'auto' | 'multi' | 'single'>(localStorage.getItem('nvr-timeline-mode') as 'auto' | 'multi' | 'single' ?? 'auto')
+
+/** 实际使用的时间轴视图 */
+const effectiveTimeline = computed(() => {
+  if (timelineMode.value === 'multi') return 'multi'
+  if (timelineMode.value === 'single') return 'single'
+  return filterCamera.value ? 'single' : 'multi'
+})
+
+function setTimelineMode(mode: 'auto' | 'multi' | 'single') {
+  timelineMode.value = mode
+  localStorage.setItem('nvr-timeline-mode', mode)
+}
+
 /** 仅看收藏 */
 const filterStarred = ref(false)
 function toggleRecStar(filename: string) {
@@ -809,9 +824,15 @@ defineExpose({ loadRecordings, playAtTime })
       </button>
     </div>
 
-    <!-- 多路同步时间轴（全部摄像头时显示） -->
+    <!-- 时间轴视图切换 -->
+    <div class="timeline-switch">
+      <button :class="['tl-mode-btn', { active: effectiveTimeline === 'multi' }]" @click="setTimelineMode(effectiveTimeline === 'multi' ? 'auto' : 'multi')" title="Multi-track">☰</button>
+      <button :class="['tl-mode-btn', { active: effectiveTimeline === 'single' }]" @click="setTimelineMode(effectiveTimeline === 'single' ? 'auto' : 'single')" title="Single-track">═</button>
+    </div>
+
+    <!-- 多路同步时间轴 -->
     <MultiTimeline
-      v-if="!filterCamera"
+      v-if="effectiveTimeline === 'multi'"
       :recordings="filteredRecordings"
       :cameras="cameras"
       :playback-time="selectedRecording && isPlaying ? currentAbsTime : 0"
@@ -821,7 +842,7 @@ defineExpose({ loadRecordings, playAtTime })
 
     <!-- 单路时间轴 -->
     <RecordingsTimeline
-      v-if="filterCamera"
+      v-if="effectiveTimeline === 'single'"
       :recordings="filteredRecordings"
       :selected-camera="filterCamera"
       :playback-time="selectedRecording && isPlaying ? currentAbsTime : 0"
@@ -910,7 +931,32 @@ defineExpose({ loadRecordings, playAtTime })
   font-size: 14px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.timeline-switch {
+  display: flex;
+  gap: 2px;
+}
+
+.tl-mode-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tl-mode-btn:hover {
+  color: #e0e0e0;
+}
+
+.tl-mode-btn.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
 }
 
 .rec-summary {
