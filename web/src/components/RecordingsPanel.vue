@@ -437,6 +437,20 @@ async function batchDelete() {
   selectedFiles.value = new Set()
 }
 
+/** 批量收藏/取消收藏选中录像 */
+function batchStar() {
+  if (selectedFiles.value.size === 0) return
+  const s = new Set(starredFiles.value)
+  /** 如果全部已收藏则全部取消，否则全部收藏 */
+  const allStarred = [...selectedFiles.value].every(f => s.has(f))
+  for (const filename of selectedFiles.value) {
+    if (allStarred) s.delete(filename)
+    else s.add(filename)
+  }
+  starredFiles.value = s
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...s]))
+}
+
 /** 打开导出面板 */
 function openExport() {
   if (!selectedRecording.value) return
@@ -817,6 +831,9 @@ defineExpose({ loadRecordings, playAtTime })
       <button v-else class="download-btn" @click="downloadMerge">{{ t('recording.download') }}</button>
       <button class="zip-btn" @click="doZipDownload" :disabled="zipping || selectedFiles.size < 1">
         {{ zipping ? t('recording.zipping') : t('recording.downloadZip') }}
+      </button>
+      <button class="batch-star-btn" @click="batchStar" :disabled="selectedFiles.size === 0">
+        {{ t('recording.starSelected') }}
       </button>
       <button class="batch-delete-btn" @click="batchDelete" :disabled="selectedFiles.size === 0">
         {{ t('recording.deleteSelected') }}
@@ -1535,6 +1552,26 @@ defineExpose({ loadRecordings, playAtTime })
   cursor: not-allowed;
 }
 
+.batch-star-btn {
+  background: none;
+  border: 1px solid #FFD93D;
+  color: #FFD93D;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.batch-star-btn:hover:not(:disabled) {
+  background: #FFD93D;
+  color: #1a1a2e;
+}
+
+.batch-star-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .batch-delete-btn {
   background: none;
   border: 1px solid #e74c3c;
@@ -1571,6 +1608,11 @@ defineExpose({ loadRecordings, playAtTime })
 
   .player-video {
     max-height: 80vh;
+  }
+
+  .rec-star,
+  .rec-delete {
+    opacity: 0.6;
   }
 }
 </style>

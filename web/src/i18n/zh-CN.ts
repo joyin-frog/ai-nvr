@@ -110,6 +110,7 @@ export default {
     zipping: '打包中...',
     filterStarred: '仅看收藏',
     toggleStar: '收藏/取消收藏',
+    starSelected: '收藏选中',
   },
   timeline: {
     today: '今天',

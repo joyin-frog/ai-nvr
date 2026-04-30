@@ -110,6 +110,7 @@ export default {
     zipping: 'Zipping...',
     filterStarred: 'Starred only',
     toggleStar: 'Star/unstar',
+    starSelected: 'Star selected',
   },
   timeline: {
     today: 'Today',
