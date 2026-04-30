@@ -349,6 +349,12 @@ defineExpose({ addEvent, loadHistory })
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
+          <img
+            v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
+            :src="snapshots[e.cameraId]"
+            class="expand-snapshot"
+            alt=""
+          />
           <div v-for="(item, i) in parseExpandedDetail(e)" :key="i" class="detail-row">
             <span class="detail-label">{{ item.label }}</span>
             <span class="detail-value">{{ item.value }}</span>
@@ -579,6 +585,12 @@ defineExpose({ addEvent, loadHistory })
 .event-expand {
   padding: 6px 12px 8px 80px;
   border-top: 1px solid #2a2a4a;
+}
+
+.expand-snapshot {
+  max-width: 320px;
+  border-radius: 4px;
+  margin-bottom: 6px;
 }
 
 .detail-row {
