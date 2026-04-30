@@ -151,4 +151,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 磁盘用量监控：DiskUsage 模块扫描数据目录报告各子目录大小和文件数，df 获取磁盘空间，/api/health 返回存储信息，状态面板显示磁盘进度条和各目录用量明细
 - 全局键盘快捷键：useKeyboard composable，1-6 切换侧边栏标签、F 全屏、Esc 退出、? 帮助面板
 - 录像片段导出：RecordingExporter 使用 ffmpeg -ss/-to 裁剪 MP4，API POST /api/recordings/export + GET /api/recordings/export/:filename 下载，前端播放器弹窗内双滑块选择起止时间一键导出下载
+- 告警静默时段：告警规则支持配置静默时段（如 22:00-06:00），静默期内不触发告警，支持跨午夜时段，前端 AlertPanel 添加时间选择器
 - 下一步优先：告警推送渠道（邮件/钉钉）、多段录像合并导出
