@@ -179,4 +179,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 多语言 i18n：vue-i18n 集成，zh-CN 和 en 双语语言包覆盖全部 UI，App header 语言切换按钮（EN/中），localStorage 持久化选择，所有面板组件（含 CameraView/RoiEditor/EventTimeline/RecordingsTimeline/MultiTimeline）已迁移到 t() 调用
 - 事件跳转录像定位：点击事件"查看录像"按钮，自动切换到录像标签、定位到对应摄像头和录像文件，视频播放器跳转到事件发生的时间点播放（loadedmetadata seek）
 - 事件面板筛选增强：日期选择器、摄像头下拉筛选、事件类型筛选，利用后端已有的 since/until/cameraId 参数；"加载更多"分页按钮（offset 参数）
-- 下一步优先：事件 CSV 导出、浏览器通知增强
+- 告警面板摄像头名称：AlertPanel 接收 cameras prop，规则列表和告警历史显示摄像头友好名称替代原始 ID
+- 离线摄像头最后在线时间：CameraView 接收 lastFrameAt prop，离线时显示"X 分钟前在线"文本
+- 侧边栏 tab 持久化：activeTab 保存到 localStorage，刷新页面恢复上次选择的标签
+- 下一步优先：录像面板日期筛选、事件 CSV 导出
