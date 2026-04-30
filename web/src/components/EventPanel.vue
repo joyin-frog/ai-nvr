@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import EventTimeline from './EventTimeline.vue'
 
 /** 事件记录 */
 interface EventRecord {
@@ -120,6 +121,7 @@ defineExpose({ addEvent, loadHistory })
         刷新
       </button>
     </div>
+    <EventTimeline :events="events" />
     <div class="event-list">
       <div v-if="events.length === 0" class="empty">
         {{ loading ? '加载中...' : '暂无事件' }}
