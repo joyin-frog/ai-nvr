@@ -78,6 +78,18 @@ function addEvent(type: string, cameraId: string, detail: string) {
   if (filterType.value && filterType.value !== type) return
   if (filterCamera.value && filterCamera.value !== cameraId) return
   const now = Date.now()
+
+  /** motion 事件去重：同一摄像头 5 秒内只更新不新增 */
+  if (type === 'motion') {
+    const recent = events.value[0]
+    if (recent && recent.type === 'motion' && recent.cameraId === cameraId && (now - recent.timestamp) < 5000) {
+      recent.detail = detail
+      recent.rawDetail = detail
+      recent.time = new Date(now).toLocaleTimeString(locale.value)
+      return
+    }
+  }
+
   const time = new Date(now).toLocaleTimeString(locale.value)
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
   if (events.value.length > PAGE_SIZE) {
