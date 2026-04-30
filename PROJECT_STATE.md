@@ -125,4 +125,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 生产模式：`bun run prod` 一键构建前端 + 启动后端
 - 今日事件统计：状态面板显示当日变动/检测次数，30秒自动刷新
 - Bug 修复：recorder forceStop 清理 recording 标志、快照文件名毫秒级精度、detectSnapshots blob URL 独立复制
+- CameraView UX 增强：检测框直接叠加画面、16:9 固定宽高比、离线状态标识、标注图3秒自动恢复实时帧
 - 下一步优先：检测区域划定、告警规则引擎
