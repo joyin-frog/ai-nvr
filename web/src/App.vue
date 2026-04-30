@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { EventClient, type Detection, type ConnectionState } from './services/events'
+import { isAuthEnabled, getToken, clearToken, authFetch, authWsUrl } from './services/auth'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
@@ -9,6 +10,7 @@ import CameraStatusPanel from './components/CameraStatusPanel.vue'
 import CameraManagePanel from './components/CameraManagePanel.vue'
 import AlertPanel from './components/AlertPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import LoginView from './components/LoginView.vue'
 
 /** 摄像头状态 */
 interface CameraStatus {
@@ -64,10 +66,19 @@ const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(nul
 const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
 const showShortcuts = ref(false)
 
+/** 认证状态 */
+const authRequired = ref(false)
+const authenticated = ref(false)
+
 /** WebSocket 连接状态 */
 const wsState = ref<ConnectionState>('disconnected')
 
-const client = new EventClient()
+/** 创建带认证的 WebSocket 客户端 */
+const client = new EventClient(authWsUrl(
+  import.meta.env.DEV
+    ? 'ws://localhost:3100/api/events'
+    : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/events`
+))
 
 /** 动态标题：闪烁后自动恢复 */
 let titleTimer: ReturnType<typeof setTimeout> | null = null
@@ -91,7 +102,8 @@ function updateTitle() {
 /** 加载摄像头列表 */
 async function loadCameras() {
   try {
-    const res = await fetch('/api/cameras')
+    const res = await authFetch('/api/cameras')
+    if (res.status === 401) return
     const data = await res.json()
     cameras.value = data.map((c: CameraStatus) => ({
       id: c.id,
@@ -158,17 +170,43 @@ const visibleCameras = computed(() => {
   return cameras.value
 })
 
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-  loadCameras()
+/** 登录成功回调 */
+function onLoginSuccess() {
+  authenticated.value = true
+  startApp()
+}
 
-  /** 监听变动事件 */
+/** 启动应用主逻辑 */
+function startApp() {
+  loadCameras()
+  setupEventListeners()
+  client.connect()
+  client.onStateChange((state) => {
+    wsState.value = state
+  })
+}
+
+/** 浏览器通知 */
+function notify(title: string, body: string) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body })
+  }
+}
+
+/** 重要检测目标 */
+const IMPORTANT_LABELS = new Set(['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'])
+
+/** 注册事件监听器 */
+function setupEventListeners() {
+  /** 请求通知权限 */
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission()
+  }
+
   client.on('motion', (payload) => {
     eventPanel.value?.addEvent('motion', payload.cameraId, `变动 ${(payload.ratio * 100).toFixed(1)}%`)
   })
 
-  /** 监听帧事件：实时推送帧图片（blob URL），释放旧的避免内存泄漏 */
   client.on('frame', (payload) => {
     const old = frameImages.value[payload.cameraId]
     if (old) URL.revokeObjectURL(old)
@@ -176,34 +214,15 @@ onMounted(() => {
     frameImages.value = { ...frameImages.value }
   })
 
-  /** 请求通知权限 */
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission()
-  }
-
-  /** 发送浏览器通知 */
-  function notify(title: string, body: string) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body })
-    }
-  }
-
-  /** 重要检测目标 */
-  const IMPORTANT_LABELS = new Set(['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'])
-
-  /** 监听检测事件 */
   client.on('detect', (payload) => {
     detectionsMap.value[payload.cameraId] = payload.detections
     detectionsMap.value = { ...detectionsMap.value }
     detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
     detectVersions.value = { ...detectVersions.value }
-    /** 保存检测时的帧快照（复制 blob 避免被后续帧 revoke） */
     const frame = frameImages.value[payload.cameraId]
     if (frame) {
-      /** 释放旧的检测快照 */
       const oldSnap = detectSnapshots.value[payload.cameraId]
       if (oldSnap) URL.revokeObjectURL(oldSnap)
-      /** 复制 blob 创建独立的 ObjectURL */
       fetch(frame)
         .then(r => r.blob())
         .then(blob => {
@@ -215,19 +234,16 @@ onMounted(() => {
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)
 
-    /** 重要目标触发通知 */
     const important = payload.detections.filter(d => IMPORTANT_LABELS.has(d.label))
     if (important.length > 0) {
       const cam = cameras.value.find(c => c.id === payload.cameraId)
       const name = cam?.name ?? payload.cameraId
       notify(`${name} - 检测到目标`, important.map(d => `${d.label} (${(d.score * 100).toFixed(0)}%)`).join(', '))
-      /** 闪烁标题提醒 */
-      const labels = important.map(d => d.label).join(', ')
-      flashTitle(`检测: ${labels} - ${name}`)
+      const detLabels = important.map(d => d.label).join(', ')
+      flashTitle(`检测: ${detLabels} - ${name}`)
     }
   })
 
-  /** 监听摄像头上线 */
   client.on('camera:online', (payload) => {
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.online = true
@@ -235,7 +251,6 @@ onMounted(() => {
     updateTitle()
   })
 
-  /** 监听摄像头离线 */
   client.on('camera:offline', (payload) => {
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.online = false
@@ -244,18 +259,36 @@ onMounted(() => {
     flashTitle(`${cam?.name ?? payload.cameraId} 离线`, 10000)
   })
 
-  /** 监听告警事件 */
   client.on('alert', (payload) => {
     eventPanel.value?.addEvent('alert', payload.cameraId, `告警: ${payload.ruleName}`)
     alertPanel.value?.loadAlerts()
     notify(`告警: ${payload.ruleName}`, payload.cameraId)
     flashTitle(`告警: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
+}
 
-  client.connect()
-  client.onStateChange((state) => {
-    wsState.value = state
-  })
+onMounted(async () => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+
+  /** 检查是否需要认证 */
+  const enabled = await isAuthEnabled()
+  if (enabled) {
+    authRequired.value = true
+    /** 已有 token 则尝试直接启动 */
+    const token = getToken()
+    if (token) {
+      const res = await authFetch('/api/cameras')
+      if (res.ok) {
+        authenticated.value = true
+        startApp()
+      }
+      /** 401 则清除 token，显示登录页 */
+    }
+    if (!authenticated.value) return
+  } else {
+    startApp()
+  }
 
   /** 键盘快捷键 */
   useKeyboardShortcuts()
@@ -286,7 +319,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app" :class="{ mobile: isMobile }">
+  <!-- 登录页 -->
+  <LoginView v-if="authRequired && !authenticated" @success="onLoginSuccess" />
+  <!-- 主界面 -->
+  <div v-else class="app" :class="{ mobile: isMobile }">
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ cameras.length }} 路摄像头</span>

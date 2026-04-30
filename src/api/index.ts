@@ -12,7 +12,8 @@ import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
-import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
+import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
+import { checkAuth } from "@/auth";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
 
@@ -41,6 +42,7 @@ export function startServer(
   cleaner: StorageCleaner,
   diskUsage: DiskUsage,
   exporter: RecordingExporter,
+  authConfig: AuthConfig,
 ): void {
   Bun.serve({
     port,
@@ -49,8 +51,31 @@ export function startServer(
 
       /** WebSocket 升级（精确匹配，避免与 /api/events/history 冲突） */
       if (url.pathname === "/api/events" && req.headers.get("upgrade") === "websocket") {
+        if (!checkAuth(authConfig, req)) return new Response("Unauthorized", { status: 401 });
         if (server.upgrade(req)) return;
         return new Response("WebSocket upgrade failed", { status: 500 });
+      }
+
+      /** 认证检查：是否启用认证 */
+      if (url.pathname === "/api/auth/check") {
+        return Response.json({ enabled: !!authConfig.token });
+      }
+
+      /** 登录端点：验证 token */
+      if (url.pathname === "/api/auth/login" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const token = obj.token as string | undefined;
+          if (!token || token !== authConfig.token) {
+            return new Response("Invalid token", { status: 401 });
+          }
+          return Response.json({ ok: true });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** API 认证检查 */
+      if (!checkAuth(authConfig, req)) {
+        return new Response("Unauthorized", { status: 401 });
       }
 
       /** REST API */

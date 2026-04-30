@@ -43,6 +43,12 @@ export interface MotionConfig {
   compareHeight: number;
 }
 
+/** 认证配置 */
+export interface AuthConfig {
+  /** 访问令牌，为空则不启用认证 */
+  token: string;
+}
+
 /** 服务配置 */
 export interface ServerConfig {
   /** HTTP 监听端口 */
@@ -59,6 +65,8 @@ export interface AppConfig {
   motion: MotionConfig;
   /** AI 检测配置 */
   ai: AiConfig;
+  /** 认证配置 */
+  auth: AuthConfig;
   /** 服务配置 */
   server: ServerConfig;
 }
@@ -114,6 +122,9 @@ export function loadConfig(configPath?: string): AppConfig {
   /** AI 配置 */
   const aiNode = doc.ai as Record<string, unknown> | undefined;
 
+  /** 认证配置 */
+  const authNode = doc.auth as Record<string, unknown> | undefined;
+
   return {
     ffmpegPath,
     cameras,
@@ -128,6 +139,9 @@ export function loadConfig(configPath?: string): AppConfig {
       model: (aiNode?.model as string) ?? "Xenova/detr-resnet-50",
       threshold: (aiNode?.threshold as number) ?? 0.5,
       maxDetections: (aiNode?.max_detections as number) ?? 20,
+    },
+    auth: {
+      token: (authNode?.token as string) ?? "",
     },
     server: {
       port: 3100,

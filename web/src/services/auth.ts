@@ -1,0 +1,66 @@
+/** Token 存储键 */
+const TOKEN_KEY = "nvr_token"
+
+/** 获取存储的 Token */
+export function getToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? ""
+}
+
+/** 保存 Token */
+export function setToken(token: string): void {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token)
+  } else {
+    localStorage.removeItem(TOKEN_KEY)
+  }
+}
+
+/** 清除 Token */
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+/** 检查是否启用了认证 */
+export async function isAuthEnabled(): Promise<boolean> {
+  const res = await fetch("/api/auth/check")
+  if (!res.ok) return false
+  const data = await res.json()
+  return data.enabled === true
+}
+
+/** 登录验证 */
+export async function login(token: string): Promise<boolean> {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  })
+  if (res.ok) {
+    setToken(token)
+    return true
+  }
+  return false
+}
+
+/** 带 Token 的 fetch 封装 */
+export async function authFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+  const token = getToken()
+  const headers = new Headers(init?.headers)
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`)
+  }
+  const res = await fetch(input, { ...init, headers })
+  if (res.status === 401) {
+    clearToken()
+    location.reload()
+  }
+  return res
+}
+
+/** 带 Token 的 WebSocket URL */
+export function authWsUrl(baseUrl: string): string {
+  const token = getToken()
+  if (!token) return baseUrl
+  const sep = baseUrl.includes("?") ? "&" : "?"
+  return `${baseUrl}${sep}token=${encodeURIComponent(token)}`
+}
