@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { EventClient, type Detection } from './services/events'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
+import RecordingsPanel from './components/RecordingsPanel.vue'
 
 /** 摄像头状态 */
 interface CameraStatus {
@@ -12,12 +13,17 @@ interface CameraStatus {
   lastFrameAt: number
 }
 
+/** 侧边栏激活的标签 */
+type SidebarTab = 'events' | 'recordings'
+const activeTab = ref<SidebarTab>('events')
+
 const cameras = ref<CameraStatus[]>([])
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
 /** 每个摄像头的最新帧 data URL */
 const frameImages = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
+const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 
 const client = new EventClient()
 
@@ -34,6 +40,14 @@ async function loadCameras() {
     }))
   } catch {
     // retry later
+  }
+}
+
+/** 切换到录像标签时刷新列表 */
+function switchTab(tab: SidebarTab) {
+  activeTab.value = tab
+  if (tab === 'recordings') {
+    recordingsPanel.value?.loadRecordings()
   }
 }
 
@@ -102,26 +116,29 @@ onUnmounted(() => {
           :frame-image="frameImages[cam.id] ?? ''"
         />
       </div>
-      <div class="event-sidebar">
-        <EventPanel ref="eventPanel" />
+      <div class="sidebar">
+        <div class="sidebar-tabs">
+          <button
+            :class="['tab-btn', { active: activeTab === 'events' }]"
+            @click="switchTab('events')"
+          >事件日志</button>
+          <button
+            :class="['tab-btn', { active: activeTab === 'recordings' }]"
+            @click="switchTab('recordings')"
+          >录像回放</button>
+        </div>
+        <div class="sidebar-content">
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
+          <RecordingsPanel
+            v-show="activeTab === 'recordings'"
+            ref="recordingsPanel"
+            :cameras="cameras"
+          />
+        </div>
       </div>
     </main>
   </div>
 </template>
-
-<style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-</style>
 
 <style scoped>
 .app {
@@ -166,8 +183,46 @@ body {
   overflow-y: auto;
 }
 
-.event-sidebar {
-  width: 320px;
+.sidebar {
+  width: 340px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-tabs {
+  display: flex;
+  background: #16213e;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid #2a2a4a;
+  border-bottom: none;
+  overflow: hidden;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tab-btn:hover {
+  color: #bbb;
+  background: #1a1a2e;
+}
+
+.tab-btn.active {
+  color: #4ECDC4;
+  background: #1a1a2e;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow: hidden;
 }
 </style>
