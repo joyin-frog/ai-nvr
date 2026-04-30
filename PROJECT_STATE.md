@@ -156,4 +156,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 告警规则编辑：AlertPanel 规则列表内联编辑，支持修改所有字段（名称/事件类型/摄像头/标签/窗口/阈值/冷却/静默时段）
 - 摄像头画面截图下载：CameraView 头部截图按钮，一键下载当前画面（优先标注图），文件名含摄像头名称和时间戳
 - 导出文件自动清理：StorageCleaner 集成 RecordingExporter，每小时清理超过 24 小时的导出临时文件
+- WebSocket 指数退避重连 + 连接状态指示器：EventClient 重连改为指数退避（1s→30s），暴露 ConnectionState，App header 显示绿/黄/红连接状态
 - 下一步优先：告警推送渠道（邮件/钉钉）、多段录像合并导出
