@@ -149,4 +149,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 动态页面标题：检测/告警/离线事件闪烁浏览器标签标题，自动恢复正常状态显示
 - NVR 品牌化：摄像头主题 favicon、正确的页面标题 "JK NVR"
 - 磁盘用量监控：DiskUsage 模块扫描数据目录报告各子目录大小和文件数，df 获取磁盘空间，/api/health 返回存储信息，状态面板显示磁盘进度条和各目录用量明细
-- 下一步优先：告警推送渠道（邮件/钉钉）、录像导出
+- 全局键盘快捷键：useKeyboard composable，1-6 切换侧边栏标签、F 全屏、Esc 退出、? 帮助面板
+- 录像片段导出：RecordingExporter 使用 ffmpeg -ss/-to 裁剪 MP4，API POST /api/recordings/export + GET /api/recordings/export/:filename 下载，前端播放器弹窗内双滑块选择起止时间一键导出下载
+- 下一步优先：告警推送渠道（邮件/钉钉）、多段录像合并导出
