@@ -76,6 +76,7 @@ export default {
     selectedCount: '{count} selected',
     exportRange: 'Export Range',
     gifExport: 'GIF Export',
+    filterDate: 'Filter by date',
   },
   timeline: {
     today: 'Today',

@@ -76,6 +76,7 @@ export default {
     selectedCount: '已选 {count} 个',
     exportRange: '导出范围',
     gifExport: 'GIF 导出',
+    filterDate: '筛选日期',
   },
   timeline: {
     today: '今天',

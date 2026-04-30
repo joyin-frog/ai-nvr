@@ -23,6 +23,8 @@ const props = defineProps<{
 const recordings = ref<Recording[]>([])
 const selectedRecording = ref<Recording | null>(null)
 const filterCamera = ref('')
+/** 日期筛选（YYYY-MM-DD） */
+const filterDate = ref('')
 const loading = ref(false)
 
 /** 多选模式 */
@@ -99,6 +101,14 @@ const cameraNameMap = computed(() => {
     map[cam.id] = cam.name
   }
   return map
+})
+
+/** 按日期过滤后的录像列表 */
+const filteredRecordings = computed(() => {
+  if (!filterDate.value) return recordings.value
+  const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+  const until = since + 86_400_000
+  return recordings.value.filter(r => r.startTime < until && r.endTime > since)
 })
 
 /** 格式化文件大小 */
@@ -411,6 +421,7 @@ defineExpose({ loadRecordings, playAtTime })
 
     <div class="panel-header">
       <span>{{ t('recording.title') }}</span>
+      <input type="date" v-model="filterDate" class="filter-date" :title="t('recording.filterDate')" />
       <select v-model="filterCamera" @change="loadRecordings" class="filter-select">
         <option value="">{{ t("recording.allCameras") }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
@@ -422,7 +433,7 @@ defineExpose({ loadRecordings, playAtTime })
     <!-- 多路同步时间轴（全部摄像头时显示） -->
     <MultiTimeline
       v-if="!filterCamera"
-      :recordings="recordings"
+      :recordings="filteredRecordings"
       :cameras="cameras"
       @play="play"
     />
@@ -430,17 +441,17 @@ defineExpose({ loadRecordings, playAtTime })
     <!-- 单路时间轴 -->
     <RecordingsTimeline
       v-if="filterCamera"
-      :recordings="recordings"
+      :recordings="filteredRecordings"
       :selected-camera="filterCamera"
       @play="play"
     />
 
     <div class="recordings-list">
-      <div v-if="recordings.length === 0" class="empty">
+      <div v-if="filteredRecordings.length === 0" class="empty">
         {{ loading ? t('app.loading') : t('recording.noRecordings') }}
       </div>
       <div
-        v-for="rec in recordings"
+        v-for="rec in filteredRecordings"
         :key="rec.filename"
         :class="['recording-item', { selected: selectedFiles.has(rec.filename) }]"
         @click="multiSelectMode ? toggleFileSelect(rec.filename) : play(rec)"
@@ -508,13 +519,25 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .filter-select {
-  margin-left: auto;
   background: #0a0a1a;
   color: #e0e0e0;
   border: 1px solid #2a2a4a;
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 12px;
+}
+
+.filter-date {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.filter-date::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
 }
 
 .refresh-btn {
