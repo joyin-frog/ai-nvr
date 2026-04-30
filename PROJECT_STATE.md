@@ -234,4 +234,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - PTZ 云台控制（ONVIF 协议）：PtzController 后端模块管理 ONVIF 连接，支持 continuousMove/absoluteMove/relativeMove/stop、预置位 CRUD、回到初始位置；YAML 配置 ptz 段启用；API 端点 /api/ptz/:cameraId/{move,stop,absolute,relative,status,presets,goto-preset,set-preset,remove-preset,home}；PtzControl 前端组件（方向键 D-pad + 缩放 + 预置位列表）；摄像头列表返回 ptz 字段
 - 事件统计图表增强：状态面板 4 宫格（变动/检测/告警/离线）、SVG 环形图展示事件类型分布、趋势图今日 24h/7 天切换、7 天趋势含告警数据
 - 移动端底部面板拖拽调整高度：触摸拖拽手柄替代固定 max-height，120px~85vh 自由调整，持久化 localStorage
-- 下一步优先：录像回放时间轴拖拽倍速播放、摄像头画面 4:3/16:9 比例自适应
+- 时间轴点击精确跳转：点击时间轴片段时根据点击位置计算偏移秒数 seekToSec，空白区域点击同样计算精确偏移，单路和多路时间轴均支持
+- 录像播放器自定义进度条：移除浏览器原生 controls，自定义控制栏（播放/暂停 + 可拖拽进度条 + 绝对时间显示起止 HH:MM:SS），悬停显示拖拽圆点
+- 下一步优先：摄像头画面 4:3/16:9 比例自适应、录像播放器音量控制
