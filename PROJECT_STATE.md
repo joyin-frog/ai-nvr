@@ -232,4 +232,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件面板快速时间范围：1h/24h 快捷按钮筛选最近事件
 - 离线画面灰度效果：离线摄像头冻结帧自动叠加灰度+半透明
 - PTZ 云台控制（ONVIF 协议）：PtzController 后端模块管理 ONVIF 连接，支持 continuousMove/absoluteMove/relativeMove/stop、预置位 CRUD、回到初始位置；YAML 配置 ptz 段启用；API 端点 /api/ptz/:cameraId/{move,stop,absolute,relative,status,presets,goto-preset,set-preset,remove-preset,home}；PtzControl 前端组件（方向键 D-pad + 缩放 + 预置位列表）；摄像头列表返回 ptz 字段
-- 下一步优先：事件统计图表增强、移动端底部面板拖拽调整高度
+- 事件统计图表增强：状态面板 4 宫格（变动/检测/告警/离线）、SVG 环形图展示事件类型分布、趋势图今日 24h/7 天切换、7 天趋势含告警数据
+- 移动端底部面板拖拽调整高度：触摸拖拽手柄替代固定 max-height，120px~85vh 自由调整，持久化 localStorage
+- 下一步优先：录像回放时间轴拖拽倍速播放、摄像头画面 4:3/16:9 比例自适应
