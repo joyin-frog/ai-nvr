@@ -142,4 +142,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - ROI（检测区域）功能：SQLite 存储多边形区域、API CRUD 端点、MotionDetector 扫描线光栅化算法实现 ROI 内像素差异比对、前端点击画面绘制多边形区域
 - 告警规则引擎：AlertStorage + AlertEngine 滑动窗口计数，支持事件类型/摄像头/标签过滤/时间窗口/触发阈值/冷却时间，alert 事件经 EventBus 推送至 WebSocket/Webhook/日志
 - 前端告警面板：6个侧边栏标签（事件/录像/状态/管理/告警/设置），规则 CRUD + 告警历史时间线，告警触发浏览器通知
-- 下一步优先：时间轴回放、告警推送渠道（邮件/钉钉）
+- 录像时间轴：交互式时间轴条，24h/1h 视图切换，日期导航，当前时间指示器，点击片段直接播放
+- 下一步优先：告警推送渠道（邮件/钉钉）、录像缩略图预览
