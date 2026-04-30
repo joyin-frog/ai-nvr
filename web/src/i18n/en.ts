@@ -37,6 +37,11 @@ export default {
     lastSeenMinutes: 'Last seen {count}m ago',
     lastSeenHours: 'Last seen {count}h ago',
     lastSeenDays: 'Last seen {count}d ago',
+    adjust: 'Adjust image',
+    brightness: 'Brightness',
+    contrast: 'Contrast',
+    saturation: 'Saturation',
+    resetAdjust: 'Reset',
   },
   event: {
     title: 'Event Log',

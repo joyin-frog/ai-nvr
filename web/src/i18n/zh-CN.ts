@@ -37,6 +37,11 @@ export default {
     lastSeenMinutes: '{count} 分钟前在线',
     lastSeenHours: '{count} 小时前在线',
     lastSeenDays: '{count} 天前在线',
+    adjust: '画面调节',
+    brightness: '亮度',
+    contrast: '对比度',
+    saturation: '饱和度',
+    resetAdjust: '重置',
   },
   event: {
     title: '事件日志',

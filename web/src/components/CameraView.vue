@@ -108,6 +108,28 @@ function takeScreenshot() {
   link.click()
 }
 
+/** 画面调节面板 */
+const showAdjust = ref(false)
+const brightness = ref(100)
+const contrast = ref(100)
+const saturation = ref(100)
+
+/** CSS filter 字符串 */
+const imageFilter = computed(() => {
+  const parts: string[] = []
+  if (brightness.value !== 100) parts.push(`brightness(${brightness.value}%)`)
+  if (contrast.value !== 100) parts.push(`contrast(${contrast.value}%)`)
+  if (saturation.value !== 100) parts.push(`saturate(${saturation.value}%)`)
+  return parts.length > 0 ? parts.join(' ') : 'none'
+})
+
+/** 重置画面调节 */
+function resetAdjust() {
+  brightness.value = 100
+  contrast.value = 100
+  saturation.value = 100
+}
+
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
@@ -125,6 +147,7 @@ onUnmounted(() => {
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+      <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
     </div>
 
     <div class="camera-body" @dblclick="emit('fullscreen', cameraId)">
@@ -132,6 +155,7 @@ onUnmounted(() => {
         v-if="displayUrl"
         :src="displayUrl"
         class="camera-image"
+        :style="{ filter: imageFilter }"
         alt=""
       />
       <div v-else class="camera-placeholder">
@@ -167,6 +191,26 @@ onUnmounted(() => {
       >
         {{ det.label }} {{ (det.score * 100).toFixed(0) }}%
       </div>
+    </div>
+
+    <!-- 画面调节面板 -->
+    <div v-if="showAdjust" class="adjust-panel">
+      <label class="adjust-row">
+        <span class="adjust-label">{{ t('camera.brightness') }}</span>
+        <input type="range" v-model.number="brightness" min="50" max="200" step="5" class="adjust-slider" />
+        <span class="adjust-val">{{ brightness }}%</span>
+      </label>
+      <label class="adjust-row">
+        <span class="adjust-label">{{ t('camera.contrast') }}</span>
+        <input type="range" v-model.number="contrast" min="50" max="200" step="5" class="adjust-slider" />
+        <span class="adjust-val">{{ contrast }}%</span>
+      </label>
+      <label class="adjust-row">
+        <span class="adjust-label">{{ t('camera.saturation') }}</span>
+        <input type="range" v-model.number="saturation" min="0" max="200" step="5" class="adjust-slider" />
+        <span class="adjust-val">{{ saturation }}%</span>
+      </label>
+      <button class="adjust-reset" @click="resetAdjust">{{ t('camera.resetAdjust') }}</button>
     </div>
   </div>
 </template>
@@ -375,6 +419,84 @@ onUnmounted(() => {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+.adjust-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.adjust-btn:hover,
+.adjust-btn.active {
+  color: #4ECDC4;
+}
+
+.adjust-panel {
+  padding: 6px 12px;
+  background: #16213e;
+  border-top: 1px solid #2a2a4a;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.adjust-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.adjust-label {
+  min-width: 36px;
+}
+
+.adjust-slider {
+  width: 60px;
+  height: 3px;
+  appearance: none;
+  background: #2a2a4a;
+  border-radius: 2px;
+  outline: none;
+}
+
+.adjust-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4ECDC4;
+  cursor: pointer;
+}
+
+.adjust-val {
+  min-width: 30px;
+  text-align: right;
+  font-size: 10px;
+  color: #888;
+}
+
+.adjust-reset {
+  background: none;
+  border: 1px solid #555;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.adjust-reset:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
 }
 
 /* 移动端适配 */
