@@ -139,7 +139,7 @@ onMounted(() => {
       <!-- Webhook 通知 -->
       <section class="section">
         <h3>Webhook 通知</h3>
-        <div v-for="(url, i) in settings.webhook.urls" :key="i" class="field">
+        <div v-for="(_url, i) in settings.webhook.urls" :key="i" class="field">
           <input
             type="url"
             v-model="settings.webhook.urls[i]"

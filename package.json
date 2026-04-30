@@ -3,7 +3,9 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts"
+    "build:web": "cd web && pnpm build",
+    "start": "bun run src/index.ts",
+    "prod": "bun run build:web && bun run start"
   },
   "type": "module",
   "private": true,
@@ -15,7 +17,9 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "js-yaml": "^4.1.1",
+    "onnxruntime-node": "^1.25.1",
     "sharp": "^0.34.5"
   }
 }
