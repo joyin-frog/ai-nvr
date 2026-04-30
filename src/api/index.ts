@@ -111,6 +111,7 @@ export function startServer(
               friendlyName: obj.friendlyName as string | undefined,
               hdUrl: obj.hdUrl as string | undefined,
               sdUrl: obj.sdUrl as string | undefined,
+              group: obj.group as string | undefined,
             });
             const newConfig = loadConfig();
             cameraManager.reloadConfig(newConfig);

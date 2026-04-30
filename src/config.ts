@@ -188,7 +188,7 @@ export function removeCameraFromConfig(cameraId: string): void {
 }
 
 /** 更新摄像头名称 */
-export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string }): void {
+export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string; group?: string }): void {
   const raw = readFileSync(configFilePath, "utf-8");
   const doc = yaml.load(raw) as Record<string, unknown>;
 
@@ -206,6 +206,9 @@ export function updateCameraInConfig(cameraId: string, updates: { friendlyName?:
   }
   if (updates.sdUrl) {
     go2rtc.streams[`${cameraId}_sd`] = [updates.sdUrl];
+  }
+  if (updates.group !== undefined) {
+    (cam as Record<string, unknown>).group = updates.group;
   }
 
   const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });

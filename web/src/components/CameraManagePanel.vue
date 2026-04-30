@@ -8,6 +8,8 @@ interface CameraInfo {
   name: string
   online: boolean
   lastFrameAt: number
+  /** 所属分组 */
+  group: string
 }
 
 const cameras = ref<CameraInfo[]>([])
@@ -20,7 +22,7 @@ const adding = ref(false)
 
 /** 编辑摄像头 */
 const editingId = ref<string | null>(null)
-const editForm = ref({ friendlyName: '', hdUrl: '', sdUrl: '' })
+const editForm = ref({ friendlyName: '', hdUrl: '', sdUrl: '', group: '' })
 const saving = ref(false)
 
 /** ROI 编辑中的摄像头 ID */
@@ -66,7 +68,7 @@ async function addCamera() {
 /** 开始编辑 */
 function startEdit(cam: CameraInfo) {
   editingId.value = cam.id
-  editForm.value = { friendlyName: cam.name, hdUrl: '', sdUrl: '' }
+  editForm.value = { friendlyName: cam.name, hdUrl: '', sdUrl: '', group: cam.group }
 }
 
 /** 取消编辑 */
@@ -172,6 +174,10 @@ defineExpose({ loadCameras })
               <label>子码流 RTSP</label>
               <input v-model="editForm.sdUrl" placeholder="留空不修改" class="input" />
             </div>
+            <div class="form-field">
+              <label>分组</label>
+              <input v-model="editForm.group" placeholder="留空清除分组" class="input" />
+            </div>
             <div class="edit-actions">
               <button class="save-btn" @click="saveEdit" :disabled="saving">
                 {{ saving ? '保存中...' : '保存' }}
@@ -185,7 +191,7 @@ defineExpose({ loadCameras })
             <span class="cam-status" :class="{ online: cam.online }">●</span>
             <div class="cam-detail">
               <span class="cam-name">{{ cam.name }}</span>
-              <span class="cam-id">{{ cam.id }}</span>
+              <span class="cam-id">{{ cam.id }}<span v-if="cam.group" class="cam-group-tag">{{ cam.group }}</span></span>
             </div>
             <span class="cam-status-text" :class="{ offline: !cam.online }">{{ statusText(cam) }}</span>
           </div>
@@ -308,6 +314,17 @@ defineExpose({ loadCameras })
   display: block;
   font-size: 11px;
   color: #666;
+}
+
+.cam-group-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  background: #2a2a4a;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #888;
+  vertical-align: middle;
 }
 
 .cam-status-text {
