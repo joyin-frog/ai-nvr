@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
@@ -26,6 +26,9 @@ const filterCamera = ref('')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
 const loading = ref(false)
+
+/** 录像列表定时刷新定时器 */
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 /** 多选模式 */
 const multiSelectMode = ref(false)
@@ -563,6 +566,12 @@ async function playAtTime(cameraId: string, timestamp: number): Promise<boolean>
 
 onMounted(() => {
   loadRecordings()
+  /** 定时刷新录像列表（30 秒间隔） */
+  refreshTimer = setInterval(loadRecordings, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 
 defineExpose({ loadRecordings, playAtTime })
