@@ -68,6 +68,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - `GET /api/snapshot/:cameraId` — 最新帧（JPEG，回退用）
 - `GET /api/detection/annotated/:cameraId` — 标注后的图片
 - `GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=` — 事件历史查询
+- `GET /api/events/stats?since=&until=` — 事件统计（按类型/小时/摄像头聚合）
 - `GET /api/roi/:cameraId` — 获取摄像头 ROI 区域列表
 - `POST /api/roi` — 添加 ROI 区域（多边形顶点）
 - `PATCH /api/roi/item/:id` — 更新 ROI（启用/禁用/顶点/名称）
@@ -193,4 +194,13 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像删除：后端 DELETE /api/recordings/:cameraId/:filename 端点（含路径遍历防护），前端录像列表 hover 显示删除按钮，confirm 确认后删除并从列表移除
 - 批量删除录像：多选模式下操作栏增加"删除选中"按钮，confirm 确认后逐个调用 DELETE API，完成后从列表移除
 - 画面滚轮缩放：CameraView 鼠标滚轮缩放(1x-5x) + 拖拽平移，CSS transform 实现，头部缩放倍率徽标（点击重置）
-- 下一步优先：PTZ 控制、事件统计图表
+- 事件统计 API：EventStorage countByType/countByHour/countByCamera 聚合查询，GET /api/events/stats 返回按类型/小时/摄像头统计
+- 状态面板事件趋势图：CameraStatusPanel 24h 柱状图展示 motion/detect 分布，纯 CSS 实现带图例
+- 磁盘空间预警：App header 每 60 秒检查磁盘用量，>80% 黄色横幅，>95% 红色闪烁，展示剩余空间
+- 录像播放器时间戳叠加：播放器左下角显示录像绝对时间 HH:MM:SS，随播放进度实时更新
+- 录像导出按钮模板语法修复：download 按钮缺少双花括号修复
+- 事件面板摄像头友好名称：事件列表显示用户定义名称替代原始 ID
+- 事件搜索：后端 EventStorage query 支持 search 参数模糊匹配 detail，前端搜索框，搜索条件同步到分页和 CSV 导出
+- 实时事件筛选：addEvent 检查 filterType/filterCamera，不匹配的实时事件不插入列表
+- 移动端告警标签：移动端底部面板增加告警标签按钮，EventPanel 传递 snapshots/cameras props
+- 下一步优先：PTZ 控制、事件统计图表增强
