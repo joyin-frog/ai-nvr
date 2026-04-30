@@ -96,6 +96,17 @@ watch(annotatedUrl, (url) => {
   }
 })
 
+/** 截图下载当前画面 */
+function takeScreenshot() {
+  if (!displayUrl.value) return
+  const link = document.createElement('a')
+  const now = new Date()
+  const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+  link.download = `${props.name}_${ts}.jpg`
+  link.href = displayUrl.value
+  link.click()
+}
+
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (annotatedTimer) clearTimeout(annotatedTimer)
@@ -113,6 +124,7 @@ onUnmounted(() => {
       </span>
       <span v-if="!online" class="offline-badge">离线</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" title="全屏">&#x26F6;</button>
+      <button v-if="online" class="screenshot-btn" @click="takeScreenshot" title="截图">&#x1F4F7;</button>
     </div>
 
     <div class="camera-body">
@@ -236,6 +248,20 @@ onUnmounted(() => {
 
 .fullscreen-btn:hover {
   color: #e0e0e0;
+}
+
+.screenshot-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.screenshot-btn:hover {
+  color: #4ECDC4;
 }
 
 .camera-body {
