@@ -256,4 +256,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像播放器截图功能：播放器头部截图按钮，video → canvas → JPEG 下载
 - 事件面板 detect 事件去重：同一摄像头 3 秒内 detect 事件只更新不新增
 - 录像播放器双击全屏：双击视频画面进入/退出全屏模式
-- 下一步优先：摄像头连接质量指标展示、录像批量下载
+- 录像批量下载 ZIP：archiver 打包多个 MP4 为 ZIP，多选操作栏蓝色"下载 ZIP"按钮，API POST /api/recordings/download-zip 端点
+- 摄像头画面 FPS 质量指示：画面右下角实时 FPS 徽标，绿色(>=10)/黄色(5-10)/红色(<5) 三级质量颜色，数据从 /api/health 轮询
+- 下一步优先：检测快照图库画廊浏览、事件/录像收藏标记
