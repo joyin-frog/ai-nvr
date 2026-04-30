@@ -39,6 +39,11 @@ const props = defineProps<{
   cameras?: Array<{ id: string; name: string }>
 }>()
 
+const emit = defineEmits<{
+  /** 点击告警跳转录像 */
+  jumpToRecording: [cameraId: string, timestamp: number]
+}>()
+
 /** 摄像头 ID → 名称映射 */
 const cameraNameMap = computed(() => {
   const map: Record<string, string> = {}
@@ -349,7 +354,7 @@ defineExpose({ loadAlerts })
     <!-- 告警历史 -->
     <div v-if="activeView === 'history'" class="alert-list">
       <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
-      <div v-for="alert in alerts" :key="alert.id" class="alert-item">
+      <div v-for="alert in alerts" :key="alert.id" class="alert-item" @click="emit('jumpToRecording', alert.cameraId, alert.timestamp)">
         <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
         <div class="alert-body">
           <span class="alert-rule">{{ alert.ruleName }}</span>
@@ -640,6 +645,12 @@ select.input {
   border-left: 3px solid #FFD93D;
   margin-bottom: 4px;
   background: #16213e;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.alert-item:hover {
+  background: #1a2a4a;
 }
 
 .alert-time {

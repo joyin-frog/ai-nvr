@@ -31,6 +31,8 @@ interface CameraStatus {
   lastFrameAt: number
   group: string
   ptz: boolean
+  width: number
+  height: number
 }
 
 /** 侧边栏激活的标签 */
@@ -250,6 +252,8 @@ async function loadCameras() {
       lastFrameAt: c.lastFrameAt,
       group: c.group ?? '',
       ptz: c.ptz ?? false,
+      width: c.width ?? 0,
+      height: c.height ?? 0,
     }))
     updateTitle()
   } catch {
@@ -634,6 +638,8 @@ onUnmounted(() => {
             :detect-version="detectVersions[cam.id] ?? 0"
             :frame-image="frameImages[cam.id] ?? ''"
             :ptz="cam.ptz"
+            :video-width="cam.width"
+            :video-height="cam.height"
             @fullscreen="enterFullscreen"
           />
         </div>
@@ -682,7 +688,7 @@ onUnmounted(() => {
             :cameras="cameras"
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-          <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" />
+          <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
@@ -730,7 +736,7 @@ onUnmounted(() => {
           :cameras="cameras"
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-        <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" />
+        <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>
