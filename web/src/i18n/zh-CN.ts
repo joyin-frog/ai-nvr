@@ -93,6 +93,8 @@ export default {
     autoPlayNext: '连续播放',
     delete: '删除',
     confirmDelete: '确认删除此录像文件？此操作不可恢复。',
+    deleteSelected: '删除选中',
+    confirmBatchDelete: '确认删除选中的 {count} 个录像文件？此操作不可恢复。',
   },
   timeline: {
     today: '今天',

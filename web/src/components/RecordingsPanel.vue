@@ -220,6 +220,23 @@ async function deleteRecording(rec: Recording) {
   }
 }
 
+/** 批量删除选中的录像 */
+async function batchDelete() {
+  if (selectedFiles.value.size === 0) return
+  if (!confirm(t('recording.confirmBatchDelete', { count: selectedFiles.value.size }))) return
+  const toDelete = new Set(selectedFiles.value)
+  for (const filename of toDelete) {
+    try {
+      await authFetch(`/api/recordings/${filename}`, { method: 'DELETE' })
+    } catch {
+      // ignore individual failures
+    }
+  }
+  if (selectedRecording.value && toDelete.has(selectedRecording.value.filename)) closePlayer()
+  recordings.value = recordings.value.filter(r => !toDelete.has(r.filename))
+  selectedFiles.value = new Set()
+}
+
 /** 打开导出面板 */
 function openExport() {
   if (!selectedRecording.value) return
@@ -528,6 +545,9 @@ defineExpose({ loadRecordings, playAtTime })
         {{ merging ? t('recording.merging') : t('recording.merge') }}
       </button>
       <button v-else class="download-btn" @click="downloadMerge">{{ t('recording.download') }}</button>
+      <button class="batch-delete-btn" @click="batchDelete" :disabled="selectedFiles.size === 0">
+        {{ t('recording.deleteSelected') }}
+      </button>
     </div>
   </div>
 </template>
@@ -985,6 +1005,26 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .merge-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.batch-delete-btn {
+  background: none;
+  border: 1px solid #e74c3c;
+  color: #e74c3c;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.batch-delete-btn:hover:not(:disabled) {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.batch-delete-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

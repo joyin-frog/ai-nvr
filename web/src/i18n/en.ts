@@ -93,6 +93,8 @@ export default {
     autoPlayNext: 'Auto play next',
     delete: 'Delete',
     confirmDelete: 'Delete this recording? This cannot be undone.',
+    deleteSelected: 'Delete selected',
+    confirmBatchDelete: 'Delete {count} selected recordings? This cannot be undone.',
   },
   timeline: {
     today: 'Today',
