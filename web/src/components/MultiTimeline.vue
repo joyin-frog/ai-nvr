@@ -25,7 +25,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  play: [recording: Recording]
+  play: [recording: Recording, seekToSec?: number]
 }>()
 
 /** 视图模式 */
@@ -192,6 +192,15 @@ function goToday() {
   selectedDate.value = new Date().toISOString().slice(0, 10)
   selectedHour.value = new Date().getHours()
 }
+
+/** 点击片段：计算点击位置对应的播放偏移 */
+function onSegClick(e: MouseEvent, rec: Recording) {
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  const offsetSec = Math.max(0, (pct * (rec.endTime - rec.startTime)) / 1000)
+  emit('play', rec, offsetSec)
+}
 </script>
 
 <template>
@@ -231,7 +240,7 @@ function goToday() {
             class="mtl-segment"
             :style="segmentStyle(rec)"
             :title="new Date(rec.startTime).toLocaleTimeString(locale)"
-            @click="emit('play', rec)"
+            @click="onSegClick($event, rec)"
           />
           <!-- 当前时间指示器 -->
           <div v-if="nowPosition >= 0" class="mtl-now" :style="{ left: nowPosition + '%' }" />

@@ -21,8 +21,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 点击录像片段 */
-  play: [recording: Recording]
+  /** 点击录像片段，可选跳转偏移（秒） */
+  play: [recording: Recording, seekToSec?: number]
 }>()
 
 /** 时间轴容器引用 */
@@ -201,7 +201,19 @@ function onTimelineClick(e: MouseEvent) {
       closest = rec
     }
   }
-  if (closest) emit('play', closest)
+  if (closest) {
+    const offsetSec = Math.max(0, (clickTime - closest.startTime) / 1000)
+    emit('play', closest, offsetSec)
+  }
+}
+
+/** 点击录像片段：计算点击位置对应的播放偏移 */
+function onSegmentClick(e: MouseEvent, rec: Recording) {
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  const offsetSec = Math.max(0, (pct * (rec.endTime - rec.startTime)) / 1000)
+  emit('play', rec, offsetSec)
 }
 
 /** 片段悬停：显示缩略图 tooltip */
@@ -270,7 +282,7 @@ function goToday() {
           :key="i"
           class="segment"
           :style="{ left: seg.left, width: seg.width }"
-          @click.stop="emit('play', seg.recording)"
+          @click.stop="onSegmentClick($event, seg.recording)"
           @mouseenter="onSegmentEnter($event, seg.recording)"
           @mousemove="onSegmentMove"
           @mouseleave="onSegmentLeave"
