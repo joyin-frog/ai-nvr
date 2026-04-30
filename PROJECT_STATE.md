@@ -183,4 +183,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 离线摄像头最后在线时间：CameraView 接收 lastFrameAt prop，离线时显示"X 分钟前在线"文本
 - 侧边栏 tab 持久化：activeTab 保存到 localStorage，刷新页面恢复上次选择的标签
 - 录像面板日期筛选：RecordingsPanel 添加日期选择器，前端 computed 过滤录像列表和时间轴
-- 下一步优先：事件 CSV 导出、摄像头拖拽排序
+- 事件 CSV 导出：EventPanel 头部 CSV 按钮，按当前筛选条件（日期/摄像头/类型）导出最多 10000 条事件为 UTF-8 CSV 文件下载
+- 下一步优先：摄像头拖拽排序、浏览器通知增强
