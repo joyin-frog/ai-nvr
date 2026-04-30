@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import sharp from "sharp";
 import { join } from "node:path";
-import { loadConfig } from "@/config";
+import { loadConfig, watchConfig } from "@/config";
 import { EventBus } from "@/event-bus";
 import { CameraManager } from "@/camera/manager";
 import { MotionDetector } from "@/detection/motion";
@@ -66,6 +66,12 @@ for (const eventType of RECORDED_EVENTS) {
     eventStorage.insert(eventType, (payload as { cameraId: string }).cameraId, (payload as { timestamp: number }).timestamp ?? Date.now(), detail);
   });
 }
+
+/** 配置热重载：监听 YAML 变更，动态增删摄像头 */
+watchConfig(undefined, (newConfig) => {
+  cameraManager.reloadConfig(newConfig);
+  console.log(`[Config] 热重载完成，${newConfig.cameras.length} 个摄像头`);
+});
 
 /** 优雅退出 */
 process.on("SIGINT", () => {

@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, watchFile } from "node:fs";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
+import { type AiConfig } from "@/ai/types";
 
 /** RTSP 流地址来源（直接连摄像机） */
 export interface StreamSource {
@@ -54,6 +55,8 @@ export interface AppConfig {
   cameras: CameraConfig[];
   /** 变动检测配置 */
   motion: MotionConfig;
+  /** AI 检测配置 */
+  ai: AiConfig;
   /** 服务配置 */
   server: ServerConfig;
 }
@@ -104,6 +107,9 @@ export function loadConfig(configPath?: string): AppConfig {
     });
   }
 
+  /** AI 配置 */
+  const aiNode = doc.ai as Record<string, unknown> | undefined;
+
   return {
     ffmpegPath,
     cameras,
@@ -113,8 +119,35 @@ export function loadConfig(configPath?: string): AppConfig {
       compareWidth: 160,
       compareHeight: 120,
     },
+    ai: {
+      enabled: (aiNode?.enabled as boolean) ?? true,
+      model: (aiNode?.model as string) ?? "Xenova/detr-resnet-50",
+      threshold: (aiNode?.threshold as number) ?? 0.5,
+      maxDetections: (aiNode?.max_detections as number) ?? 20,
+    },
     server: {
       port: 3100,
     },
   };
+}
+
+/** 监听配置文件变更，触发回调 */
+export function watchConfig(configPath: string | undefined, onChange: (config: AppConfig) => void): void {
+  const path = configPath ?? resolve(import.meta.dir, "../nvr_config.yml");
+  let lastReload = 0;
+
+  watchFile(path, { interval: 2000 }, () => {
+    /** 防抖：2秒内不重复触发 */
+    const now = Date.now();
+    if (now - lastReload < 2000) return;
+    lastReload = now;
+
+    try {
+      const newConfig = loadConfig(configPath);
+      onChange(newConfig);
+      console.log("[Config] 配置已热重载");
+    } catch (err) {
+      console.error("[Config] 配置重载失败:", err);
+    }
+  });
 }
