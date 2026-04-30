@@ -246,4 +246,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头画面比例自适应：CameraView 根据 videoWidth/videoHeight 动态计算 aspect-ratio，移除硬编码 16:9，无数据时回退
 - 录像水印叠加：ffmpeg drawtext 滤镜在画面左上角叠加摄像头名称、左下角叠加实时时间戳（YYYY-MM-DD HH:MM:SS），NotoSansCJK 字体，半透明黑色背景框
 - 状态面板实时性能趋势图：SVG 折线图展示 FPS 和内存使用趋势，环形缓冲区 60 点（5 分钟），复用 /api/health 轮询
-- 下一步优先：检测区域划定 Web UI（RoiEditor 改进）、告警联动截图（高清快照）
+- 告警历史点击跳转录像：AlertPanel 告警条目可点击，自动切换到录像标签并定位到对应时间点播放
+- 下一步优先：告警面板筛选与分页、检测目标逗留计时
