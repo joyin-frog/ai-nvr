@@ -249,4 +249,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 告警历史点击跳转录像：AlertPanel 告警条目可点击，自动切换到录像标签并定位到对应时间点播放
 - 告警面板筛选与分页：摄像头下拉筛选、日期选择器、总数显示、加载更多按钮，后端 API 已支持全部筛选参数
 - 录像水印可配置化：RuntimeSettings 水印开关/名称位置/时间戳位置/字号，设置面板 UI，关闭时跳过 drawtext 节省编码开销
-- 下一步优先：前端摄像头灵敏度 per-camera 配置 UI、录像播放器帧预览缩略图条
+- 前端摄像头灵敏度 per-camera 配置 UI：设置面板新增摄像头独立阈值/冷却时间/检测帧率覆盖，后端已有 getMotionConfig(cameraId)
+- 告警实时推送优化：WebSocket alert 事件前端直接追加到列表，替代每次全量 loadAlerts() HTTP 请求
+- 下一步优先：事件面板实时推送优化（detect 事件追加去重）、录像播放器进度条悬停时间提示
