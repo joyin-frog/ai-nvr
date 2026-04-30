@@ -412,7 +412,33 @@ function startApp() {
 }
 
 /** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
+/** 声音提醒配置（localStorage 持久化） */
+const SOUND_KEY = 'nvr-sound-alert'
+const SOUND_VOLUME_KEY = 'nvr-sound-volume'
+const soundEnabled = ref(localStorage.getItem(SOUND_KEY) !== 'false')
+const soundVolume = ref(Number(localStorage.getItem(SOUND_VOLUME_KEY) ?? 80) / 100)
+
+/** Web Audio API 播放提示音 */
+let audioCtx: AudioContext | null = null
+function playAlertSound() {
+  if (!soundEnabled.value) return
+  if (!audioCtx) audioCtx = new AudioContext()
+  const ctx = audioCtx
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(880, ctx.currentTime)
+  osc.frequency.setValueAtTime(660, ctx.currentTime + 0.1)
+  gain.gain.setValueAtTime(soundVolume.value * 0.3, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+  osc.start(ctx.currentTime)
+  osc.stop(ctx.currentTime + 0.3)
+}
+
 function notify(title: string, body: string, cameraId?: string) {
+  playAlertSound()
   if ('Notification' in window && Notification.permission === 'granted') {
     const n = new Notification(title, { body })
     n.onclick = () => {

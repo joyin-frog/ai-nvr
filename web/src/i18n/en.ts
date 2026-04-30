@@ -311,6 +311,9 @@ export default {
     cameraSensitivity: 'Camera Sensitivity',
     cameraReset: 'Reset',
     detectFps: 'Detect FPS',
+    soundAlert: 'Sound Alert',
+    soundEnabled: 'Enable alert sound',
+    soundVolume: 'Volume',
   },
   login: {
     title: 'JK NVR Login',

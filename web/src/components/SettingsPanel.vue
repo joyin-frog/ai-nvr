@@ -5,6 +5,19 @@ import { authFetch } from '../services/auth'
 
 const { t } = useI18n()
 
+/** 声音提醒设置（localStorage 持久化，纯前端） */
+const SOUND_KEY = 'nvr-sound-alert'
+const SOUND_VOLUME_KEY = 'nvr-sound-volume'
+const soundEnabled = ref(localStorage.getItem(SOUND_KEY) !== 'false')
+const soundVolume = ref(Number(localStorage.getItem(SOUND_VOLUME_KEY) ?? 80))
+
+function onSoundToggle() {
+  localStorage.setItem(SOUND_KEY, String(soundEnabled.value))
+}
+function onVolumeChange() {
+  localStorage.setItem(SOUND_VOLUME_KEY, String(soundVolume.value))
+}
+
 /** 运行时设置 */
 interface RuntimeSettings {
   motion: {
@@ -481,6 +494,22 @@ onMounted(() => {
         </label>
         <button class="add-btn" @click="runCleanup">{{ t('settings.runCleanup') }}</button>
       </section>
+
+      <!-- 声音提醒 -->
+      <section class="section">
+        <h3>{{ t('settings.soundAlert') }}</h3>
+        <label class="field">
+          <span class="field-label">{{ t('settings.soundEnabled') }}</span>
+          <input type="checkbox" v-model="soundEnabled" class="checkbox" @change="onSoundToggle" />
+        </label>
+        <label v-if="soundEnabled" class="field">
+          <span class="field-label">{{ t('settings.soundVolume') }}</span>
+          <div class="volume-row">
+            <input type="range" v-model.number="soundVolume" min="0" max="100" step="5" class="volume-slider" @input="onVolumeChange" />
+            <span class="volume-val">{{ soundVolume }}%</span>
+          </div>
+        </label>
+      </section>
     </div>
     <div v-else class="empty">{{ t('settings.loading') }}</div>
   </div>
@@ -799,5 +828,24 @@ onMounted(() => {
   width: 60px;
   font-size: 11px;
   padding: 2px 6px;
+}
+
+.volume-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volume-slider {
+  width: 100px;
+  accent-color: #4ECDC4;
+  cursor: pointer;
+}
+
+.volume-val {
+  font-size: 12px;
+  color: #aaa;
+  min-width: 36px;
+  text-align: right;
 }
 </style>

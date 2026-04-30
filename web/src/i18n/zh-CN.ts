@@ -313,6 +313,9 @@ export default {
     cameraSensitivity: '摄像头灵敏度',
     cameraReset: '重置',
     detectFps: '检测帧率',
+    soundAlert: '声音提醒',
+    soundEnabled: '启用提示音',
+    soundVolume: '音量',
   },
   login: {
     title: 'JK NVR 登录',
