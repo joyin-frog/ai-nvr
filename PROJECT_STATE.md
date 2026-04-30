@@ -259,4 +259,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像批量下载 ZIP：archiver 打包多个 MP4 为 ZIP，多选操作栏蓝色"下载 ZIP"按钮，API POST /api/recordings/download-zip 端点
 - 摄像头画面 FPS 质量指示：画面右下角实时 FPS 徽标，绿色(>=10)/黄色(5-10)/红色(<5) 三级质量颜色，数据从 /api/health 轮询
 - 检测快照画廊：EventPanel 视图切换（事件列表 ☰ / 快照画廊 ☷），网格缩略图展示检测快照，摄像头筛选，点击放大预览浮层
-- 下一步优先：事件/录像收藏标记、摄像头连接健康详情面板
+- 事件/录像收藏标记：EventStorage starred 列 + toggleStar API，前端事件/录像行星标按钮 + ☆/★ 筛选开关，录像收藏 localStorage 持久化
+- 下一步优先：摄像头连接健康详情面板、录像批量操作增强
