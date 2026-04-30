@@ -9,6 +9,13 @@ export default {
     patrolInterval: 'Interval',
     groupAll: 'All',
     help: 'Shortcuts',
+    cameraCount: '{count} cameras',
+    wsConnected: 'Connected',
+    wsConnecting: 'Connecting...',
+    wsDisconnected: 'Disconnected',
+    backToGrid: 'Back to grid',
+    close: 'Close',
+    panel: 'Panel',
   },
   tab: {
     events: 'Events',

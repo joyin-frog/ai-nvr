@@ -9,6 +9,13 @@ export default {
     patrolInterval: '间隔',
     groupAll: '全部',
     help: '快捷键',
+    cameraCount: '{count} 路摄像头',
+    wsConnected: '已连接',
+    wsConnecting: '连接中...',
+    wsDisconnected: '已断开',
+    backToGrid: '返回网格',
+    close: '关闭',
+    panel: '面板',
   },
   tab: {
     events: '事件',

@@ -401,8 +401,8 @@ onUnmounted(() => {
   <div v-else class="app" :class="{ mobile: isMobile }">
     <header class="app-header">
       <h1>JK NVR</h1>
-      <span class="status">{{ cameras.length }} 路摄像头</span>
-      <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? '已连接' : wsState === 'connecting' ? '连接中...' : '已断开'">
+      <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
+      <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? t('header.wsConnected') : wsState === 'connecting' ? t('header.wsConnecting') : t('header.wsDisconnected')">
         {{ wsState === 'connected' ? '●' : wsState === 'connecting' ? '◐' : '○' }}
       </span>
       <select v-if="groups.length > 0" v-model="filterGroup" class="group-select">
@@ -429,12 +429,12 @@ onUnmounted(() => {
           v-if="fullscreenCamera && !patrolActive"
           class="header-btn"
           @click="exitFullscreen"
-        >返回网格</button>
+        >{{ t('header.backToGrid') }}</button>
         <button
           v-if="isMobile"
           class="header-btn"
           @click="mobilePanelOpen = !mobilePanelOpen"
-        >{{ mobilePanelOpen ? '关闭' : '面板' }}</button>
+        >{{ mobilePanelOpen ? t('header.close') : t('header.panel') }}</button>
         <button class="header-btn lang-btn" @click="toggleLocale" :title="locale === 'zh-CN' ? 'English' : '中文'">
           {{ locale === 'zh-CN' ? 'EN' : '中' }}
         </button>
