@@ -41,7 +41,7 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
   clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
 }
 
-/** 标注图片 URL */
+/** 标注图片 URL（仅用于截图下载） */
 const annotatedUrl = ref<string>('')
 
 /** 检测框列表（按置信度排序） */
@@ -49,7 +49,7 @@ const sortedDetections = computed(() =>
   [...props.detections].sort((a, b) => b.score - a.score)
 )
 
-/** 收到检测事件时拉取标注图片 */
+/** 收到检测事件时拉取标注图片（仅截图用） */
 watch(() => props.detectVersion, async (v: number) => {
   if (v === 0) return
   try {
@@ -64,8 +64,8 @@ watch(() => props.detectVersion, async (v: number) => {
   }
 })
 
-/** 优先显示标注图片，没有则显示实时帧 */
-const displayUrl = computed(() => annotatedUrl.value || props.frameImage)
+/** 始终显示实时帧，检测框通过叠加层渲染 */
+const displayUrl = computed(() => props.frameImage)
 
 /** 检测框叠加在画面上的样式 */
 const detectionBoxes = computed(() => {
@@ -82,35 +82,20 @@ const detectionBoxes = computed(() => {
   }))
 })
 
-/** 3秒后清除标注图片，恢复实时帧 */
-let annotatedTimer: ReturnType<typeof setTimeout> | null = null
-watch(annotatedUrl, (url) => {
-  if (annotatedTimer) clearTimeout(annotatedTimer)
-  if (url) {
-    annotatedTimer = setTimeout(() => {
-      if (annotatedUrl.value) {
-        URL.revokeObjectURL(annotatedUrl.value)
-        annotatedUrl.value = ''
-      }
-      annotatedTimer = null
-    }, 3000)
-  }
-})
-
-/** 截图下载当前画面 */
+/** 截图下载当前画面（优先标注图） */
 function takeScreenshot() {
-  if (!displayUrl.value) return
+  const src = annotatedUrl.value || displayUrl.value
+  if (!src) return
   const link = document.createElement('a')
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
   link.download = `${props.name}_${ts}.jpg`
-  link.href = displayUrl.value
+  link.href = src
   link.click()
 }
 
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
-  if (annotatedTimer) clearTimeout(annotatedTimer)
   if (clockTimer) clearInterval(clockTimer)
 })
 </script>
