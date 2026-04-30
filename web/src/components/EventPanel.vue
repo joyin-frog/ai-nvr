@@ -19,12 +19,16 @@ interface EventItem {
   type: string
   cameraId: string
   detail: string
+  /** 原始 JSON detail（用于展开详情解析） */
+  rawDetail: string | null
 }
 
 const events = ref<EventItem[]>([])
 const MAX_LIVE_EVENTS = 50
 const loading = ref(false)
 const filterType = ref('')
+/** 当前展开的事件 ID */
+const expandedId = ref<number | null>(null)
 
 const props = defineProps<{
   /** 每个摄像头的最新检测帧快照 */
@@ -41,13 +45,14 @@ const typeConfig: Record<string, { label: string; bg: string; color: string }> =
   detect: { label: '检测', bg: '#4ECDC4', color: '#333' },
   'camera:online': { label: '上线', bg: '#4CAF50', color: '#fff' },
   'camera:offline': { label: '离线', bg: '#F44336', color: '#fff' },
+  alert: { label: '告警', bg: '#FFD93D', color: '#333' },
 }
 
 /** 添加实时事件 */
 function addEvent(type: string, cameraId: string, detail: string) {
   const now = Date.now()
   const time = new Date(now).toLocaleTimeString('zh-CN')
-  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail })
+  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
   if (events.value.length > MAX_LIVE_EVENTS) {
     events.value = events.value.slice(0, MAX_LIVE_EVENTS)
   }
@@ -89,6 +94,7 @@ async function loadHistory() {
         type: e.type,
         cameraId: e.camera_id,
         detail: parseDetail(e.type, e.detail),
+        rawDetail: e.detail,
       }))
       events.value = historyEvents
     }
@@ -102,6 +108,35 @@ async function loadHistory() {
 onMounted(() => {
   loadHistory()
 })
+
+/** 切换事件展开 */
+function toggleExpand(id: number) {
+  expandedId.value = expandedId.value === id ? null : id
+}
+
+/** 解析 rawDetail 为结构化信息 */
+function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string }> {
+  if (!e.rawDetail) return []
+  const items: Array<{ label: string; value: string }> = []
+  try {
+    const obj = JSON.parse(e.rawDetail)
+    if (e.type === 'motion' && obj.ratio !== undefined) {
+      items.push({ label: '变动比例', value: `${(obj.ratio * 100).toFixed(1)}%` })
+    }
+    if (e.type === 'detect' && Array.isArray(obj.detections)) {
+      for (const d of obj.detections as Array<{ label: string; score: number }>) {
+        items.push({ label: d.label, value: `${(d.score * 100).toFixed(0)}%` })
+      }
+    }
+    if (e.type === 'alert') {
+      if (obj.ruleName) items.push({ label: '规则', value: obj.ruleName })
+      if (obj.detail) items.push({ label: '详情', value: obj.detail })
+    }
+  } catch {
+    if (e.rawDetail) items.push({ label: '详情', value: e.rawDetail })
+  }
+  return items
+}
 
 defineExpose({ addEvent, loadHistory })
 </script>
@@ -129,24 +164,44 @@ defineExpose({ addEvent, loadHistory })
       <div
         v-for="e in events"
         :key="e.id"
-        class="event-item"
-        :class="[e.type, { clickable: e.type === 'motion' || e.type === 'detect' }]"
-        @click="emit('play-recording', e.cameraId, e.timestamp)"
+        class="event-row"
+        :class="{ expanded: expandedId === e.id }"
       >
-        <span class="event-time">{{ e.time }}</span>
-        <span
-          v-if="typeConfig[e.type]"
-          class="event-type"
-          :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
-        >{{ typeConfig[e.type].label }}</span>
-        <span class="event-cam">{{ e.cameraId }}</span>
-        <img
-          v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
-          :src="snapshots[e.cameraId]"
-          class="event-thumb"
-          alt=""
-        />
-        <span class="event-detail">{{ e.detail }}</span>
+        <div
+          class="event-item"
+          :class="e.type"
+          @click="toggleExpand(e.id)"
+        >
+          <span class="event-time">{{ e.time }}</span>
+          <span
+            v-if="typeConfig[e.type]"
+            class="event-type"
+            :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
+          >{{ typeConfig[e.type].label }}</span>
+          <span class="event-cam">{{ e.cameraId }}</span>
+          <img
+            v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
+            :src="snapshots[e.cameraId]"
+            class="event-thumb"
+            alt=""
+          />
+          <span class="event-detail">{{ e.detail }}</span>
+          <span class="expand-icon">{{ expandedId === e.id ? '▾' : '▸' }}</span>
+        </div>
+        <!-- 展开详情 -->
+        <div v-if="expandedId === e.id" class="event-expand">
+          <div v-for="(item, i) in parseExpandedDetail(e)" :key="i" class="detail-row">
+            <span class="detail-label">{{ item.label }}</span>
+            <span class="detail-value">{{ item.value }}</span>
+          </div>
+          <div class="expand-actions">
+            <button
+              v-if="e.type === 'motion' || e.type === 'detect'"
+              class="play-btn"
+              @click.stop="emit('play-recording', e.cameraId, e.timestamp)"
+            >查看录像</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -224,18 +279,20 @@ defineExpose({ addEvent, loadHistory })
   font-size: 12px;
   color: #aaa;
   align-items: center;
+  cursor: pointer;
 }
 
 .event-item:hover {
   background: #2a2a4a;
 }
 
-.event-item.clickable {
-  cursor: pointer;
+.event-row {
+  border-radius: 4px;
 }
 
-.event-item.clickable:hover {
-  background: #2a3a4a;
+.event-row.expanded {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
 }
 
 .event-time {
@@ -262,9 +319,54 @@ defineExpose({ addEvent, loadHistory })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 
-.event-thumb {
+.expand-icon {
+  color: #555;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.event-expand {
+  padding: 6px 12px 8px 80px;
+  border-top: 1px solid #2a2a4a;
+}
+
+.detail-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.detail-label {
+  color: #888;
+  min-width: 60px;
+}
+
+.detail-value {
+  color: #e0e0e0;
+}
+
+.expand-actions {
+  margin-top: 6px;
+}
+
+.play-btn {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.play-btn:hover {
+  opacity: 0.85;
+}
   width: 32px;
   height: 24px;
   object-fit: cover;
