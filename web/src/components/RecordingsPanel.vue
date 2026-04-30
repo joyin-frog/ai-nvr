@@ -23,7 +23,7 @@ const props = defineProps<{
 
 const recordings = ref<Recording[]>([])
 const selectedRecording = ref<Recording | null>(null)
-const filterCamera = ref('')
+const filterCamera = ref(localStorage.getItem('nvr-rec-filter-camera') ?? '')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
 const loading = ref(false)
@@ -367,6 +367,12 @@ function formatSec(sec: number): string {
   const s = sec % 60
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/** 摄像头筛选变更 */
+function onCameraFilterChange() {
+  localStorage.setItem('nvr-rec-filter-camera', filterCamera.value)
+  loadRecordings()
 }
 
 /** 加载录像列表 */
@@ -792,7 +798,7 @@ defineExpose({ loadRecordings, playAtTime })
     <div class="panel-header">
       <span>{{ t('recording.title') }} <span v-if="filteredRecordings.length > 0" class="rec-summary">{{ filteredRecordings.length }} / {{ formatSize(totalSize) }}</span></span>
       <input type="date" v-model="filterDate" class="filter-date" :title="t('recording.filterDate')" />
-      <select v-model="filterCamera" @change="loadRecordings" class="filter-select">
+      <select v-model="filterCamera" @change="onCameraFilterChange" class="filter-select">
         <option value="">{{ t("recording.allCameras") }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
