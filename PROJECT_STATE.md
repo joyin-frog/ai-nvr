@@ -192,4 +192,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 画面亮度/对比度/饱和度调节：CameraView 头部星号按钮展开调节面板，CSS filter 实时预览，亮度(50-200%)、对比度(50-200%)、饱和度(0-200%)，重置按钮
 - 录像删除：后端 DELETE /api/recordings/:cameraId/:filename 端点（含路径遍历防护），前端录像列表 hover 显示删除按钮，confirm 确认后删除并从列表移除
 - 批量删除录像：多选模式下操作栏增加"删除选中"按钮，confirm 确认后逐个调用 DELETE API，完成后从列表移除
-- 下一步优先：PTZ 控制、摄像头画面数字放大
+- 画面滚轮缩放：CameraView 鼠标滚轮缩放(1x-5x) + 拖拽平移，CSS transform 实现，头部缩放倍率徽标（点击重置）
+- 下一步优先：PTZ 控制、事件统计图表
