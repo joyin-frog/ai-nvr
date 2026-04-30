@@ -244,4 +244,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像播放器全屏模式：player-header 全屏按钮，Browser Fullscreen API，全屏时撑满视口
 - motion 事件实时去重：同一摄像头 5 秒内连续 motion 事件只更新不新增，避免事件列表被淹没
 - 摄像头画面比例自适应：CameraView 根据 videoWidth/videoHeight 动态计算 aspect-ratio，移除硬编码 16:9，无数据时回退
-- 下一步优先：性能监控面板实时 FPS 图表、录像水印叠加
+- 录像水印叠加：ffmpeg drawtext 滤镜在画面左上角叠加摄像头名称、左下角叠加实时时间戳（YYYY-MM-DD HH:MM:SS），NotoSansCJK 字体，半透明黑色背景框
+- 下一步优先：性能监控面板实时 FPS/内存折线图、检测区域划定 Web UI
