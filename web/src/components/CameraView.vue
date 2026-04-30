@@ -127,7 +127,7 @@ onUnmounted(() => {
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
     </div>
 
-    <div class="camera-body">
+    <div class="camera-body" @dblclick="emit('fullscreen', cameraId)">
       <img
         v-if="displayUrl"
         :src="displayUrl"
@@ -268,12 +268,12 @@ onUnmounted(() => {
 .camera-body {
   position: relative;
   background: #0a0a1a;
-  /** 16:9 宽高比 */
   aspect-ratio: 16 / 9;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  cursor: pointer;
 }
 
 .camera-image {

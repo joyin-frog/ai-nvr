@@ -366,21 +366,21 @@ onMounted(async () => {
 
   /** 键盘快捷键 */
   useKeyboardShortcuts()
-  registerShortcut({ key: '1', description: '事件面板', handler: () => switchTab('events') })
-  registerShortcut({ key: '2', description: '录像面板', handler: () => switchTab('recordings') })
-  registerShortcut({ key: '3', description: '状态面板', handler: () => switchTab('status') })
-  registerShortcut({ key: '4', description: '管理面板', handler: () => switchTab('cameras') })
-  registerShortcut({ key: '5', description: '告警面板', handler: () => switchTab('alerts') })
-  registerShortcut({ key: '6', description: '设置面板', handler: () => switchTab('settings') })
-  registerShortcut({ key: 'f', description: '全屏切换', handler: () => {
+  registerShortcut({ key: '1', description: t('shortcuts.switchTab'), handler: () => switchTab('events') })
+  registerShortcut({ key: '2', description: t('shortcuts.switchTab'), handler: () => switchTab('recordings') })
+  registerShortcut({ key: '3', description: t('shortcuts.switchTab'), handler: () => switchTab('status') })
+  registerShortcut({ key: '4', description: t('shortcuts.switchTab'), handler: () => switchTab('cameras') })
+  registerShortcut({ key: '5', description: t('shortcuts.switchTab'), handler: () => switchTab('alerts') })
+  registerShortcut({ key: '6', description: t('shortcuts.switchTab'), handler: () => switchTab('settings') })
+  registerShortcut({ key: 'f', description: t('shortcuts.fullscreen'), handler: () => {
     if (fullscreenCamera.value) exitFullscreen()
     else if (cameras.value.length > 0) enterFullscreen(cameras.value[0]!.id)
   }})
-  registerShortcut({ key: 'Escape', description: '退出全屏', handler: () => {
+  registerShortcut({ key: 'Escape', description: t('shortcuts.exit'), handler: () => {
     if (fullscreenCamera.value) exitFullscreen()
   }})
-  registerShortcut({ key: '?', description: '快捷键帮助', handler: () => { showShortcuts.value = !showShortcuts.value }})
-  registerShortcut({ key: 'p', description: '轮巡切换', handler: () => { togglePatrol() }})
+  registerShortcut({ key: '?', description: t('shortcuts.help'), handler: () => { showShortcuts.value = !showShortcuts.value }})
+  registerShortcut({ key: 'p', description: t('shortcuts.patrol'), handler: () => { togglePatrol() }})
 })
 
 onUnmounted(() => {
