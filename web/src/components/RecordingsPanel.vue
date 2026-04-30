@@ -127,6 +127,25 @@ function onProgressClick(e: MouseEvent) {
   playerRef.value.currentTime = pct * playerRef.value.duration
 }
 
+/** 进度条悬停提示 */
+const hoverPct = ref(-1)
+const hoverClientX = ref(0)
+function onProgressHover(e: MouseEvent) {
+  if (!progressEl.value) return
+  const rect = progressEl.value.getBoundingClientRect()
+  hoverPct.value = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  hoverClientX.value = e.clientX
+}
+function onProgressLeave() {
+  hoverPct.value = -1
+}
+/** 悬停位置的绝对时间 */
+const hoverAbsTime = computed(() => {
+  if (!selectedRecording.value || hoverPct.value < 0) return 0
+  const durationMs = selectedRecording.value.endTime - selectedRecording.value.startTime
+  return selectedRecording.value.startTime + hoverPct.value * durationMs
+})
+
 /** 拖拽进度条 */
 let progressDragging = false
 function onProgressDragStart(e: MouseEvent) {
@@ -591,9 +610,12 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="ctrl-btn play-pause" @click="isPlaying ? playerRef?.pause() : playerRef?.play()">
             {{ isPlaying ? '&#10074;&#10074;' : '&#9654;' }}
           </button>
-          <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart">
+          <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
+            <div v-if="hoverPct >= 0 && selectedRecording" class="progress-tooltip" :style="{ left: (hoverPct * 100) + '%' }">
+              {{ formatAbsTime(hoverAbsTime) }}
+            </div>
           </div>
           <div class="time-display">
             <span class="time-current">{{ formatAbsTime(currentAbsTime) }}</span>
@@ -1103,6 +1125,23 @@ defineExpose({ loadRecordings, playAtTime })
 
 .progress-bar:hover .progress-thumb {
   opacity: 1;
+}
+
+.progress-tooltip {
+  position: absolute;
+  bottom: 100%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid #4ECDC4;
+  white-space: nowrap;
+  pointer-events: none;
+  margin-bottom: 4px;
+  z-index: 10;
 }
 
 .time-display {
