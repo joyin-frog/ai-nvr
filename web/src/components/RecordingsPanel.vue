@@ -276,7 +276,23 @@ function onPlayerKeydown(e: KeyboardEvent) {
     case 'F':
       togglePlayerFullscreen()
       break
+    case ',':
+      e.preventDefault()
+      stepFrame(-1)
+      break
+    case '.':
+      e.preventDefault()
+      stepFrame(1)
+      break
   }
+}
+
+/** 逐帧步进（±1/30秒） */
+function stepFrame(direction: number) {
+  if (!playerRef.value) return
+  playerRef.value.pause()
+  const step = direction > 0 ? 1 / 30 : -1 / 30
+  playerRef.value.currentTime = Math.max(0, Math.min(playerRef.value.duration, playerRef.value.currentTime + step))
 }
 
 /** 格式化绝对时间为 HH:MM:SS */
@@ -725,6 +741,8 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="ctrl-btn play-pause" @click="isPlaying ? playerRef?.pause() : playerRef?.play()">
             {{ isPlaying ? '&#10074;&#10074;' : '&#9654;' }}
           </button>
+          <button class="ctrl-btn frame-btn" @click="stepFrame(-1)" title="◀ 1帧 (,)">◂</button>
+          <button class="ctrl-btn frame-btn" @click="stepFrame(1)" title="1帧 ▸ (.)">▸</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
@@ -1276,6 +1294,11 @@ defineExpose({ loadRecordings, playAtTime })
 
 .ctrl-btn:hover {
   color: #4ECDC4;
+}
+
+.frame-btn {
+  font-size: 12px;
+  padding: 2px 6px;
 }
 
 .progress-bar {
