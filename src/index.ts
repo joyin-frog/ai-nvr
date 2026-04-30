@@ -84,15 +84,15 @@ const thumbnailGenerator = new ThumbnailGenerator(join(import.meta.dir, "../data
 /** 事件存储（cleaner 和 server 都需要） */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
 
+/** 录像导出器 */
+const exporter = new RecordingExporter(join(import.meta.dir, "../data/exports"), config.ffmpegPath);
+
 /** 统一存储清理管理器 */
-const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator);
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter);
 cleaner.start();
 
 /** 磁盘用量统计 */
 const diskUsage = new DiskUsage(join(import.meta.dir, "../data"));
-
-/** 录像导出器 */
-const exporter = new RecordingExporter(join(import.meta.dir, "../data/exports"), config.ffmpegPath);
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
