@@ -212,4 +212,8 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 内存泄漏修复：CameraStatusPanel loadTodayStats interval、App.vue PWA interval 未清理；checkDiskSpace 间隔改为 300s 避免冗余
 - 无摄像头引导空状态：网格区域显示图标+提示+添加按钮
 - 录像面板总数和总大小：头部显示筛选后的录像数量和占用空间
+- 侧边栏可拖拽调整宽度：左侧拖拽手柄 260-600px，宽度持久化到 localStorage
+- WebSocket 重连后自动刷新：非首次连接时刷新摄像头列表和事件历史
+- 事件面板排序切换：最新/最早在前按钮
+- 通知权限延迟请求：改为首次点击页面时触发，需要用户手势
 - 下一步优先：PTZ 控制、事件统计图表增强
