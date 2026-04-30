@@ -76,6 +76,9 @@ export class MotionRecorder {
 
       if (!state.recording) {
         this.startRecording(cameraId, timestamp);
+      } else {
+        /** 已在录像：取消之前的停止定时器，重新设置延迟停止 */
+        this.scheduleStop(cameraId);
       }
     });
 
@@ -97,7 +100,7 @@ export class MotionRecorder {
   /** 停止所有录像 */
   stop(): void {
     for (const [cameraId] of this.states) {
-      this.stopRecording(cameraId);
+      this.forceStop(cameraId);
     }
   }
 
@@ -211,7 +214,7 @@ export class MotionRecorder {
   }
 
   /** 延迟停止录像（最后一次 motion 后等待一段时间） */
-  private stopRecording(cameraId: string): void {
+  private scheduleStop(cameraId: string): void {
     const state = this.states.get(cameraId);
     if (!state?.recording) return;
 
@@ -226,6 +229,19 @@ export class MotionRecorder {
       state.stopTimer = null;
       console.log(`[Recorder] ${cameraId} 停止录像（无运动超时）`);
     }, this.config.postMotionDuration);
+  }
+
+  /** 立即强制停止录像 */
+  private forceStop(cameraId: string): void {
+    const state = this.states.get(cameraId);
+    if (!state) return;
+    if (state.stopTimer) {
+      clearTimeout(state.stopTimer);
+      state.stopTimer = null;
+    }
+    if (state.proc) {
+      state.proc.stdin?.end();
+    }
   }
 
   /** 清理过期录像 */
