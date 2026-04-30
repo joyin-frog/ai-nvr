@@ -162,4 +162,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件详情展开面板：EventPanel 点击事件行展开显示完整详情（变动比例/检测目标置信度/告警规则），展开面板内"查看录像"按钮跳转播放
 - 摄像头分组筛选：CameraConfig 添加 group 字段（YAML cameras.<id>.group），API 返回 group，App header 分组下拉筛选器，按分组过滤摄像头网格
 - 摄像头管理面板分组编辑：API PATCH /api/cameras/:id 支持 group 字段，CameraManagePanel 编辑表单增加分组输入，列表中显示分组标签
-- 下一步优先：告警推送渠道（钉钉机器人/邮件）、录像回放增强
+- 钉钉机器人告警通知：DingTalkNotifier 监听 motion/detect/offline/alert 事件，通过钉钉自定义机器人 Webhook 推送 markdown 消息，支持 HmacSHA256 加签，RuntimeConfig notify.dingtalk 配置（enabled/webhookUrl/secret），设置面板可配置
+- 下一步优先：邮件告警推送、录像回放增强
