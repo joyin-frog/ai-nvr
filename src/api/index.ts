@@ -6,6 +6,7 @@ import { type MotionRecorder } from "@/storage/recorder";
 import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
+import { type RoiStorage } from "@/storage/roi";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -29,6 +30,7 @@ export function startServer(
   monitor: SystemMonitor,
   runtimeConfig: RuntimeConfig,
   snapshotStorage: SnapshotStorage,
+  roiStorage: RoiStorage,
 ): void {
   Bun.serve({
     port,
@@ -228,6 +230,48 @@ export function startServer(
         return new Response(file, {
           headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
         });
+      }
+
+      /** ROI 列表 */
+      const roiListMatch = url.pathname.match(/^\/api\/roi\/([^/]+)$/);
+      if (roiListMatch && req.method === "GET") {
+        const cameraId = roiListMatch[1]!;
+        return Response.json(roiStorage.list(cameraId));
+      }
+
+      /** ROI 添加 */
+      if (url.pathname === "/api/roi" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const cameraId = obj.cameraId as string | undefined;
+          const name = obj.name as string | undefined;
+          const points = obj.points as string | undefined;
+          if (!cameraId || !points) return new Response("Missing cameraId or points", { status: 400 });
+          const id = roiStorage.add(cameraId, name ?? "", points);
+          return Response.json({ id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** ROI 更新 */
+      const roiIdMatch = url.pathname.match(/^\/api\/roi\/item\/(\d+)$/);
+      if (roiIdMatch && req.method === "PATCH") {
+        const roiId = Number(roiIdMatch[1]!);
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const updates: { name?: string; points?: string; enabled?: boolean } = {};
+          if (typeof obj.name === "string") updates.name = obj.name;
+          if (typeof obj.points === "string") updates.points = obj.points;
+          if (typeof obj.enabled === "boolean") updates.enabled = obj.enabled;
+          roiStorage.update(roiId, updates);
+          return Response.json({ ok: true });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** ROI 删除 */
+      if (roiIdMatch && req.method === "DELETE") {
+        const roiId = Number(roiIdMatch[1]!);
+        roiStorage.remove(roiId);
+        return Response.json({ ok: true });
       }
 
       /** API 路径未匹配 → 404 */

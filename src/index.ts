@@ -14,6 +14,7 @@ import { SystemMonitor } from "@/monitor";
 import { RuntimeConfig } from "@/runtime-config";
 import { WebhookNotifier } from "@/notify/webhook";
 import { SnapshotStorage } from "@/storage/snapshots";
+import { RoiStorage } from "@/storage/roi";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -63,10 +64,13 @@ webhookNotifier.start();
 const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);
 snapshotStorage.start();
 
+/** ROI 检测区域存储 */
+const roiStorage = new RoiStorage(join(import.meta.dir, "../data/roi.db"));
+
 /** 启动 HTTP 服务 */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline"] as const;
@@ -95,6 +99,7 @@ process.on("SIGINT", () => {
   recorder.stop();
   cameraManager.stop();
   eventStorage.close();
+  roiStorage.close();
   eventBus.clear();
   process.exit(0);
 });
