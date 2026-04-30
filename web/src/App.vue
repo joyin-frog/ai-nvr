@@ -6,6 +6,7 @@ import EventPanel from './components/EventPanel.vue'
 import RecordingsPanel from './components/RecordingsPanel.vue'
 import CameraStatusPanel from './components/CameraStatusPanel.vue'
 import CameraManagePanel from './components/CameraManagePanel.vue'
+import AlertPanel from './components/AlertPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 
 /** 摄像头状态 */
@@ -17,7 +18,7 @@ interface CameraStatus {
 }
 
 /** 侧边栏激活的标签 */
-type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'settings'
+type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'settings'
 const activeTab = ref<SidebarTab>('events')
 
 /** 全屏摄像头 ID（null 为网格模式） */
@@ -46,6 +47,7 @@ const detectSnapshots = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
+const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
 
 const client = new EventClient()
 
@@ -195,6 +197,13 @@ onMounted(() => {
     notify(`${cam?.name ?? payload.cameraId} 离线`, '摄像头连接已断开')
   })
 
+  /** 监听告警事件 */
+  client.on('alert', (payload) => {
+    eventPanel.value?.addEvent('alert', payload.cameraId, `告警: ${payload.ruleName}`)
+    alertPanel.value?.loadAlerts()
+    notify(`告警: ${payload.ruleName}`, payload.cameraId)
+  })
+
   client.connect()
 })
 
@@ -260,6 +269,10 @@ onUnmounted(() => {
             @click="switchTab('cameras')"
           >管理</button>
           <button
+            :class="['tab-btn', { active: activeTab === 'alerts' }]"
+            @click="switchTab('alerts')"
+          >告警</button>
+          <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
           >设置</button>
@@ -276,6 +289,7 @@ onUnmounted(() => {
             :cameras="cameras"
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
+          <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" />
           <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
@@ -316,6 +330,7 @@ onUnmounted(() => {
           :cameras="cameras"
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
+        <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

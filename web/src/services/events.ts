@@ -12,6 +12,7 @@ export interface EventMap {
   detect: { cameraId: string; timestamp: number; detections: Detection[] }
   'camera:online': { cameraId: string }
   'camera:offline': { cameraId: string }
+  alert: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }
 }
 
 /** 事件回调 */
