@@ -102,6 +102,19 @@ const totalDurationSec = computed(() => {
   return Math.max(0, Math.round((selectedRecording.value.endTime - selectedRecording.value.startTime) / 1000))
 })
 
+/** 当前播放位置对应的绝对时间戳 */
+const currentAbsTime = ref(0)
+function onTimeUpdate() {
+  if (!playerRef.value || !selectedRecording.value) return
+  currentAbsTime.value = selectedRecording.value.startTime + playerRef.value.currentTime * 1000
+}
+
+/** 格式化绝对时间为 HH:MM:SS */
+function formatAbsTime(ts: number): string {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+}
+
 /** 导出时长文本 */
 const exportDurationText = computed(() => {
   const sec = exportEndSec.value - exportStartSec.value
@@ -444,7 +457,12 @@ defineExpose({ loadRecordings, playAtTime })
           @ratechange="onRateChange"
           @loadedmetadata="onLoadedMetadata"
           @ended="onVideoEnded"
+          @timeupdate="onTimeUpdate"
         />
+        <!-- 绝对时间戳叠加 -->
+        <div v-if="currentAbsTime > 0" class="player-timestamp">
+          {{ formatAbsTime(currentAbsTime) }}
+        </div>
         <!-- 导出面板 -->
         <div v-if="showExport" class="export-panel">
           <div class="export-row">
@@ -465,8 +483,8 @@ defineExpose({ loadRecordings, playAtTime })
             <button v-if="!exportFilename && !gifFilename" class="gif-btn" @click="doGifExport" :disabled="gifExporting || exportEndSec <= exportStartSec">
               {{ gifExporting ? t('recording.exporting') : t('recording.exportGif') }}
             </button>
-            <button v-if="exportFilename" class="download-btn" @click="downloadExport">{ t('recording.download') } MP4 ({{ exportDurationText }})</button>
-            <button v-if="gifFilename" class="download-btn" @click="downloadGif">{ t('recording.download') } GIF ({{ exportDurationText }})</button>
+            <button v-if="exportFilename" class="download-btn" @click="downloadExport">{{ t('recording.download') }} MP4 ({{ exportDurationText }})</button>
+            <button v-if="gifFilename" class="download-btn" @click="downloadGif">{{ t('recording.download') }} GIF ({{ exportDurationText }})</button>
           </div>
         </div>
       </div>
@@ -769,6 +787,7 @@ defineExpose({ loadRecordings, playAtTime })
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid #2a2a4a;
+  position: relative;
 }
 
 .player-header {
@@ -841,6 +860,20 @@ defineExpose({ loadRecordings, playAtTime })
   display: block;
   max-height: 75vh;
   background: #000;
+}
+
+.player-timestamp {
+  position: absolute;
+  bottom: 52px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #e0e0e0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* 导出面板 */
