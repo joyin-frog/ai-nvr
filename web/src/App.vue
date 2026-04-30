@@ -83,6 +83,30 @@ const isMobile = ref(false)
 /** 移动端底部面板是否展开 */
 const mobilePanelOpen = ref(false)
 
+/** 侧边栏宽度（可拖拽调整） */
+const sidebarWidth = ref(Number(localStorage.getItem('nvr-sidebar-width')) || 340)
+/** 拖拽调整侧边栏宽度 */
+let resizing = false
+function onResizeStart(e: MouseEvent) {
+  e.preventDefault()
+  resizing = true
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+  function onMove(ev: MouseEvent) {
+    if (!resizing) return
+    const delta = ev.clientX - startX
+    sidebarWidth.value = Math.max(260, Math.min(600, startWidth + delta))
+  }
+  function onUp() {
+    resizing = false
+    localStorage.setItem('nvr-sidebar-width', String(sidebarWidth.value))
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
 /** 检测屏幕宽度 */
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
@@ -557,7 +581,8 @@ onUnmounted(() => {
         </div>
       </div>
       <!-- 桌面端侧边栏 -->
-      <div v-if="!isMobile" class="sidebar">
+      <div v-if="!isMobile" class="sidebar" :style="{ width: sidebarWidth + 'px' }">
+        <div class="sidebar-resize-handle" @mousedown="onResizeStart" />
         <div class="sidebar-tabs">
           <button
             :class="['tab-btn', { active: activeTab === 'events' }]"
@@ -863,10 +888,25 @@ onUnmounted(() => {
 }
 
 .sidebar {
-  width: 340px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:active {
+  background: rgba(78, 205, 196, 0.3);
 }
 
 .sidebar-tabs {
