@@ -5,6 +5,7 @@ import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
 import RecordingsPanel from './components/RecordingsPanel.vue'
 import CameraStatusPanel from './components/CameraStatusPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 
 /** 摄像头状态 */
 interface CameraStatus {
@@ -15,7 +16,7 @@ interface CameraStatus {
 }
 
 /** 侧边栏激活的标签 */
-type SidebarTab = 'events' | 'recordings' | 'status'
+type SidebarTab = 'events' | 'recordings' | 'status' | 'settings'
 const activeTab = ref<SidebarTab>('events')
 
 /** 全屏摄像头 ID（null 为网格模式） */
@@ -220,6 +221,10 @@ onUnmounted(() => {
             :class="['tab-btn', { active: activeTab === 'status' }]"
             @click="switchTab('status')"
           >状态</button>
+          <button
+            :class="['tab-btn', { active: activeTab === 'settings' }]"
+            @click="switchTab('settings')"
+          >设置</button>
         </div>
         <div class="sidebar-content">
           <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
@@ -232,6 +237,7 @@ onUnmounted(() => {
             v-if="activeTab === 'status'"
             :cameras="cameras"
           />
+          <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
     </main>
@@ -250,6 +256,10 @@ onUnmounted(() => {
           :class="['tab-btn', { active: activeTab === 'status' }]"
           @click="switchTab('status')"
         >状态</button>
+        <button
+          :class="['tab-btn', { active: activeTab === 'settings' }]"
+          @click="switchTab('settings')"
+        >设置</button>
       </div>
       <div class="mobile-content">
         <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
@@ -262,6 +272,7 @@ onUnmounted(() => {
           v-if="activeTab === 'status'"
           :cameras="cameras"
         />
+        <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>
   </div>
