@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
-import { authFetch } from '../services/auth'
+import { authFetch, authUrl } from '../services/auth'
 
 const { t, locale } = useI18n()
 
@@ -46,6 +46,65 @@ const expandedId = ref<number | null>(null)
 const totalCount = ref(0)
 /** 排序方向（默认最新在前） */
 const sortDesc = ref(true)
+
+/** 当前子视图：'events' 事件列表 | 'gallery' 快照画廊 */
+const subView = ref<'events' | 'gallery'>('events')
+
+/** 快照数据 */
+interface SnapshotInfo {
+  filename: string
+  cameraId: string
+  timestamp: number
+  size: number
+}
+const snapshotList = ref<SnapshotInfo[]>([])
+const snapshotLoading = ref(false)
+/** 快照筛选摄像头 */
+const snapFilterCamera = ref('')
+/** 选中放大查看的快照 URL */
+const previewUrl = ref('')
+
+/** 加载快照列表 */
+async function loadSnapshots() {
+  snapshotLoading.value = true
+  try {
+    const params = new URLSearchParams({ limit: '200' })
+    if (snapFilterCamera.value) params.set('cameraId', snapFilterCamera.value)
+    const res = await authFetch(`/api/snapshots?${params}`)
+    if (res.ok) {
+      snapshotList.value = await res.json()
+    }
+  } catch {
+    // ignore
+  } finally {
+    snapshotLoading.value = false
+  }
+}
+
+/** 快照缩略图 URL */
+function snapThumbUrl(snap: SnapshotInfo): string {
+  return authUrl(`/api/snapshots/${snap.cameraId}/${snap.filename}`)
+}
+
+/** 打开快照大图预览 */
+function openSnapPreview(snap: SnapshotInfo) {
+  previewUrl.value = snapThumbUrl(snap)
+}
+
+/** 切换到快照画廊视图 */
+function switchToGallery() {
+  subView.value = 'gallery'
+  previewUrl.value = ''
+  loadSnapshots()
+}
+
+/** 下载快照图片 */
+function downloadSnapshot(snap: SnapshotInfo) {
+  const link = document.createElement('a')
+  link.href = snapThumbUrl(snap)
+  link.download = snap.filename
+  link.click()
+}
 
 /** 排序后的事件列表 */
 const sortedEvents = computed(() => {
@@ -299,7 +358,10 @@ defineExpose({ addEvent, loadHistory })
 <template>
   <div class="event-panel">
     <div class="panel-header">
-      <span>{{ t('event.title') }} <span v-if="totalCount > 0" class="total-count">{{ totalCount }}</span></span>
+      <span>{{ t('event.title') }} <span v-if="totalCount > 0 && subView === 'events'" class="total-count">{{ totalCount }}</span></span>
+      <button :class="['view-toggle', { active: subView === 'events' }]" @click="subView = 'events'" :title="t('event.viewEvents')">☰</button>
+      <button :class="['view-toggle', { active: subView === 'gallery' }]" @click="switchToGallery" :title="t('event.viewGallery')">☷</button>
+      <template v-if="subView === 'events'">
       <button :class="['range-btn', { active: filterRange === '1h' }]" @click="setRange('1h')">1h</button>
       <button :class="['range-btn', { active: filterRange === '24h' }]" @click="setRange('24h')">24h</button>
       <input
@@ -337,9 +399,19 @@ defineExpose({ addEvent, loadHistory })
       <button :class="['sort-btn', { desc: sortDesc }]" @click="sortDesc = !sortDesc" :title="sortDesc ? t('event.sortOldest') : t('event.sortNewest')">
         {{ sortDesc ? '↓' : '↑' }}
       </button>
+      </template>
+      <template v-if="subView === 'gallery'">
+      <select v-model="snapFilterCamera" @change="loadSnapshots" class="filter-select">
+        <option value="">{{ t('event.allCameras') }}</option>
+        <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+      </select>
+      <button class="refresh-btn" @click="loadSnapshots" :disabled="snapshotLoading">
+        {{ t('event.refresh') }}
+      </button>
+      </template>
     </div>
-    <EventTimeline :events="events" />
-    <div class="event-list">
+    <EventTimeline v-if="subView === 'events'" :events="events" />
+    <div v-if="subView === 'events'" class="event-list">
       <div v-if="events.length === 0" class="empty">
         {{ loading ? t('app.loading') : t('event.noEvents') }}
       </div>
@@ -395,6 +467,35 @@ defineExpose({ addEvent, loadHistory })
         <button class="load-more-btn" @click="loadMore" :disabled="loading">
           {{ loading ? t('app.loading') : t('event.loadMore') }}
         </button>
+      </div>
+    </div>
+
+    <!-- 快照画廊视图 -->
+    <div v-if="subView === 'gallery'" class="gallery-container">
+      <div v-if="snapshotList.length === 0" class="empty">
+        {{ snapshotLoading ? t('app.loading') : t('event.noSnapshots') }}
+      </div>
+      <div class="gallery-grid">
+        <div
+          v-for="snap in snapshotList"
+          :key="snap.filename"
+          class="gallery-item"
+          @click="openSnapPreview(snap)"
+        >
+          <img :src="snapThumbUrl(snap)" class="gallery-thumb" alt="" loading="lazy" />
+          <div class="gallery-meta">
+            <span class="gallery-cam">{{ cameras?.find(c => c.id === snap.cameraId)?.name ?? snap.cameraId }}</span>
+            <span class="gallery-time">{{ new Date(snap.timestamp).toLocaleString(locale, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 快照大图预览浮层 -->
+    <div v-if="previewUrl" class="preview-overlay" @click.self="previewUrl = ''">
+      <div class="preview-modal">
+        <button class="preview-close" @click="previewUrl = ''">&times;</button>
+        <img :src="previewUrl" class="preview-img" alt="" />
       </div>
     </div>
   </div>
@@ -674,6 +775,121 @@ defineExpose({ addEvent, loadHistory })
   opacity: 0.5;
 }
 
+/* 视图切换按钮 */
+.view-toggle {
+  background: none;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.view-toggle:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.view-toggle.active {
+  background: #4ECDC4;
+  border-color: #4ECDC4;
+  color: #1a1a2e;
+}
+
+/* 快照画廊 */
+.gallery-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.gallery-item {
+  background: #0a0a1a;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid #2a2a4a;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.gallery-item:hover {
+  border-color: #4ECDC4;
+  transform: translateY(-2px);
+}
+
+.gallery-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+}
+
+.gallery-meta {
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gallery-cam {
+  font-size: 11px;
+  color: #e0e0e0;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-time {
+  font-size: 10px;
+  color: #888;
+}
+
+/* 快照大图预览 */
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-modal {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.preview-img {
+  max-width: 100%;
+  max-height: 85vh;
+  border-radius: 6px;
+}
+
+.preview-close {
+  position: absolute;
+  top: -30px;
+  right: 0;
+  background: none;
+  border: none;
+  color: #e0e0e0;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.preview-close:hover {
+  color: #4ECDC4;
+}
+
 /* 移动端适配 */
 @media (max-width: 768px) {
   .event-panel {
@@ -687,6 +903,11 @@ defineExpose({ addEvent, loadHistory })
 
   .event-cam {
     min-width: 45px;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 6px;
   }
 }
 </style>

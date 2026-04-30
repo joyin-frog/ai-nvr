@@ -73,6 +73,9 @@ export default {
     searchPlaceholder: 'Search events...',
     sortNewest: 'Newest first',
     sortOldest: 'Oldest first',
+    viewEvents: 'Event list',
+    viewGallery: 'Snapshot gallery',
+    noSnapshots: 'No detection snapshots',
   },
   recording: {
     title: 'Recordings',

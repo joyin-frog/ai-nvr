@@ -73,6 +73,9 @@ export default {
     searchPlaceholder: '搜索事件...',
     sortNewest: '最新在前',
     sortOldest: '最早在前',
+    viewEvents: '事件列表',
+    viewGallery: '快照画廊',
+    noSnapshots: '暂无检测快照',
   },
   recording: {
     title: '录像',
