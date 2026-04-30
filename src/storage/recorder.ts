@@ -43,8 +43,6 @@ interface RecordingState {
   startTime: number;
   /** 停止定时器 */
   stopTimer: ReturnType<typeof setTimeout> | null;
-  /** 帧缓冲（录像未启动时缓存最近帧） */
-  frameBuffer: Buffer[];
 }
 
 /**
@@ -285,11 +283,11 @@ export class MotionRecorder {
 
   /** 获取或创建摄像头录像状态 */
   private getOrCreateState(cameraId: string): RecordingState {
-    let state = this.states.get(cameraId);
-    if (!state) {
-      state = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, frameBuffer: [] };
-      this.states.set(cameraId, state);
-    }
+    const existing = this.states.get(cameraId);
+    if (existing) return existing;
+
+    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null };
+    this.states.set(cameraId, state);
     return state;
   }
 }
