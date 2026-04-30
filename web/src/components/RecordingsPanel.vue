@@ -323,4 +323,23 @@ defineExpose({ loadRecordings })
   max-height: 75vh;
   background: #000;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .recordings-panel {
+    border-radius: 0;
+    border: none;
+  }
+
+  .player-modal {
+    width: 100vw;
+    max-width: 100vw;
+    border-radius: 0;
+    max-height: 100vh;
+  }
+
+  .player-video {
+    max-height: 80vh;
+  }
+}
 </style>

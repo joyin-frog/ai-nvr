@@ -233,4 +233,20 @@ defineExpose({ addEvent, loadHistory })
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .event-panel {
+    border-radius: 0;
+    border: none;
+  }
+
+  .event-time {
+    min-width: 55px;
+  }
+
+  .event-cam {
+    min-width: 45px;
+  }
+}
 </style>

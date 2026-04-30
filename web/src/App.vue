@@ -24,6 +24,16 @@ const fullscreenCamera = ref<string | null>(null)
 /** 网格列数配置 */
 const gridCols = ref(0) // 0 = auto
 
+/** 是否为移动端布局 */
+const isMobile = ref(false)
+/** 移动端底部面板是否展开 */
+const mobilePanelOpen = ref(false)
+
+/** 检测屏幕宽度 */
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+
 const cameras = ref<CameraStatus[]>([])
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
@@ -74,6 +84,7 @@ function exitFullscreen() {
 /** 网格列数样式 */
 const gridStyle = computed(() => {
   if (fullscreenCamera.value) return {}
+  if (isMobile.value) return { 'grid-template-columns': '1fr' }
   const n = gridCols.value
   if (n > 0) return { 'grid-template-columns': `repeat(${n}, 1fr)` }
   return { 'grid-template-columns': 'repeat(auto-fit, minmax(400px, 1fr))' }
@@ -88,6 +99,8 @@ const visibleCameras = computed(() => {
 })
 
 onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
   loadCameras()
 
   /** 监听变动事件 */
@@ -130,11 +143,12 @@ onMounted(() => {
 
 onUnmounted(() => {
   client.disconnect()
+  window.removeEventListener('resize', checkMobile)
 })
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ mobile: isMobile }">
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ cameras.length }} 路摄像头</span>
@@ -144,6 +158,11 @@ onUnmounted(() => {
           class="header-btn"
           @click="exitFullscreen"
         >返回网格</button>
+        <button
+          v-if="isMobile"
+          class="header-btn"
+          @click="mobilePanelOpen = !mobilePanelOpen"
+        >{{ mobilePanelOpen ? '关闭' : '面板' }}</button>
       </div>
     </header>
     <main class="app-body">
@@ -160,7 +179,8 @@ onUnmounted(() => {
           @fullscreen="enterFullscreen"
         />
       </div>
-      <div class="sidebar">
+      <!-- 桌面端侧边栏 -->
+      <div v-if="!isMobile" class="sidebar">
         <div class="sidebar-tabs">
           <button
             :class="['tab-btn', { active: activeTab === 'events' }]"
@@ -189,6 +209,35 @@ onUnmounted(() => {
         </div>
       </div>
     </main>
+    <!-- 移动端底部面板 -->
+    <div v-if="isMobile" class="mobile-panel" :class="{ open: mobilePanelOpen }">
+      <div class="mobile-tabs">
+        <button
+          :class="['tab-btn', { active: activeTab === 'events' }]"
+          @click="switchTab('events')"
+        >事件</button>
+        <button
+          :class="['tab-btn', { active: activeTab === 'recordings' }]"
+          @click="switchTab('recordings')"
+        >录像</button>
+        <button
+          :class="['tab-btn', { active: activeTab === 'status' }]"
+          @click="switchTab('status')"
+        >状态</button>
+      </div>
+      <div class="mobile-content">
+        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
+        <RecordingsPanel
+          v-show="activeTab === 'recordings'"
+          ref="recordingsPanel"
+          :cameras="cameras"
+        />
+        <CameraStatusPanel
+          v-if="activeTab === 'status'"
+          :cameras="cameras"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -297,5 +346,50 @@ onUnmounted(() => {
 .sidebar-content {
   flex: 1;
   overflow: hidden;
+}
+
+/* 移动端布局 */
+.app.mobile .app-body {
+  flex-direction: column;
+  padding: 8px;
+}
+
+.app.mobile .app-header {
+  padding: 8px 12px;
+}
+
+.app.mobile .app-header h1 {
+  font-size: 16px;
+}
+
+.mobile-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  border-top: 1px solid #2a2a4a;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  z-index: 100;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-panel.open {
+  transform: translateY(0);
+}
+
+.mobile-tabs {
+  display: flex;
+  background: #16213e;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.mobile-content {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 55vh;
 }
 </style>

@@ -176,4 +176,23 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 12px;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .camera-header {
+    padding: 6px 8px;
+  }
+
+  .camera-name {
+    font-size: 13px;
+  }
+
+  .camera-body {
+    min-height: 150px;
+  }
+
+  .camera-footer {
+    padding: 4px 8px;
+  }
+}
 </style>
