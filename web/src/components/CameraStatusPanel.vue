@@ -55,6 +55,44 @@ const weekStats = ref<Array<{ date: string; motion: number; detect: number; aler
 type ChartRange = 'today' | 'week'
 const chartRange = ref<ChartRange>('today')
 
+/** 实时性能历史数据点（环形缓冲区，5秒间隔，保存最近 5 分钟 = 60 点） */
+const PERF_HISTORY_SIZE = 60
+interface PerfPoint {
+  /** 总 FPS（所有摄像头 FPS 之和） */
+  totalFps: number
+  /** 堆内存（MB） */
+  memoryMb: number
+}
+const perfHistory = ref<PerfPoint[]>([])
+
+/** 性能折线图的 SVG points 属性 */
+const fpsLinePoints = computed(() => {
+  const data = perfHistory.value
+  if (data.length < 2) return ''
+  const maxFps = Math.max(1, ...data.map(d => d.totalFps))
+  const w = 100
+  const h = 40
+  return data.map((d, i) => {
+    const x = (i / (PERF_HISTORY_SIZE - 1)) * w
+    const y = h - (d.totalFps / maxFps) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+})
+
+/** 内存折线图的 SVG points 属性 */
+const memLinePoints = computed(() => {
+  const data = perfHistory.value
+  if (data.length < 2) return ''
+  const maxMem = Math.max(1, ...data.map(d => d.memoryMb))
+  const w = 100
+  const h = 40
+  return data.map((d, i) => {
+    const x = (i / (PERF_HISTORY_SIZE - 1)) * w
+    const y = h - (d.memoryMb / maxMem) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+})
+
 /** 小时趋势图数据：24 个桶，每个桶包含 motion 和 detect 计数 */
 const hourlyChart = computed(() => {
   const buckets = Array.from({ length: 24 }, (_, h) => ({
@@ -164,7 +202,14 @@ async function loadMetrics() {
   try {
     const res = await authFetch('/api/health')
     if (res.ok) {
-      metrics.value = await res.json()
+      const data = await res.json() as SystemMetrics
+      metrics.value = data
+      /** 收集性能历史数据点 */
+      const totalFps = data.cameras.reduce((sum, c) => sum + c.fps, 0)
+      const point: PerfPoint = { totalFps, memoryMb: data.memoryUsedMb }
+      const arr = [...perfHistory.value, point]
+      if (arr.length > PERF_HISTORY_SIZE) arr.splice(0, arr.length - PERF_HISTORY_SIZE)
+      perfHistory.value = arr
     }
   } catch {
     // ignore
@@ -260,6 +305,26 @@ onUnmounted(() => {
           <span class="online-count">{{ metrics.onlineCameras }}</span>
           <span class="dim"> / {{ metrics.cameraCount }}</span>
         </span>
+      </div>
+    </div>
+
+    <!-- 实时性能趋势（FPS + 内存） -->
+    <div v-if="perfHistory.length >= 2" class="perf-section">
+      <div class="perf-row">
+        <div class="perf-chart">
+          <div class="perf-label">FPS</div>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none" class="perf-svg">
+            <polyline :points="fpsLinePoints" fill="none" stroke="#4ECDC4" stroke-width="1.5" stroke-linejoin="round" />
+          </svg>
+          <span class="perf-val">{{ perfHistory[perfHistory.length - 1].totalFps.toFixed(1) }}</span>
+        </div>
+        <div class="perf-chart">
+          <div class="perf-label">MEM</div>
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none" class="perf-svg">
+            <polyline :points="memLinePoints" fill="none" stroke="#FFEAA7" stroke-width="1.5" stroke-linejoin="round" />
+          </svg>
+          <span class="perf-val">{{ perfHistory[perfHistory.length - 1].memoryMb }} MB</span>
+        </div>
       </div>
     </div>
 
@@ -447,6 +512,44 @@ onUnmounted(() => {
 .system-overview {
   padding: 10px 12px;
   border-bottom: 1px solid #2a2a4a;
+}
+
+/* 实时性能折线图 */
+.perf-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.perf-row {
+  display: flex;
+  gap: 12px;
+}
+
+.perf-chart {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.perf-label {
+  font-size: 10px;
+  color: #666;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.perf-svg {
+  width: 100%;
+  height: 40px;
+  background: #0a0a1a;
+  border-radius: 3px;
+}
+
+.perf-val {
+  font-size: 11px;
+  color: #aaa;
+  font-weight: 500;
 }
 
 .stat-row {
