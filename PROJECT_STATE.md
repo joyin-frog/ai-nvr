@@ -110,4 +110,9 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 前端设置面板：4个侧边栏标签（事件/录像/状态/设置），支持运行时参数调整
 - 二进制 WebSocket 协议：替代 base64 JSON，消除 ~33% 编码开销
 - blob URL 内存管理：帧更新时释放旧 URL 避免泄漏
-- 下一步优先：双码流策略、Webhook 通知、检测区域划定
+- 双码流策略：子码流（SD）预览/检测，主码流（HD）直接 RTSP 录像
+- RuntimeConfig 连接到检测器：设置面板修改实时生效（阈值、冷却、AI 置信度）
+- 路径遍历防护：录像端点验证 resolved path 在存储目录内
+- SQLite 优雅关闭：SIGINT 时 flush WAL
+- Webhook 通知：事件推送到外部 URL，前端可配置 Webhook 地址
+- 下一步优先：检测区域划定、事件时间线、告警规则引擎
