@@ -191,4 +191,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头拖拽排序：HTML5 Drag & Drop API 实现网格拖拽重排，排序持久化到 localStorage，sortedCameras computed 应用排序
 - 画面亮度/对比度/饱和度调节：CameraView 头部星号按钮展开调节面板，CSS filter 实时预览，亮度(50-200%)、对比度(50-200%)、饱和度(0-200%)，重置按钮
 - 录像删除：后端 DELETE /api/recordings/:cameraId/:filename 端点（含路径遍历防护），前端录像列表 hover 显示删除按钮，confirm 确认后删除并从列表移除
+- 批量删除录像：多选模式下操作栏增加"删除选中"按钮，confirm 确认后逐个调用 DELETE API，完成后从列表移除
 - 下一步优先：PTZ 控制、摄像头画面数字放大
