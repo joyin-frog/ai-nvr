@@ -45,7 +45,7 @@ const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW({
   immediate: true,
   onRegisteredSW(_swUrl: string, registration: ServiceWorkerRegistration | undefined) {
     if (registration) {
-      setInterval(() => { registration.update() }, 60 * 60 * 1000)
+      pwaUpdateTimer = setInterval(() => { registration.update() }, 60 * 60 * 1000)
     }
   },
 })
@@ -113,6 +113,8 @@ const wsState = ref<ConnectionState>('disconnected')
 /** 磁盘空间预警 */
 const diskWarn = ref<{ percent: number; free: string } | null>(null)
 let diskCheckTimer: ReturnType<typeof setInterval> | null = null
+/** PWA 更新检查定时器 */
+let pwaUpdateTimer: ReturnType<typeof setInterval> | null = null
 
 async function checkDiskSpace() {
   try {
@@ -325,7 +327,7 @@ function startApp() {
     wsState.value = state
   })
   checkDiskSpace()
-  diskCheckTimer = setInterval(checkDiskSpace, 60000)
+  diskCheckTimer = setInterval(checkDiskSpace, 300000)
 }
 
 /** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
@@ -461,6 +463,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
   stopPatrol()
   if (diskCheckTimer) clearInterval(diskCheckTimer)
+  if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
   /** 释放所有检测快照 blob URL */
   for (const url of Object.values(detectSnapshots.value)) {
     URL.revokeObjectURL(url)

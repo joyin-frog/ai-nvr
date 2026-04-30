@@ -74,6 +74,8 @@ const chartMax = computed(() => {
   return max || 1
 })
 let timer: ReturnType<typeof setInterval> | null = null
+/** 今日统计刷新定时器 */
+let statsTimer: ReturnType<typeof setInterval> | null = null
 
 /** 摄像头 ID → 名称 */
 const nameMap = () => {
@@ -161,12 +163,12 @@ onMounted(() => {
   loadMetrics()
   loadTodayStats()
   timer = setInterval(loadMetrics, 5000)
-  /** 每30秒刷新今日统计 */
-  setInterval(loadTodayStats, 30000)
+  statsTimer = setInterval(loadTodayStats, 30000)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  if (statsTimer) clearInterval(statsTimer)
 })
 </script>
 
