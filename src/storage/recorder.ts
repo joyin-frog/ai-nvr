@@ -33,7 +33,7 @@ interface RecorderConfig {
 
 /** 每个摄像头的录像状态 */
 interface RecordingState {
-  /** 当前正在运行的 ffmpeg 进程 */
+  /** 当前正在运行的 ffmpeg 录像进程 */
   proc: ReturnType<typeof spawn> | null;
   /** 是否正在录像 */
   recording: boolean;
@@ -47,12 +47,14 @@ interface RecordingState {
 
 /**
  * 变动触发录像器
- * 监听 motion 事件启动 ffmpeg 录像，无变动后延迟停止
- * 使用 ffmpeg 的 image2pipe 输入方式将帧编码为 MP4 片段
+ * 监听 motion 事件，直接从主码流 RTSP 拉流录像（高质量）
+ * 不再依赖 frame pipe，录像与预览/检测完全解耦
  */
 export class MotionRecorder {
   private config: RecorderConfig;
   private states = new Map<string, RecordingState>();
+  /** 摄像头 ID → 主码流 RTSP URL */
+  private hdStreams = new Map<string, string>();
 
   constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus) {
     this.config = {
@@ -65,10 +67,21 @@ export class MotionRecorder {
     mkdirSync(storagePath, { recursive: true });
   }
 
-  /** 启动：监听 motion 和 frame 事件 */
+  /** 注册摄像头的主码流 RTSP 地址 */
+  registerStream(cameraId: string, hdUrl: string): void {
+    this.hdStreams.set(cameraId, hdUrl);
+  }
+
+  /** 移除摄像头 */
+  unregisterStream(cameraId: string): void {
+    this.forceStop(cameraId);
+    this.hdStreams.delete(cameraId);
+  }
+
+  /** 启动：监听 motion 事件 */
   start(): void {
     /** motion 事件触发开始/延续录像 */
-    this.eventBus.on("motion", ({ cameraId, data, timestamp }) => {
+    this.eventBus.on("motion", ({ cameraId, timestamp }) => {
       const state = this.getOrCreateState(cameraId);
       state.lastMotionTime = timestamp;
 
@@ -77,17 +90,6 @@ export class MotionRecorder {
       } else {
         /** 已在录像：取消之前的停止定时器，重新设置延迟停止 */
         this.scheduleStop(cameraId);
-      }
-    });
-
-    /** frame 事件喂给正在运行的 ffmpeg */
-    this.eventBus.on("frame", ({ cameraId, data }) => {
-      const state = this.states.get(cameraId);
-      if (!state?.recording || !state.proc) return;
-
-      const stdin = state.proc.stdin;
-      if (stdin?.writable) {
-        stdin.write(data);
       }
     });
 
@@ -154,8 +156,14 @@ export class MotionRecorder {
     return join(this.config.storagePath, relativePath);
   }
 
-  /** 开始录像 */
+  /** 开始录像：直接从主码流 RTSP 拉流 */
   private startRecording(cameraId: string, timestamp: number): void {
+    const hdUrl = this.hdStreams.get(cameraId);
+    if (!hdUrl) {
+      console.warn(`[Recorder] ${cameraId} 无主码流地址，跳过录像`);
+      return;
+    }
+
     const state = this.getOrCreateState(cameraId);
 
     /** 取消待执行的停止定时器 */
@@ -172,25 +180,24 @@ export class MotionRecorder {
     mkdirSync(dir, { recursive: true });
     const outputPath = join(dir, filename);
 
-    /** 用 ffmpeg 将 JPEG 帧流编码为 MP4 */
+    /** 直接从 RTSP 主码流转码保存为 MP4 */
     const args = [
-      "-f", "image2pipe",
-      "-vcodec", "mjpeg",
-      "-framerate", "5",
-      "-i", "pipe:0",
+      "-rtsp_transport", "tcp",
+      "-i", hdUrl,
       "-c:v", "libx264",
       "-preset", "ultrafast",
-      "-crf", "28",
+      "-crf", "23",
       "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
+      "-an",
       "-t", String(this.config.maxSegmentDuration),
       "-y",
       outputPath,
     ];
 
-    console.log(`[Recorder] ${cameraId} 开始录像: ${filename}`);
+    console.log(`[Recorder] ${cameraId} 开始录像 (主码流): ${filename}`);
     const proc = spawn(this.config.ffmpegPath, args, {
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
     proc.stderr?.on("data", (chunk: Buffer) => {
@@ -221,8 +228,11 @@ export class MotionRecorder {
     }
 
     state.stopTimer = setTimeout(() => {
+      /** 发送 q 命令优雅停止 ffmpeg（让它正常关闭输出文件） */
       if (state.proc) {
         state.proc.stdin?.end();
+        /** 如果 ffmpeg 是从 RTSP 拉流（stdin 无用），用 SIGTERM 优雅退出 */
+        state.proc.kill("SIGTERM");
       }
       state.stopTimer = null;
       console.log(`[Recorder] ${cameraId} 停止录像（无运动超时）`);
@@ -238,7 +248,8 @@ export class MotionRecorder {
       state.stopTimer = null;
     }
     if (state.proc) {
-      state.proc.stdin?.end();
+      state.proc.kill("SIGTERM");
+      state.proc = null;
     }
   }
 

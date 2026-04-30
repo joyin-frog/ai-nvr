@@ -23,8 +23,12 @@ const eventBus = new EventBus();
 const config = loadConfig();
 console.log(`[Config] 已加载配置，${config.cameras.length} 个摄像头`);
 
-/** 摄像头管理器 */
-const cameraManager = new CameraManager(config, eventBus);
+/** 录像器（需先于 CameraManager 创建，因为 CameraManager 会注册主码流 URL） */
+const recorder = new MotionRecorder(join(import.meta.dir, "../data/recordings"), config.ffmpegPath, eventBus);
+recorder.start();
+
+/** 摄像头管理器（子码流预览/检测 + 主码流注册给录像器） */
+const cameraManager = new CameraManager(config, eventBus, recorder);
 
 /** 变动检测器 */
 const motionDetector = new MotionDetector(config.motion, eventBus);
@@ -48,8 +52,6 @@ aiDetector.init().then(() => {
 
 /** 启动 HTTP 服务 */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
-const recorder = new MotionRecorder(join(import.meta.dir, "../data/recordings"), config.ffmpegPath, eventBus);
-recorder.start();
 const monitor = new SystemMonitor(eventBus);
 const runtimeConfig = new RuntimeConfig(config);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig);

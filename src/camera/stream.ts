@@ -151,8 +151,8 @@ export class FrameExtractor {
 
     const args = [
       "-rtsp_transport", "tcp",
-      "-i", stream.hd,
-      "-vf", `fps=${detectFps},scale=960:-4`,
+      "-i", stream.sd,
+      "-vf", `fps=${detectFps},scale=640:-4`,
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
       "-q:v", "2",
