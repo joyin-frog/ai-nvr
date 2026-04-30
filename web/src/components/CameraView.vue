@@ -130,6 +130,60 @@ function resetAdjust() {
   saturation.value = 100
 }
 
+/** 画面缩放（滚轮缩放，可拖拽平移） */
+const zoomLevel = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+
+function onWheel(e: WheelEvent) {
+  e.preventDefault()
+  const delta = e.deltaY > 0 ? -0.15 : 0.15
+  zoomLevel.value = Math.max(1, Math.min(5, zoomLevel.value + delta))
+  if (zoomLevel.value === 1) {
+    panX.value = 0
+    panY.value = 0
+  }
+}
+
+/** 拖拽平移 */
+let dragging = false
+let dragStartX = 0
+let dragStartY = 0
+let dragStartPanX = 0
+let dragStartPanY = 0
+
+function onPanStart(e: MouseEvent) {
+  if (zoomLevel.value <= 1) return
+  dragging = true
+  dragStartX = e.clientX
+  dragStartY = e.clientY
+  dragStartPanX = panX.value
+  dragStartPanY = panY.value
+}
+
+function onPanMove(e: MouseEvent) {
+  if (!dragging) return
+  panX.value = dragStartPanX + (e.clientX - dragStartX)
+  panY.value = dragStartPanY + (e.clientY - dragStartY)
+}
+
+function onPanEnd() {
+  dragging = false
+}
+
+/** 缩放 transform 样式 */
+const zoomTransform = computed(() => {
+  if (zoomLevel.value <= 1) return 'none'
+  return `translate(${panX.value}px, ${panY.value}px) scale(${zoomLevel.value})`
+})
+
+/** 重置缩放 */
+function resetZoom() {
+  zoomLevel.value = 1
+  panX.value = 0
+  panY.value = 0
+}
+
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
@@ -144,18 +198,27 @@ onUnmounted(() => {
       <span v-if="online && detections.length > 0" class="detection-count">
         {{ detections.length }}
       </span>
+      <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
       <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
     </div>
 
-    <div class="camera-body" @dblclick="emit('fullscreen', cameraId)">
+    <div
+      class="camera-body"
+      @dblclick="emit('fullscreen', cameraId)"
+      @wheel="onWheel"
+      @mousedown="onPanStart"
+      @mousemove="onPanMove"
+      @mouseup="onPanEnd"
+      @mouseleave="onPanEnd"
+    >
       <img
         v-if="displayUrl"
         :src="displayUrl"
         class="camera-image"
-        :style="{ filter: imageFilter }"
+        :style="{ filter: imageFilter, transform: zoomTransform }"
         alt=""
       />
       <div v-else class="camera-placeholder">
@@ -325,6 +388,18 @@ onUnmounted(() => {
   height: 100%;
   object-fit: contain;
   display: block;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+}
+
+.zoom-badge {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .camera-placeholder {

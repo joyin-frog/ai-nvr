@@ -42,6 +42,7 @@ export default {
     contrast: 'Contrast',
     saturation: 'Saturation',
     resetAdjust: 'Reset',
+    resetZoom: 'Reset zoom',
   },
   event: {
     title: 'Event Log',

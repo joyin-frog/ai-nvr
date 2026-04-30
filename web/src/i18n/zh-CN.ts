@@ -42,6 +42,7 @@ export default {
     contrast: '对比度',
     saturation: '饱和度',
     resetAdjust: '重置',
+    resetZoom: '重置缩放',
   },
   event: {
     title: '事件日志',
