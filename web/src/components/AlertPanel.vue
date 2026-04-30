@@ -12,6 +12,8 @@ interface AlertRule {
   threshold: number
   cooldownSeconds: number
   enabled: boolean
+  silentStart: string
+  silentEnd: string
 }
 
 /** 告警记录 */
@@ -38,6 +40,8 @@ const form = ref({
   windowSeconds: 60,
   threshold: 3,
   cooldownSeconds: 300,
+  silentStart: '',
+  silentEnd: '',
 })
 
 /** 事件类型选项 */
@@ -84,7 +88,7 @@ async function addRule() {
     })
     if (res.ok) {
       showAddForm.value = false
-      form.value = { name: '', eventType: 'detect', cameraId: '', labels: '', windowSeconds: 60, threshold: 3, cooldownSeconds: 300 }
+      form.value = { name: '', eventType: 'detect', cameraId: '', labels: '', windowSeconds: 60, threshold: 3, cooldownSeconds: 300, silentStart: '', silentEnd: '' }
       loadRules()
     }
   } catch {
@@ -179,6 +183,16 @@ defineExpose({ loadAlerts })
         <label>冷却时间(秒)</label>
         <input v-model.number="form.cooldownSeconds" type="number" class="input" />
       </div>
+      <div class="form-row">
+        <div class="form-field half">
+          <label>静默开始</label>
+          <input v-model="form.silentStart" type="time" class="input" />
+        </div>
+        <div class="form-field half">
+          <label>静默结束</label>
+          <input v-model="form.silentEnd" type="time" class="input" />
+        </div>
+      </div>
       <button class="submit-btn" @click="addRule">确认添加</button>
     </div>
 
@@ -204,6 +218,7 @@ defineExpose({ loadAlerts })
           <span v-if="rule.cameraId" class="meta-tag cam">{{ rule.cameraId }}</span>
           <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
           <span class="meta-info">{{ rule.threshold }}次 / {{ rule.windowSeconds }}秒 · 冷却{{ rule.cooldownSeconds }}秒</span>
+          <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">静默 {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
         </div>
       </div>
     </div>
@@ -432,6 +447,7 @@ select.input {
 
 .meta-tag.cam { color: #4ECDC4; }
 .meta-tag.label { color: #FFD93D; }
+.meta-tag.silent { color: #e74c3c; }
 
 .meta-info {
   font-size: 11px;

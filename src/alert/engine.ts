@@ -79,6 +79,23 @@ export class AlertEngine {
     }
   }
 
+  /** 判断当前时间是否在静默时段内 */
+  private isSilentPeriod(rule: AlertRule): boolean {
+    if (!rule.silentStart || !rule.silentEnd) return false;
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const startParts = rule.silentStart.split(":").map(Number);
+    const endParts = rule.silentEnd.split(":").map(Number);
+    const startMinutes = (startParts[0] ?? 0) * 60 + (startParts[1] ?? 0);
+    const endMinutes = (endParts[0] ?? 0) * 60 + (endParts[1] ?? 0);
+
+    /** 跨午夜的情况：如 22:00 - 06:00 */
+    if (startMinutes > endMinutes) {
+      return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    }
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+  }
+
   /** 检查规则是否触发告警 */
   private checkRule(rule: AlertRule, cameraId: string, timestamp: number, detail?: string): void {
     let window = this.windows.get(rule.id);
@@ -96,6 +113,9 @@ export class AlertEngine {
 
     /** 检查是否达到阈值 */
     if (window.timestamps.length < rule.threshold) return;
+
+    /** 检查静默时段 */
+    if (this.isSilentPeriod(rule)) return;
 
     /** 检查冷却期 */
     if (timestamp - window.lastAlertTime < rule.cooldownSeconds * 1000) return;
