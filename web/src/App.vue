@@ -5,6 +5,7 @@ import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
 import RecordingsPanel from './components/RecordingsPanel.vue'
 import CameraStatusPanel from './components/CameraStatusPanel.vue'
+import CameraManagePanel from './components/CameraManagePanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 
 /** 摄像头状态 */
@@ -16,7 +17,7 @@ interface CameraStatus {
 }
 
 /** 侧边栏激活的标签 */
-type SidebarTab = 'events' | 'recordings' | 'status' | 'settings'
+type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'settings'
 const activeTab = ref<SidebarTab>('events')
 
 /** 全屏摄像头 ID（null 为网格模式） */
@@ -42,6 +43,7 @@ const detectVersions = ref<Record<string, number>>({})
 const frameImages = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
+const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
 
 const client = new EventClient()
 
@@ -69,6 +71,9 @@ function switchTab(tab: SidebarTab) {
   }
   if (tab === 'events') {
     eventPanel.value?.loadHistory()
+  }
+  if (tab === 'cameras') {
+    cameraManagePanel.value?.loadCameras()
   }
 }
 
@@ -222,6 +227,10 @@ onUnmounted(() => {
             @click="switchTab('status')"
           >状态</button>
           <button
+            :class="['tab-btn', { active: activeTab === 'cameras' }]"
+            @click="switchTab('cameras')"
+          >管理</button>
+          <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
           >设置</button>
@@ -237,6 +246,7 @@ onUnmounted(() => {
             v-if="activeTab === 'status'"
             :cameras="cameras"
           />
+          <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
@@ -257,6 +267,10 @@ onUnmounted(() => {
           @click="switchTab('status')"
         >状态</button>
         <button
+          :class="['tab-btn', { active: activeTab === 'cameras' }]"
+          @click="switchTab('cameras')"
+        >管理</button>
+        <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
         >设置</button>
@@ -272,6 +286,7 @@ onUnmounted(() => {
           v-if="activeTab === 'status'"
           :cameras="cameras"
         />
+        <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>
@@ -364,7 +379,7 @@ onUnmounted(() => {
   background: transparent;
   border: none;
   color: #888;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
