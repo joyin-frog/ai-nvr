@@ -38,6 +38,23 @@ const exporting = ref(false)
 /** 导出结果下载文件名 */
 const exportFilename = ref('')
 
+/** 当前播放速度 */
+const playbackSpeed = ref(1)
+
+/** video 元素引用 */
+const playerRef = ref<HTMLVideoElement | null>(null)
+
+/** 倍速变更时同步到 video 元素 */
+function changeSpeed(speed: number) {
+  playbackSpeed.value = speed
+  if (playerRef.value) playerRef.value.playbackRate = speed
+}
+
+/** video 元素 ratechange 事件（用户通过浏览器原生控件改倍速时同步下拉框） */
+function onRateChange() {
+  if (playerRef.value) playbackSpeed.value = playerRef.value.playbackRate
+}
+
 /** 当前播放的录像 URL */
 const videoUrl = computed(() => {
   if (!selectedRecording.value) return ''
@@ -285,13 +302,23 @@ defineExpose({ loadRecordings, playAtTime })
           <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
           <button class="export-toggle-btn" @click="openExport" title="导出片段">导出</button>
+          <select :value="playbackSpeed" @change="changeSpeed(Number(($event.target as HTMLSelectElement).value))" class="speed-select" title="播放速度">
+            <option :value="0.5">0.5x</option>
+            <option :value="1">1x</option>
+            <option :value="1.5">1.5x</option>
+            <option :value="2">2x</option>
+            <option :value="4">4x</option>
+            <option :value="8">8x</option>
+          </select>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
         <video
+          ref="playerRef"
           :src="videoUrl"
           controls
           autoplay
           class="player-video"
+          @ratechange="onRateChange"
         />
         <!-- 导出面板 -->
         <div v-if="showExport" class="export-panel">
@@ -595,7 +622,6 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .close-btn {
-  margin-left: auto;
   background: none;
   border: none;
   color: #888;
@@ -607,6 +633,21 @@ defineExpose({ loadRecordings, playAtTime })
 
 .close-btn:hover {
   color: #e0e0e0;
+}
+
+.speed-select {
+  background: #0a0a1a;
+  color: #4ECDC4;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.speed-select:hover {
+  border-color: #4ECDC4;
 }
 
 .player-video {
