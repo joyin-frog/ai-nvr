@@ -104,10 +104,51 @@ const totalDurationSec = computed(() => {
 
 /** 当前播放位置对应的绝对时间戳 */
 const currentAbsTime = ref(0)
+/** 是否正在播放 */
+const isPlaying = ref(false)
 function onTimeUpdate() {
   if (!playerRef.value || !selectedRecording.value) return
   currentAbsTime.value = selectedRecording.value.startTime + playerRef.value.currentTime * 1000
 }
+
+/** 播放进度百分比 */
+const playProgress = computed(() => {
+  if (!playerRef.value || !playerRef.value.duration || !isFinite(playerRef.value.duration)) return 0
+  return (playerRef.value.currentTime / playerRef.value.duration) * 100
+})
+
+/** 进度条拖拽 seek */
+const progressEl = ref<HTMLDivElement | null>(null)
+function onProgressClick(e: MouseEvent) {
+  if (!playerRef.value || !progressEl.value) return
+  const rect = progressEl.value.getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  playerRef.value.currentTime = pct * playerRef.value.duration
+}
+
+/** 拖拽进度条 */
+let progressDragging = false
+function onProgressDragStart(e: MouseEvent) {
+  progressDragging = true
+  onProgressClick(e)
+  function onMove(ev: MouseEvent) {
+    if (!progressDragging || !playerRef.value || !progressEl.value) return
+    const rect = progressEl.value.getBoundingClientRect()
+    const pct = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width))
+    playerRef.value.currentTime = pct * playerRef.value.duration
+  }
+  function onUp() {
+    progressDragging = false
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
+/** video play/pause 事件同步 isPlaying */
+function onPlay() { isPlaying.value = true }
+function onPause() { isPlaying.value = false }
 
 /** 格式化绝对时间为 HH:MM:SS */
 function formatAbsTime(ts: number): string {
@@ -463,17 +504,29 @@ defineExpose({ loadRecordings, playAtTime })
         <video
           ref="playerRef"
           :src="videoUrl"
-          controls
           autoplay
           class="player-video"
           @ratechange="onRateChange"
           @loadedmetadata="onLoadedMetadata"
           @ended="onVideoEnded"
           @timeupdate="onTimeUpdate"
+          @play="onPlay"
+          @pause="onPause"
         />
-        <!-- 绝对时间戳叠加 -->
-        <div v-if="currentAbsTime > 0" class="player-timestamp">
-          {{ formatAbsTime(currentAbsTime) }}
+        <!-- 自定义进度条（绝对时间） -->
+        <div v-if="selectedRecording" class="custom-controls">
+          <button class="ctrl-btn play-pause" @click="isPlaying ? playerRef?.pause() : playerRef?.play()">
+            {{ isPlaying ? '&#10074;&#10074;' : '&#9654;' }}
+          </button>
+          <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart">
+            <div class="progress-fill" :style="{ width: playProgress + '%' }" />
+            <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
+          </div>
+          <div class="time-display">
+            <span class="time-current">{{ formatAbsTime(currentAbsTime) }}</span>
+            <span class="time-sep">/</span>
+            <span class="time-end">{{ formatAbsTime(selectedRecording.endTime) }}</span>
+          </div>
         </div>
         <!-- 导出面板 -->
         <div v-if="showExport" class="export-panel">
@@ -884,18 +937,90 @@ defineExpose({ loadRecordings, playAtTime })
   background: #000;
 }
 
-.player-timestamp {
-  position: absolute;
-  bottom: 52px;
-  left: 12px;
-  background: rgba(0, 0, 0, 0.7);
+/* 自定义控制栏 */
+.custom-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #111;
+  border-top: 1px solid #2a2a2a;
+}
+
+.ctrl-btn {
+  background: none;
+  border: none;
   color: #e0e0e0;
-  padding: 2px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.ctrl-btn:hover {
+  color: #4ECDC4;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #333;
   border-radius: 3px;
-  font-size: 13px;
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  cursor: pointer;
+  position: relative;
+}
+
+.progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: #4ECDC4;
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
+
+.progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  background: #4ECDC4;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.15s;
   pointer-events: none;
-  z-index: 1;
+}
+
+.progress-bar:hover .progress-thumb {
+  opacity: 1;
+}
+
+.time-display {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  color: #aaa;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.time-current {
+  color: #e0e0e0;
+  min-width: 60px;
+  text-align: right;
+}
+
+.time-sep {
+  color: #555;
+}
+
+.time-end {
+  min-width: 60px;
 }
 
 /* 导出面板 */
