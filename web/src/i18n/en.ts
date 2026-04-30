@@ -101,6 +101,8 @@ export default {
     confirmDelete: 'Delete this recording? This cannot be undone.',
     deleteSelected: 'Delete selected',
     confirmBatchDelete: 'Delete {count} selected recordings? This cannot be undone.',
+    downloadZip: 'Download ZIP',
+    zipping: 'Zipping...',
   },
   timeline: {
     today: 'Today',

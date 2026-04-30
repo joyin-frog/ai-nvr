@@ -35,6 +35,9 @@ const multiSelectMode = ref(false)
 const selectedFiles = ref<Set<string>>(new Set())
 const merging = ref(false)
 const mergeFilename = ref('')
+/** ZIP 打包状态 */
+const zipping = ref(false)
+const zipFilename = ref('')
 
 /** 缩略图 URL 缓存（filename → URL） */
 const thumbUrls = ref<Record<string, string>>({})
@@ -559,6 +562,35 @@ function downloadMerge() {
   link.click()
 }
 
+/** ZIP 批量下载选中录像 */
+async function doZipDownload() {
+  if (sortedSelectedFiles.value.length < 1) return
+  zipping.value = true
+  zipFilename.value = ''
+  const cameraId = sortedSelectedFiles.value[0]!.cameraId
+  try {
+    const res = await authFetch('/api/recordings/download-zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        files: sortedSelectedFiles.value.map(r => r.filename),
+        cameraId,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const link = document.createElement('a')
+      link.href = authUrl(`/api/recordings/export/${data.filename}`)
+      link.download = data.filename
+      link.click()
+    }
+  } catch {
+    // ignore
+  } finally {
+    zipping.value = false
+  }
+}
+
 /** 根据摄像头和时间戳查找并播放对应录像 */
 async function playAtTime(cameraId: string, timestamp: number): Promise<boolean> {
   /** 加载该摄像头的录像列表 */
@@ -758,6 +790,9 @@ defineExpose({ loadRecordings, playAtTime })
         {{ merging ? t('recording.merging') : t('recording.merge') }}
       </button>
       <button v-else class="download-btn" @click="downloadMerge">{{ t('recording.download') }}</button>
+      <button class="zip-btn" @click="doZipDownload" :disabled="zipping || selectedFiles.size < 1">
+        {{ zipping ? t('recording.zipping') : t('recording.downloadZip') }}
+      </button>
       <button class="batch-delete-btn" @click="batchDelete" :disabled="selectedFiles.size === 0">
         {{ t('recording.deleteSelected') }}
       </button>
@@ -1408,6 +1443,27 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .merge-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.zip-btn {
+  background: #3498db;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.zip-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.zip-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

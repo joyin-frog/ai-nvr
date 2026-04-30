@@ -393,8 +393,37 @@ export function startServer(
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
+      /** 录像批量下载 ZIP：打包多个录像文件 */
+      if (url.pathname === "/api/recordings/download-zip" && req.method === "POST") {
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const files = obj.files as string[] | undefined;
+          const cameraId = obj.cameraId as string | undefined;
+          if (!files || !Array.isArray(files) || files.length === 0) {
+            return new Response("Missing files array", { status: 400 });
+          }
+
+          /** 防止路径遍历：验证所有文件 */
+          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const resolvedPaths: string[] = [];
+          for (const relPath of files) {
+            const videoPath = recorder.getRecordingPath(relPath);
+            if (!existsSync(videoPath)) return new Response(`Not Found: ${relPath}`, { status: 404 });
+            const resolved = realpathSync(videoPath);
+            if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+            resolvedPaths.push(resolved);
+          }
+
+          const result = await exporter.zipBatch(resolvedPaths, cameraId ?? "unknown");
+          if (!result) return new Response("ZIP export failed", { status: 500 });
+
+          const zipFilename = result.filePath.split("/").pop()!;
+          return Response.json({ filename: zipFilename, size: result.size });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
       /** 下载导出文件 */
-      const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.(mp4|gif))$/);
+      const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.(mp4|gif|zip))$/);
       if (exportDownloadMatch && req.method === "GET") {
         const filename = exportDownloadMatch[1]!;
         const exportRoot = realpathSync(exporter.getExportPath("."));
@@ -405,7 +434,7 @@ export function startServer(
 
         const stat = statSync(filePath);
         const file = Bun.file(filePath);
-        const contentType = filename.endsWith(".gif") ? "image/gif" : "video/mp4";
+        const contentType = filename.endsWith(".gif") ? "image/gif" : filename.endsWith(".zip") ? "application/zip" : "video/mp4";
         return new Response(file, {
           headers: {
             "Content-Type": contentType,

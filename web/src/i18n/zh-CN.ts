@@ -101,6 +101,8 @@ export default {
     confirmDelete: '确认删除此录像文件？此操作不可恢复。',
     deleteSelected: '删除选中',
     confirmBatchDelete: '确认删除选中的 {count} 个录像文件？此操作不可恢复。',
+    downloadZip: '下载 ZIP',
+    zipping: '打包中...',
   },
   timeline: {
     today: '今天',

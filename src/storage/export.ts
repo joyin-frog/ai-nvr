@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, createWriteStream } from "node:fs";
+import { join, basename } from "node:path";
+import * as archiver from "archiver";
 
 /** 导出任务结果 */
 export interface ExportResult {
@@ -200,6 +201,50 @@ export class RecordingExporter {
     if (gifResult.status !== 0 || !existsSync(outputPath)) return null;
 
     return { filePath: outputPath, size: statSync(outputPath).size };
+  }
+
+  /**
+   * 批量打包录像为 ZIP 文件
+   * @param sourcePaths 源 MP4 文件绝对路径列表
+   * @param cameraId 摄像头 ID（用于文件命名）
+   * @returns 导出结果
+   */
+  async zipBatch(sourcePaths: string[], cameraId: string): Promise<ExportResult | null> {
+    if (sourcePaths.length === 0) return null;
+
+    for (const p of sourcePaths) {
+      if (!existsSync(p)) return null;
+    }
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const filename = `export_${cameraId}_${dateStr}_${timeStr}.zip`;
+    const outputPath = join(this.exportDir, filename);
+
+    return new Promise((resolve) => {
+      const output = createWriteStream(outputPath);
+      const archive = archiver.create("zip", { zlib: { level: 1 } });
+
+      output.on("close", () => {
+        if (!existsSync(outputPath)) { resolve(null); return; }
+        const stat = statSync(outputPath);
+        resolve({ filePath: outputPath, size: stat.size });
+      });
+
+      archive.on("error", () => {
+        try { unlinkSync(outputPath); } catch { /* ignore */ }
+        resolve(null);
+      });
+
+      archive.pipe(output);
+
+      for (const p of sourcePaths) {
+        archive.file(p, { name: basename(p) });
+      }
+
+      archive.finalize();
+    });
   }
 
   /** 清理超过指定小时的导出文件 */
