@@ -626,6 +626,7 @@ defineExpose({ loadRecordings, playAtTime })
           :src="videoUrl"
           autoplay
           class="player-video"
+          @dblclick="togglePlayerFullscreen"
           @ratechange="onRateChange"
           @loadedmetadata="onLoadedMetadata"
           @ended="onVideoEnded"
@@ -1106,6 +1107,7 @@ defineExpose({ loadRecordings, playAtTime })
   display: block;
   max-height: 75vh;
   background: #000;
+  cursor: pointer;
 }
 
 /* 自定义控制栏 */
