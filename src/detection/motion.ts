@@ -1,6 +1,6 @@
 import sharp from "sharp";
-import { type MotionConfig } from "@/config";
 import { type EventBus } from "@/event-bus";
+import { type RuntimeConfig } from "@/runtime-config";
 
 /** 每个摄像头的变动检测状态 */
 interface CameraState {
@@ -15,13 +15,14 @@ interface CameraState {
 /**
  * 变动检测器
  * 监听帧事件，通过灰度像素差异比对判断是否有变动
+ * 使用 RuntimeConfig 获取实时配置（支持 API 热修改）
  */
 export class MotionDetector {
   /** 每个摄像头的检测状态 */
   private states = new Map<string, CameraState>();
 
   constructor(
-    private config: MotionConfig,
+    private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
   ) {}
 
@@ -49,12 +50,15 @@ export class MotionDetector {
       return;
     }
 
+    /** 从 RuntimeConfig 获取该摄像头的有效配置（考虑覆盖） */
+    const config = this.runtimeConfig.getMotionConfig(cameraId);
+
     /** 用 sharp 解码 JPEG → 灰度 → 缩放到比对分辨率 */
     let rawData: { data: Buffer; info: sharp.OutputInfo };
     try {
       rawData = await sharp(jpeg)
         .grayscale()
-        .resize(this.config.compareWidth, this.config.compareHeight, { fit: "fill" })
+        .resize(config.compareWidth, config.compareHeight, { fit: "fill" })
         .raw()
         .toBuffer({ resolveWithObject: true });
     } catch {
@@ -91,7 +95,7 @@ export class MotionDetector {
     state.prevPixels = pixels;
 
     /** 超过阈值且冷却期已过 → 触发变动事件 */
-    if (ratio >= this.config.threshold && timestamp - state.lastMotionTime >= this.config.cooldown) {
+    if (ratio >= config.threshold && timestamp - state.lastMotionTime >= config.cooldown) {
       state.lastMotionTime = timestamp;
       this.eventBus.emit("motion", {
         cameraId,

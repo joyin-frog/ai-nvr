@@ -23,6 +23,9 @@ const eventBus = new EventBus();
 const config = loadConfig();
 console.log(`[Config] 已加载配置，${config.cameras.length} 个摄像头`);
 
+/** 运行时配置（支持 API 热修改，检测器实时读取） */
+const runtimeConfig = new RuntimeConfig(config);
+
 /** 录像器（需先于 CameraManager 创建，因为 CameraManager 会注册主码流 URL） */
 const recorder = new MotionRecorder(join(import.meta.dir, "../data/recordings"), config.ffmpegPath, eventBus);
 recorder.start();
@@ -30,12 +33,12 @@ recorder.start();
 /** 摄像头管理器（子码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder);
 
-/** 变动检测器 */
-const motionDetector = new MotionDetector(config.motion, eventBus);
+/** 变动检测器（使用 RuntimeConfig，支持 API 热修改阈值/冷却） */
+const motionDetector = new MotionDetector(runtimeConfig, eventBus);
 
-/** AI 检测器 */
+/** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
 const annotator = new Annotator();
-const aiDetector = new AiDetector(config.ai, eventBus, annotator);
+const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator);
 
 /** 启动变动检测 */
 motionDetector.start();
@@ -53,7 +56,6 @@ aiDetector.init().then(() => {
 /** 启动 HTTP 服务 */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
 const monitor = new SystemMonitor(eventBus);
-const runtimeConfig = new RuntimeConfig(config);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig);
 
 /** 自动记录事件到 SQLite */
@@ -82,6 +84,7 @@ process.on("SIGINT", () => {
   console.log("\n[App] 正在关闭...");
   recorder.stop();
   cameraManager.stop();
+  eventStorage.close();
   eventBus.clear();
   process.exit(0);
 });
