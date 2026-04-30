@@ -52,6 +52,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 | MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，ffmpeg 编码 MP4，`scheduleStop` 支持运动超时自动停止 |
 | SystemMonitor | `src/monitor.ts` | 系统性能监控，FPS/内存/检测计数 |
 | RuntimeConfig | `src/runtime-config.ts` | 运行时配置管理，API 可修改灵敏度/AI/录像参数 |
+| PtzController | `src/ptz/index.ts` | ONVIF PTZ 云台控制，管理摄像头连接，提供移动/预置位/初始位操作 |
 | API | `src/api/index.ts` | HTTP REST + WebSocket 服务，二进制帧推送协议 |
 | 前端 | `web/src/` | Vue3 SPA，WebSocket 实时帧 + 事件日志 + 录像回放 + 状态面板 + 设置面板 |
 | EmailNotifier | `src/notify/email.ts` | SMTP 邮件告警推送，HTML 彩色卡片格式 |
@@ -82,6 +83,16 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - `GET /api/recordings/:cameraId/:filename` — 录像文件播放
 - `GET /api/ai/model` — 获取当前 AI 模型信息
 - `POST /api/ai/reload-model` — 重新加载 AI 模型（可选 body.model 指定模型名）
+- `GET /api/ptz/:cameraId/status` — PTZ 摄像头状态（位置信息）
+- `POST /api/ptz/:cameraId/move` — 连续移动（velocity + timeout）
+- `POST /api/ptz/:cameraId/stop` — 停止移动
+- `POST /api/ptz/:cameraId/absolute` — 绝对移动
+- `POST /api/ptz/:cameraId/relative` — 相对移动
+- `GET /api/ptz/:cameraId/presets` — 预置位列表
+- `POST /api/ptz/:cameraId/goto-preset` — 跳转预置位
+- `POST /api/ptz/:cameraId/set-preset` — 设置预置位
+- `POST /api/ptz/:cameraId/remove-preset` — 删除预置位
+- `POST /api/ptz/:cameraId/home` — 回到初始位置
 - `WS /api/events` — 实时事件推送（二进制协议：4B头长度 + JSON + 可选二进制帧）
 
 ## WebSocket 二进制协议
@@ -220,4 +231,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - WS 断开画面覆盖提示：网格顶部红色半透明横幅提示连接断开
 - 事件面板快速时间范围：1h/24h 快捷按钮筛选最近事件
 - 离线画面灰度效果：离线摄像头冻结帧自动叠加灰度+半透明
-- 下一步优先：PTZ 控制、事件统计图表增强
+- PTZ 云台控制（ONVIF 协议）：PtzController 后端模块管理 ONVIF 连接，支持 continuousMove/absoluteMove/relativeMove/stop、预置位 CRUD、回到初始位置；YAML 配置 ptz 段启用；API 端点 /api/ptz/:cameraId/{move,stop,absolute,relative,status,presets,goto-preset,set-preset,remove-preset,home}；PtzControl 前端组件（方向键 D-pad + 缩放 + 预置位列表）；摄像头列表返回 ptz 字段
+- 下一步优先：事件统计图表增强、移动端底部面板拖拽调整高度
