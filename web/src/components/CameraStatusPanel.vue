@@ -21,6 +21,12 @@ interface SystemMetrics {
   onlineCameras: number
   cameras: CameraMetric[]
   startedAt: number
+  storage?: {
+    directories: Array<{ name: string; bytes: number; fileCount: number }>
+    totalBytes: number
+    diskFreeBytes: number
+    diskTotalBytes: number
+  }
 }
 
 const props = defineProps<{
@@ -49,6 +55,33 @@ function formatUptime(seconds: number): string {
   if (d > 0) return `${d}天${h}时${m}分`
   if (h > 0) return `${h}时${m}分`
   return `${m}分`
+}
+
+/** 格式化字节数 */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+/** 磁盘用量百分比 */
+function diskUsagePercent(): number {
+  if (!metrics.value?.storage) return 0
+  const { diskTotalBytes, diskFreeBytes } = metrics.value.storage
+  if (diskTotalBytes === 0) return 0
+  return Math.round(((diskTotalBytes - diskFreeBytes) / diskTotalBytes) * 100)
+}
+
+/** 目录友好名称映射 */
+const dirNames: Record<string, string> = {
+  recordings: '录像',
+  'detection-snapshots': '检测快照',
+  snapshots: '帧快照',
+  nvr: '事件数据库',
+  roi: 'ROI 数据库',
+  alerts: '告警数据库',
+  thumbnails: '缩略图缓存',
 }
 
 /** 加载指标 */
@@ -134,6 +167,33 @@ onUnmounted(() => {
         <div class="stat-card">
           <span class="stat-num detect">{{ todayStats.detectCount }}</span>
           <span class="stat-desc">检测</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 存储用量 -->
+    <div v-if="metrics?.storage" class="storage-section">
+      <div class="stats-title">存储用量</div>
+      <!-- 磁盘总览 -->
+      <div v-if="metrics.storage.diskTotalBytes > 0" class="disk-bar-wrap">
+        <div class="disk-bar">
+          <div
+            class="disk-used"
+            :style="{ width: diskUsagePercent() + '%' }"
+            :class="{ warn: diskUsagePercent() > 80, critical: diskUsagePercent() > 95 }"
+          />
+        </div>
+        <div class="disk-info">
+          <span>已用 {{ diskUsagePercent() }}%</span>
+          <span class="dim">剩余 {{ formatBytes(metrics.storage.diskFreeBytes) }}</span>
+        </div>
+      </div>
+      <!-- 各目录用量 -->
+      <div class="dir-list">
+        <div v-for="dir in metrics.storage.directories" :key="dir.name" class="dir-row">
+          <span class="dir-name">{{ dirNames[dir.name] ?? dir.name }}</span>
+          <span class="dir-size">{{ formatBytes(dir.bytes) }}</span>
+          <span class="dir-files">{{ dir.fileCount }} 文件</span>
         </div>
       </div>
     </div>
@@ -349,5 +409,69 @@ onUnmounted(() => {
 .stat-desc {
   font-size: 11px;
   color: #666;
+}
+
+/* 存储用量 */
+.storage-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.disk-bar-wrap {
+  margin-bottom: 8px;
+}
+
+.disk-bar {
+  height: 6px;
+  background: #0a0a1a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.disk-used {
+  height: 100%;
+  background: #4ECDC4;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.disk-used.warn { background: #FFEAA7; }
+.disk-used.critical { background: #e74c3c; }
+
+.disk-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #aaa;
+  margin-top: 3px;
+}
+
+.dir-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dir-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.dir-name {
+  color: #ccc;
+  flex: 1;
+}
+
+.dir-size {
+  color: #4ECDC4;
+  font-weight: 500;
+}
+
+.dir-files {
+  color: #555;
+  font-size: 11px;
 }
 </style>

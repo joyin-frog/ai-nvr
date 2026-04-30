@@ -10,6 +10,7 @@ import { type RoiStorage } from "@/storage/roi";
 import { type AlertStorage } from "@/alert/storage";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
+import { type DiskUsage } from "@/storage/disk-usage";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -37,6 +38,7 @@ export function startServer(
   alertStorage: AlertStorage,
   thumbnailGenerator: ThumbnailGenerator,
   cleaner: StorageCleaner,
+  diskUsage: DiskUsage,
 ): void {
   Bun.serve({
     port,
@@ -125,7 +127,10 @@ export function startServer(
       /** 系统健康检查 + 性能指标 */
       if (url.pathname === "/api/health") {
         const cameraIds = cameraManager.getStatus().map(c => c.id);
-        return Response.json(monitor.getMetrics(cameraIds));
+        return Response.json({
+          ...monitor.getMetrics(cameraIds),
+          storage: diskUsage.getInfo(),
+        });
       }
 
       /** 获取运行时设置 */
