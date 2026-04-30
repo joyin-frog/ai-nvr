@@ -190,4 +190,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 快捷键描述国际化：App.vue registerShortcut 的 description 全部使用 t() 调用
 - 摄像头拖拽排序：HTML5 Drag & Drop API 实现网格拖拽重排，排序持久化到 localStorage，sortedCameras computed 应用排序
 - 画面亮度/对比度/饱和度调节：CameraView 头部星号按钮展开调节面板，CSS filter 实时预览，亮度(50-200%)、对比度(50-200%)、饱和度(0-200%)，重置按钮
-- 下一步优先：PTZ 控制、摄像头画面数字放大（pinch zoom）
+- 录像删除：后端 DELETE /api/recordings/:cameraId/:filename 端点（含路径遍历防护），前端录像列表 hover 显示删除按钮，confirm 确认后删除并从列表移除
+- 下一步优先：PTZ 控制、摄像头画面数字放大
