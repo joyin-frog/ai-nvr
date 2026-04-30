@@ -86,11 +86,33 @@ function closePlayer() {
   selectedRecording.value = null
 }
 
+/** 根据摄像头和时间戳查找并播放对应录像 */
+async function playAtTime(cameraId: string, timestamp: number): Promise<boolean> {
+  /** 加载该摄像头的录像列表 */
+  filterCamera.value = cameraId
+  await loadRecordings()
+
+  /** 找到时间范围包含该时间戳的录像 */
+  const match = recordings.value.find(
+    r => r.cameraId === cameraId && r.startTime <= timestamp && r.endTime >= timestamp
+  )
+  /** 如果没有精确匹配，找最接近的（时间戳在录像开始前后60秒内） */
+  const closest = match ?? recordings.value
+    .filter(r => r.cameraId === cameraId)
+    .sort((a, b) => Math.abs(a.startTime - timestamp) - Math.abs(b.startTime - timestamp))[0]
+
+  if (closest) {
+    play(closest)
+    return true
+  }
+  return false
+}
+
 onMounted(() => {
   loadRecordings()
 })
 
-defineExpose({ loadRecordings })
+defineExpose({ loadRecordings, playAtTime })
 </script>
 
 <template>

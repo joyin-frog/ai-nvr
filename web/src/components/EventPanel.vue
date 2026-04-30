@@ -13,6 +13,8 @@ interface EventRecord {
 interface EventItem {
   id: number
   time: string
+  /** 原始时间戳 */
+  timestamp: number
   type: string
   cameraId: string
   detail: string
@@ -22,6 +24,10 @@ const events = ref<EventItem[]>([])
 const MAX_LIVE_EVENTS = 50
 const loading = ref(false)
 const filterType = ref('')
+
+const emit = defineEmits<{
+  (e: 'play-recording', cameraId: string, timestamp: number): void
+}>()
 
 /** 事件类型标签样式 */
 const typeConfig: Record<string, { label: string; bg: string; color: string }> = {
@@ -33,8 +39,9 @@ const typeConfig: Record<string, { label: string; bg: string; color: string }> =
 
 /** 添加实时事件 */
 function addEvent(type: string, cameraId: string, detail: string) {
-  const time = new Date().toLocaleTimeString('zh-CN')
-  events.value.unshift({ id: Date.now(), time, type, cameraId, detail })
+  const now = Date.now()
+  const time = new Date(now).toLocaleTimeString('zh-CN')
+  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail })
   if (events.value.length > MAX_LIVE_EVENTS) {
     events.value = events.value.slice(0, MAX_LIVE_EVENTS)
   }
@@ -72,6 +79,7 @@ async function loadHistory() {
       const historyEvents: EventItem[] = (data.events as EventRecord[]).map((e) => ({
         id: e.id,
         time: formatTimestamp(e.timestamp),
+        timestamp: e.timestamp,
         type: e.type,
         cameraId: e.camera_id,
         detail: parseDetail(e.type, e.detail),
@@ -115,7 +123,8 @@ defineExpose({ addEvent, loadHistory })
         v-for="e in events"
         :key="e.id"
         class="event-item"
-        :class="e.type"
+        :class="[e.type, { clickable: e.type === 'motion' || e.type === 'detect' }]"
+        @click="emit('play-recording', e.cameraId, e.timestamp)"
       >
         <span class="event-time">{{ e.time }}</span>
         <span
@@ -206,6 +215,14 @@ defineExpose({ addEvent, loadHistory })
 
 .event-item:hover {
   background: #2a2a4a;
+}
+
+.event-item.clickable {
+  cursor: pointer;
+}
+
+.event-item.clickable:hover {
+  background: #2a3a4a;
 }
 
 .event-time {

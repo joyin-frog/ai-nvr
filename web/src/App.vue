@@ -63,6 +63,14 @@ async function loadCameras() {
   }
 }
 
+/** 事件点击跳转录像 */
+async function onPlayRecording(cameraId: string, timestamp: number) {
+  activeTab.value = 'recordings'
+  /** 等 DOM 更新后调用 playAtTime */
+  await new Promise(r => setTimeout(r, 50))
+  await recordingsPanel.value?.playAtTime(cameraId, timestamp)
+}
+
 /** 切换到录像标签时刷新列表 */
 function switchTab(tab: SidebarTab) {
   activeTab.value = tab
@@ -236,7 +244,7 @@ onUnmounted(() => {
           >设置</button>
         </div>
         <div class="sidebar-content">
-          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" @play-recording="onPlayRecording" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"
@@ -276,7 +284,7 @@ onUnmounted(() => {
         >设置</button>
       </div>
       <div class="mobile-content">
-        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
+        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" @play-recording="onPlayRecording" />
         <RecordingsPanel
           v-show="activeTab === 'recordings'"
           ref="recordingsPanel"
