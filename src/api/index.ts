@@ -3,6 +3,7 @@ import { type EventBus, type EventName } from "@/event-bus";
 import { type Annotator } from "@/ai/annotator";
 import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
+import { type SystemMonitor } from "@/monitor";
 import { existsSync, statSync } from "node:fs";
 
 /** WebSocket 客户端集合 */
@@ -21,6 +22,7 @@ export function startServer(
   annotator: Annotator,
   eventStorage: EventStorage,
   recorder: MotionRecorder,
+  monitor: SystemMonitor,
 ): void {
   Bun.serve({
     port,
@@ -41,6 +43,7 @@ export function startServer(
           cameras: cameraManager.getStatus().length,
           endpoints: [
             "GET /api/cameras",
+            "GET /api/health",
             "GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=",
             "GET /api/recordings?cameraId=",
             "GET /api/recordings/:cameraId/:filename",
@@ -52,6 +55,12 @@ export function startServer(
 
       if (url.pathname === "/api/cameras") {
         return Response.json(cameraManager.getStatus());
+      }
+
+      /** 系统健康检查 + 性能指标 */
+      if (url.pathname === "/api/health") {
+        const cameraIds = cameraManager.getStatus().map(c => c.id);
+        return Response.json(monitor.getMetrics(cameraIds));
       }
 
       /** 查询事件历史 */
