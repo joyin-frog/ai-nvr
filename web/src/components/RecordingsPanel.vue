@@ -173,6 +173,17 @@ function initVolume() {
   volume.value = Math.round(v * 100)
 }
 
+/** 播放器全屏切换 */
+const playerModalEl = ref<HTMLDivElement | null>(null)
+function togglePlayerFullscreen() {
+  if (!playerModalEl.value) return
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  } else {
+    playerModalEl.value.requestFullscreen()
+  }
+}
+
 /** 格式化绝对时间为 HH:MM:SS */
 function formatAbsTime(ts: number): string {
   const d = new Date(ts)
@@ -504,7 +515,7 @@ defineExpose({ loadRecordings, playAtTime })
   <div class="recordings-panel">
     <!-- 播放器弹窗 -->
     <div v-if="selectedRecording" class="player-overlay" @click.self="closePlayer">
-      <div class="player-modal">
+      <div ref="playerModalEl" class="player-modal">
         <div class="player-header">
           <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
@@ -522,6 +533,7 @@ defineExpose({ loadRecordings, playAtTime })
             @click="autoPlayNext = !autoPlayNext"
             :title="t('recording.autoPlayNext')"
           >&#9654;&#9654;</button>
+          <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
         <video
@@ -892,6 +904,21 @@ defineExpose({ loadRecordings, playAtTime })
   overflow: hidden;
   border: 1px solid #2a2a4a;
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-modal:fullscreen {
+  max-width: 100vw;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+}
+
+.player-modal:fullscreen .player-video {
+  max-height: none;
+  flex: 1;
 }
 
 .player-header {
@@ -921,6 +948,19 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .close-btn:hover {
+  color: #e0e0e0;
+}
+
+.fullscreen-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.fullscreen-btn:hover {
   color: #e0e0e0;
 }
 
