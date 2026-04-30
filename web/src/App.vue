@@ -385,6 +385,31 @@ const visibleCameras = computed(() => {
   return list
 })
 
+/** 按分组聚集摄像头（用于分组视图） */
+const groupedCameras = computed(() => {
+  if (fullscreenCamera.value || filterGroup.value) {
+    return [{ group: '', cameras: visibleCameras.value }]
+  }
+  const map = new Map<string, CameraStatus[]>()
+  for (const cam of visibleCameras.value) {
+    const g = cam.group || ''
+    const list = map.get(g) ?? []
+    list.push(cam)
+    map.set(g, list)
+  }
+  /** 确保有分组的在前，无分组的在后 */
+  const result: Array<{ group: string; cameras: CameraStatus[] }> = []
+  for (const [group, cams] of map) {
+    if (group) result.push({ group, cameras: cams })
+  }
+  const ungrouped = map.get('')
+  if (ungrouped) result.push({ group: '', cameras: ungrouped })
+  return result
+})
+
+/** 折叠的分组集合 */
+const collapsedGroups = ref(new Set<string>())
+
 /** 登录成功回调 */
 function onLoginSuccess() {
   authenticated.value = true
@@ -656,32 +681,41 @@ onUnmounted(() => {
           <p>{{ t('manage.noCameras') }}</p>
           <button class="header-btn" @click="switchTab('cameras')">{{ t('manage.addCamera') }}</button>
         </div>
-        <div
-          v-for="cam in visibleCameras"
-          :key="cam.id"
-          class="camera-cell"
-          :class="{ dragging: dragCameraId === cam.id }"
-          draggable="true"
-          @dragstart="onDragStart(cam.id)"
-          @dragover="onDragOver"
-          @drop="onDrop(cam.id)"
-        >
-          <CameraView
-            :camera-id="cam.id"
-            :name="cam.name"
-            :online="cam.online"
-            :last-frame-at="cam.lastFrameAt"
-            :detections="detectionsMap[cam.id] ?? []"
-            :detect-version="detectVersions[cam.id] ?? 0"
-            :frame-image="frameImages[cam.id] ?? ''"
-            :ptz="cam.ptz"
-            :video-width="cam.width"
-            :video-height="cam.height"
-            :fps="cameraFpsMap[cam.id] ?? 0"
-            @fullscreen="enterFullscreen"
-            @jump-to-recording="onPlayRecording"
-          />
-        </div>
+        <template v-for="group in groupedCameras" :key="group.group">
+          <div v-if="group.group && groupedCameras.length > 1" class="group-header" @click="collapsedGroups.has(group.group) ? collapsedGroups.delete(group.group) : collapsedGroups.add(group.group)">
+            <span class="group-toggle">{{ collapsedGroups.has(group.group) ? '▸' : '▾' }}</span>
+            <span class="group-name">{{ group.group }}</span>
+            <span class="group-count">{{ group.cameras.filter(c => c.online).length }}/{{ group.cameras.length }}</span>
+          </div>
+          <template v-if="!collapsedGroups.has(group.group)">
+            <div
+              v-for="cam in group.cameras"
+              :key="cam.id"
+              class="camera-cell"
+              :class="{ dragging: dragCameraId === cam.id }"
+              draggable="true"
+              @dragstart="onDragStart(cam.id)"
+              @dragover="onDragOver"
+              @drop="onDrop(cam.id)"
+            >
+              <CameraView
+                :camera-id="cam.id"
+                :name="cam.name"
+                :online="cam.online"
+                :last-frame-at="cam.lastFrameAt"
+                :detections="detectionsMap[cam.id] ?? []"
+                :detect-version="detectVersions[cam.id] ?? 0"
+                :frame-image="frameImages[cam.id] ?? ''"
+                :ptz="cam.ptz"
+                :video-width="cam.width"
+                :video-height="cam.height"
+                :fps="cameraFpsMap[cam.id] ?? 0"
+                @fullscreen="enterFullscreen"
+                @jump-to-recording="onPlayRecording"
+              />
+            </div>
+          </template>
+        </template>
         <!-- WS 断开覆盖 -->
         <div v-if="wsState === 'disconnected' && cameras.length > 0" class="ws-disconnected-overlay">
           <span>{{ t('header.wsDisconnected') }}</span>
@@ -944,6 +978,41 @@ onUnmounted(() => {
 
 .empty-state .header-btn:hover {
   opacity: 0.9;
+}
+
+.group-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #16213e;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  margin-top: 4px;
+}
+
+.group-header:hover {
+  background: #1e2d4a;
+}
+
+.group-toggle {
+  font-size: 10px;
+  color: #4ECDC4;
+  width: 12px;
+}
+
+.group-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.group-count {
+  font-size: 11px;
+  color: #888;
+  margin-left: auto;
 }
 
 .ws-disconnected-overlay {
