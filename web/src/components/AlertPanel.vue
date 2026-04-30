@@ -32,6 +32,8 @@ const loading = ref(false)
 
 /** 显示添加表单 */
 const showAddForm = ref(false)
+/** 正在编辑的规则 ID（null 为新增模式） */
+const editingRuleId = ref<number | null>(null)
 const form = ref({
   name: '',
   eventType: 'detect',
@@ -43,6 +45,12 @@ const form = ref({
   silentStart: '',
   silentEnd: '',
 })
+
+const emptyForm = {
+  name: '', eventType: 'detect', cameraId: '', labels: '',
+  windowSeconds: 60, threshold: 3, cooldownSeconds: 300,
+  silentStart: '', silentEnd: '',
+}
 
 /** 事件类型选项 */
 const eventTypes = [
@@ -88,12 +96,54 @@ async function addRule() {
     })
     if (res.ok) {
       showAddForm.value = false
-      form.value = { name: '', eventType: 'detect', cameraId: '', labels: '', windowSeconds: 60, threshold: 3, cooldownSeconds: 300, silentStart: '', silentEnd: '' }
+      form.value = { ...emptyForm }
       loadRules()
     }
   } catch {
     // ignore
   }
+}
+
+/** 开始编辑规则 */
+function startEdit(rule: AlertRule) {
+  editingRuleId.value = rule.id
+  showAddForm.value = false
+  form.value = {
+    name: rule.name,
+    eventType: rule.eventType,
+    cameraId: rule.cameraId,
+    labels: rule.labels,
+    windowSeconds: rule.windowSeconds,
+    threshold: rule.threshold,
+    cooldownSeconds: rule.cooldownSeconds,
+    silentStart: rule.silentStart,
+    silentEnd: rule.silentEnd,
+  }
+}
+
+/** 保存编辑 */
+async function saveEdit() {
+  if (!editingRuleId.value || !form.value.name) return
+  try {
+    const res = await fetch(`/api/alerts/rules/${editingRuleId.value}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form.value),
+    })
+    if (res.ok) {
+      editingRuleId.value = null
+      form.value = { ...emptyForm }
+      loadRules()
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** 取消编辑 */
+function cancelEdit() {
+  editingRuleId.value = null
+  form.value = { ...emptyForm }
 }
 
 /** 切换启用 */
@@ -206,20 +256,75 @@ defineExpose({ loadAlerts })
     <div v-if="activeView === 'rules'" class="rule-list">
       <div v-if="rules.length === 0" class="empty">{{ loading ? '加载中...' : '暂无规则' }}</div>
       <div v-for="rule in rules" :key="rule.id" class="rule-item">
-        <div class="rule-header">
-          <button class="toggle-btn" @click="toggleRule(rule)">
-            {{ rule.enabled ? '●' : '○' }}
-          </button>
-          <span class="rule-name" :class="{ disabled: !rule.enabled }">{{ rule.name }}</span>
-          <button class="delete-btn" @click="deleteRule(rule.id)">删除</button>
-        </div>
-        <div class="rule-meta">
-          <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
-          <span v-if="rule.cameraId" class="meta-tag cam">{{ rule.cameraId }}</span>
-          <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
-          <span class="meta-info">{{ rule.threshold }}次 / {{ rule.windowSeconds }}秒 · 冷却{{ rule.cooldownSeconds }}秒</span>
-          <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">静默 {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
-        </div>
+        <!-- 编辑模式 -->
+        <template v-if="editingRuleId === rule.id">
+          <div class="edit-form">
+            <div class="form-field">
+              <label>名称</label>
+              <input v-model="form.name" class="input" />
+            </div>
+            <div class="form-field">
+              <label>事件类型</label>
+              <select v-model="form.eventType" class="input">
+                <option v-for="t in eventTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label>摄像头</label>
+              <input v-model="form.cameraId" placeholder="留空表示所有" class="input" />
+            </div>
+            <div class="form-field" v-if="form.eventType === 'detect'">
+              <label>标签过滤</label>
+              <input v-model="form.labels" placeholder="person, car" class="input" />
+            </div>
+            <div class="form-row">
+              <div class="form-field half">
+                <label>时间窗口(秒)</label>
+                <input v-model.number="form.windowSeconds" type="number" class="input" />
+              </div>
+              <div class="form-field half">
+                <label>触发次数</label>
+                <input v-model.number="form.threshold" type="number" class="input" />
+              </div>
+            </div>
+            <div class="form-field">
+              <label>冷却时间(秒)</label>
+              <input v-model.number="form.cooldownSeconds" type="number" class="input" />
+            </div>
+            <div class="form-row">
+              <div class="form-field half">
+                <label>静默开始</label>
+                <input v-model="form.silentStart" type="time" class="input" />
+              </div>
+              <div class="form-field half">
+                <label>静默结束</label>
+                <input v-model="form.silentEnd" type="time" class="input" />
+              </div>
+            </div>
+            <div class="edit-actions">
+              <button class="save-btn" @click="saveEdit">保存</button>
+              <button class="cancel-btn" @click="cancelEdit">取消</button>
+            </div>
+          </div>
+        </template>
+        <!-- 显示模式 -->
+        <template v-else>
+          <div class="rule-header">
+            <button class="toggle-btn" @click="toggleRule(rule)">
+              {{ rule.enabled ? '●' : '○' }}
+            </button>
+            <span class="rule-name" :class="{ disabled: !rule.enabled }">{{ rule.name }}</span>
+            <button class="edit-btn" @click="startEdit(rule)">编辑</button>
+            <button class="delete-btn" @click="deleteRule(rule.id)">删除</button>
+          </div>
+          <div class="rule-meta">
+            <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
+            <span v-if="rule.cameraId" class="meta-tag cam">{{ rule.cameraId }}</span>
+            <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
+            <span class="meta-info">{{ rule.threshold }}次 / {{ rule.windowSeconds }}秒 · 冷却{{ rule.cooldownSeconds }}秒</span>
+            <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">静默 {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -428,6 +533,55 @@ select.input {
 }
 
 .delete-btn:hover { color: #ff6b6b; }
+
+.edit-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.edit-btn:hover { color: #4ECDC4; }
+
+/* 编辑表单 */
+.edit-form {
+  padding: 8px;
+  background: #0a0a1a;
+  border-radius: 4px;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.save-btn {
+  flex: 1;
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.save-btn:hover { background: #3ad4c8; }
+
+.cancel-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cancel-btn:hover { color: #e0e0e0; }
 
 .rule-meta {
   display: flex;
