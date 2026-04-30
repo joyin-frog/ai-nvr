@@ -262,4 +262,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件/录像收藏标记：EventStorage starred 列 + toggleStar API，前端事件/录像行星标按钮 + ☆/★ 筛选开关，录像收藏 localStorage 持久化
 - 摄像头健康详情面板：CameraStatusPanel 每路摄像头 FPS 迷你 SVG 折线图（30 点历史），FPS 质量色标（绿/黄/红），avgMotionRatio 显示，离线摄像头最后在线相对时间
 - 录像批量收藏：多选操作栏"收藏选中"按钮（智能切换全部/取消），移动端星标/删除按钮 opacity 可访问性修复
-- 下一步优先：摄像头分组视图优化、录像时间轴增强
+- 摄像头画面一键跳转录像：CameraView 头部 ▶ 按钮，点击自动切到录像标签并定位到当前时间附近录像播放
+- 下一步优先：时间轴播放进度指示器、摄像头分组视图优化
