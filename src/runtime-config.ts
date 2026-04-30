@@ -121,6 +121,7 @@ export class RuntimeConfig {
     if (obj.ai && typeof obj.ai === "object") {
       const a = obj.ai as Record<string, unknown>;
       if (typeof a.enabled === "boolean") this.settings.ai.enabled = a.enabled;
+      if (typeof a.model === "string") this.settings.ai.model = a.model;
       if (typeof a.threshold === "number") this.settings.ai.threshold = a.threshold;
       if (typeof a.maxDetections === "number") this.settings.ai.maxDetections = a.maxDetections;
     }

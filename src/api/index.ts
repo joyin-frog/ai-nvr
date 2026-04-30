@@ -12,6 +12,7 @@ import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
+import { type AiDetector } from "@/ai/detector";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
 import { existsSync, statSync, realpathSync } from "node:fs";
@@ -42,6 +43,7 @@ export function startServer(
   cleaner: StorageCleaner,
   diskUsage: DiskUsage,
   exporter: RecordingExporter,
+  aiDetector: AiDetector,
   authConfig: AuthConfig,
 ): void {
   Bun.serve({
@@ -518,6 +520,22 @@ export function startServer(
       if (url.pathname === "/api/cleanup/run" && req.method === "POST") {
         const report = cleaner.runCleanup();
         return Response.json(report);
+      }
+
+      /** 获取当前 AI 模型信息 */
+      if (url.pathname === "/api/ai/model" && req.method === "GET") {
+        return Response.json(aiDetector.getModelInfo());
+      }
+
+      /** 重新加载 AI 模型 */
+      if (url.pathname === "/api/ai/reload-model" && req.method === "POST") {
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const model = obj.model as string | undefined;
+          const result = await aiDetector.reloadModel(model);
+          if (!result.ok) return Response.json(result, { status: 400 });
+          return Response.json(result);
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** API 路径未匹配 → 404 */

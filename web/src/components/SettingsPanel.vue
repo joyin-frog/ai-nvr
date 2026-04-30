@@ -46,6 +46,8 @@ interface RuntimeSettings {
 const settings = ref<RuntimeSettings | null>(null)
 const saving = ref(false)
 const success = ref(false)
+const modelReloading = ref(false)
+const modelInfo = ref<{ model: string; loading: boolean; initialized: boolean } | null>(null)
 
 /** 加载设置 */
 async function loadSettings() {
@@ -54,6 +56,41 @@ async function loadSettings() {
     if (res.ok) settings.value = await res.json()
   } catch {
     // ignore
+  }
+}
+
+/** 加载模型信息 */
+async function loadModelInfo() {
+  try {
+    const res = await authFetch('/api/ai/model')
+    if (res.ok) modelInfo.value = await res.json()
+  } catch {
+    // ignore
+  }
+}
+
+/** 重新加载 AI 模型 */
+async function reloadModel() {
+  if (!settings.value) return
+  modelReloading.value = true
+  try {
+    const res = await authFetch('/api/ai/reload-model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: settings.value.ai.model }),
+    })
+    const result = await res.json()
+    if (result.ok) {
+      modelInfo.value = { model: result.model, loading: false, initialized: true }
+      success.value = true
+      setTimeout(() => { success.value = false }, 2000)
+    } else {
+      alert(`模型加载失败: ${result.error ?? '未知错误'}`)
+    }
+  } catch {
+    alert('模型加载请求失败')
+  } finally {
+    modelReloading.value = false
   }
 }
 
@@ -108,6 +145,7 @@ async function runCleanup() {
 
 onMounted(() => {
   loadSettings()
+  loadModelInfo()
 })
 </script>
 
@@ -141,6 +179,23 @@ onMounted(() => {
           <span class="field-label">启用</span>
           <input type="checkbox" v-model="settings.ai.enabled" class="checkbox" />
         </label>
+        <div class="field field-col">
+          <span class="field-label">检测模型</span>
+          <div class="model-row">
+            <input
+              type="text"
+              v-model="settings.ai.model"
+              placeholder="Xenova/detr-resnet-50"
+              class="input-model"
+            />
+            <button class="reload-btn" @click="reloadModel" :disabled="modelReloading">
+              {{ modelReloading ? '加载中...' : '重载' }}
+            </button>
+          </div>
+          <span v-if="modelInfo" class="model-status">
+            {{ modelInfo.loading ? '加载中...' : modelInfo.initialized ? `当前: ${modelInfo.model}` : '未初始化' }}
+          </span>
+        </div>
         <label class="field">
           <span class="field-label">置信度阈值</span>
           <input type="number" v-model.number="settings.ai.threshold" step="0.05" min="0.1" max="1" class="input" />
@@ -376,5 +431,59 @@ onMounted(() => {
 
 .add-btn:hover {
   background: #1a2a2e;
+}
+
+.field-col {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.model-row {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.input-model {
+  flex: 1;
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.input-model:focus {
+  outline: none;
+  border-color: #4ECDC4;
+}
+
+.reload-btn {
+  background: #2a2a4a;
+  color: #4ECDC4;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.reload-btn:hover {
+  background: #3a3a5a;
+}
+
+.reload-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-status {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
 }
 </style>
