@@ -195,6 +195,18 @@ export function startServer(
         return Response.json({ events, total });
       }
 
+      /** 事件统计 */
+      if (url.pathname === "/api/events/stats") {
+        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
+        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        const opts = { since, until };
+        return Response.json({
+          byType: eventStorage.countByType(opts),
+          byHour: eventStorage.countByHour(opts),
+          byCamera: eventStorage.countByCamera(opts),
+        });
+      }
+
       /** 获取摄像头最新帧（实时视频用，已预压缩） */
       const snapshotMatch = url.pathname.match(/^\/api\/snapshot\/(.+)$/);
       if (snapshotMatch) {

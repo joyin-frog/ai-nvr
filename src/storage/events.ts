@@ -65,6 +65,38 @@ export class EventStorage {
     return result.changes;
   }
 
+  /** 按类型统计事件数量 */
+  countByType(options: { since?: number; until?: number } = {}): Record<string, number> {
+    const { conditions, params } = this.buildConditions(options);
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = this.db.query(
+      `SELECT type, COUNT(*) as count FROM events ${where} GROUP BY type`
+    ).all(...params) as Array<{ type: string; count: number }>;
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      result[row.type] = row.count;
+    }
+    return result;
+  }
+
+  /** 按小时统计事件数量（用于时间线图表） */
+  countByHour(options: { since?: number; until?: number } = {}): Array<{ hour: number; count: number; type: string }> {
+    const { conditions, params } = this.buildConditions(options);
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    return this.db.query(
+      `SELECT (timestamp / 3600000) * 3600000 as hour_ts, type, COUNT(*) as count FROM events ${where} GROUP BY hour_ts, type ORDER BY hour_ts`
+    ).all(...params) as Array<{ hour: number; count: number; type: string }>;
+  }
+
+  /** 按摄像头统计事件数量 */
+  countByCamera(options: { since?: number; until?: number; type?: string } = {}): Array<{ camera_id: string; count: number }> {
+    const { conditions, params } = this.buildConditions(options);
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    return this.db.query(
+      `SELECT camera_id, COUNT(*) as count FROM events ${where} GROUP BY camera_id ORDER BY count DESC`
+    ).all(...params) as Array<{ camera_id: string; count: number }>;
+  }
+
   /** 关闭数据库 */
   close(): void {
     this.db.close();

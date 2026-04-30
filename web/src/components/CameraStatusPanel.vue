@@ -39,7 +39,11 @@ const props = defineProps<{
 
 const metrics = ref<SystemMetrics | null>(null)
 /** 今日事件统计 */
-const todayStats = ref<{ motionCount: number; detectCount: number; onlineCount: number; offlineCount: number; topLabels: string[] } | null>(null)
+const todayStats = ref<{
+  motionCount: number
+  detectCount: number
+  byCamera: Array<{ cameraId: string; count: number }>
+} | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 
 /** 摄像头 ID → 名称 */
@@ -106,18 +110,17 @@ async function loadTodayStats() {
   startOfDay.setHours(0, 0, 0, 0)
   const since = startOfDay.getTime()
   try {
-    const [motionRes, detectRes] = await Promise.all([
-      authFetch(`/api/events/history?type=motion&since=${since}&limit=1`),
-      authFetch(`/api/events/history?type=detect&since=${since}&limit=1`),
-    ])
-    const motionData = motionRes.ok ? await motionRes.json() : { total: 0 }
-    const detectData = detectRes.ok ? await detectRes.json() : { total: 0 }
+    const res = await authFetch(`/api/events/stats?since=${since}`)
+    if (!res.ok) return
+    const data = await res.json()
+    const byType = data.byType as Record<string, number>
     todayStats.value = {
-      motionCount: motionData.total ?? 0,
-      detectCount: detectData.total ?? 0,
-      onlineCount: 0,
-      offlineCount: 0,
-      topLabels: [],
+      motionCount: byType.motion ?? 0,
+      detectCount: byType.detect ?? 0,
+      byCamera: (data.byCamera as Array<{ camera_id: string; count: number }>).map(c => ({
+        cameraId: c.camera_id,
+        count: c.count,
+      })),
     }
   } catch {
     // ignore
@@ -228,6 +231,10 @@ onUnmounted(() => {
             <div class="metric">
               <span class="metric-val">{{ cam.detectCount }}</span>
               <span class="metric-unit">{{ t('status.todayDetect') }}</span>
+            </div>
+            <div v-if="todayStats" class="metric">
+              <span class="metric-val">{{ todayStats.byCamera.find(c => c.cameraId === cam.cameraId)?.count ?? 0 }}</span>
+              <span class="metric-unit">{{ t('status.todayEvents') }}</span>
             </div>
           </div>
         </div>

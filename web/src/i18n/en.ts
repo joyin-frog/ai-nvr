@@ -115,7 +115,7 @@ export default {
     memoryUsage: 'Memory Usage',
     cameras: 'Cameras',
     detections: 'Detections',
-    todayEvents: "Today's Events",
+    todayEvents: "Today's",
     todayStats: "Today's Stats",
     todayMotion: 'Motion',
     todayDetect: 'Detect',
