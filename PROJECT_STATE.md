@@ -47,6 +47,8 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 | Annotator | `src/ai/annotator.ts` | SVG 叠加检测框 + sharp 合成标注图 |
 | EventStorage | `src/storage/events.ts` | bun:sqlite 事件持久化，支持查询/统计/清理 |
 | RoiStorage | `src/storage/roi.ts` | bun:sqlite ROI 多边形区域存储，CRUD + getEnabledPolygons |
+| AlertStorage | `src/alert/storage.ts` | bun:sqlite 告警规则和记录存储 |
+| AlertEngine | `src/alert/engine.ts` | 告警规则引擎，滑动窗口计数 + 标签过滤 |
 | MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，ffmpeg 编码 MP4，`scheduleStop` 支持运动超时自动停止 |
 | SystemMonitor | `src/monitor.ts` | 系统性能监控，FPS/内存/检测计数 |
 | RuntimeConfig | `src/runtime-config.ts` | 运行时配置管理，API 可修改灵敏度/AI/录像参数 |
@@ -69,6 +71,11 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - `POST /api/roi` — 添加 ROI 区域（多边形顶点）
 - `PATCH /api/roi/item/:id` — 更新 ROI（启用/禁用/顶点/名称）
 - `DELETE /api/roi/item/:id` — 删除 ROI 区域
+- `GET /api/alerts/rules` — 告警规则列表
+- `POST /api/alerts/rules` — 添加告警规则
+- `PATCH /api/alerts/rules/:id` — 更新告警规则
+- `DELETE /api/alerts/rules/:id` — 删除告警规则
+- `GET /api/alerts/history?cameraId=&since=&until=&limit=&offset=` — 告警历史查询
 - `GET /api/recordings?cameraId=` — 录像列表
 - `GET /api/recordings/:cameraId/:filename` — 录像文件播放
 - `WS /api/events` — 实时事件推送（二进制协议：4B头长度 + JSON + 可选二进制帧）
@@ -133,4 +140,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - Bug 修复：recorder forceStop 清理 recording 标志、快照文件名毫秒级精度、detectSnapshots blob URL 独立复制
 - CameraView UX 增强：检测框直接叠加画面、16:9 固定宽高比、离线状态标识、标注图3秒自动恢复实时帧
 - ROI（检测区域）功能：SQLite 存储多边形区域、API CRUD 端点、MotionDetector 扫描线光栅化算法实现 ROI 内像素差异比对、前端点击画面绘制多边形区域
-- 下一步优先：告警规则引擎、时间轴回放
+- 告警规则引擎：AlertStorage + AlertEngine 滑动窗口计数，支持事件类型/摄像头/标签过滤/时间窗口/触发阈值/冷却时间，alert 事件经 EventBus 推送至 WebSocket/Webhook/日志
+- 前端告警面板：6个侧边栏标签（事件/录像/状态/管理/告警/设置），规则 CRUD + 告警历史时间线，告警触发浏览器通知
+- 下一步优先：时间轴回放、告警推送渠道（邮件/钉钉）
