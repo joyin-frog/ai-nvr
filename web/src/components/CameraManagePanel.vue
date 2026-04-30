@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import RoiEditor from './RoiEditor.vue'
 
 /** 摄像头信息 */
 interface CameraInfo {
@@ -21,6 +22,9 @@ const adding = ref(false)
 const editingId = ref<string | null>(null)
 const editForm = ref({ friendlyName: '', hdUrl: '', sdUrl: '' })
 const saving = ref(false)
+
+/** ROI 编辑中的摄像头 ID */
+const roiCameraId = ref<string | null>(null)
 
 /** 加载摄像头列表 */
 async function loadCameras() {
@@ -186,8 +190,13 @@ defineExpose({ loadCameras })
             <span class="cam-status-text" :class="{ offline: !cam.online }">{{ statusText(cam) }}</span>
           </div>
           <div class="camera-actions">
+            <button class="action-btn roi" :class="{ active: roiCameraId === cam.id }" @click="roiCameraId = roiCameraId === cam.id ? null : cam.id">区域</button>
             <button class="action-btn edit" @click="startEdit(cam)">编辑</button>
             <button class="action-btn delete" @click="deleteCamera(cam.id)">删除</button>
+          </div>
+          <!-- ROI 编辑器 -->
+          <div v-if="roiCameraId === cam.id" class="roi-section">
+            <RoiEditor :camera-id="cam.id" :frame-url="`/api/snapshot/${cam.id}`" />
           </div>
         </template>
       </div>
@@ -341,6 +350,17 @@ defineExpose({ loadCameras })
 
 .action-btn.delete:hover { background: #e74c3c20; }
 
+.action-btn.roi {
+  color: #FFD93D;
+  border-color: #FFD93D;
+}
+
+.action-btn.roi:hover { background: #FFD93D20; }
+
+.action-btn.roi.active {
+  background: #FFD93D30;
+}
+
 /* 添加表单 */
 .add-form {
   padding: 10px 12px;
@@ -434,6 +454,14 @@ defineExpose({ loadCameras })
 }
 
 .cancel-btn:hover { color: #e0e0e0; }
+
+/* ROI 编辑区 */
+.roi-section {
+  margin-top: 6px;
+  border-top: 1px solid #2a2a4a;
+  background: #16213e;
+  border-radius: 4px;
+}
 
 /* 移动端适配 */
 @media (max-width: 768px) {
