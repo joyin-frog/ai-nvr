@@ -83,6 +83,27 @@ const groups = computed(() => {
 const isMobile = ref(false)
 /** 移动端底部面板是否展开 */
 const mobilePanelOpen = ref(false)
+/** 移动端面板高度（px，默认 50vh） */
+const mobilePanelHeight = ref(Number(localStorage.getItem('nvr-mobile-panel-height')) || Math.round(window.innerHeight * 0.5))
+
+/** 移动端面板拖拽调整高度 */
+function onMobileDragStart(e: TouchEvent) {
+  const startY = e.touches[0]!.clientY
+  const startHeight = mobilePanelHeight.value
+  function onMove(ev: TouchEvent) {
+    const delta = startY - ev.touches[0]!.clientY
+    const maxH = Math.round(window.innerHeight * 0.85)
+    const minH = 120
+    mobilePanelHeight.value = Math.max(minH, Math.min(maxH, startHeight + delta))
+  }
+  function onEnd() {
+    localStorage.setItem('nvr-mobile-panel-height', String(mobilePanelHeight.value))
+    document.removeEventListener('touchmove', onMove)
+    document.removeEventListener('touchend', onEnd)
+  }
+  document.addEventListener('touchmove', onMove, { passive: true })
+  document.addEventListener('touchend', onEnd)
+}
 
 /** 侧边栏宽度（可拖拽调整） */
 const sidebarWidth = ref(Number(localStorage.getItem('nvr-sidebar-width')) || 340)
@@ -655,7 +676,10 @@ onUnmounted(() => {
       </div>
     </main>
     <!-- 移动端底部面板 -->
-    <div v-if="isMobile" class="mobile-panel" :class="{ open: mobilePanelOpen }">
+    <div v-if="isMobile" class="mobile-panel" :class="{ open: mobilePanelOpen }" :style="mobilePanelOpen ? { height: mobilePanelHeight + 'px' } : {}">
+      <div class="mobile-drag-handle" @touchstart="onMobileDragStart">
+        <span class="drag-indicator"></span>
+      </div>
       <div class="mobile-tabs">
         <button
           :class="['tab-btn', { active: activeTab === 'events' }]"
@@ -1014,13 +1038,27 @@ onUnmounted(() => {
   transform: translateY(100%);
   transition: transform 0.3s ease;
   z-index: 100;
-  max-height: 60vh;
   display: flex;
   flex-direction: column;
 }
 
 .mobile-panel.open {
   transform: translateY(0);
+}
+
+.mobile-drag-handle {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 4px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.drag-indicator {
+  width: 36px;
+  height: 4px;
+  background: #3a3a5a;
+  border-radius: 2px;
 }
 
 .mobile-tabs {
@@ -1032,7 +1070,6 @@ onUnmounted(() => {
 .mobile-content {
   flex: 1;
   overflow-y: auto;
-  max-height: 55vh;
 }
 
 .shortcuts-overlay {
