@@ -245,4 +245,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - motion 事件实时去重：同一摄像头 5 秒内连续 motion 事件只更新不新增，避免事件列表被淹没
 - 摄像头画面比例自适应：CameraView 根据 videoWidth/videoHeight 动态计算 aspect-ratio，移除硬编码 16:9，无数据时回退
 - 录像水印叠加：ffmpeg drawtext 滤镜在画面左上角叠加摄像头名称、左下角叠加实时时间戳（YYYY-MM-DD HH:MM:SS），NotoSansCJK 字体，半透明黑色背景框
-- 下一步优先：性能监控面板实时 FPS/内存折线图、检测区域划定 Web UI
+- 状态面板实时性能趋势图：SVG 折线图展示 FPS 和内存使用趋势，环形缓冲区 60 点（5 分钟），复用 /api/health 轮询
+- 下一步优先：检测区域划定 Web UI（RoiEditor 改进）、告警联动截图（高清快照）
