@@ -3,6 +3,7 @@ import { ref, computed, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
+import PtzControl from './PtzControl.vue'
 
 const { t } = useI18n()
 const props = defineProps<{
@@ -15,6 +16,8 @@ const props = defineProps<{
   detectVersion: number
   /** WebSocket 推送的实时帧 data URL */
   frameImage: string
+  /** 是否支持 PTZ 云台控制 */
+  ptz?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -205,6 +208,7 @@ onUnmounted(() => {
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+      <PtzControl v-if="ptz && online" :camera-id="cameraId" />
       <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
     </div>
 

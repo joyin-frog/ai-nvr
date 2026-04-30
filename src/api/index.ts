@@ -13,6 +13,7 @@ import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
 import { type AiDetector } from "@/ai/detector";
+import { type PtzController } from "@/ptz";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
 import { existsSync, statSync, realpathSync, unlinkSync } from "node:fs";
@@ -45,6 +46,7 @@ export function startServer(
   exporter: RecordingExporter,
   aiDetector: AiDetector,
   authConfig: AuthConfig,
+  ptzController: PtzController,
 ): void {
   Bun.serve({
     port,
@@ -566,6 +568,104 @@ export function startServer(
           if (!result.ok) return Response.json(result, { status: 400 });
           return Response.json(result);
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      // ===== PTZ 云台控制 =====
+
+      /** 查询摄像头是否支持 PTZ */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/status") && req.method === "GET") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        const supported = ptzController.hasPtz(cameraId);
+        if (!supported) return Response.json({ supported: false });
+        return ptzController.getStatus(cameraId)
+          .then(pos => Response.json({ supported: true, position: pos }))
+          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 连续移动（持续按住方向） */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/move") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const vel = obj.velocity as { x?: number; y?: number; zoom?: number } | undefined;
+          const timeout = (obj.timeout as number) ?? 0;
+          await ptzController.continuousMove(cameraId, vel ?? {}, timeout);
+          return Response.json({ ok: true });
+        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 停止移动 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/stop") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return ptzController.stop(cameraId)
+          .then(() => Response.json({ ok: true }))
+          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 绝对移动 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/absolute") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          await ptzController.absoluteMove(cameraId, obj.position as { x?: number; y?: number; zoom?: number });
+          return Response.json({ ok: true });
+        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 相对移动 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/relative") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          await ptzController.relativeMove(cameraId, obj.delta as { x?: number; y?: number; zoom?: number });
+          return Response.json({ ok: true });
+        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 获取预置位列表 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/presets") && req.method === "GET") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return ptzController.getPresets(cameraId)
+          .then(presets => Response.json({ presets }))
+          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 跳转预置位 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/goto-preset") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          await ptzController.gotoPreset(cameraId, obj.presetToken as string);
+          return Response.json({ ok: true });
+        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 设置预置位 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/set-preset") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const token = await ptzController.setPreset(cameraId, obj.presetName as string);
+          return Response.json({ ok: true, presetToken: token });
+        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 删除预置位 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/remove-preset") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          await ptzController.removePreset(cameraId, obj.presetToken as string);
+          return Response.json({ ok: true });
+        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 回到初始位置 */
+      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/home") && req.method === "POST") {
+        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
+        return ptzController.gotoHomePosition(cameraId)
+          .then(() => Response.json({ ok: true }))
+          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
       }
 
       /** API 路径未匹配 → 404 */

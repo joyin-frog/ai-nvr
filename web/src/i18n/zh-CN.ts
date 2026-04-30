@@ -320,4 +320,10 @@ export default {
     alertPrefix: '告警',
     titleOnline: '{total} 路 ({online} 在线)',
   },
+  ptz: {
+    control: '云台控制',
+    home: '回到初始位置',
+    zoom: '缩放',
+    presets: '预置位',
+  },
 }

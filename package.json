@@ -22,6 +22,7 @@
     "js-yaml": "^4.1.1",
     "nodemailer": "^8.0.7",
     "onnxruntime-node": "^1.25.1",
+    "onvif": "^0.8.1",
     "sharp": "^0.34.5"
   }
 }

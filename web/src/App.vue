@@ -30,6 +30,7 @@ interface CameraStatus {
   online: boolean
   lastFrameAt: number
   group: string
+  ptz: boolean
 }
 
 /** 侧边栏激活的标签 */
@@ -227,6 +228,7 @@ async function loadCameras() {
       online: c.online,
       lastFrameAt: c.lastFrameAt,
       group: c.group ?? '',
+      ptz: c.ptz ?? false,
     }))
     updateTitle()
   } catch {
@@ -598,6 +600,7 @@ onUnmounted(() => {
             :detections="detectionsMap[cam.id] ?? []"
             :detect-version="detectVersions[cam.id] ?? 0"
             :frame-image="frameImages[cam.id] ?? ''"
+            :ptz="cam.ptz"
             @fullscreen="enterFullscreen"
           />
         </div>

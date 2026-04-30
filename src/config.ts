@@ -11,6 +11,20 @@ export interface StreamSource {
   sd: string;
 }
 
+/** PTZ 配置 */
+export interface PtzConfig {
+  /** 是否启用 PTZ */
+  enabled: boolean;
+  /** ONVIF 设备主机地址 */
+  host: string;
+  /** ONVIF 端口 */
+  port: number;
+  /** 用户名 */
+  username: string;
+  /** 密码 */
+  password: string;
+}
+
 /** 单个摄像头配置 */
 export interface CameraConfig {
   /** 摄像头唯一标识 */
@@ -29,6 +43,8 @@ export interface CameraConfig {
   detectFps: number;
   /** 所属分组（可选，用于前端筛选） */
   group: string;
+  /** PTZ 配置（可选，仅支持云台的摄像头） */
+  ptz?: PtzConfig;
 }
 
 /** 变动检测配置 */
@@ -69,6 +85,19 @@ export interface AppConfig {
   auth: AuthConfig;
   /** 服务配置 */
   server: ServerConfig;
+}
+
+/** 解析摄像头 PTZ 配置 */
+function parsePtzConfig(cam: Record<string, unknown>): PtzConfig | undefined {
+  const ptz = cam.ptz as Record<string, unknown> | undefined;
+  if (!ptz || ptz.enabled !== true) return undefined;
+  return {
+    enabled: true,
+    host: ptz.host as string,
+    port: (ptz.port as number) ?? 80,
+    username: ptz.username as string,
+    password: ptz.password as string,
+  };
 }
 
 /** 配置文件路径（模块级别缓存） */
@@ -116,6 +145,7 @@ export function loadConfig(configPath?: string): AppConfig {
       detectHeight: 360,
       detectFps: (cam.detect as Record<string, unknown>)?.fps as number ?? 5,
       group: (cam.group as string) ?? "",
+      ptz: parsePtzConfig(cam),
     });
   }
 

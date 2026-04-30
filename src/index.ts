@@ -23,6 +23,7 @@ import { ThumbnailGenerator } from "@/storage/thumbnails";
 import { StorageCleaner } from "@/storage/cleaner";
 import { DiskUsage } from "@/storage/disk-usage";
 import { RecordingExporter } from "@/storage/export";
+import { PtzController } from "@/ptz";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -104,9 +105,27 @@ cleaner.start();
 /** 磁盘用量统计 */
 const diskUsage = new DiskUsage(join(import.meta.dir, "../data"));
 
+/** PTZ 云台控制器 */
+const ptzController = new PtzController();
+for (const cam of config.cameras) {
+  if (cam.ptz?.enabled) {
+    ptzController.register({
+      cameraId: cam.id,
+      hostname: cam.ptz.host,
+      port: cam.ptz.port,
+      username: cam.ptz.username,
+      password: cam.ptz.password,
+    }).then(() => {
+      console.log(`[PTZ] ${cam.id} 已注册`);
+    }).catch((err) => {
+      console.error(`[PTZ] ${cam.id} 注册失败:`, err);
+    });
+  }
+}
+
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;

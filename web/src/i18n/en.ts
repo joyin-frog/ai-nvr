@@ -318,4 +318,10 @@ export default {
     alertPrefix: 'Alert',
     titleOnline: '{total} cams ({online} online)',
   },
+  ptz: {
+    control: 'PTZ Control',
+    home: 'Home position',
+    zoom: 'Zoom',
+    presets: 'Presets',
+  },
 }
