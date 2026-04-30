@@ -7,6 +7,7 @@ import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
+import { resolve, extname } from "node:path";
 
 /** WebSocket 客户端集合 */
 const wsClients = new Set<import("bun").ServerWebSocket>();
@@ -202,7 +203,13 @@ export function startServer(
         });
       }
 
-      return new Response("Not Found", { status: 404 });
+      /** API 路径未匹配 → 404 */
+      if (url.pathname.startsWith("/api/")) {
+        return new Response("Not Found", { status: 404 });
+      }
+
+      /** 静态文件服务：服务前端构建产物 */
+      return serveStatic(url.pathname);
     },
     websocket: {
       open(ws) {
@@ -252,4 +259,57 @@ export function startServer(
   }
 
   console.log(`[Server] HTTP + WebSocket 服务已启动: http://localhost:${port}`);
+}
+
+/** MIME 类型映射 */
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".mjs": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+};
+
+/** 前端构建产物目录 */
+const STATIC_DIR = resolve(import.meta.dir, "../../web/dist");
+
+/** 服务静态文件，SPA fallback 到 index.html */
+function serveStatic(pathname: string): Response {
+  /** 去掉前导 / */
+  let filePath = resolve(STATIC_DIR, pathname.slice(1) || "index.html");
+
+  /** 安全检查：确保路径在静态目录内 */
+  if (!filePath.startsWith(STATIC_DIR)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  /** 如果文件不存在，SPA fallback 到 index.html */
+  if (!existsSync(filePath)) {
+    filePath = resolve(STATIC_DIR, "index.html");
+  }
+
+  if (!existsSync(filePath)) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  const ext = extname(filePath);
+  const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
+  const file = Bun.file(filePath);
+
+  return new Response(file, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=31536000",
+    },
+  });
 }
