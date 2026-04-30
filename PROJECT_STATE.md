@@ -237,4 +237,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 时间轴点击精确跳转：点击时间轴片段时根据点击位置计算偏移秒数 seekToSec，空白区域点击同样计算精确偏移，单路和多路时间轴均支持
 - 录像播放器自定义进度条：移除浏览器原生 controls，自定义控制栏（播放/暂停 + 可拖拽进度条 + 绝对时间显示起止 HH:MM:SS），悬停显示拖拽圆点
 - 录像播放器音量控制：音量图标按钮（静音切换）+ 音量滑块，持久化 localStorage，加载时自动恢复
-- 下一步优先：摄像头画面比例自适应、录像播放器全屏模式优化
+- 录像播放器全屏模式：player-header 全屏按钮，Browser Fullscreen API，全屏时撑满视口
+- 持续录制模式（24/7）：RuntimeConfig recording.mode 支持 motion/continuous，MotionRecorder 自动分段循环录制，段间无缝衔接，设置面板可切换模式和配置分段时长
+- 下一步优先：录像模式热切换（运行时切换立即生效）、摄像头画面比例自适应
