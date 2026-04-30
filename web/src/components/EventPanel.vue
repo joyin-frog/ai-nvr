@@ -90,6 +90,17 @@ function addEvent(type: string, cameraId: string, detail: string) {
     }
   }
 
+  /** detect 事件去重：同一摄像头 3 秒内只更新不新增 */
+  if (type === 'detect') {
+    const recent = events.value[0]
+    if (recent && recent.type === 'detect' && recent.cameraId === cameraId && (now - recent.timestamp) < 3000) {
+      recent.detail = detail
+      recent.rawDetail = detail
+      recent.time = new Date(now).toLocaleTimeString(locale.value)
+      return
+    }
+  }
+
   const time = new Date(now).toLocaleTimeString(locale.value)
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
   if (events.value.length > PAGE_SIZE) {
