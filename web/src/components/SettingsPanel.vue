@@ -24,6 +24,9 @@ interface RuntimeSettings {
     motionCooldown?: number
     detectFps?: number
   }>
+  webhook: {
+    urls: string[]
+  }
 }
 
 const settings = ref<RuntimeSettings | null>(null)
@@ -61,6 +64,18 @@ async function saveSettings() {
   } finally {
     saving.value = false
   }
+}
+
+/** 添加 Webhook URL */
+function addWebhook() {
+  if (!settings.value) return
+  settings.value.webhook.urls.push('')
+}
+
+/** 移除 Webhook URL */
+function removeWebhook(index: number) {
+  if (!settings.value) return
+  settings.value.webhook.urls.splice(index, 1)
 }
 
 onMounted(() => {
@@ -119,6 +134,21 @@ onMounted(() => {
           <span class="field-label">保留天数</span>
           <input type="number" v-model.number="settings.recording.retentionDays" step="1" min="1" max="90" class="input" />
         </label>
+      </section>
+
+      <!-- Webhook 通知 -->
+      <section class="section">
+        <h3>Webhook 通知</h3>
+        <div v-for="(url, i) in settings.webhook.urls" :key="i" class="field">
+          <input
+            type="url"
+            v-model="settings.webhook.urls[i]"
+            placeholder="https://example.com/webhook"
+            class="input-url"
+          />
+          <button class="remove-btn" @click="removeWebhook(i)">✕</button>
+        </div>
+        <button class="add-btn" @click="addWebhook">+ 添加 Webhook</button>
       </section>
     </div>
     <div v-else class="empty">加载中...</div>
@@ -225,5 +255,49 @@ onMounted(() => {
   text-align: center;
   padding: 20px;
   font-size: 13px;
+}
+
+.input-url {
+  flex: 1;
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.input-url:focus {
+  outline: none;
+  border-color: #4ECDC4;
+}
+
+.remove-btn {
+  background: transparent;
+  color: #e74c3c;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.remove-btn:hover {
+  color: #ff6b6b;
+}
+
+.add-btn {
+  background: transparent;
+  color: #4ECDC4;
+  border: 1px dashed #4ECDC4;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.add-btn:hover {
+  background: #1a2a2e;
 }
 </style>
