@@ -4,6 +4,7 @@ import { type Annotator } from "@/ai/annotator";
 import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
 import { type SystemMonitor } from "@/monitor";
+import { type RuntimeConfig } from "@/runtime-config";
 import { existsSync, statSync } from "node:fs";
 
 /** WebSocket 客户端集合 */
@@ -23,6 +24,7 @@ export function startServer(
   eventStorage: EventStorage,
   recorder: MotionRecorder,
   monitor: SystemMonitor,
+  runtimeConfig: RuntimeConfig,
 ): void {
   Bun.serve({
     port,
@@ -44,6 +46,8 @@ export function startServer(
           endpoints: [
             "GET /api/cameras",
             "GET /api/health",
+            "GET /api/settings",
+            "PATCH /api/settings",
             "GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=",
             "GET /api/recordings?cameraId=",
             "GET /api/recordings/:cameraId/:filename",
@@ -61,6 +65,19 @@ export function startServer(
       if (url.pathname === "/api/health") {
         const cameraIds = cameraManager.getStatus().map(c => c.id);
         return Response.json(monitor.getMetrics(cameraIds));
+      }
+
+      /** 获取运行时设置 */
+      if (url.pathname === "/api/settings" && req.method === "GET") {
+        return Response.json(runtimeConfig.get());
+      }
+
+      /** 更新运行时设置 */
+      if (url.pathname === "/api/settings" && req.method === "PATCH") {
+        return req.json().then((body: unknown) => {
+          const updated = runtimeConfig.patchFromJSON(body);
+          return Response.json(updated);
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** 查询事件历史 */
