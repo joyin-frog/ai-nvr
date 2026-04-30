@@ -13,6 +13,7 @@ import CameraManagePanel from './components/CameraManagePanel.vue'
 import AlertPanel from './components/AlertPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import LoginView from './components/LoginView.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const { t, locale } = useI18n()
 
@@ -838,6 +839,7 @@ onUnmounted(() => {
       <button class="pwa-btn pwa-btn-close" @click="closePwaPrompt">{{ t('pwa.close') }}</button>
     </div>
   </div>
+  <ConfirmDialog />
 </template>
 
 <style scoped>

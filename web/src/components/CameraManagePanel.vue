@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+import { confirmDialog } from '../composables/useConfirm'
 import RoiEditor from './RoiEditor.vue'
 
 const { t } = useI18n()
@@ -103,7 +104,7 @@ async function saveEdit() {
 
 /** 删除摄像头 */
 async function deleteCamera(id: string) {
-  if (!confirm(t('manage.confirmDelete', { name: id }))) return
+  if (!await confirmDialog(t('manage.confirmDelete', { name: id }))) return
   try {
     const res = await authFetch(`/api/cameras/${id}`, { method: 'DELETE' })
     if (res.ok) loadCameras()

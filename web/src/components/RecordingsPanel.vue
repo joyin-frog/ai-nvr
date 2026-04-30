@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
+import { confirmDialog } from '../composables/useConfirm'
 
 const { t, locale } = useI18n()
 
@@ -408,7 +409,7 @@ function closePlayer() {
 
 /** 删除录像 */
 async function deleteRecording(rec: Recording) {
-  if (!confirm(t('recording.confirmDelete'))) return
+  if (!await confirmDialog(t('recording.confirmDelete'))) return
   try {
     const res = await authFetch(`/api/recordings/${rec.filename}`, { method: 'DELETE' })
     if (res.ok) {
@@ -423,7 +424,7 @@ async function deleteRecording(rec: Recording) {
 /** 批量删除选中的录像 */
 async function batchDelete() {
   if (selectedFiles.value.size === 0) return
-  if (!confirm(t('recording.confirmBatchDelete', { count: selectedFiles.value.size }))) return
+  if (!await confirmDialog(t('recording.confirmBatchDelete', { count: selectedFiles.value.size }))) return
   const toDelete = new Set(selectedFiles.value)
   for (const filename of toDelete) {
     try {
