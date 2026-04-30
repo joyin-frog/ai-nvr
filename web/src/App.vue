@@ -153,11 +153,20 @@ onMounted(() => {
     detectionsMap.value = { ...detectionsMap.value }
     detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
     detectVersions.value = { ...detectVersions.value }
-    /** 保存检测时的帧快照 */
+    /** 保存检测时的帧快照（复制 blob 避免被后续帧 revoke） */
     const frame = frameImages.value[payload.cameraId]
     if (frame) {
-      detectSnapshots.value[payload.cameraId] = frame
-      detectSnapshots.value = { ...detectSnapshots.value }
+      /** 释放旧的检测快照 */
+      const oldSnap = detectSnapshots.value[payload.cameraId]
+      if (oldSnap) URL.revokeObjectURL(oldSnap)
+      /** 复制 blob 创建独立的 ObjectURL */
+      fetch(frame)
+        .then(r => r.blob())
+        .then(blob => {
+          detectSnapshots.value[payload.cameraId] = URL.createObjectURL(blob)
+          detectSnapshots.value = { ...detectSnapshots.value }
+        })
+        .catch(() => { /* ignore */ })
     }
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)
@@ -192,6 +201,10 @@ onMounted(() => {
 onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
+  /** 释放所有检测快照 blob URL */
+  for (const url of Object.values(detectSnapshots.value)) {
+    URL.revokeObjectURL(url)
+  }
 })
 </script>
 

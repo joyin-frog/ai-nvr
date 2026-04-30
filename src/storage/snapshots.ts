@@ -49,7 +49,8 @@ export class SnapshotStorage {
     const date = new Date(timestamp);
     const dateStr = date.toISOString().slice(0, 10);
     const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
-    const filename = `${dateStr}_${timeStr}.jpg`;
+    const ms = String(date.getMilliseconds()).padStart(3, "0");
+    const filename = `${dateStr}_${timeStr}_${ms}.jpg`;
 
     const filePath = join(dir, filename);
     writeFileSync(filePath, imageData);

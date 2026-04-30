@@ -228,10 +228,8 @@ export class MotionRecorder {
     }
 
     state.stopTimer = setTimeout(() => {
-      /** 发送 q 命令优雅停止 ffmpeg（让它正常关闭输出文件） */
+      /** SIGTERM 让 ffmpeg 优雅退出（写入 MP4 文件尾） */
       if (state.proc) {
-        state.proc.stdin?.end();
-        /** 如果 ffmpeg 是从 RTSP 拉流（stdin 无用），用 SIGTERM 优雅退出 */
         state.proc.kill("SIGTERM");
       }
       state.stopTimer = null;
@@ -251,6 +249,7 @@ export class MotionRecorder {
       state.proc.kill("SIGTERM");
       state.proc = null;
     }
+    state.recording = false;
   }
 
   /** 清理过期录像 */
