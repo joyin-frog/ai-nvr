@@ -151,6 +151,11 @@ export default {
     day: '{d}天{h}时{m}分',
     hour: '{h}时{m}分',
     minute: '{m}分',
+    avgMotion: '平均变动',
+    justNow: '刚刚',
+    minutesAgo: '{count}分钟前',
+    hoursAgo: '{count}小时前',
+    daysAgo: '{count}天前',
     /** 目录友好名称 */
     dirRecordings: '录像',
     dirDetectionSnapshots: '检测快照',

@@ -65,6 +65,10 @@ interface PerfPoint {
 }
 const perfHistory = ref<PerfPoint[]>([])
 
+/** 每路摄像头 FPS 历史（cameraId → number[]） */
+const CAM_FPS_HISTORY_SIZE = 30
+const camFpsHistory = ref<Record<string, number[]>>({})
+
 /** 性能折线图的 SVG points 属性 */
 const fpsLinePoints = computed(() => {
   const data = perfHistory.value
@@ -92,6 +96,37 @@ const memLinePoints = computed(() => {
     return `${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
 })
+
+/** 生成指定摄像头 FPS 迷你折线图的 SVG points */
+function camFpsPoints(cameraId: string): string {
+  const data = camFpsHistory.value[cameraId]
+  if (!data || data.length < 2) return ''
+  const maxFps = Math.max(1, ...data)
+  const w = 100
+  const h = 20
+  return data.map((fps, i) => {
+    const x = (i / (CAM_FPS_HISTORY_SIZE - 1)) * w
+    const y = h - (fps / maxFps) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+
+/** FPS 质量颜色 */
+function fpsColor(fps: number): string {
+  if (fps >= 10) return '#4CAF50'
+  if (fps >= 5) return '#FFEAA7'
+  return '#F44336'
+}
+
+/** 格式化最后帧时间为相对时间 */
+function formatLastSeen(lastFrameAt: number): string {
+  if (!lastFrameAt) return ''
+  const diffSec = Math.floor((Date.now() - lastFrameAt) / 1000)
+  if (diffSec < 60) return t('status.justNow')
+  if (diffSec < 3600) return t('status.minutesAgo', { count: Math.floor(diffSec / 60) })
+  if (diffSec < 86400) return t('status.hoursAgo', { count: Math.floor(diffSec / 3600) })
+  return t('status.daysAgo', { count: Math.floor(diffSec / 86400) })
+}
 
 /** 小时趋势图数据：24 个桶，每个桶包含 motion 和 detect 计数 */
 const hourlyChart = computed(() => {
@@ -210,6 +245,14 @@ async function loadMetrics() {
       const arr = [...perfHistory.value, point]
       if (arr.length > PERF_HISTORY_SIZE) arr.splice(0, arr.length - PERF_HISTORY_SIZE)
       perfHistory.value = arr
+      /** 收集每路摄像头 FPS 历史 */
+      const fpsMap: Record<string, number[]> = {}
+      for (const cam of data.cameras) {
+        const hist = [...(camFpsHistory.value[cam.cameraId] ?? []), cam.fps]
+        if (hist.length > CAM_FPS_HISTORY_SIZE) hist.splice(0, hist.length - CAM_FPS_HISTORY_SIZE)
+        fpsMap[cam.cameraId] = hist
+      }
+      camFpsHistory.value = fpsMap
     }
   } catch {
     // ignore
@@ -462,11 +505,18 @@ onUnmounted(() => {
           <div class="cam-header">
             <span class="cam-dot" :class="{ online: cam.online }" />
             <span class="cam-name">{{ nameMap()[cam.cameraId] ?? cam.cameraId }}</span>
+            <span v-if="!cam.online && cam.lastFrameAt" class="cam-last-seen">{{ formatLastSeen(cam.lastFrameAt) }}</span>
             <span class="cam-status">{{ cam.online ? t('status.online') : t('status.offline') }}</span>
+          </div>
+          <!-- FPS 迷你趋势图 -->
+          <div v-if="cam.online && camFpsPoints(cam.cameraId)" class="cam-fps-chart">
+            <svg viewBox="0 0 100 20" preserveAspectRatio="none" class="cam-fps-svg">
+              <polyline :points="camFpsPoints(cam.cameraId)" fill="none" :stroke="fpsColor(cam.fps)" stroke-width="1.5" stroke-linejoin="round" />
+            </svg>
           </div>
           <div class="cam-metrics">
             <div class="metric">
-              <span class="metric-val">{{ cam.fps }}</span>
+              <span class="metric-val" :style="{ color: fpsColor(cam.fps) }">{{ cam.fps }}</span>
               <span class="metric-unit">fps</span>
             </div>
             <div class="metric">
@@ -476,6 +526,10 @@ onUnmounted(() => {
             <div class="metric">
               <span class="metric-val">{{ cam.detectCount }}</span>
               <span class="metric-unit">{{ t('status.todayDetect') }}</span>
+            </div>
+            <div v-if="cam.avgMotionRatio > 0" class="metric">
+              <span class="metric-val">{{ (cam.avgMotionRatio * 100).toFixed(1) }}%</span>
+              <span class="metric-unit">{{ t('status.avgMotion') }}</span>
             </div>
             <div v-if="todayStats" class="metric">
               <span class="metric-val">{{ todayStats.byCamera.find(c => c.cameraId === cam.cameraId)?.count ?? 0 }}</span>
@@ -633,6 +687,25 @@ onUnmounted(() => {
 .cam-metrics {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cam-last-seen {
+  font-size: 10px;
+  color: #9B59B6;
+  margin-left: auto;
+  margin-right: 4px;
+}
+
+.cam-fps-chart {
+  margin-bottom: 6px;
+}
+
+.cam-fps-svg {
+  width: 100%;
+  height: 20px;
+  background: #0a0a1a;
+  border-radius: 2px;
 }
 
 .metric {
