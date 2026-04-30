@@ -243,4 +243,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头全屏 Browser Fullscreen API：双击/按钮进入全屏时调用 requestFullscreen，Esc 同步退出单路模式
 - 录像播放器全屏模式：player-header 全屏按钮，Browser Fullscreen API，全屏时撑满视口
 - motion 事件实时去重：同一摄像头 5 秒内连续 motion 事件只更新不新增，避免事件列表被淹没
-- 下一步优先：摄像头画面比例自适应、录像回放键盘快捷键（左右箭头快进/快退）
+- 摄像头画面比例自适应：CameraView 根据 videoWidth/videoHeight 动态计算 aspect-ratio，移除硬编码 16:9，无数据时回退
+- 下一步优先：性能监控面板实时 FPS 图表、录像水印叠加
