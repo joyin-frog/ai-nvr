@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { authFetch } from '../services/auth'
 
 /** 告警规则 */
 interface AlertRule {
@@ -63,7 +64,7 @@ const eventTypes = [
 async function loadRules() {
   loading.value = true
   try {
-    const res = await fetch('/api/alerts/rules')
+    const res = await authFetch('/api/alerts/rules')
     if (res.ok) rules.value = await res.json()
   } catch {
     // ignore
@@ -75,7 +76,7 @@ async function loadRules() {
 /** 加载告警历史 */
 async function loadAlerts() {
   try {
-    const res = await fetch('/api/alerts/history?limit=50')
+    const res = await authFetch('/api/alerts/history?limit=50')
     if (res.ok) {
       const data = await res.json()
       alerts.value = data.alerts
@@ -89,7 +90,7 @@ async function loadAlerts() {
 async function addRule() {
   if (!form.value.name || !form.value.eventType) return
   try {
-    const res = await fetch('/api/alerts/rules', {
+    const res = await authFetch('/api/alerts/rules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form.value),
@@ -125,7 +126,7 @@ function startEdit(rule: AlertRule) {
 async function saveEdit() {
   if (!editingRuleId.value || !form.value.name) return
   try {
-    const res = await fetch(`/api/alerts/rules/${editingRuleId.value}`, {
+    const res = await authFetch(`/api/alerts/rules/${editingRuleId.value}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form.value),
@@ -149,7 +150,7 @@ function cancelEdit() {
 /** 切换启用 */
 async function toggleRule(rule: AlertRule) {
   try {
-    await fetch(`/api/alerts/rules/${rule.id}`, {
+    await authFetch(`/api/alerts/rules/${rule.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !rule.enabled }),
@@ -163,7 +164,7 @@ async function toggleRule(rule: AlertRule) {
 /** 删除规则 */
 async function deleteRule(id: number) {
   try {
-    await fetch(`/api/alerts/rules/${id}`, { method: 'DELETE' })
+    await authFetch(`/api/alerts/rules/${id}`, { method: 'DELETE' })
     loadRules()
   } catch {
     // ignore

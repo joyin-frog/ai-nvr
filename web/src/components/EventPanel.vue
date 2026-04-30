@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import EventTimeline from './EventTimeline.vue'
+import { authFetch } from '../services/auth'
 
 /** 事件记录 */
 interface EventRecord {
@@ -84,7 +85,7 @@ async function loadHistory() {
   try {
     const params = new URLSearchParams({ limit: '100' })
     if (filterType.value) params.set('type', filterType.value)
-    const res = await fetch(`/api/events/history?${params}`)
+    const res = await authFetch(`/api/events/history?${params}`)
     if (res.ok) {
       const data = await res.json()
       const historyEvents: EventItem[] = (data.events as EventRecord[]).map((e) => ({

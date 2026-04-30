@@ -64,3 +64,11 @@ export function authWsUrl(baseUrl: string): string {
   const sep = baseUrl.includes("?") ? "&" : "?"
   return `${baseUrl}${sep}token=${encodeURIComponent(token)}`
 }
+
+/** 给 URL 附加 token 参数（用于 video src / 下载链接等非 fetch 场景） */
+export function authUrl(path: string): string {
+  const token = getToken()
+  if (!token) return path
+  const sep = path.includes("?") ? "&" : "?"
+  return `${path}${sep}token=${encodeURIComponent(token)}`
+}

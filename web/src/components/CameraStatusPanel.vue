@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { authFetch } from '../services/auth'
 
 /** 摄像头性能指标 */
 interface CameraMetric {
@@ -87,7 +88,7 @@ const dirNames: Record<string, string> = {
 /** 加载指标 */
 async function loadMetrics() {
   try {
-    const res = await fetch('/api/health')
+    const res = await authFetch('/api/health')
     if (res.ok) {
       metrics.value = await res.json()
     }
@@ -103,8 +104,8 @@ async function loadTodayStats() {
   const since = startOfDay.getTime()
   try {
     const [motionRes, detectRes] = await Promise.all([
-      fetch(`/api/events/history?type=motion&since=${since}&limit=1`),
-      fetch(`/api/events/history?type=detect&since=${since}&limit=1`),
+      authFetch(`/api/events/history?type=motion&since=${since}&limit=1`),
+      authFetch(`/api/events/history?type=detect&since=${since}&limit=1`),
     ])
     const motionData = motionRes.ok ? await motionRes.json() : { total: 0 }
     const detectData = detectRes.ok ? await detectRes.json() : { total: 0 }

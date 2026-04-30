@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { authFetch } from '../services/auth'
 
 /** 运行时设置 */
 interface RuntimeSettings {
@@ -49,7 +50,7 @@ const success = ref(false)
 /** 加载设置 */
 async function loadSettings() {
   try {
-    const res = await fetch('/api/settings')
+    const res = await authFetch('/api/settings')
     if (res.ok) settings.value = await res.json()
   } catch {
     // ignore
@@ -62,7 +63,7 @@ async function saveSettings() {
   saving.value = true
   success.value = false
   try {
-    const res = await fetch('/api/settings', {
+    const res = await authFetch('/api/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings.value),
@@ -94,7 +95,7 @@ function removeWebhook(index: number) {
 /** 手动触发清理 */
 async function runCleanup() {
   try {
-    const res = await fetch('/api/cleanup/run', { method: 'POST' })
+    const res = await authFetch('/api/cleanup/run', { method: 'POST' })
     if (res.ok) {
       const report = await res.json()
       const total = (report.events ?? 0) + (report.alerts ?? 0) + (report.snapshots ?? 0)

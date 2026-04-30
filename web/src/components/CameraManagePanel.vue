@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { authFetch } from '../services/auth'
 import RoiEditor from './RoiEditor.vue'
 
 /** 摄像头信息 */
@@ -32,7 +33,7 @@ const roiCameraId = ref<string | null>(null)
 async function loadCameras() {
   loading.value = true
   try {
-    const res = await fetch('/api/cameras')
+    const res = await authFetch('/api/cameras')
     if (res.ok) {
       cameras.value = await res.json()
     }
@@ -48,7 +49,7 @@ async function addCamera() {
   if (!addForm.value.id || !addForm.value.friendlyName || !addForm.value.hdUrl || !addForm.value.sdUrl) return
   adding.value = true
   try {
-    const res = await fetch('/api/cameras', {
+    const res = await authFetch('/api/cameras', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(addForm.value),
@@ -81,7 +82,7 @@ async function saveEdit() {
   if (!editingId.value) return
   saving.value = true
   try {
-    const res = await fetch(`/api/cameras/${editingId.value}`, {
+    const res = await authFetch(`/api/cameras/${editingId.value}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(editForm.value),
@@ -101,7 +102,7 @@ async function saveEdit() {
 async function deleteCamera(id: string) {
   if (!confirm(`确定删除摄像头 "${id}"？`)) return
   try {
-    const res = await fetch(`/api/cameras/${id}`, { method: 'DELETE' })
+    const res = await authFetch(`/api/cameras/${id}`, { method: 'DELETE' })
     if (res.ok) loadCameras()
   } catch {
     // ignore

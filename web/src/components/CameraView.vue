@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
 import type { Detection } from '../services/events'
+import { authFetch } from '../services/auth'
 
 const props = defineProps<{
   cameraId: string
@@ -52,7 +53,7 @@ const sortedDetections = computed(() =>
 watch(() => props.detectVersion, async (v: number) => {
   if (v === 0) return
   try {
-    const res = await fetch(`/api/detection/annotated/${props.cameraId}`)
+    const res = await authFetch(`/api/detection/annotated/${props.cameraId}`)
     if (res.ok) {
       const blob = await res.blob()
       if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)

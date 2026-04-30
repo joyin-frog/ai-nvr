@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
 
@@ -58,7 +59,7 @@ function onRateChange() {
 /** 当前播放的录像 URL */
 const videoUrl = computed(() => {
   if (!selectedRecording.value) return ''
-  return `/api/recordings/${selectedRecording.value.filename}`
+  return authUrl(`/api/recordings/${selectedRecording.value.filename}`)
 })
 
 /** 当前录像总时长（秒） */
@@ -124,7 +125,7 @@ async function loadRecordings() {
   try {
     const params = new URLSearchParams()
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
-    const res = await fetch(`/api/recordings?${params}`)
+    const res = await authFetch(`/api/recordings?${params}`)
     if (res.ok) {
       recordings.value = await res.json()
     }
@@ -150,7 +151,7 @@ function onRecordingHover(rec: Recording) {
   const dur = Math.max(0, (rec.endTime - rec.startTime) / 1000 / 2)
   thumbUrls.value = {
     ...thumbUrls.value,
-    [rec.filename]: `/api/recordings/thumb?file=${encodeURIComponent(rec.filename)}&time=${dur.toFixed(1)}`,
+    [rec.filename]: authUrl(`/api/recordings/thumb?file=${encodeURIComponent(rec.filename)}&time=${dur.toFixed(1)}`),
   }
 }
 
@@ -176,7 +177,7 @@ async function doExport() {
   exporting.value = true
   exportFilename.value = ''
   try {
-    const res = await fetch('/api/recordings/export', {
+    const res = await authFetch('/api/recordings/export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -201,7 +202,7 @@ async function doExport() {
 function downloadExport() {
   if (!exportFilename.value) return
   const link = document.createElement('a')
-  link.href = `/api/recordings/export/${exportFilename.value}`
+  link.href = authUrl(`/api/recordings/export/${exportFilename.value}`)
   link.download = exportFilename.value
   link.click()
 }
@@ -236,7 +237,7 @@ async function doMergeExport() {
   mergeFilename.value = ''
   const cameraId = sortedSelectedFiles.value[0]!.cameraId
   try {
-    const res = await fetch('/api/recordings/merge', {
+    const res = await authFetch('/api/recordings/merge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -259,7 +260,7 @@ async function doMergeExport() {
 function downloadMerge() {
   if (!mergeFilename.value) return
   const link = document.createElement('a')
-  link.href = `/api/recordings/export/${mergeFilename.value}`
+  link.href = authUrl(`/api/recordings/export/${mergeFilename.value}`)
   link.download = mergeFilename.value
   link.click()
 }

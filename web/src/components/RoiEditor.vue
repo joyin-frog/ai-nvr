@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { authFetch } from '../services/auth'
 
 /** ROI 区域 */
 interface RoiRegion {
@@ -31,7 +32,7 @@ const newRegionName = ref('')
 async function loadRegions() {
   loading.value = true
   try {
-    const res = await fetch(`/api/roi/${props.cameraId}`)
+    const res = await authFetch(`/api/roi/${props.cameraId}`)
     if (res.ok) regions.value = await res.json()
   } catch {
     // ignore
@@ -67,7 +68,7 @@ function onImageClick(e: MouseEvent) {
 async function finishDrawing() {
   if (currentPoints.value.length < 3) return
   try {
-    const res = await fetch('/api/roi', {
+    const res = await authFetch('/api/roi', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -89,7 +90,7 @@ async function finishDrawing() {
 /** 切换启用/禁用 */
 async function toggleRegion(region: RoiRegion) {
   try {
-    await fetch(`/api/roi/item/${region.id}`, {
+    await authFetch(`/api/roi/item/${region.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !region.enabled }),
@@ -103,7 +104,7 @@ async function toggleRegion(region: RoiRegion) {
 /** 删除区域 */
 async function deleteRegion(id: number) {
   try {
-    await fetch(`/api/roi/item/${id}`, { method: 'DELETE' })
+    await authFetch(`/api/roi/item/${id}`, { method: 'DELETE' })
     loadRegions()
   } catch {
     // ignore
