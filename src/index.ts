@@ -20,6 +20,7 @@ import { AlertEngine } from "@/alert/engine";
 import { ThumbnailGenerator } from "@/storage/thumbnails";
 import { StorageCleaner } from "@/storage/cleaner";
 import { DiskUsage } from "@/storage/disk-usage";
+import { RecordingExporter } from "@/storage/export";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -90,9 +91,12 @@ cleaner.start();
 /** 磁盘用量统计 */
 const diskUsage = new DiskUsage(join(import.meta.dir, "../data"));
 
+/** 录像导出器 */
+const exporter = new RecordingExporter(join(import.meta.dir, "../data/exports"), config.ffmpegPath);
+
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;

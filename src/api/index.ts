@@ -11,6 +11,7 @@ import { type AlertStorage } from "@/alert/storage";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
+import { type RecordingExporter } from "@/storage/export";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -39,6 +40,7 @@ export function startServer(
   thumbnailGenerator: ThumbnailGenerator,
   cleaner: StorageCleaner,
   diskUsage: DiskUsage,
+  exporter: RecordingExporter,
 ): void {
   Bun.serve({
     port,
@@ -239,6 +241,55 @@ export function startServer(
         const file = Bun.file(thumbPath);
         return new Response(file, {
           headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
+        });
+      }
+
+      /** 录像导出：裁剪视频片段 */
+      if (url.pathname === "/api/recordings/export" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const file = obj.file as string | undefined;
+          const startSec = obj.startSec as number | undefined;
+          const endSec = obj.endSec as number | undefined;
+          const cameraId = obj.cameraId as string | undefined;
+          if (!file || startSec === undefined || endSec === undefined) {
+            return new Response("Missing file, startSec, endSec", { status: 400 });
+          }
+
+          const videoPath = recorder.getRecordingPath(file);
+          if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
+
+          /** 防止路径遍历 */
+          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const resolved = realpathSync(videoPath);
+          if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+
+          const result = exporter.export(resolved, startSec, endSec, cameraId ?? "unknown");
+          if (!result) return new Response("Export failed", { status: 500 });
+
+          const exportFilename = result.filePath.split("/").pop()!;
+          return Response.json({ filename: exportFilename, size: result.size });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 下载导出文件 */
+      const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.mp4)$/);
+      if (exportDownloadMatch && req.method === "GET") {
+        const filename = exportDownloadMatch[1]!;
+        const exportRoot = realpathSync(exporter.getExportPath("."));
+        const filePath = exporter.getExportPath(filename);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        const resolved = realpathSync(filePath);
+        if (!resolved.startsWith(exportRoot)) return new Response("Forbidden", { status: 403 });
+
+        const stat = statSync(filePath);
+        const file = Bun.file(filePath);
+        return new Response(file, {
+          headers: {
+            "Content-Type": "video/mp4",
+            "Content-Length": String(stat.size),
+            "Content-Disposition": `attachment; filename="${filename}"`,
+          },
         });
       }
 

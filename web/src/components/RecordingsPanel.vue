@@ -24,10 +24,32 @@ const loading = ref(false)
 /** 缩略图 URL 缓存（filename → URL） */
 const thumbUrls = ref<Record<string, string>>({})
 
+/** 导出状态 */
+const showExport = ref(false)
+const exportStartSec = ref(0)
+const exportEndSec = ref(0)
+const exporting = ref(false)
+/** 导出结果下载文件名 */
+const exportFilename = ref('')
+
 /** 当前播放的录像 URL */
 const videoUrl = computed(() => {
   if (!selectedRecording.value) return ''
   return `/api/recordings/${selectedRecording.value.filename}`
+})
+
+/** 当前录像总时长（秒） */
+const totalDurationSec = computed(() => {
+  if (!selectedRecording.value) return 0
+  return Math.max(0, Math.round((selectedRecording.value.endTime - selectedRecording.value.startTime) / 1000))
+})
+
+/** 导出时长文本 */
+const exportDurationText = computed(() => {
+  const sec = exportEndSec.value - exportStartSec.value
+  if (sec <= 0) return '0s'
+  if (sec < 60) return `${sec}s`
+  return `${Math.floor(sec / 60)}m${sec % 60}s`
 })
 
 /** 摄像头 ID → 名称映射 */
@@ -64,6 +86,15 @@ function duration(start: number, end: number): string {
   return `${Math.floor(sec / 60)}m${sec % 60}s`
 }
 
+/** 格式化秒数为 mm:ss 或 hh:mm:ss */
+function formatSec(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 /** 加载录像列表 */
 async function loadRecordings() {
   loading.value = true
@@ -84,6 +115,10 @@ async function loadRecordings() {
 /** 选择录像播放 */
 function play(rec: Recording) {
   selectedRecording.value = rec
+  showExport.value = false
+  exportFilename.value = ''
+  exportStartSec.value = 0
+  exportEndSec.value = totalDurationSec.value || 0
 }
 
 /** 悬停时懒加载缩略图 */
@@ -99,6 +134,53 @@ function onRecordingHover(rec: Recording) {
 /** 关闭播放器 */
 function closePlayer() {
   selectedRecording.value = null
+  showExport.value = false
+  exportFilename.value = ''
+}
+
+/** 打开导出面板 */
+function openExport() {
+  if (!selectedRecording.value) return
+  exportStartSec.value = 0
+  exportEndSec.value = totalDurationSec.value
+  showExport.value = true
+  exportFilename.value = ''
+}
+
+/** 执行导出 */
+async function doExport() {
+  if (!selectedRecording.value) return
+  exporting.value = true
+  exportFilename.value = ''
+  try {
+    const res = await fetch('/api/recordings/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file: selectedRecording.value.filename,
+        cameraId: selectedRecording.value.cameraId,
+        startSec: exportStartSec.value,
+        endSec: exportEndSec.value,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      exportFilename.value = data.filename
+    }
+  } catch {
+    // ignore
+  } finally {
+    exporting.value = false
+  }
+}
+
+/** 下载导出文件 */
+function downloadExport() {
+  if (!exportFilename.value) return
+  const link = document.createElement('a')
+  link.href = `/api/recordings/export/${exportFilename.value}`
+  link.download = exportFilename.value
+  link.click()
 }
 
 /** 根据摄像头和时间戳查找并播放对应录像 */
@@ -138,6 +220,7 @@ defineExpose({ loadRecordings, playAtTime })
         <div class="player-header">
           <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
+          <button class="export-toggle-btn" @click="openExport" title="导出片段">导出</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
         <video
@@ -146,6 +229,26 @@ defineExpose({ loadRecordings, playAtTime })
           autoplay
           class="player-video"
         />
+        <!-- 导出面板 -->
+        <div v-if="showExport" class="export-panel">
+          <div class="export-row">
+            <label>起始</label>
+            <input type="range" v-model.number="exportStartSec" :min="0" :max="totalDurationSec" step="1" class="export-slider" />
+            <span class="export-time">{{ formatSec(exportStartSec) }}</span>
+          </div>
+          <div class="export-row">
+            <label>结束</label>
+            <input type="range" v-model.number="exportEndSec" :min="0" :max="totalDurationSec" step="1" class="export-slider" />
+            <span class="export-time">{{ formatSec(exportEndSec) }}</span>
+          </div>
+          <div class="export-actions">
+            <span class="export-duration">时长: {{ exportDurationText }}</span>
+            <button v-if="!exportFilename" class="export-btn" @click="doExport" :disabled="exporting || exportEndSec <= exportStartSec">
+              {{ exporting ? '导出中...' : '导出片段' }}
+            </button>
+            <button v-else class="download-btn" @click="downloadExport">下载 ({{ exportDurationText }})</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -397,6 +500,109 @@ defineExpose({ loadRecordings, playAtTime })
   display: block;
   max-height: 75vh;
   background: #000;
+}
+
+/* 导出面板 */
+.export-toggle-btn {
+  margin-left: auto;
+  background: #2a4a2a;
+  color: #4ECDC4;
+  border: 1px solid #4ECDC4;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.export-toggle-btn:hover {
+  background: #4ECDC4;
+  color: #1a1a2e;
+}
+
+.export-panel {
+  padding: 12px 16px;
+  background: #0a0a1a;
+  border-top: 1px solid #2a2a4a;
+}
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.export-row label {
+  color: #888;
+  font-size: 12px;
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.export-slider {
+  flex: 1;
+  accent-color: #4ECDC4;
+  height: 4px;
+}
+
+.export-time {
+  color: #4ECDC4;
+  font-size: 12px;
+  font-family: monospace;
+  width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.export-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.export-duration {
+  color: #888;
+  font-size: 12px;
+}
+
+.export-btn {
+  margin-left: auto;
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.export-btn:hover {
+  opacity: 0.85;
+}
+
+.export-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.download-btn {
+  margin-left: auto;
+  background: #4CAF50;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.download-btn:hover {
+  opacity: 0.85;
 }
 
 /* 移动端适配 */
