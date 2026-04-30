@@ -50,8 +50,8 @@ export class CameraManager {
   }
 
   /** 获取所有摄像头状态 */
-  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean }> {
-    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean }> = [];
+  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number }> {
+    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number }> = [];
     for (const cam of this.cameraConfigs) {
       const extractor = this.extractors.get(cam.id);
       result.push({
@@ -61,6 +61,8 @@ export class CameraManager {
         lastFrameAt: extractor?.lastFrameAt ?? 0,
         group: cam.group,
         ptz: cam.ptz?.enabled === true,
+        width: cam.detectWidth,
+        height: cam.detectHeight,
       });
     }
     return result;
@@ -106,6 +108,8 @@ export class CameraManager {
 
     /** 主码流注册给录像器 */
     this.recorder.registerStream(cam.id, cam.stream.hd);
+    /** 注册摄像头名称（用于录像水印） */
+    this.recorder.registerCameraName(cam.id, cam.friendlyName);
 
     console.log(`[CameraManager] 启动摄像头: ${cam.friendlyName} (${cam.id})`);
   }

@@ -40,6 +40,10 @@ const runtimeConfig = new RuntimeConfig(config);
 
 /** 录像器（需先于 CameraManager 创建，因为 CameraManager 会注册主码流 URL） */
 const recorder = new MotionRecorder(join(import.meta.dir, "../data/recordings"), config.ffmpegPath, eventBus, runtimeConfig);
+/** 注册摄像头友好名称（用于录像水印） */
+for (const cam of config.cameras) {
+  recorder.registerCameraName(cam.id, cam.friendlyName);
+}
 recorder.start();
 
 /** 摄像头管理器（子码流预览/检测 + 主码流注册给录像器） */

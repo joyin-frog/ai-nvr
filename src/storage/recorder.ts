@@ -53,11 +53,16 @@ interface RecordingState {
  * 支持两种模式：变动触发录像（motion）和持续录制（continuous）
  * 直接从主码流 RTSP 拉流录像（高质量），与预览/检测解耦
  */
+/** drawtext 水印默认字体路径 */
+const DEFAULT_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+
 export class MotionRecorder {
   private config: RecorderConfig;
   private states = new Map<string, RecordingState>();
   /** 摄像头 ID → 主码流 RTSP URL */
   private hdStreams = new Map<string, string>();
+  /** 摄像头 ID → 友好名称（水印用） */
+  private cameraNames = new Map<string, string>();
   private runtimeConfig: RuntimeConfig;
 
   constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig) {
@@ -79,6 +84,11 @@ export class MotionRecorder {
     if (this.runtimeConfig.get().recording.mode === "continuous") {
       this.startContinuous(cameraId);
     }
+  }
+
+  /** 注册摄像头友好名称（水印用） */
+  registerCameraName(cameraId: string, name: string): void {
+    this.cameraNames.set(cameraId, name);
   }
 
   /** 移除摄像头 */
@@ -254,9 +264,26 @@ export class MotionRecorder {
     mkdirSync(dir, { recursive: true });
     const outputPath = join(dir, filename);
 
+    /** 构建 drawtext 水印滤镜 */
+    const filterParts: string[] = [];
+    const camName = this.cameraNames.get(cameraId);
+    if (camName) {
+      /** 转义摄像头名称中的单引号 */
+      const safeName = camName.replace(/'/g, "'\\''");
+      filterParts.push(
+        `drawtext=fontfile='${DEFAULT_FONT}':text='${safeName}':x=10:y=10:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`,
+      );
+    }
+    /** 左下角：实时时间戳，%{localtime:...} 内冒号用 \: 转义 */
+    const timeText = "%{localtime\\:%Y-%m-%d %H\\:%M\\:%S}";
+    filterParts.push(
+      `drawtext=fontfile='${DEFAULT_FONT}':text='${timeText}':x=10:y=h-th-10:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`,
+    );
+
     const args = [
       "-rtsp_transport", "tcp",
       "-i", hdUrl,
+      "-vf", filterParts.join(","),
       "-c:v", "libx264",
       "-preset", "ultrafast",
       "-crf", "23",
