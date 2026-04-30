@@ -24,9 +24,6 @@ const sortedDetections = computed(() =>
   [...props.detections].sort((a, b) => b.score - a.score)
 )
 
-/** 状态指示灯颜色 */
-const statusColor = computed(() => props.online ? '#4CAF50' : '#F44336')
-
 /** 收到检测事件时拉取标注图片 */
 watch(() => props.detectVersion, async (v: number) => {
   if (v === 0) return
@@ -45,19 +42,51 @@ watch(() => props.detectVersion, async (v: number) => {
 /** 优先显示标注图片，没有则显示实时帧 */
 const displayUrl = computed(() => annotatedUrl.value || props.frameImage)
 
+/** 检测框叠加在画面上的样式 */
+const detectionBoxes = computed(() => {
+  if (!sortedDetections.value.length) return []
+  return sortedDetections.value.map(d => ({
+    label: d.label,
+    score: d.score,
+    style: {
+      left: `${d.box.xmin * 100}%`,
+      top: `${d.box.ymin * 100}%`,
+      width: `${(d.box.xmax - d.box.xmin) * 100}%`,
+      height: `${(d.box.ymax - d.box.ymin) * 100}%`,
+    },
+  }))
+})
+
+/** 3秒后清除标注图片，恢复实时帧 */
+let annotatedTimer: ReturnType<typeof setTimeout> | null = null
+watch(annotatedUrl, (url) => {
+  if (annotatedTimer) clearTimeout(annotatedTimer)
+  if (url) {
+    annotatedTimer = setTimeout(() => {
+      if (annotatedUrl.value) {
+        URL.revokeObjectURL(annotatedUrl.value)
+        annotatedUrl.value = ''
+      }
+      annotatedTimer = null
+    }, 3000)
+  }
+})
+
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
+  if (annotatedTimer) clearTimeout(annotatedTimer)
 })
 </script>
 
 <template>
-  <div class="camera-view">
+  <div class="camera-view" :class="{ offline: !online }">
     <div class="camera-header">
-      <span class="status-dot" :style="{ backgroundColor: statusColor }" />
+      <span class="status-dot" :class="{ online, offline: !online }" />
       <span class="camera-name">{{ name }}</span>
-      <span class="detection-count" v-if="detections.length > 0">
-        {{ detections.length }} 个目标
+      <span v-if="online && detections.length > 0" class="detection-count">
+        {{ detections.length }}
       </span>
+      <span v-if="!online" class="offline-badge">离线</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" title="全屏">&#x26F6;</button>
     </div>
 
@@ -66,10 +95,24 @@ onUnmounted(() => {
         v-if="displayUrl"
         :src="displayUrl"
         class="camera-image"
-        alt="视频流"
+        alt=""
       />
       <div v-else class="camera-placeholder">
-        <span>等待视频...</span>
+        <div v-if="online" class="placeholder-icon">&#9679;</div>
+        <div v-else class="placeholder-icon offline-icon">&#10005;</div>
+        <span>{{ online ? '等待视频...' : '摄像头离线' }}</span>
+      </div>
+
+      <!-- 检测框叠加层 -->
+      <div v-if="displayUrl && detectionBoxes.length > 0" class="detection-overlay">
+        <div
+          v-for="(box, i) in detectionBoxes"
+          :key="i"
+          class="detect-box"
+          :style="box.style"
+        >
+          <span class="detect-label">{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
+        </div>
       </div>
     </div>
 
@@ -91,6 +134,11 @@ onUnmounted(() => {
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid #2a2a4a;
+  transition: border-color 0.3s;
+}
+
+.camera-view.offline {
+  opacity: 0.7;
 }
 
 .camera-header {
@@ -107,18 +155,42 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  background: #666;
+}
+
+.status-dot.online {
+  background: #4CAF50;
+}
+
+.status-dot.offline {
+  background: #F44336;
 }
 
 .camera-name {
   color: #e0e0e0;
   font-weight: 600;
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detection-count {
-  margin-left: auto;
-  color: #4ECDC4;
-  font-size: 12px;
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.offline-badge {
+  background: #F44336;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .fullscreen-btn {
@@ -136,28 +208,73 @@ onUnmounted(() => {
   color: #e0e0e0;
 }
 
-.has-detections .fullscreen-btn {
-  margin-left: 0;
-}
-
 .camera-body {
   position: relative;
   background: #0a0a1a;
-  min-height: 200px;
+  /** 16:9 宽高比 */
+  aspect-ratio: 16 / 9;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .camera-image {
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
   display: block;
 }
 
 .camera-placeholder {
-  color: #555;
-  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #444;
+  font-size: 13px;
+}
+
+.placeholder-icon {
+  font-size: 28px;
+  color: #4CAF50;
+  animation: pulse 2s infinite;
+}
+
+.placeholder-icon.offline-icon {
+  color: #F44336;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* 检测框叠加层 */
+.detection-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.detect-box {
+  position: absolute;
+  border: 2px solid #4ECDC4;
+  border-radius: 3px;
+}
+
+.detect-label {
+  position: absolute;
+  top: -20px;
+  left: -2px;
+  background: #4ECDC4;
+  color: #1a1a2e;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 2px;
+  white-space: nowrap;
 }
 
 .camera-footer {
@@ -185,10 +302,6 @@ onUnmounted(() => {
 
   .camera-name {
     font-size: 13px;
-  }
-
-  .camera-body {
-    min-height: 150px;
   }
 
   .camera-footer {
