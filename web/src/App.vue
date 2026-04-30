@@ -277,16 +277,20 @@ let patrolTimer: ReturnType<typeof setInterval> | null = null
 /** 当前轮巡索引 */
 let patrolIndex = 0
 
+/** 获取在线摄像头列表 */
+const onlineCameras = computed(() => cameras.value.filter(c => c.online))
+
 /** 开始轮巡 */
 function startPatrol() {
-  if (cameras.value.length === 0) return
+  if (onlineCameras.value.length === 0) return
   patrolActive.value = true
   patrolIndex = 0
-  /** 立即显示第一路 */
-  fullscreenCamera.value = cameras.value[0]!.id
+  fullscreenCamera.value = onlineCameras.value[0]!.id
   patrolTimer = setInterval(() => {
-    patrolIndex = (patrolIndex + 1) % cameras.value.length
-    fullscreenCamera.value = cameras.value[patrolIndex]!.id
+    const cams = onlineCameras.value
+    if (cams.length === 0) { stopPatrol(); return }
+    patrolIndex = (patrolIndex + 1) % cams.length
+    fullscreenCamera.value = cams[patrolIndex]!.id
   }, patrolInterval.value * 1000)
 }
 
