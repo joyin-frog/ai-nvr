@@ -260,4 +260,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头画面 FPS 质量指示：画面右下角实时 FPS 徽标，绿色(>=10)/黄色(5-10)/红色(<5) 三级质量颜色，数据从 /api/health 轮询
 - 检测快照画廊：EventPanel 视图切换（事件列表 ☰ / 快照画廊 ☷），网格缩略图展示检测快照，摄像头筛选，点击放大预览浮层
 - 事件/录像收藏标记：EventStorage starred 列 + toggleStar API，前端事件/录像行星标按钮 + ☆/★ 筛选开关，录像收藏 localStorage 持久化
-- 下一步优先：摄像头连接健康详情面板、录像批量操作增强
+- 摄像头健康详情面板：CameraStatusPanel 每路摄像头 FPS 迷你 SVG 折线图（30 点历史），FPS 质量色标（绿/黄/红），avgMotionRatio 显示，离线摄像头最后在线相对时间
+- 下一步优先：录像批量操作增强、摄像头分组视图优化
