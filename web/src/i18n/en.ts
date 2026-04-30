@@ -292,6 +292,9 @@ export default {
     posTopRight: 'Top Right',
     posBottomLeft: 'Bottom Left',
     posBottomRight: 'Bottom Right',
+    cameraSensitivity: 'Camera Sensitivity',
+    cameraReset: 'Reset',
+    detectFps: 'Detect FPS',
   },
   login: {
     title: 'JK NVR Login',

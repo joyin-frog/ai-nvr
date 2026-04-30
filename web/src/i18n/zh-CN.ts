@@ -294,6 +294,9 @@ export default {
     posTopRight: '右上',
     posBottomLeft: '左下',
     posBottomRight: '右下',
+    cameraSensitivity: '摄像头灵敏度',
+    cameraReset: '重置',
+    detectFps: '检测帧率',
   },
   login: {
     title: 'JK NVR 登录',

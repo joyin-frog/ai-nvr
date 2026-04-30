@@ -72,6 +72,9 @@ const success = ref(false)
 const modelReloading = ref(false)
 const modelInfo = ref<{ model: string; loading: boolean; initialized: boolean } | null>(null)
 
+/** 摄像头列表（用于 per-camera 配置） */
+const cameraList = ref<Array<{ id: string; name: string }>>([])
+
 /** 加载设置 */
 async function loadSettings() {
   try {
@@ -162,6 +165,38 @@ function removeWebhook(index: number) {
   settings.value.webhook.urls.splice(index, 1)
 }
 
+/** 加载摄像头列表（用于 per-camera 灵敏度配置） */
+async function loadCameras() {
+  try {
+    const res = await authFetch('/api/cameras')
+    if (res.ok) {
+      const data = await res.json()
+      cameraList.value = data.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** 设置摄像头级别覆盖参数 */
+function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps', rawValue: string) {
+  if (!settings.value) return
+  if (!settings.value.cameraOverrides[cameraId]) {
+    settings.value.cameraOverrides[cameraId] = {}
+  }
+  const override = settings.value.cameraOverrides[cameraId]!
+  if (rawValue === '') {
+    delete override[field]
+    /** 如果 override 对象为空，删除整个条目 */
+    if (Object.keys(override).length === 0) {
+      delete settings.value.cameraOverrides[cameraId]
+    }
+  } else {
+    const num = Number(rawValue)
+    if (!isNaN(num)) override[field] = num
+  }
+}
+
 /** 手动触发清理 */
 async function runCleanup() {
   try {
@@ -179,6 +214,7 @@ async function runCleanup() {
 onMounted(() => {
   loadSettings()
   loadModelInfo()
+  loadCameras()
 })
 </script>
 
@@ -203,6 +239,31 @@ onMounted(() => {
           <span class="field-label">{{ t('settings.motionCooldown') }}</span>
           <input type="number" v-model.number="settings.motion.cooldown" step="100" min="0" class="input" />
         </label>
+      </section>
+
+      <!-- 摄像头灵敏度覆盖 -->
+      <section v-if="cameraList.length > 0" class="section">
+        <h3>{{ t('settings.cameraSensitivity') }}</h3>
+        <div v-for="cam in cameraList" :key="cam.id" class="camera-override">
+          <div class="cam-override-header">
+            <span class="cam-override-name">{{ cam.name }}</span>
+            <button v-if="settings.cameraOverrides[cam.id]" class="reset-cam-btn" @click="delete settings.cameraOverrides[cam.id]">{{ t('settings.cameraReset') }}</button>
+          </div>
+          <div class="cam-override-fields">
+            <label class="field compact">
+              <span class="field-label small">{{ t('settings.motionThreshold') }}</span>
+              <input type="number" :value="settings.cameraOverrides[cam.id]?.motionThreshold ?? ''" @input="setCameraOverride(cam.id, 'motionThreshold', ($event.target as HTMLInputElement).value)" step="0.001" min="0.001" max="1" class="input small" :placeholder="String(settings.motion.threshold)" />
+            </label>
+            <label class="field compact">
+              <span class="field-label small">{{ t('settings.motionCooldown') }}</span>
+              <input type="number" :value="settings.cameraOverrides[cam.id]?.motionCooldown ?? ''" @input="setCameraOverride(cam.id, 'motionCooldown', ($event.target as HTMLInputElement).value)" step="100" min="0" class="input small" :placeholder="String(settings.motion.cooldown)" />
+            </label>
+            <label class="field compact">
+              <span class="field-label small">{{ t('settings.detectFps') }}</span>
+              <input type="number" :value="settings.cameraOverrides[cam.id]?.detectFps ?? ''" @input="setCameraOverride(cam.id, 'detectFps', ($event.target as HTMLInputElement).value)" step="1" min="1" max="30" class="input small" />
+            </label>
+          </div>
+        </div>
       </section>
 
       <!-- AI 检测 -->
@@ -678,5 +739,65 @@ onMounted(() => {
   width: 16px;
   height: 16px;
   cursor: pointer;
+}
+
+/* 摄像头灵敏度覆盖 */
+.camera-override {
+  background: #16213e;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border: 1px solid #2a2a4a;
+}
+
+.cam-override-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.cam-override-name {
+  font-size: 12px;
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.reset-cam-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #555;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.reset-cam-btn:hover {
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+
+.cam-override-fields {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field.compact {
+  padding: 2px 0;
+  gap: 4px;
+}
+
+.field-label.small {
+  font-size: 11px;
+  min-width: 40px;
+}
+
+.input.small {
+  width: 60px;
+  font-size: 11px;
+  padding: 2px 6px;
 }
 </style>
