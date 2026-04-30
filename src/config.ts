@@ -155,7 +155,7 @@ export function getConfigPath(): string {
 }
 
 /** 添加摄像头到配置文件并写回 YAML */
-export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number }): void {
+export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number; group?: string }): void {
   const raw = readFileSync(configFilePath, "utf-8");
   const doc = yaml.load(raw) as Record<string, unknown>;
 
@@ -170,6 +170,7 @@ export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl
   camerasNode[cam.id] = {
     enabled: true,
     friendly_name: cam.friendlyName,
+    ...(cam.group ? { group: cam.group } : {}),
     ffmpeg: {
       inputs: [
         { path: `rtsp://127.0.0.1:8554/${cam.id}_hd`, input_args: "preset-rtsp-restream", roles: ["detect", "record"] },

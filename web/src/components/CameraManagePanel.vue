@@ -18,7 +18,7 @@ const loading = ref(false)
 
 /** 添加摄像头表单 */
 const showAddForm = ref(false)
-const addForm = ref({ id: '', friendlyName: '', hdUrl: '', sdUrl: '', detectFps: 5 })
+const addForm = ref({ id: '', friendlyName: '', hdUrl: '', sdUrl: '', detectFps: 5, group: '' })
 const adding = ref(false)
 
 /** 编辑摄像头 */
@@ -56,7 +56,7 @@ async function addCamera() {
     })
     if (res.ok) {
       showAddForm.value = false
-      addForm.value = { id: '', friendlyName: '', hdUrl: '', sdUrl: '', detectFps: 5 }
+      addForm.value = { id: '', friendlyName: '', hdUrl: '', sdUrl: '', detectFps: 5, group: '' }
       loadCameras()
     }
   } catch {
@@ -149,6 +149,10 @@ defineExpose({ loadCameras })
       <div class="form-field">
         <label>子码流 RTSP</label>
         <input v-model="addForm.sdUrl" placeholder="rtsp://..." class="input" />
+      </div>
+      <div class="form-field">
+        <label>分组</label>
+        <input v-model="addForm.group" placeholder="可选分组名称" class="input" />
       </div>
       <button class="submit-btn" @click="addCamera" :disabled="adding">
         {{ adding ? '添加中...' : '确认添加' }}

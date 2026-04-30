@@ -116,7 +116,7 @@ export function startServer(
           if (!id || !friendlyName || !hdUrl || !sdUrl) {
             return new Response("Missing required fields: id, friendlyName, hdUrl, sdUrl", { status: 400 });
           }
-          addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined });
+          addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined, group: obj.group as string | undefined });
           /** 触发配置热重载 */
           const newConfig = loadConfig();
           cameraManager.reloadConfig(newConfig);
