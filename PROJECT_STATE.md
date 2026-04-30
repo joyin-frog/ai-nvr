@@ -239,4 +239,8 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像播放器音量控制：音量图标按钮（静音切换）+ 音量滑块，持久化 localStorage，加载时自动恢复
 - 录像播放器全屏模式：player-header 全屏按钮，Browser Fullscreen API，全屏时撑满视口
 - 持续录制模式（24/7）：RuntimeConfig recording.mode 支持 motion/continuous，MotionRecorder 自动分段循环录制，段间无缝衔接，设置面板可切换模式和配置分段时长
-- 下一步优先：录像模式热切换（运行时切换立即生效）、摄像头画面比例自适应
+- 录像模式运行时热切换：API PATCH /api/settings 检测 mode 变更自动调用 recorder.reloadMode()，无需重启
+- 摄像头全屏 Browser Fullscreen API：双击/按钮进入全屏时调用 requestFullscreen，Esc 同步退出单路模式
+- 录像播放器全屏模式：player-header 全屏按钮，Browser Fullscreen API，全屏时撑满视口
+- motion 事件实时去重：同一摄像头 5 秒内连续 motion 事件只更新不新增，避免事件列表被淹没
+- 下一步优先：摄像头画面比例自适应、录像回放键盘快捷键（左右箭头快进/快退）
