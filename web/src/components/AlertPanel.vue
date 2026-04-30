@@ -34,6 +34,17 @@ const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
 const loading = ref(false)
 
+/** 告警历史筛选参数 */
+const filterCamera = ref('')
+/** 日期筛选（YYYY-MM-DD） */
+const filterDate = ref('')
+/** 分页偏移 */
+const alertOffset = ref(0)
+/** 每页条数 */
+const PAGE_SIZE = 50
+/** 筛选条件下的总数 */
+const alertTotal = ref(0)
+
 const props = defineProps<{
   /** 摄像头列表（用于名称映射） */
   cameras?: Array<{ id: string; name: string }>
@@ -95,18 +106,39 @@ async function loadRules() {
   }
 }
 
-/** 加载告警历史 */
-async function loadAlerts() {
+/** 加载告警历史（支持筛选和分页） */
+async function loadAlerts(append = false) {
   try {
-    const res = await authFetch('/api/alerts/history?limit=50')
+    const params = new URLSearchParams()
+    params.set('limit', String(PAGE_SIZE))
+    if (!append) alertOffset.value = 0
+    params.set('offset', String(alertOffset.value))
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      const until = since + 86_400_000
+      params.set('since', String(since))
+      params.set('until', String(until))
+    }
+    const res = await authFetch(`/api/alerts/history?${params}`)
     if (res.ok) {
       const data = await res.json()
-      alerts.value = data.alerts
+      alerts.value = append ? [...alerts.value, ...data.alerts] : data.alerts
+      alertTotal.value = data.total ?? alerts.value.length
     }
   } catch {
     // ignore
   }
 }
+
+/** 加载更多（追加下一页） */
+function loadMoreAlerts() {
+  alertOffset.value += PAGE_SIZE
+  loadAlerts(true)
+}
+
+/** 是否还有更多 */
+const hasMore = computed(() => alerts.value.length < alertTotal.value)
 
 /** 添加规则 */
 async function addRule() {
@@ -352,6 +384,14 @@ defineExpose({ loadAlerts })
     </div>
 
     <!-- 告警历史 -->
+    <div v-if="activeView === 'history'" class="history-filters">
+      <select v-model="filterCamera" @change="loadAlerts()" class="filter-select" :title="t('alert.filterCamera')">
+        <option value="">{{ t('alert.allCameras') }}</option>
+        <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+      </select>
+      <input type="date" v-model="filterDate" @change="loadAlerts()" class="filter-date" :title="t('alert.filterDate')" />
+      <span v-if="alertTotal > 0" class="alert-total">{{ t('alert.totalCount', { count: alertTotal }) }}</span>
+    </div>
     <div v-if="activeView === 'history'" class="alert-list">
       <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
       <div v-for="alert in alerts" :key="alert.id" class="alert-item" @click="emit('jumpToRecording', alert.cameraId, alert.timestamp)">
@@ -362,6 +402,7 @@ defineExpose({ loadAlerts })
         </div>
         <div v-if="alert.detail" class="alert-detail">{{ alert.detail }}</div>
       </div>
+      <button v-if="hasMore" class="load-more-btn" @click="loadMoreAlerts">{{ t('alert.loadMore') }}</button>
     </div>
   </div>
 </template>
@@ -633,10 +674,64 @@ select.input {
 }
 
 /* 告警历史 */
+.history-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #2a2a4a;
+  background: #16213e;
+}
+
+.filter-select {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.filter-date {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.filter-date::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+.alert-total {
+  margin-left: auto;
+  font-size: 11px;
+  color: #666;
+}
+
 .alert-list {
   flex: 1;
   overflow-y: auto;
   padding: 4px;
+}
+
+.load-more-btn {
+  display: block;
+  width: 100%;
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.load-more-btn:hover {
+  background: #3a3a5a;
 }
 
 .alert-item {

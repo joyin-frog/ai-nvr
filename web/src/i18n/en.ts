@@ -229,6 +229,10 @@ export default {
     eventTypeDetect: 'AI Detect',
     eventTypeMotion: 'Motion Detect',
     eventTypeOffline: 'Camera Offline',
+    loadMore: 'Load More',
+    totalCount: '{count} total',
+    filterCamera: 'Filter Camera',
+    filterDate: 'Filter Date',
   },
   settings: {
     title: 'Settings',

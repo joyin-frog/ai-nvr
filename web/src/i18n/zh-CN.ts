@@ -231,6 +231,10 @@ export default {
     eventTypeDetect: 'AI 检测',
     eventTypeMotion: '变动检测',
     eventTypeOffline: '摄像头离线',
+    loadMore: '加载更多',
+    totalCount: '共 {count} 条',
+    filterCamera: '筛选摄像头',
+    filterDate: '筛选日期',
   },
   settings: {
     title: '设置',
