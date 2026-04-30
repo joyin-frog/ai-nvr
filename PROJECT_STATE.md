@@ -167,4 +167,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - Token 认证保护：YAML 配置 auth.token 启用认证（空则不启用），checkAuth 中间件检查 Bearer header 或 ?token= 参数，/api/auth/check 和 /api/auth/login 端点，前端 LoginView 登录页 + localStorage 持久化 token，authFetch 自动带 Authorization，WebSocket URL 附加 token，401 自动跳转登录
 - 全局 authFetch 迁移：8 个组件全部迁移到 authFetch（EventPanel/RecordingsPanel/CameraManagePanel/AlertPanel/SettingsPanel/CameraView/CameraStatusPanel/RoiEditor），authUrl() 给 video src / 下载链接附加 token
 - 摄像头画面检测框持久叠加：移除标注图3秒替代实时帧机制，displayUrl 始终显示实时帧，检测框通过叠加层持久渲染（跟随 detections），标注图仅用于截图下载，消除画面闪烁
-- 下一步优先：邮件告警推送、录像播放器快捷键
+- 摄像头轮巡自动切换：header 轮巡按钮（多路时显示），可配置间隔（2-60秒）自动全屏切换摄像头，Esc 停止，P 键快捷切换，onUnmounted 清理
+- 下一步优先：邮件告警推送、摄像头管理面板添加摄像头时增加分组字段
