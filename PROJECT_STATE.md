@@ -186,4 +186,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件 CSV 导出：EventPanel 头部 CSV 按钮，按当前筛选条件（日期/摄像头/类型）导出最多 10000 条事件为 UTF-8 CSV 文件下载
 - 浏览器通知国际化 + 点击跳转：通知文本全部使用 t()，点击通知自动聚焦窗口并全屏对应摄像头；App.vue 模板和事件处理中文全部国际化
 - 录像连续播放：播放器头部 ▶▶ 连续播放开关，视频结束后自动播放同摄像头下一段录像（按时间排序），默认开启
+- 双击全屏：CameraView 画面区域双击进入全屏，cursor:pointer 提示可交互
+- 快捷键描述国际化：App.vue registerShortcut 的 description 全部使用 t() 调用
 - 下一步优先：摄像头拖拽排序、PTZ 控制
