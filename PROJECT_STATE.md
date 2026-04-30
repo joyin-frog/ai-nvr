@@ -29,41 +29,52 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
                               Annotator（标注图片）
                                            ↓
                                     HTTP API + WebSocket Server
-                                    （帧通过 WS base64 推送）
+                                    （帧通过 WS 二进制协议推送）
                                            ↓
-                                    Vue3 前端（CameraView + EventPanel）
+                                    Vue3 前端（CameraView + EventPanel + SettingsPanel）
 ```
 
 ## 模块说明
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | EventBus | `src/event-bus.ts` | 类型安全事件总线，模块间解耦通信 |
-| Config | `src/config.ts` | 从 YAML 加载配置，提取摄像头/流/AI/服务配置 |
-| CameraManager | `src/camera/manager.ts` | 管理多个 FrameExtractor，压缩缓存最新帧 |
-| FrameExtractor | `src/camera/stream.ts` | ffmpeg 子进程 + JPEG 帧分割器，从 RTSP 提取帧，发射 online/offline 事件 |
+| Config | `src/config.ts` | 从 YAML 加载配置，`watchConfig` 支持热重载 |
+| CameraManager | `src/camera/manager.ts` | 管理多个 FrameExtractor，`reloadConfig` 支持动态增删 |
+| FrameExtractor | `src/camera/stream.ts` | ffmpeg 子进程 + JPEG 帧分割器，发射 online/offline 事件 |
 | MotionDetector | `src/detection/motion.ts` | 灰度像素差异比对，检测画面变动 |
 | AiDetector | `src/ai/detector.ts` | HuggingFace pipeline 目标检测 |
 | AiTypes | `src/ai/types.ts` | AI 检测类型定义 |
 | Annotator | `src/ai/annotator.ts` | SVG 叠加检测框 + sharp 合成标注图 |
 | EventStorage | `src/storage/events.ts` | bun:sqlite 事件持久化，支持查询/统计/清理 |
-| MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，ffmpeg 编码 MP4，自动分段/清理 |
+| MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，ffmpeg 编码 MP4，`scheduleStop` 支持运动超时自动停止 |
 | SystemMonitor | `src/monitor.ts` | 系统性能监控，FPS/内存/检测计数 |
-| API | `src/api/index.ts` | HTTP REST + WebSocket 服务，帧通过 WS base64 推送 |
-| 前端 | `web/src/` | Vue3 SPA，WebSocket 实时帧 + 事件日志 + 录像回放 + 状态面板 |
+| RuntimeConfig | `src/runtime-config.ts` | 运行时配置管理，API 可修改灵敏度/AI/录像参数 |
+| API | `src/api/index.ts` | HTTP REST + WebSocket 服务，二进制帧推送协议 |
+| 前端 | `web/src/` | Vue3 SPA，WebSocket 实时帧 + 事件日志 + 录像回放 + 状态面板 + 设置面板 |
 
 ## API 端点
 - `GET /` / `GET /api` — 服务状态
 - `GET /api/cameras` — 摄像头列表与状态
 - `GET /api/health` — 系统健康检查 + 性能指标（FPS/内存/运行时长/检测计数）
+- `GET /api/settings` — 获取运行时设置
+- `PATCH /api/settings` — 更新运行时设置（motion/ai/recording）
 - `GET /api/snapshot/:cameraId` — 最新帧（JPEG，回退用）
 - `GET /api/detection/annotated/:cameraId` — 标注后的图片
 - `GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=` — 事件历史查询
 - `GET /api/recordings?cameraId=` — 录像列表
 - `GET /api/recordings/:cameraId/:filename` — 录像文件播放
-- `WS /api/events` — 实时事件推送（frame含base64图片/motion/detect/camera:online/camera:offline）
+- `WS /api/events` — 实时事件推送（二进制协议：4B头长度 + JSON + 可选二进制帧）
+
+## WebSocket 二进制协议
+```
+[4字节 header 长度 LE uint32][JSON header][可选 JPEG 二进制帧]
+```
+- frame 事件：JSON 头不含 data，帧数据作为二进制部分追加
+- detect 事件：JSON 头不含 annotatedImage
+- 其他事件：仅 JSON 头
 
 ## 事件流
-- `frame` — 原始帧（cameraId, data: Buffer, timestamp）→ WS 推送含 base64 image
+- `frame` — 原始帧（cameraId, data: Buffer, timestamp）→ WS 二进制推送
 - `motion` — 变动检测（cameraId, ratio, data: Buffer, timestamp）→ 触发录像
 - `detect` — AI 检测（cameraId, timestamp, detections, annotatedImage）
 - `camera:online` / `camera:offline` — 摄像头状态变化
@@ -83,7 +94,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 前端 Vite dev: 3200
 
 ## 当前阶段
-- 核心视频流链路完整：RTSP → ffmpeg → 帧分割 → WS 推送 → 前端实时显示
+- 核心视频流链路完整：RTSP → ffmpeg → 帧分割 → WS 二进制推送 → 前端实时显示
 - 变动检测 + AI 检测完整：motion → DETR 目标检测 → 标注图
 - 摄像头在线状态：自动检测上线/离线，WS 实时推送
 - 事件持久化：所有事件存 SQLite，支持历史查询
@@ -95,4 +106,8 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 移动端适配：<768px 单列布局 + 底部滑出面板
 - 浏览器通知：person/car 等重要目标检测 + 摄像头离线时推送
 - 配置热重载：修改 YAML 后自动增删摄像头，无需重启
-- 下一步优先：Webhook 通知、检测区域划定、灵敏度配置 UI
+- 运行时设置 API：通过 PATCH /api/settings 动态修改灵敏度/AI/录像参数
+- 前端设置面板：4个侧边栏标签（事件/录像/状态/设置），支持运行时参数调整
+- 二进制 WebSocket 协议：替代 base64 JSON，消除 ~33% 编码开销
+- blob URL 内存管理：帧更新时释放旧 URL 避免泄漏
+- 下一步优先：双码流策略、Webhook 通知、检测区域划定
