@@ -769,6 +769,8 @@ defineExpose({ loadRecordings, playAtTime })
       v-if="!filterCamera"
       :recordings="filteredRecordings"
       :cameras="cameras"
+      :playback-time="selectedRecording && isPlaying ? currentAbsTime : 0"
+      :playback-camera-id="selectedRecording?.cameraId ?? ''"
       @play="play"
     />
 
@@ -777,6 +779,7 @@ defineExpose({ loadRecordings, playAtTime })
       v-if="filterCamera"
       :recordings="filteredRecordings"
       :selected-camera="filterCamera"
+      :playback-time="selectedRecording && isPlaying ? currentAbsTime : 0"
       @play="play"
     />
 

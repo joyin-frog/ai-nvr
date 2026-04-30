@@ -18,6 +18,8 @@ const props = defineProps<{
   recordings: Recording[]
   /** 当前选中的摄像头（空=全部） */
   selectedCamera: string
+  /** 当前播放位置（绝对时间戳 ms，0 表示未播放） */
+  playbackTime?: number
 }>()
 
 const emit = defineEmits<{
@@ -149,6 +151,14 @@ const nowPosition = computed(() => {
   const { start, end } = timeRange.value
   if (now.value < start || now.value > end) return -1
   return ((now.value - start) / (end - start)) * 100
+})
+
+/** 播放位置指示器 */
+const playbackPosition = computed(() => {
+  if (!props.playbackTime) return -1
+  const { start, end } = timeRange.value
+  if (props.playbackTime < start || props.playbackTime > end) return -1
+  return ((props.playbackTime - start) / (end - start)) * 100
 })
 
 /** 切换到上/下一个时间段 */
@@ -293,6 +303,12 @@ function goToday() {
       <div v-if="nowPosition >= 0" class="now-indicator" :style="{ left: nowPosition + '%' }">
         <div class="now-dot"></div>
         <div class="now-line"></div>
+      </div>
+
+      <!-- 播放位置指示器 -->
+      <div v-if="playbackPosition >= 0" class="playback-indicator" :style="{ left: playbackPosition + '%' }">
+        <div class="playback-dot"></div>
+        <div class="playback-line"></div>
       </div>
     </div>
 
@@ -474,6 +490,34 @@ function goToday() {
   left: 0;
   width: 1px;
   background: #e74c3c;
+}
+
+/* 播放位置指示器 */
+.playback-indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.playback-dot {
+  width: 8px;
+  height: 8px;
+  background: #FFD93D;
+  border-radius: 50%;
+  position: absolute;
+  top: 7px;
+  left: -4px;
+}
+
+.playback-line {
+  position: absolute;
+  top: 14px;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: #FFD93D;
 }
 
 /* 日期快速选择 */

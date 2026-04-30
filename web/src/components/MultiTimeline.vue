@@ -22,6 +22,10 @@ interface CameraInfo {
 const props = defineProps<{
   recordings: Recording[]
   cameras: CameraInfo[]
+  /** 当前播放位置（绝对时间戳 ms，0 表示未播放） */
+  playbackTime?: number
+  /** 当前播放的摄像头 ID */
+  playbackCameraId?: string
 }>()
 
 const emit = defineEmits<{
@@ -99,6 +103,14 @@ const nowPosition = computed(() => {
   const { start, end } = timeRange.value
   if (now.value < start || now.value > end) return -1
   return ((now.value - start) / (end - start)) * 100
+})
+
+/** 播放位置指示器 */
+const playbackPosition = computed(() => {
+  if (!props.playbackTime) return -1
+  const { start, end } = timeRange.value
+  if (props.playbackTime < start || props.playbackTime > end) return -1
+  return ((props.playbackTime - start) / (end - start)) * 100
 })
 
 /** 筛选日期范围内的录像 */
@@ -244,6 +256,8 @@ function onSegClick(e: MouseEvent, rec: Recording) {
           />
           <!-- 当前时间指示器 -->
           <div v-if="nowPosition >= 0" class="mtl-now" :style="{ left: nowPosition + '%' }" />
+          <!-- 播放位置指示器（仅当前播放的摄像头轨道） -->
+          <div v-if="playbackPosition >= 0 && cam.id === playbackCameraId" class="mtl-playback" :style="{ left: playbackPosition + '%' }" />
         </div>
       </div>
       <div v-if="cameraRows.length === 0" class="mtl-empty">
@@ -417,6 +431,16 @@ function onSegClick(e: MouseEvent, rec: Recording) {
   width: 1px;
   background: #e74c3c;
   z-index: 2;
+}
+
+.mtl-playback {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: #FFD93D;
+  z-index: 3;
+  border-radius: 1px;
 }
 
 .mtl-empty {
