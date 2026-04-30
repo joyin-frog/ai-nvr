@@ -597,8 +597,11 @@ onUnmounted(() => {
             @fullscreen="enterFullscreen"
           />
         </div>
+        <!-- WS 断开覆盖 -->
+        <div v-if="wsState === 'disconnected' && cameras.length > 0" class="ws-disconnected-overlay">
+          <span>{{ t('header.wsDisconnected') }}</span>
+        </div>
       </div>
-      <!-- 桌面端侧边栏 -->
       <div v-if="!isMobile" class="sidebar" :style="{ width: sidebarWidth + 'px' }">
         <div class="sidebar-resize-handle" @mousedown="onResizeStart" />
         <div class="sidebar-tabs">
@@ -807,6 +810,7 @@ onUnmounted(() => {
   display: grid;
   gap: 12px;
   overflow-y: auto;
+  position: relative;
 }
 
 .camera-grid.fullscreen {
@@ -852,6 +856,22 @@ onUnmounted(() => {
 
 .empty-state .header-btn:hover {
   opacity: 0.9;
+}
+
+.ws-disconnected-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 8px;
+  background: rgba(244, 67, 54, 0.15);
+  border-bottom: 1px solid rgba(244, 67, 54, 0.3);
+  text-align: center;
+  color: #F44336;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 10;
 }
 
 .camera-cell.dragging {
