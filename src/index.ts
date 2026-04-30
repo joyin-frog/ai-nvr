@@ -36,8 +36,11 @@ recorder.start();
 /** 摄像头管理器（子码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder);
 
-/** 变动检测器（使用 RuntimeConfig，支持 API 热修改阈值/冷却） */
-const motionDetector = new MotionDetector(runtimeConfig, eventBus);
+/** ROI 检测区域存储（MotionDetector 需要） */
+const roiStorage = new RoiStorage(join(import.meta.dir, "../data/roi.db"));
+
+/** 变动检测器（使用 RuntimeConfig + ROI 区域过滤） */
+const motionDetector = new MotionDetector(runtimeConfig, eventBus, roiStorage);
 
 /** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
 const annotator = new Annotator();
@@ -63,9 +66,6 @@ webhookNotifier.start();
 /** 检测快照存储（保存标注图到磁盘） */
 const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);
 snapshotStorage.start();
-
-/** ROI 检测区域存储 */
-const roiStorage = new RoiStorage(join(import.meta.dir, "../data/roi.db"));
 
 /** 启动 HTTP 服务 */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));

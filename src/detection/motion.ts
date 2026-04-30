@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
+import { type RoiStorage } from "@/storage/roi";
 
 /** 每个摄像头的变动检测状态 */
 interface CameraState {
@@ -10,12 +11,16 @@ interface CameraState {
   lastMotionTime: number;
   /** 是否正在处理中（防止帧堆积） */
   processing: boolean;
+  /** ROI 缓存的 key（摄像头 ID + ROI 版本） */
+  roiCacheKey: string;
+  /** 预计算的 ROI mask（true = 在检测区域内） */
+  roiMask: Uint8Array | null;
 }
 
 /**
  * 变动检测器
  * 监听帧事件，通过灰度像素差异比对判断是否有变动
- * 使用 RuntimeConfig 获取实时配置（支持 API 热修改）
+ * 支持 ROI（Region of Interest）：只在检测区域内计算像素差异
  */
 export class MotionDetector {
   /** 每个摄像头的检测状态 */
@@ -24,13 +29,14 @@ export class MotionDetector {
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
+    private roiStorage: RoiStorage,
   ) {}
 
   /** 获取或创建摄像头状态 */
   private getOrCreateState(cameraId: string): CameraState {
     let state = this.states.get(cameraId);
     if (!state) {
-      state = { prevPixels: null, lastMotionTime: 0, processing: false };
+      state = { prevPixels: null, lastMotionTime: 0, processing: false, roiCacheKey: "", roiMask: null };
       this.states.set(cameraId, state);
     }
     return state;
@@ -62,14 +68,23 @@ export class MotionDetector {
         .raw()
         .toBuffer({ resolveWithObject: true });
     } catch {
-      /** 解码失败的帧直接跳过 */
       return;
     }
 
     const { data, info } = rawData;
+    const width = info.width;
+    const height = info.height;
+    const totalPixels = width * height;
 
     const pixels = new Uint8Array(data.buffer);
     const state = this.getOrCreateState(cameraId);
+
+    /** 构建 ROI mask（每60秒刷新一次） */
+    const roiKey = `${cameraId}:${Math.floor(timestamp / 60000)}`;
+    if (state.roiCacheKey !== roiKey) {
+      state.roiMask = this.buildRoiMask(cameraId, width, height);
+      state.roiCacheKey = roiKey;
+    }
 
     /** 第一帧，没有可对比的，存储后返回 */
     if (!state.prevPixels) {
@@ -77,19 +92,37 @@ export class MotionDetector {
       return;
     }
 
-    /** 计算像素差异 */
-    const totalPixels = info.width * info.height;
+    /** 计算像素差异（考虑 ROI mask） */
     let diffCount = 0;
+    let roiPixelCount = totalPixels;
     const prev = state.prevPixels;
+    const mask = state.roiMask;
 
-    for (let i = 0; i < totalPixels; i++) {
-      /** 灰度图每像素 1 字节，绝对差值 > 25 算变动 */
-      if (Math.abs(pixels[i]! - prev[i]!) > 25) {
-        diffCount++;
+    if (mask) {
+      roiPixelCount = 0;
+      for (let i = 0; i < totalPixels; i++) {
+        if (mask[i]) {
+          roiPixelCount++;
+          if (Math.abs(pixels[i]! - prev[i]!) > 25) {
+            diffCount++;
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < totalPixels; i++) {
+        if (Math.abs(pixels[i]! - prev[i]!) > 25) {
+          diffCount++;
+        }
       }
     }
 
-    const ratio = diffCount / totalPixels;
+    /** ROI 内无像素则跳过 */
+    if (roiPixelCount === 0) {
+      state.prevPixels = pixels;
+      return;
+    }
+
+    const ratio = diffCount / roiPixelCount;
 
     /** 更新上一帧 */
     state.prevPixels = pixels;
@@ -103,6 +136,79 @@ export class MotionDetector {
         data: jpeg,
         timestamp,
       });
+    }
+  }
+
+  /**
+   * 构建 ROI mask
+   * 返回一个与图像同大小的 Uint8Array，1 = 在检测区域内，0 = 不在
+   * 如果没有 ROI，返回 null（表示全图检测）
+   */
+  private buildRoiMask(cameraId: string, width: number, height: number): Uint8Array | null {
+    const polygons = this.roiStorage.getEnabledPolygons(cameraId);
+    if (polygons.length === 0) return null;
+
+    const mask = new Uint8Array(width * height);
+
+    for (const polygon of polygons) {
+      if (polygon.points.length < 3) continue;
+      this.rasterizePolygon(mask, polygon.points, width, height);
+    }
+
+    return mask;
+  }
+
+  /**
+   * 将多边形光栅化到 mask 上（扫描线填充算法）
+   * 坐标为归一化值 (0-1)，映射到图像像素坐标
+   */
+  private rasterizePolygon(
+    mask: Uint8Array,
+    points: Array<{ x: number; y: number }>,
+    width: number,
+    height: number,
+  ): void {
+    /** 转换为像素坐标 */
+    const pixelPoints = points.map(p => ({
+      x: Math.round(p.x * width),
+      y: Math.round(p.y * height),
+    }));
+
+    /** 找到 Y 范围 */
+    let minY = height;
+    let maxY = 0;
+    for (const p of pixelPoints) {
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    minY = Math.max(0, minY);
+    maxY = Math.min(height - 1, maxY);
+
+    /** 对每条扫描线，计算与多边形边的交点 */
+    for (let y = minY; y <= maxY; y++) {
+      const intersections: number[] = [];
+      const n = pixelPoints.length;
+
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const pi = pixelPoints[i]!;
+        const pj = pixelPoints[j]!;
+
+        if ((pi.y <= y && pj.y > y) || (pj.y <= y && pi.y > y)) {
+          const x = pi.x + (y - pi.y) / (pj.y - pi.y) * (pj.x - pi.x);
+          intersections.push(x);
+        }
+      }
+
+      /** 排序交点，填充交点对之间的像素 */
+      intersections.sort((a, b) => a - b);
+      for (let k = 0; k < intersections.length - 1; k += 2) {
+        const startX = Math.max(0, Math.ceil(intersections[k]!));
+        const endX = Math.min(width - 1, Math.floor(intersections[k + 1]!));
+        for (let x = startX; x <= endX; x++) {
+          mask[y * width + x] = 1;
+        }
+      }
     }
   }
 }
