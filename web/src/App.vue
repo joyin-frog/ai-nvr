@@ -476,7 +476,7 @@ onUnmounted(() => {
           >{{ t('tab.settings') }}</button>
         </div>
         <div class="sidebar-content">
-          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" @play-recording="onPlayRecording" />
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" :cameras="cameras" @play-recording="onPlayRecording" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"

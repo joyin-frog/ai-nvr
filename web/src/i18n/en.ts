@@ -48,6 +48,8 @@ export default {
     timelineTitle: "Today's Events",
     hourEvents: '{hour}:00 - {count} events',
     motionRatio: 'Motion {ratio}%',
+    allCameras: 'All Cameras',
+    filterDate: 'Filter by date',
   },
   recording: {
     title: 'Recordings',

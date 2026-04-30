@@ -48,6 +48,8 @@ export default {
     timelineTitle: '今日事件分布',
     hourEvents: '{hour}:00 - {count} 个事件',
     motionRatio: '变动 {ratio}%',
+    allCameras: '全部摄像头',
+    filterDate: '筛选日期',
   },
   recording: {
     title: '录像',

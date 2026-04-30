@@ -28,15 +28,22 @@ interface EventItem {
 }
 
 const events = ref<EventItem[]>([])
-const MAX_LIVE_EVENTS = 50
+const PAGE_SIZE = 50
 const loading = ref(false)
+const hasMore = ref(false)
 const filterType = ref('')
+/** 摄像头筛选 */
+const filterCamera = ref('')
+/** 日期筛选（YYYY-MM-DD） */
+const filterDate = ref('')
 /** 当前展开的事件 ID */
 const expandedId = ref<number | null>(null)
 
 const props = defineProps<{
   /** 每个摄像头的最新检测帧快照 */
   snapshots?: Record<string, string>
+  /** 摄像头列表（用于筛选） */
+  cameras?: Array<{ id: string; name: string }>
 }>()
 
 const emit = defineEmits<{
@@ -57,8 +64,8 @@ function addEvent(type: string, cameraId: string, detail: string) {
   const now = Date.now()
   const time = new Date(now).toLocaleTimeString('zh-CN')
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
-  if (events.value.length > MAX_LIVE_EVENTS) {
-    events.value = events.value.slice(0, MAX_LIVE_EVENTS)
+  if (events.value.length > PAGE_SIZE) {
+    events.value = events.value.slice(0, PAGE_SIZE)
   }
 }
 
@@ -86,8 +93,15 @@ function parseDetail(type: string, detail: string | null): string {
 async function loadHistory() {
   loading.value = true
   try {
-    const params = new URLSearchParams({ limit: '100' })
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
     if (filterType.value) params.set('type', filterType.value)
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      const until = since + 86_400_000
+      params.set('since', String(since))
+      params.set('until', String(until))
+    }
     const res = await authFetch(`/api/events/history?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -101,6 +115,43 @@ async function loadHistory() {
         rawDetail: e.detail,
       }))
       events.value = historyEvents
+      hasMore.value = historyEvents.length >= PAGE_SIZE
+    }
+  } catch {
+    // ignore
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 加载更多（追加） */
+async function loadMore() {
+  if (loading.value || !hasMore.value) return
+  loading.value = true
+  try {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(events.value.length) })
+    if (filterType.value) params.set('type', filterType.value)
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      const until = since + 86_400_000
+      params.set('since', String(since))
+      params.set('until', String(until))
+    }
+    const res = await authFetch(`/api/events/history?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      const moreEvents: EventItem[] = (data.events as EventRecord[]).map((e) => ({
+        id: e.id,
+        time: formatTimestamp(e.timestamp),
+        timestamp: e.timestamp,
+        type: e.type,
+        cameraId: e.camera_id,
+        detail: parseDetail(e.type, e.detail),
+        rawDetail: e.detail,
+      }))
+      events.value.push(...moreEvents)
+      hasMore.value = moreEvents.length >= PAGE_SIZE
     }
   } catch {
     // ignore
@@ -149,6 +200,17 @@ defineExpose({ addEvent, loadHistory })
   <div class="event-panel">
     <div class="panel-header">
       <span>{{ t('event.title') }}</span>
+      <input
+        type="date"
+        v-model="filterDate"
+        @change="loadHistory"
+        class="filter-date"
+        :title="t('event.filterDate')"
+      />
+      <select v-model="filterCamera" @change="loadHistory" class="filter-select">
+        <option value="">{{ t('event.allCameras') }}</option>
+        <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+      </select>
       <select v-model="filterType" @change="loadHistory" class="filter-select">
         <option value="">{{ t('event.allTypesLabel') }}</option>
         <option value="motion">{{ t('event.motion') }}</option>
@@ -207,6 +269,11 @@ defineExpose({ addEvent, loadHistory })
           </div>
         </div>
       </div>
+      <div v-if="hasMore" class="load-more">
+        <button class="load-more-btn" @click="loadMore" :disabled="loading">
+          {{ loading ? t('app.loading') : t('event.loadMore') }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -235,13 +302,25 @@ defineExpose({ addEvent, loadHistory })
 }
 
 .filter-select {
-  margin-left: auto;
   background: #0a0a1a;
   color: #e0e0e0;
   border: 1px solid #2a2a4a;
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 12px;
+}
+
+.filter-date {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.filter-date::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
 }
 
 .refresh-btn {
@@ -370,6 +449,29 @@ defineExpose({ addEvent, loadHistory })
 
 .play-btn:hover {
   opacity: 0.85;
+}
+
+.load-more {
+  padding: 8px;
+  text-align: center;
+}
+
+.load-more-btn {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 16px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.load-more-btn:hover {
+  background: #3a3a5a;
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
 }
 
 /* 移动端适配 */
