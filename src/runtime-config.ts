@@ -11,6 +11,12 @@ export interface CameraOverride {
   detectFps?: number;
 }
 
+/** Webhook 通知配置 */
+export interface WebhookConfig {
+  /** Webhook 推送 URL 列表 */
+  urls: string[];
+}
+
 /** 运行时可修改的设置 */
 export interface RuntimeSettings {
   /** 全局变动检测配置 */
@@ -26,6 +32,8 @@ export interface RuntimeSettings {
     /** 自动清理天数 */
     retentionDays: number;
   };
+  /** Webhook 通知配置 */
+  webhook: WebhookConfig;
 }
 
 /**
@@ -43,6 +51,9 @@ export class RuntimeConfig {
       recording: {
         postMotionDuration: 5000,
         retentionDays: 7,
+      },
+      webhook: {
+        urls: [],
       },
     };
   }
@@ -82,6 +93,13 @@ export class RuntimeConfig {
       this.settings.cameraOverrides = { ...this.settings.cameraOverrides, ...(obj.cameraOverrides as Record<string, CameraOverride>) };
     }
 
+    if (obj.webhook && typeof obj.webhook === "object") {
+      const w = obj.webhook as Record<string, unknown>;
+      if (Array.isArray(w.urls)) {
+        this.settings.webhook.urls = w.urls.filter((u): u is string => typeof u === "string");
+      }
+    }
+
     return this.settings;
   }
 
@@ -98,6 +116,9 @@ export class RuntimeConfig {
     }
     if (updates.cameraOverrides) {
       this.settings.cameraOverrides = { ...this.settings.cameraOverrides, ...updates.cameraOverrides };
+    }
+    if (updates.webhook) {
+      this.settings.webhook = { ...this.settings.webhook, ...updates.webhook };
     }
     return this.settings;
   }

@@ -12,6 +12,7 @@ import { EventStorage } from "@/storage/events";
 import { MotionRecorder } from "@/storage/recorder";
 import { SystemMonitor } from "@/monitor";
 import { RuntimeConfig } from "@/runtime-config";
+import { WebhookNotifier } from "@/notify/webhook";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -57,6 +58,10 @@ aiDetector.init().then(() => {
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
 const monitor = new SystemMonitor(eventBus);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig);
+
+/** Webhook 通知（事件推送到外部 URL） */
+const webhookNotifier = new WebhookNotifier(runtimeConfig, eventBus);
+webhookNotifier.start();
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline"] as const;
