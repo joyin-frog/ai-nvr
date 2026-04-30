@@ -42,9 +42,18 @@ const metrics = ref<SystemMetrics | null>(null)
 const todayStats = ref<{
   motionCount: number
   detectCount: number
+  offlineCount: number
+  alertCount: number
   byCamera: Array<{ cameraId: string; count: number }>
   byHour: Array<{ hour: number; count: number; type: string }>
 } | null>(null)
+
+/** 7天趋势数据 */
+const weekStats = ref<Array<{ date: string; motion: number; detect: number; alert: number }>>([])
+
+/** 图表时间范围 */
+type ChartRange = 'today' | 'week'
+const chartRange = ref<ChartRange>('today')
 
 /** 小时趋势图数据：24 个桶，每个桶包含 motion 和 detect 计数 */
 const hourlyChart = computed(() => {
@@ -63,6 +72,33 @@ const hourlyChart = computed(() => {
     }
   }
   return buckets
+})
+
+/** 7天趋势图最大值 */
+const weekChartMax = computed(() => {
+  let max = 0
+  for (const d of weekStats.value) {
+    max = Math.max(max, d.motion + d.detect + d.alert)
+  }
+  return max || 1
+})
+
+/** 环形图分段（SVG stroke-dasharray） */
+const donutSegments = computed(() => {
+  const ts = todayStats.value
+  if (!ts) return { motion: '0 100', detect: '0 100', alert: '0 100', detectOffset: 25, alertOffset: 25 }
+  const total = ts.motionCount + ts.detectCount + ts.alertCount
+  if (total === 0) return { motion: '0 100', detect: '0 100', alert: '0 100', detectOffset: 25, alertOffset: 25 }
+  const mPct = (ts.motionCount / total) * 100
+  const dPct = (ts.detectCount / total) * 100
+  const aPct = (ts.alertCount / total) * 100
+  return {
+    motion: `${mPct} ${100 - mPct}`,
+    detect: `${dPct} ${100 - dPct}`,
+    alert: `${aPct} ${100 - aPct}`,
+    detectOffset: 25 - mPct,
+    alertOffset: 25 - mPct - dPct,
+  }
 })
 
 /** 趋势图最大值 */
@@ -148,6 +184,8 @@ async function loadTodayStats() {
     todayStats.value = {
       motionCount: byType.motion ?? 0,
       detectCount: byType.detect ?? 0,
+      offlineCount: (byType['camera:offline'] ?? 0) as number,
+      alertCount: byType.alert ?? 0,
       byCamera: (data.byCamera as Array<{ camera_id: string; count: number }>).map(c => ({
         cameraId: c.camera_id,
         count: c.count,
@@ -159,9 +197,39 @@ async function loadTodayStats() {
   }
 }
 
+/** 加载 7 天趋势数据 */
+async function loadWeekStats() {
+  const result: Array<{ date: string; motion: number; detect: number; alert: number }> = []
+  const now = new Date()
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - i)
+    d.setHours(0, 0, 0, 0)
+    const since = d.getTime()
+    const until = since + 86400000
+    const dateStr = `${d.getMonth() + 1}/${d.getDate()}`
+    try {
+      const res = await authFetch(`/api/events/stats?since=${since}&until=${until}`)
+      if (!res.ok) { result.push({ date: dateStr, motion: 0, detect: 0, alert: 0 }); continue }
+      const data = await res.json()
+      const byType = data.byType as Record<string, number>
+      result.push({
+        date: dateStr,
+        motion: byType.motion ?? 0,
+        detect: byType.detect ?? 0,
+        alert: byType.alert ?? 0,
+      })
+    } catch {
+      result.push({ date: dateStr, motion: 0, detect: 0, alert: 0 })
+    }
+  }
+  weekStats.value = result
+}
+
 onMounted(() => {
   loadMetrics()
   loadTodayStats()
+  loadWeekStats()
   timer = setInterval(loadMetrics, 5000)
   statsTimer = setInterval(loadTodayStats, 30000)
 })
@@ -207,33 +275,87 @@ onUnmounted(() => {
           <span class="stat-num detect">{{ todayStats.detectCount }}</span>
           <span class="stat-desc">{{ t('status.todayDetect') }}</span>
         </div>
+        <div class="stat-card">
+          <span class="stat-num alert">{{ todayStats.alertCount }}</span>
+          <span class="stat-desc">{{ t('status.todayAlerts') }}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num offline">{{ todayStats.offlineCount }}</span>
+          <span class="stat-desc">{{ t('status.todayOffline') }}</span>
+        </div>
+      </div>
+      <!-- 事件类型分布环形图 -->
+      <div v-if="todayStats.motionCount + todayStats.detectCount + todayStats.alertCount > 0" class="donut-section">
+        <div class="donut-chart">
+          <svg viewBox="0 0 36 36">
+            <circle class="donut-ring" cx="18" cy="18" r="15.9" />
+            <circle class="donut-segment motion-seg" cx="18" cy="18" r="15.9"
+              :stroke-dasharray="donutSegments.motion" stroke-dashoffset="25" />
+            <circle class="donut-segment detect-seg" cx="18" cy="18" r="15.9"
+              :stroke-dasharray="donutSegments.detect" :stroke-dashoffset="donutSegments.detectOffset" />
+            <circle class="donut-segment alert-seg" cx="18" cy="18" r="15.9"
+              :stroke-dasharray="donutSegments.alert" :stroke-dashoffset="donutSegments.alertOffset" />
+          </svg>
+          <div class="donut-center">
+            <span class="donut-total">{{ todayStats.motionCount + todayStats.detectCount + todayStats.alertCount }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- 事件趋势图 -->
-    <div v-if="todayStats" class="chart-section">
-      <div class="stats-title">{{ t('status.todayEvents') }}</div>
-      <div class="hourly-chart">
-        <div v-for="b in hourlyChart" :key="b.hour" class="chart-bar-wrap" :title="`${b.hour}:00 — motion: ${b.motion} detect: ${b.detect}`">
-          <div class="chart-bar">
-            <div
-              v-if="b.detect > 0"
-              class="bar-segment detect"
-              :style="{ height: (b.detect / chartMax * 100) + '%' }"
-            />
-            <div
-              v-if="b.motion > 0"
-              class="bar-segment motion"
-              :style="{ height: (b.motion / chartMax * 100) + '%' }"
-            />
-          </div>
-          <span class="bar-label">{{ b.hour }}</span>
+    <div class="chart-section">
+      <div class="chart-header">
+        <span class="stats-title" style="margin-bottom:0">{{ t('status.eventTrend') }}</span>
+        <div class="range-tabs">
+          <button :class="['range-btn', { active: chartRange === 'today' }]" @click="chartRange = 'today'">{{ t('status.today') }}</button>
+          <button :class="['range-btn', { active: chartRange === 'week' }]" @click="chartRange = 'week'">7{{ t('status.days') }}</button>
         </div>
       </div>
-      <div class="chart-legend">
-        <span class="legend-item"><span class="legend-dot motion" />{{ t('event.motion') }}</span>
-        <span class="legend-item"><span class="legend-dot detect" />{{ t('event.detect') }}</span>
-      </div>
+
+      <!-- 今日 24h 趋势 -->
+      <template v-if="chartRange === 'today' && todayStats">
+        <div class="hourly-chart">
+          <div v-for="b in hourlyChart" :key="b.hour" class="chart-bar-wrap" :title="`${b.hour}:00 — motion: ${b.motion} detect: ${b.detect}`">
+            <div class="chart-bar">
+              <div
+                v-if="b.detect > 0"
+                class="bar-segment detect"
+                :style="{ height: (b.detect / chartMax * 100) + '%' }"
+              />
+              <div
+                v-if="b.motion > 0"
+                class="bar-segment motion"
+                :style="{ height: (b.motion / chartMax * 100) + '%' }"
+              />
+            </div>
+            <span class="bar-label">{{ b.hour }}</span>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot motion" />{{ t('event.motion') }}</span>
+          <span class="legend-item"><span class="legend-dot detect" />{{ t('event.detect') }}</span>
+        </div>
+      </template>
+
+      <!-- 7天趋势 -->
+      <template v-if="chartRange === 'week'">
+        <div class="hourly-chart">
+          <div v-for="d in weekStats" :key="d.date" class="chart-bar-wrap" :title="`${d.date} — motion: ${d.motion} detect: ${d.detect} alert: ${d.alert}`">
+            <div class="chart-bar">
+              <div v-if="d.alert > 0" class="bar-segment alert" :style="{ height: (d.alert / weekChartMax * 100) + '%' }" />
+              <div v-if="d.detect > 0" class="bar-segment detect" :style="{ height: (d.detect / weekChartMax * 100) + '%' }" />
+              <div v-if="d.motion > 0" class="bar-segment motion" :style="{ height: (d.motion / weekChartMax * 100) + '%' }" />
+            </div>
+            <span class="bar-label">{{ d.date }}</span>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot motion" />{{ t('event.motion') }}</span>
+          <span class="legend-item"><span class="legend-dot detect" />{{ t('event.detect') }}</span>
+          <span class="legend-item"><span class="legend-dot alert-dot" />{{ t('event.alert') }}</span>
+        </div>
+      </template>
     </div>
 
     <!-- 存储用量 -->
@@ -454,6 +576,87 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+/* 环形图 */
+.donut-section {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.donut-chart {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.donut-chart svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.donut-ring {
+  fill: none;
+  stroke: #2a2a4a;
+  stroke-width: 3;
+}
+
+.donut-segment {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.motion-seg { stroke: #FFEAA7; }
+.detect-seg { stroke: #4ECDC4; }
+.alert-seg { stroke: #F44336; }
+
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.donut-total {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e0e0e0;
+}
+
+/* 趋势范围切换 */
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.range-tabs {
+  display: flex;
+  gap: 2px;
+  background: #0a0a1a;
+  border-radius: 4px;
+  padding: 1px;
+}
+
+.range-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.range-btn.active {
+  background: #2a2a4a;
+  color: #4ECDC4;
+  font-weight: 600;
+}
+
 .stat-card {
   background: #16213e;
   border-radius: 4px;
@@ -473,6 +676,14 @@ onUnmounted(() => {
 
 .stat-num.detect {
   color: #4ECDC4;
+}
+
+.stat-num.alert {
+  color: #F44336;
+}
+
+.stat-num.offline {
+  color: #9B59B6;
 }
 
 .stat-desc {
@@ -584,6 +795,7 @@ onUnmounted(() => {
 
 .bar-segment.motion { background: #FFEAA7; }
 .bar-segment.detect { background: #4ECDC4; }
+.bar-segment.alert { background: #F44336; }
 
 .bar-label {
   font-size: 8px;
@@ -616,4 +828,5 @@ onUnmounted(() => {
 
 .legend-dot.motion { background: #FFEAA7; }
 .legend-dot.detect { background: #4ECDC4; }
+.legend-dot.alert-dot { background: #F44336; }
 </style>
