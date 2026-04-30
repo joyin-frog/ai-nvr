@@ -26,6 +26,8 @@ interface AlertRecord {
   cameraId: string
   timestamp: number
   detail: string
+  /** 是否为实时新增（用于入场动画） */
+  isNew?: boolean
 }
 
 const { t, locale } = useI18n()
@@ -251,9 +253,15 @@ function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string;
     cameraId: payload.cameraId,
     timestamp: payload.timestamp,
     detail: payload.detail,
+    isNew: true,
   }
   alerts.value.unshift(record)
   alertTotal.value++
+  const recordId = record.id
+  setTimeout(() => {
+    const r = alerts.value.find(a => a.id === recordId)
+    if (r) r.isNew = false
+  }, 1000)
 }
 
 /** Tab 切换 */
@@ -415,7 +423,7 @@ defineExpose({ loadAlerts, addAlert })
     </div>
     <div v-if="activeView === 'history'" class="alert-list">
       <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
-      <div v-for="alert in alerts" :key="alert.id" class="alert-item" @click="emit('jumpToRecording', alert.cameraId, alert.timestamp)">
+      <div v-for="alert in alerts" :key="alert.id" :class="['alert-item', { 'new-alert': alert.isNew }]" @click="emit('jumpToRecording', alert.cameraId, alert.timestamp)">
         <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
         <div class="alert-body">
           <span class="alert-rule">{{ alert.ruleName }}</span>
@@ -767,6 +775,15 @@ select.input {
 
 .alert-item:hover {
   background: #1a2a4a;
+}
+
+.alert-item.new-alert {
+  animation: alert-flash 1s ease-out;
+}
+
+@keyframes alert-flash {
+  0% { background: rgba(255, 217, 61, 0.25); }
+  100% { background: #16213e; }
 }
 
 .alert-time {
