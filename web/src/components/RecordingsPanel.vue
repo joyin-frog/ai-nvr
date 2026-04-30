@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
+
+const { t } = useI18n()
 
 /** 录像信息 */
 interface Recording {
@@ -344,8 +347,8 @@ defineExpose({ loadRecordings, playAtTime })
         <div class="player-header">
           <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
-          <button class="export-toggle-btn" @click="openExport" title="导出片段">导出</button>
-          <select :value="playbackSpeed" @change="changeSpeed(Number(($event.target as HTMLSelectElement).value))" class="speed-select" title="播放速度">
+          <button class="export-toggle-btn" @click="openExport" :title="t('recording.export')">{{ t('recording.export') }}</button>
+          <select :value="playbackSpeed" @change="changeSpeed(Number(($event.target as HTMLSelectElement).value))" class="speed-select" :title="t('recording.speed')">
             <option :value="0.5">0.5x</option>
             <option :value="1">1x</option>
             <option :value="1.5">1.5x</option>
@@ -366,38 +369,38 @@ defineExpose({ loadRecordings, playAtTime })
         <!-- 导出面板 -->
         <div v-if="showExport" class="export-panel">
           <div class="export-row">
-            <label>起始</label>
+            <label>{{ t('recording.startTime') }}</label>
             <input type="range" v-model.number="exportStartSec" :min="0" :max="totalDurationSec" step="1" class="export-slider" />
             <span class="export-time">{{ formatSec(exportStartSec) }}</span>
           </div>
           <div class="export-row">
-            <label>结束</label>
+            <label>{{ t('recording.endTime') }}</label>
             <input type="range" v-model.number="exportEndSec" :min="0" :max="totalDurationSec" step="1" class="export-slider" />
             <span class="export-time">{{ formatSec(exportEndSec) }}</span>
           </div>
           <div class="export-actions">
-            <span class="export-duration">时长: {{ exportDurationText }}</span>
+            <span class="export-duration">{{ exportDurationText }}</span>
             <button v-if="!exportFilename && !gifFilename" class="export-btn" @click="doExport" :disabled="exporting || exportEndSec <= exportStartSec">
-              {{ exporting ? '导出中...' : '导出 MP4' }}
+              {{ exporting ? t('recording.exporting') : t('recording.exportMp4') }}
             </button>
             <button v-if="!exportFilename && !gifFilename" class="gif-btn" @click="doGifExport" :disabled="gifExporting || exportEndSec <= exportStartSec">
-              {{ gifExporting ? '生成中...' : '导出 GIF' }}
+              {{ gifExporting ? t('recording.exporting') : t('recording.exportGif') }}
             </button>
-            <button v-if="exportFilename" class="download-btn" @click="downloadExport">下载 MP4 ({{ exportDurationText }})</button>
-            <button v-if="gifFilename" class="download-btn" @click="downloadGif">下载 GIF ({{ exportDurationText }})</button>
+            <button v-if="exportFilename" class="download-btn" @click="downloadExport">{ t('recording.download') } MP4 ({{ exportDurationText }})</button>
+            <button v-if="gifFilename" class="download-btn" @click="downloadGif">{ t('recording.download') } GIF ({{ exportDurationText }})</button>
           </div>
         </div>
       </div>
     </div>
 
     <div class="panel-header">
-      <span>录像回放</span>
+      <span>{{ t('recording.title') }}</span>
       <select v-model="filterCamera" @change="loadRecordings" class="filter-select">
-        <option value="">全部摄像头</option>
+        <option value="">{{ t("recording.allCameras") }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
-      <button class="refresh-btn" @click="loadRecordings" :disabled="loading">刷新</button>
-      <button :class="['select-btn', { active: multiSelectMode }]" @click="toggleMultiSelect">{{ multiSelectMode ? '取消' : '多选' }}</button>
+      <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
+      <button :class="['select-btn', { active: multiSelectMode }]" @click="toggleMultiSelect">{{ multiSelectMode ? t('recording.cancelSelect') : t('recording.selectMultiple') }}</button>
     </div>
 
     <!-- 多路同步时间轴（全部摄像头时显示） -->
@@ -418,7 +421,7 @@ defineExpose({ loadRecordings, playAtTime })
 
     <div class="recordings-list">
       <div v-if="recordings.length === 0" class="empty">
-        {{ loading ? '加载中...' : '暂无录像' }}
+        {{ loading ? t('app.loading') : t('recording.noRecordings') }}
       </div>
       <div
         v-for="rec in recordings"
@@ -453,14 +456,14 @@ defineExpose({ loadRecordings, playAtTime })
 
     <!-- 多选合并操作栏 -->
     <div v-if="multiSelectMode" class="merge-bar">
-      <span class="merge-info">已选 {{ selectedFiles.size }} 段</span>
+      <span class="merge-info">{{ t('recording.selectedCount', { count: selectedFiles.size }) }}</span>
       <span v-if="sortedSelectedFiles.length > 1" class="merge-duration">
-        总时长 {{ duration(sortedSelectedFiles[0].startTime, sortedSelectedFiles[sortedSelectedFiles.length - 1].endTime) }}
+        {{ duration(sortedSelectedFiles[0].startTime, sortedSelectedFiles[sortedSelectedFiles.length - 1].endTime) }}
       </span>
       <button v-if="!mergeFilename" class="merge-btn" @click="doMergeExport" :disabled="merging || selectedFiles.size < 1">
-        {{ merging ? '合并中...' : '合并导出' }}
+        {{ merging ? t('recording.merging') : t('recording.merge') }}
       </button>
-      <button v-else class="download-btn" @click="downloadMerge">下载合并文件</button>
+      <button v-else class="download-btn" @click="downloadMerge">{{ t('recording.download') }}</button>
     </div>
   </div>
 </template>

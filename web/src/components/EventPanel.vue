@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch } from '../services/auth'
+
+const { t } = useI18n()
 
 /** 事件记录 */
 interface EventRecord {
@@ -41,12 +44,12 @@ const emit = defineEmits<{
 }>()
 
 /** 事件类型标签样式 */
-const typeConfig: Record<string, { label: string; bg: string; color: string }> = {
-  motion: { label: '变动', bg: '#FFEAA7', color: '#333' },
-  detect: { label: '检测', bg: '#4ECDC4', color: '#333' },
-  'camera:online': { label: '上线', bg: '#4CAF50', color: '#fff' },
-  'camera:offline': { label: '离线', bg: '#F44336', color: '#fff' },
-  alert: { label: '告警', bg: '#FFD93D', color: '#333' },
+const typeConfig: Record<string, { labelKey: string; bg: string; color: string }> = {
+  motion: { labelKey: 'event.motion', bg: '#FFEAA7', color: '#333' },
+  detect: { labelKey: 'event.detect', bg: '#4ECDC4', color: '#333' },
+  'camera:online': { labelKey: 'event.online', bg: '#4CAF50', color: '#fff' },
+  'camera:offline': { labelKey: 'event.offline', bg: '#F44336', color: '#fff' },
+  alert: { labelKey: 'event.alert', bg: '#FFD93D', color: '#333' },
 }
 
 /** 添加实时事件 */
@@ -69,7 +72,7 @@ function parseDetail(type: string, detail: string | null): string {
   if (!detail) return ''
   try {
     const obj = JSON.parse(detail)
-    if (type === 'motion' && obj.ratio) return `变动 ${(obj.ratio * 100).toFixed(1)}%`
+    if (type === 'motion' && obj.ratio) return t('event.motionRatio', { ratio: (obj.ratio * 100).toFixed(1) })
     if (type === 'detect' && obj.detections) {
       return obj.detections.map((d: { label: string; score: number }) => d.label).join(', ')
     }
@@ -122,7 +125,7 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
   try {
     const obj = JSON.parse(e.rawDetail)
     if (e.type === 'motion' && obj.ratio !== undefined) {
-      items.push({ label: '变动比例', value: `${(obj.ratio * 100).toFixed(1)}%` })
+      items.push({ label: t('event.ratio'), value: `${(obj.ratio * 100).toFixed(1)}%` })
     }
     if (e.type === 'detect' && Array.isArray(obj.detections)) {
       for (const d of obj.detections as Array<{ label: string; score: number }>) {
@@ -130,11 +133,11 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       }
     }
     if (e.type === 'alert') {
-      if (obj.ruleName) items.push({ label: '规则', value: obj.ruleName })
-      if (obj.detail) items.push({ label: '详情', value: obj.detail })
+      if (obj.ruleName) items.push({ label: t('event.rule'), value: obj.ruleName })
+      if (obj.detail) items.push({ label: t('event.detail'), value: obj.detail })
     }
   } catch {
-    if (e.rawDetail) items.push({ label: '详情', value: e.rawDetail })
+    if (e.rawDetail) items.push({ label: t('event.detail'), value: e.rawDetail })
   }
   return items
 }
@@ -145,22 +148,22 @@ defineExpose({ addEvent, loadHistory })
 <template>
   <div class="event-panel">
     <div class="panel-header">
-      <span>事件日志</span>
+      <span>{{ t('event.title') }}</span>
       <select v-model="filterType" @change="loadHistory" class="filter-select">
-        <option value="">全部类型</option>
-        <option value="motion">变动</option>
-        <option value="detect">检测</option>
-        <option value="camera:online">上线</option>
-        <option value="camera:offline">离线</option>
+        <option value="">{{ t('event.allTypesLabel') }}</option>
+        <option value="motion">{{ t('event.motion') }}</option>
+        <option value="detect">{{ t('event.detect') }}</option>
+        <option value="camera:online">{{ t('event.online') }}</option>
+        <option value="camera:offline">{{ t('event.offline') }}</option>
       </select>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
-        刷新
+        {{ t('event.refresh') }}
       </button>
     </div>
     <EventTimeline :events="events" />
     <div class="event-list">
       <div v-if="events.length === 0" class="empty">
-        {{ loading ? '加载中...' : '暂无事件' }}
+        {{ loading ? t('app.loading') : t('event.noEvents') }}
       </div>
       <div
         v-for="e in events"
@@ -178,7 +181,7 @@ defineExpose({ addEvent, loadHistory })
             v-if="typeConfig[e.type]"
             class="event-type"
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
-          >{{ typeConfig[e.type].label }}</span>
+          >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ e.cameraId }}</span>
           <img
             v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
@@ -200,7 +203,7 @@ defineExpose({ addEvent, loadHistory })
               v-if="e.type === 'motion' || e.type === 'detect'"
               class="play-btn"
               @click.stop="emit('play-recording', e.cameraId, e.timestamp)"
-            >查看录像</button>
+            >{{ t('event.viewRecording') }}</button>
           </div>
         </div>
       </div>

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 import RoiEditor from './RoiEditor.vue'
+
+const { t } = useI18n()
 
 /** 摄像头信息 */
 interface CameraInfo {
@@ -100,7 +103,7 @@ async function saveEdit() {
 
 /** 删除摄像头 */
 async function deleteCamera(id: string) {
-  if (!confirm(`确定删除摄像头 "${id}"？`)) return
+  if (!confirm(t('manage.confirmDelete', { name: id }))) return
   try {
     const res = await authFetch(`/api/cameras/${id}`, { method: 'DELETE' })
     if (res.ok) loadCameras()
@@ -111,10 +114,10 @@ async function deleteCamera(id: string) {
 
 /** 在线状态标签 */
 function statusText(cam: CameraInfo): string {
-  if (!cam.online) return '离线'
+  if (!cam.online) return t('manage.offline')
   const ago = Math.round((Date.now() - cam.lastFrameAt) / 1000)
-  if (ago > 10) return `${ago}s 前`
-  return '在线'
+  if (ago > 10) return t('manage.statusAgo', { seconds: ago })
+  return t('manage.online')
 }
 
 onMounted(() => {
@@ -127,67 +130,67 @@ defineExpose({ loadCameras })
 <template>
   <div class="camera-manage-panel">
     <div class="panel-header">
-      <span>摄像头管理</span>
-      <button class="refresh-btn" @click="loadCameras" :disabled="loading">刷新</button>
-      <button class="add-btn" @click="showAddForm = !showAddForm">{{ showAddForm ? '取消' : '+ 添加' }}</button>
+      <span>{{ t('manage.title') }}</span>
+      <button class="refresh-btn" @click="loadCameras" :disabled="loading">{{ t('manage.refresh') }}</button>
+      <button class="add-btn" @click="showAddForm = !showAddForm">{{ showAddForm ? t('manage.cancel') : t('manage.add') }}</button>
     </div>
 
     <!-- 添加表单 -->
     <div v-if="showAddForm" class="add-form">
       <div class="form-field">
-        <label>ID</label>
-        <input v-model="addForm.id" placeholder="ipc_new" class="input" />
+        <label>{{ t('manage.cameraId') }}</label>
+        <input v-model="addForm.id" :placeholder="t('manage.placeholderId')" class="input" />
       </div>
       <div class="form-field">
-        <label>名称</label>
-        <input v-model="addForm.friendlyName" placeholder="新摄像头" class="input" />
+        <label>{{ t('manage.friendlyName') }}</label>
+        <input v-model="addForm.friendlyName" :placeholder="t('manage.placeholderName')" class="input" />
       </div>
       <div class="form-field">
-        <label>主码流 RTSP</label>
+        <label>{{ t('manage.hdStream') }}</label>
         <input v-model="addForm.hdUrl" placeholder="rtsp://..." class="input" />
       </div>
       <div class="form-field">
-        <label>子码流 RTSP</label>
+        <label>{{ t('manage.sdStream') }}</label>
         <input v-model="addForm.sdUrl" placeholder="rtsp://..." class="input" />
       </div>
       <div class="form-field">
-        <label>分组</label>
-        <input v-model="addForm.group" placeholder="可选分组名称" class="input" />
+        <label>{{ t('manage.group') }}</label>
+        <input v-model="addForm.group" :placeholder="t('manage.placeholderGroup')" class="input" />
       </div>
       <button class="submit-btn" @click="addCamera" :disabled="adding">
-        {{ adding ? '添加中...' : '确认添加' }}
+        {{ adding ? t('manage.adding') : t('manage.confirmAdd') }}
       </button>
     </div>
 
     <!-- 摄像头列表 -->
     <div class="camera-list">
       <div v-if="cameras.length === 0" class="empty">
-        {{ loading ? '加载中...' : '暂无摄像头' }}
+        {{ loading ? t('app.loading') : t('manage.noCameras') }}
       </div>
       <div v-for="cam in cameras" :key="cam.id" class="camera-item">
         <template v-if="editingId === cam.id">
           <div class="edit-form">
             <div class="form-field">
-              <label>名称</label>
+              <label>{{ t('manage.friendlyName') }}</label>
               <input v-model="editForm.friendlyName" class="input" />
             </div>
             <div class="form-field">
-              <label>主码流 RTSP</label>
-              <input v-model="editForm.hdUrl" placeholder="留空不修改" class="input" />
+              <label>{{ t('manage.hdStream') }}</label>
+              <input v-model="editForm.hdUrl" :placeholder="t('manage.placeholderKeepEmpty')" class="input" />
             </div>
             <div class="form-field">
-              <label>子码流 RTSP</label>
-              <input v-model="editForm.sdUrl" placeholder="留空不修改" class="input" />
+              <label>{{ t('manage.sdStream') }}</label>
+              <input v-model="editForm.sdUrl" :placeholder="t('manage.placeholderKeepEmpty')" class="input" />
             </div>
             <div class="form-field">
-              <label>分组</label>
-              <input v-model="editForm.group" placeholder="留空清除分组" class="input" />
+              <label>{{ t('manage.group') }}</label>
+              <input v-model="editForm.group" :placeholder="t('manage.placeholderClearGroup')" class="input" />
             </div>
             <div class="edit-actions">
               <button class="save-btn" @click="saveEdit" :disabled="saving">
-                {{ saving ? '保存中...' : '保存' }}
+                {{ saving ? t('manage.saving') : t('manage.save') }}
               </button>
-              <button class="cancel-btn" @click="cancelEdit">取消</button>
+              <button class="cancel-btn" @click="cancelEdit">{{ t('manage.cancel') }}</button>
             </div>
           </div>
         </template>

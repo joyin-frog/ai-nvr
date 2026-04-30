@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+
+const { t } = useI18n()
 
 /** 摄像头性能指标 */
 interface CameraMetric {
@@ -53,9 +56,9 @@ function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
   const m = Math.floor((seconds % 3600) / 60)
-  if (d > 0) return `${d}天${h}时${m}分`
-  if (h > 0) return `${h}时${m}分`
-  return `${m}分`
+  if (d > 0) return t('status.day', { d, h, m })
+  if (h > 0) return t('status.hour', { h, m })
+  return t('status.minute', { m })
 }
 
 /** 格式化字节数 */
@@ -74,15 +77,15 @@ function diskUsagePercent(): number {
   return Math.round(((diskTotalBytes - diskFreeBytes) / diskTotalBytes) * 100)
 }
 
-/** 目录友好名称映射 */
-const dirNames: Record<string, string> = {
-  recordings: '录像',
-  'detection-snapshots': '检测快照',
-  snapshots: '帧快照',
-  nvr: '事件数据库',
-  roi: 'ROI 数据库',
-  alerts: '告警数据库',
-  thumbnails: '缩略图缓存',
+/** 目录名称到 i18n key 的映射 */
+const dirNameKeys: Record<string, string> = {
+  recordings: 'status.dirRecordings',
+  'detection-snapshots': 'status.dirDetectionSnapshots',
+  snapshots: 'status.dirSnapshots',
+  nvr: 'status.dirNvr',
+  roi: 'status.dirRoi',
+  alerts: 'status.dirAlerts',
+  thumbnails: 'status.dirThumbnails',
 }
 
 /** 加载指标 */
@@ -136,20 +139,20 @@ onUnmounted(() => {
 
 <template>
   <div class="status-panel">
-    <div class="panel-header">系统状态</div>
+    <div class="panel-header">{{ t('status.title') }}</div>
 
     <!-- 系统概览 -->
     <div v-if="metrics" class="system-overview">
       <div class="stat-row">
-        <span class="stat-label">运行时长</span>
+        <span class="stat-label">{{ t('status.uptime') }}</span>
         <span class="stat-value">{{ formatUptime(metrics.uptime) }}</span>
       </div>
       <div class="stat-row">
-        <span class="stat-label">内存使用</span>
+        <span class="stat-label">{{ t('status.memoryUsage') }}</span>
         <span class="stat-value">{{ metrics.memoryUsedMb }} MB</span>
       </div>
       <div class="stat-row">
-        <span class="stat-label">摄像头</span>
+        <span class="stat-label">{{ t('status.cameras') }}</span>
         <span class="stat-value">
           <span class="online-count">{{ metrics.onlineCameras }}</span>
           <span class="dim"> / {{ metrics.cameraCount }}</span>
@@ -159,22 +162,22 @@ onUnmounted(() => {
 
     <!-- 今日统计 -->
     <div v-if="todayStats" class="today-stats">
-      <div class="stats-title">今日统计</div>
+      <div class="stats-title">{{ t('status.todayStats') }}</div>
       <div class="stats-grid">
         <div class="stat-card">
           <span class="stat-num motion">{{ todayStats.motionCount }}</span>
-          <span class="stat-desc">变动</span>
+          <span class="stat-desc">{{ t('status.todayMotion') }}</span>
         </div>
         <div class="stat-card">
           <span class="stat-num detect">{{ todayStats.detectCount }}</span>
-          <span class="stat-desc">检测</span>
+          <span class="stat-desc">{{ t('status.todayDetect') }}</span>
         </div>
       </div>
     </div>
 
     <!-- 存储用量 -->
     <div v-if="metrics?.storage" class="storage-section">
-      <div class="stats-title">存储用量</div>
+      <div class="stats-title">{{ t('status.storageUsage') }}</div>
       <!-- 磁盘总览 -->
       <div v-if="metrics.storage.diskTotalBytes > 0" class="disk-bar-wrap">
         <div class="disk-bar">
@@ -185,16 +188,16 @@ onUnmounted(() => {
           />
         </div>
         <div class="disk-info">
-          <span>已用 {{ diskUsagePercent() }}%</span>
-          <span class="dim">剩余 {{ formatBytes(metrics.storage.diskFreeBytes) }}</span>
+          <span>{{ t('status.used') }} {{ diskUsagePercent() }}%</span>
+          <span class="dim">{{ t('status.remaining') }} {{ formatBytes(metrics.storage.diskFreeBytes) }}</span>
         </div>
       </div>
       <!-- 各目录用量 -->
       <div class="dir-list">
         <div v-for="dir in metrics.storage.directories" :key="dir.name" class="dir-row">
-          <span class="dir-name">{{ dirNames[dir.name] ?? dir.name }}</span>
+          <span class="dir-name">{{ dirNameKeys[dir.name] ? t(dirNameKeys[dir.name]) : dir.name }}</span>
           <span class="dir-size">{{ formatBytes(dir.bytes) }}</span>
-          <span class="dir-files">{{ dir.fileCount }} 文件</span>
+          <span class="dir-files">{{ dir.fileCount }} {{ t('status.files') }}</span>
         </div>
       </div>
     </div>
@@ -211,7 +214,7 @@ onUnmounted(() => {
           <div class="cam-header">
             <span class="cam-dot" :class="{ online: cam.online }" />
             <span class="cam-name">{{ nameMap()[cam.cameraId] ?? cam.cameraId }}</span>
-            <span class="cam-status">{{ cam.online ? '在线' : '离线' }}</span>
+            <span class="cam-status">{{ cam.online ? t('status.online') : t('status.offline') }}</span>
           </div>
           <div class="cam-metrics">
             <div class="metric">
@@ -220,16 +223,16 @@ onUnmounted(() => {
             </div>
             <div class="metric">
               <span class="metric-val">{{ cam.motionCount }}</span>
-              <span class="metric-unit">变动</span>
+              <span class="metric-unit">{{ t('status.todayMotion') }}</span>
             </div>
             <div class="metric">
               <span class="metric-val">{{ cam.detectCount }}</span>
-              <span class="metric-unit">检测</span>
+              <span class="metric-unit">{{ t('status.todayDetect') }}</span>
             </div>
           </div>
         </div>
       </div>
-      <div v-else class="empty">加载中...</div>
+      <div v-else class="empty">{{ t('app.loading') }}</div>
     </div>
   </div>
 </template>

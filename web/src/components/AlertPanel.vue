@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 
 /** 告警规则 */
@@ -26,6 +27,8 @@ interface AlertRecord {
   timestamp: number
   detail: string
 }
+
+const { t } = useI18n()
 
 const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
@@ -54,11 +57,11 @@ const emptyForm = {
 }
 
 /** 事件类型选项 */
-const eventTypes = [
-  { value: 'detect', label: 'AI 检测' },
-  { value: 'motion', label: '变动检测' },
-  { value: 'camera:offline', label: '摄像头离线' },
-]
+const eventTypes = computed(() => [
+  { value: 'detect', label: t('alert.eventTypeDetect') },
+  { value: 'motion', label: t('alert.eventTypeMotion') },
+  { value: 'camera:offline', label: t('alert.eventTypeOffline') },
+])
 
 /** 加载规则列表 */
 async function loadRules() {
@@ -178,7 +181,7 @@ function formatTime(ts: number): string {
 
 /** 事件类型中文 */
 function eventTypeLabel(type: string): string {
-  return eventTypes.find(e => e.value === type)?.label ?? type
+  return eventTypes.value.find(e => e.value === type)?.label ?? type
 }
 
 /** Tab 切换 */
@@ -195,9 +198,9 @@ defineExpose({ loadAlerts })
 <template>
   <div class="alert-panel">
     <div class="panel-header">
-      <span>告警规则</span>
-      <button class="refresh-btn" @click="loadRules(); loadAlerts()" :disabled="loading">刷新</button>
-      <button class="add-btn" @click="showAddForm = !showAddForm">{{ showAddForm ? '取消' : '+ 规则' }}</button>
+      <span>{{ t('alert.rules') }}</span>
+      <button class="refresh-btn" @click="loadRules(); loadAlerts()" :disabled="loading">{{ t('alert.refresh') }}</button>
+      <button class="add-btn" @click="showAddForm = !showAddForm">{{ showAddForm ? t('alert.cancel') : t('alert.addRuleShort') }}</button>
     </div>
 
     <!-- 添加表单 -->
