@@ -41,6 +41,8 @@ const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
 /** 每个摄像头的最新帧 data URL */
 const frameImages = ref<Record<string, string>>({})
+/** 每个摄像头最近检测事件的帧快照 */
+const detectSnapshots = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
@@ -151,6 +153,12 @@ onMounted(() => {
     detectionsMap.value = { ...detectionsMap.value }
     detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
     detectVersions.value = { ...detectVersions.value }
+    /** 保存检测时的帧快照 */
+    const frame = frameImages.value[payload.cameraId]
+    if (frame) {
+      detectSnapshots.value[payload.cameraId] = frame
+      detectSnapshots.value = { ...detectSnapshots.value }
+    }
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)
 
@@ -244,7 +252,7 @@ onUnmounted(() => {
           >设置</button>
         </div>
         <div class="sidebar-content">
-          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" @play-recording="onPlayRecording" />
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" @play-recording="onPlayRecording" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"

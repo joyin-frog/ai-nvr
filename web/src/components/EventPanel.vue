@@ -25,6 +25,11 @@ const MAX_LIVE_EVENTS = 50
 const loading = ref(false)
 const filterType = ref('')
 
+const props = defineProps<{
+  /** 每个摄像头的最新检测帧快照 */
+  snapshots?: Record<string, string>
+}>()
+
 const emit = defineEmits<{
   (e: 'play-recording', cameraId: string, timestamp: number): void
 }>()
@@ -133,6 +138,12 @@ defineExpose({ addEvent, loadHistory })
           :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
         >{{ typeConfig[e.type].label }}</span>
         <span class="event-cam">{{ e.cameraId }}</span>
+        <img
+          v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
+          :src="snapshots[e.cameraId]"
+          class="event-thumb"
+          alt=""
+        />
         <span class="event-detail">{{ e.detail }}</span>
       </div>
     </div>
@@ -249,6 +260,15 @@ defineExpose({ addEvent, loadHistory })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.event-thumb {
+  width: 32px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 2px;
+  flex-shrink: 0;
+  border: 1px solid #2a2a4a;
 }
 
 /* 移动端适配 */
