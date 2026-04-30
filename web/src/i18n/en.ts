@@ -71,6 +71,8 @@ export default {
     exportCsv: 'Export CSV',
     search: 'Search',
     searchPlaceholder: 'Search events...',
+    sortNewest: 'Newest first',
+    sortOldest: 'Oldest first',
   },
   recording: {
     title: 'Recordings',

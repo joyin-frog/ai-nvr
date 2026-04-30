@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch } from '../services/auth'
@@ -42,6 +42,14 @@ const filterSearch = ref('')
 const expandedId = ref<number | null>(null)
 /** 当前筛选条件下的事件总数 */
 const totalCount = ref(0)
+/** 排序方向（默认最新在前） */
+const sortDesc = ref(true)
+
+/** 排序后的事件列表 */
+const sortedEvents = computed(() => {
+  if (sortDesc.value) return events.value
+  return [...events.value].reverse()
+})
 
 const props = defineProps<{
   /** 每个摄像头的最新检测帧快照 */
@@ -280,6 +288,9 @@ defineExpose({ addEvent, loadHistory })
       <button class="export-btn" @click="exportCsv" :disabled="loading" :title="t('event.exportCsv')">
         CSV
       </button>
+      <button :class="['sort-btn', { desc: sortDesc }]" @click="sortDesc = !sortDesc" :title="sortDesc ? t('event.sortOldest') : t('event.sortNewest')">
+        {{ sortDesc ? '↓' : '↑' }}
+      </button>
     </div>
     <EventTimeline :events="events" />
     <div class="event-list">
@@ -287,7 +298,7 @@ defineExpose({ addEvent, loadHistory })
         {{ loading ? t('app.loading') : t('event.noEvents') }}
       </div>
       <div
-        v-for="e in events"
+        v-for="e in sortedEvents"
         :key="e.id"
         class="event-row"
         :class="{ expanded: expandedId === e.id }"
@@ -427,6 +438,20 @@ defineExpose({ addEvent, loadHistory })
 
 .export-btn:hover:not(:disabled) {
   opacity: 0.85;
+}
+
+.sort-btn {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sort-btn:hover {
+  background: #3a3a5a;
 }
 
 .total-count {
