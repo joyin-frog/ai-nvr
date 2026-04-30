@@ -283,12 +283,17 @@ function switchTab(tab: SidebarTab) {
 /** 进入全屏单路 */
 function enterFullscreen(cameraId: string) {
   fullscreenCamera.value = cameraId
+  /** 同时请求浏览器全屏 */
+  document.documentElement.requestFullscreen?.().catch(() => { /* ignore */ })
 }
 
 /** 退出全屏回到网格 */
 function exitFullscreen() {
   fullscreenCamera.value = null
   stopPatrol()
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.().catch(() => { /* ignore */ })
+  }
 }
 
 /** 轮巡模式 */
@@ -484,6 +489,13 @@ function setupEventListeners() {
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+
+  /** 浏览器全屏退出时同步退出单路模式 */
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && fullscreenCamera.value) {
+      fullscreenCamera.value = null
+    }
+  })
 
   /** 检查是否需要认证 */
   const enabled = await isAuthEnabled()
