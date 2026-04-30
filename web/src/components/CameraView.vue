@@ -16,6 +16,30 @@ const emit = defineEmits<{
   fullscreen: [cameraId: string]
 }>()
 
+/** 实时时钟 */
+const clockText = ref('')
+let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const mo = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const h = String(now.getHours()).padStart(2, '0')
+  const mi = String(now.getMinutes()).padStart(2, '0')
+  const s = String(now.getSeconds()).padStart(2, '0')
+  clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
+}, 1000)
+/** 立即初始化 */
+{
+  const now = new Date()
+  const y = now.getFullYear()
+  const mo = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const h = String(now.getHours()).padStart(2, '0')
+  const mi = String(now.getMinutes()).padStart(2, '0')
+  const s = String(now.getSeconds()).padStart(2, '0')
+  clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
+}
+
 /** 标注图片 URL */
 const annotatedUrl = ref<string>('')
 
@@ -75,6 +99,7 @@ watch(annotatedUrl, (url) => {
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (annotatedTimer) clearTimeout(annotatedTimer)
+  if (clockTimer) clearInterval(clockTimer)
 })
 </script>
 
@@ -113,6 +138,11 @@ onUnmounted(() => {
         >
           <span class="detect-label">{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
         </div>
+      </div>
+
+      <!-- 数字时钟叠加 -->
+      <div v-if="online && displayUrl" class="clock-overlay">
+        <span class="clock-text">{{ clockText }}</span>
       </div>
     </div>
 
@@ -256,6 +286,26 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* 数字时钟叠加 */
+.clock-overlay {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+  padding: 2px 8px;
+  pointer-events: none;
+}
+
+.clock-text {
+  color: #fff;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 .detect-box {
