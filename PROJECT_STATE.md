@@ -157,4 +157,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头画面截图下载：CameraView 头部截图按钮，一键下载当前画面（优先标注图），文件名含摄像头名称和时间戳
 - 导出文件自动清理：StorageCleaner 集成 RecordingExporter，每小时清理超过 24 小时的导出临时文件
 - WebSocket 指数退避重连 + 连接状态指示器：EventClient 重连改为指数退避（1s→30s），暴露 ConnectionState，App header 显示绿/黄/红连接状态
-- 下一步优先：告警推送渠道（邮件/钉钉）、多段录像合并导出
+- 多段录像合并导出：RecordingExporter merge() 使用 ffmpeg concat demuxer 合并多个 MP4，API POST /api/recordings/merge，前端多选模式 + checkbox + 底部合并操作栏
+- 下一步优先：告警推送渠道（邮件/钉钉）、事件面板时间线可视化
