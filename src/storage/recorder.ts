@@ -105,7 +105,7 @@ export class MotionRecorder {
   }
 
   /** 列出录像文件 */
-  listRecordings(cameraId?: string): RecordingInfo[] {
+  listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
     const results: RecordingInfo[] = [];
 
     const scanDir = cameraId ? join(this.config.storagePath, cameraId) : this.config.storagePath;
@@ -138,13 +138,17 @@ export class MotionRecorder {
         const stat = statSync(filePath);
         /** 文件名格式：2026-05-01_14-30-00.mp4 */
         const parsed = this.parseFilename(file);
-        results.push({
+        const rec: RecordingInfo = {
           filename: `${camId}/${file}`,
           cameraId: camId,
           startTime: parsed.startTime,
           endTime: parsed.endTime ?? stat.mtimeMs,
           size: stat.size,
-        });
+        };
+        /** 时间范围过滤：录像时间段与查询范围有交集 */
+        if (since && rec.endTime < since) continue;
+        if (until && rec.startTime > until) continue;
+        results.push(rec);
       }
     }
 

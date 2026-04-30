@@ -227,7 +227,9 @@ export function startServer(
       /** 录像列表 */
       if (url.pathname === "/api/recordings") {
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
-        return Response.json(recorder.listRecordings(cameraId));
+        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
+        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        return Response.json(recorder.listRecordings(cameraId, since, until));
       }
 
       /** 录像文件播放 */

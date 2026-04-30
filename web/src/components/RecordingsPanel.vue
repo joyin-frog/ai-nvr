@@ -185,6 +185,12 @@ async function loadRecordings() {
   try {
     const params = new URLSearchParams()
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      const until = since + 86_400_000
+      params.set('since', String(since))
+      params.set('until', String(until))
+    }
     const res = await authFetch(`/api/recordings?${params}`)
     if (res.ok) {
       recordings.value = await res.json()
