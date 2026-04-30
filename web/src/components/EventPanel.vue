@@ -38,6 +38,8 @@ const filterCamera = ref('')
 const filterDate = ref('')
 /** 搜索关键词 */
 const filterSearch = ref('')
+/** 快速时间范围（空=全部, '1h'=最近1小时, '24h'=最近24小时） */
+const filterRange = ref('')
 /** 当前展开的事件 ID */
 const expandedId = ref<number | null>(null)
 /** 当前筛选条件下的事件总数 */
@@ -111,7 +113,11 @@ async function loadHistory() {
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
     if (filterSearch.value) params.set('search', filterSearch.value)
-    if (filterDate.value) {
+    if (filterRange.value) {
+      const now = Date.now()
+      const since = filterRange.value === '1h' ? now - 3600000 : now - 86400000
+      params.set('since', String(since))
+    } else if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
       const until = since + 86_400_000
       params.set('since', String(since))
@@ -149,7 +155,11 @@ async function loadMore() {
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
     if (filterSearch.value) params.set('search', filterSearch.value)
-    if (filterDate.value) {
+    if (filterRange.value) {
+      const now = Date.now()
+      const since = filterRange.value === '1h' ? now - 3600000 : now - 86400000
+      params.set('since', String(since))
+    } else if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
       const until = since + 86_400_000
       params.set('since', String(since))
@@ -218,7 +228,11 @@ async function exportCsv() {
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
     if (filterSearch.value) params.set('search', filterSearch.value)
-    if (filterDate.value) {
+    if (filterRange.value) {
+      const now = Date.now()
+      const since = filterRange.value === '1h' ? now - 3600000 : now - 86400000
+      params.set('since', String(since))
+    } else if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
       const until = since + 86_400_000
       params.set('since', String(since))
@@ -249,6 +263,13 @@ async function exportCsv() {
   }
 }
 
+/** 切换快速时间范围 */
+function setRange(range: string) {
+  filterRange.value = filterRange.value === range ? '' : range
+  filterDate.value = ''
+  loadHistory()
+}
+
 defineExpose({ addEvent, loadHistory })
 </script>
 
@@ -256,10 +277,12 @@ defineExpose({ addEvent, loadHistory })
   <div class="event-panel">
     <div class="panel-header">
       <span>{{ t('event.title') }} <span v-if="totalCount > 0" class="total-count">{{ totalCount }}</span></span>
+      <button :class="['range-btn', { active: filterRange === '1h' }]" @click="setRange('1h')">1h</button>
+      <button :class="['range-btn', { active: filterRange === '24h' }]" @click="setRange('24h')">24h</button>
       <input
         type="date"
         v-model="filterDate"
-        @change="loadHistory"
+        @change="filterRange = ''; loadHistory()"
         class="filter-date"
         :title="t('event.filterDate')"
       />
@@ -452,6 +475,25 @@ defineExpose({ addEvent, loadHistory })
 
 .sort-btn:hover {
   background: #3a3a5a;
+}
+
+.range-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.range-btn:hover {
+  background: #3a3a5a;
+}
+
+.range-btn.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
 }
 
 .total-count {
