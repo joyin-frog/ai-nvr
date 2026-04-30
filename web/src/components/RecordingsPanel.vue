@@ -53,6 +53,9 @@ const playerRef = ref<HTMLVideoElement | null>(null)
 /** 播放后需要跳转到的时间点（秒偏移，-1 表示不跳转） */
 const seekOffset = ref(-1)
 
+/** 自动连续播放开关 */
+const autoPlayNext = ref(true)
+
 /** 倍速变更时同步到 video 元素 */
 function changeSpeed(speed: number) {
   playbackSpeed.value = speed
@@ -71,6 +74,19 @@ function onLoadedMetadata() {
   if (seekOffset.value >= 0) {
     playerRef.value.currentTime = seekOffset.value
     seekOffset.value = -1
+  }
+}
+
+/** 视频播放结束，自动播放同摄像头的下一段录像 */
+function onVideoEnded() {
+  if (!autoPlayNext.value || !selectedRecording.value) return
+  /** 按时间升序排列，找到当前录像的下一段 */
+  const sameCam = filteredRecordings.value
+    .filter(r => r.cameraId === selectedRecording.value!.cameraId)
+    .sort((a, b) => a.startTime - b.startTime)
+  const idx = sameCam.findIndex(r => r.filename === selectedRecording.value!.filename)
+  if (idx >= 0 && idx < sameCam.length - 1) {
+    play(sameCam[idx + 1]!)
   }
 }
 
@@ -381,6 +397,11 @@ defineExpose({ loadRecordings, playAtTime })
             <option :value="4">4x</option>
             <option :value="8">8x</option>
           </select>
+          <button
+            :class="['autoplay-btn', { active: autoPlayNext }]"
+            @click="autoPlayNext = !autoPlayNext"
+            :title="t('recording.autoPlayNext')"
+          >&#9654;&#9654;</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
         <video
@@ -391,6 +412,7 @@ defineExpose({ loadRecordings, playAtTime })
           class="player-video"
           @ratechange="onRateChange"
           @loadedmetadata="onLoadedMetadata"
+          @ended="onVideoEnded"
         />
         <!-- 导出面板 -->
         <div v-if="showExport" class="export-panel">
@@ -736,6 +758,26 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .speed-select:hover {
+  border-color: #4ECDC4;
+}
+
+.autoplay-btn {
+  background: none;
+  border: 1px solid #555;
+  color: #555;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.autoplay-btn.active {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.autoplay-btn:hover {
   border-color: #4ECDC4;
 }
 

@@ -85,6 +85,7 @@ export default {
     exportRange: '导出范围',
     gifExport: 'GIF 导出',
     filterDate: '筛选日期',
+    autoPlayNext: '连续播放',
   },
   timeline: {
     today: '今天',

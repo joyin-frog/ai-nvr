@@ -85,6 +85,7 @@ export default {
     exportRange: 'Export Range',
     gifExport: 'GIF Export',
     filterDate: 'Filter by date',
+    autoPlayNext: 'Auto play next',
   },
   timeline: {
     today: 'Today',
