@@ -381,9 +381,13 @@ const IMPORTANT_LABELS = new Set(['person', 'car', 'truck', 'bus', 'motorcycle',
 
 /** 注册事件监听器 */
 function setupEventListeners() {
-  /** 请求通知权限 */
+  /** 首次用户交互时请求通知权限（需要用户手势） */
   if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission()
+    const handler = () => {
+      Notification.requestPermission()
+      document.removeEventListener('click', handler)
+    }
+    document.addEventListener('click', handler)
   }
 
   client.on('motion', (payload) => {
