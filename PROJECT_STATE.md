@@ -42,7 +42,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 | CameraManager | `src/camera/manager.ts` | 管理多个 FrameExtractor，`reloadConfig` 支持动态增删 |
 | FrameExtractor | `src/camera/stream.ts` | ffmpeg 子进程 + JPEG 帧分割器，发射 online/offline 事件 |
 | MotionDetector | `src/detection/motion.ts` | 灰度像素差异比对，ROI mask 过滤，扫描线光栅化多边形填充 |
-| AiDetector | `src/ai/detector.ts` | HuggingFace pipeline 目标检测 |
+| AiDetector | `src/ai/detector.ts` | HuggingFace pipeline 目标检测，支持运行时切换模型 |
 | AiTypes | `src/ai/types.ts` | AI 检测类型定义 |
 | Annotator | `src/ai/annotator.ts` | SVG 叠加检测框 + sharp 合成标注图 |
 | EventStorage | `src/storage/events.ts` | bun:sqlite 事件持久化，支持查询/统计/清理 |
@@ -54,6 +54,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 | RuntimeConfig | `src/runtime-config.ts` | 运行时配置管理，API 可修改灵敏度/AI/录像参数 |
 | API | `src/api/index.ts` | HTTP REST + WebSocket 服务，二进制帧推送协议 |
 | 前端 | `web/src/` | Vue3 SPA，WebSocket 实时帧 + 事件日志 + 录像回放 + 状态面板 + 设置面板 |
+| EmailNotifier | `src/notify/email.ts` | SMTP 邮件告警推送，HTML 彩色卡片格式 |
 
 ## API 端点
 - `GET /` / `GET /api` — 服务状态
@@ -78,6 +79,8 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - `GET /api/alerts/history?cameraId=&since=&until=&limit=&offset=` — 告警历史查询
 - `GET /api/recordings?cameraId=` — 录像列表
 - `GET /api/recordings/:cameraId/:filename` — 录像文件播放
+- `GET /api/ai/model` — 获取当前 AI 模型信息
+- `POST /api/ai/reload-model` — 重新加载 AI 模型（可选 body.model 指定模型名）
 - `WS /api/events` — 实时事件推送（二进制协议：4B头长度 + JSON + 可选二进制帧）
 
 ## WebSocket 二进制协议
@@ -170,4 +173,10 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头轮巡自动切换：header 轮巡按钮（多路时显示），可配置间隔（2-60秒）自动全屏切换摄像头，Esc 停止，P 键快捷切换，onUnmounted 清理
 - 添加摄像头分组字段：CameraManagePanel 添加表单增加分组输入，addCameraToConfig 写入 YAML group，API 传递 group
 - 录像片段 GIF 导出：RecordingExporter.toGif() 使用 ffmpeg 双 pass（palettegen + paletteuse bayer 抖动）生成高质量调色板 GIF（480px 宽，10fps），API POST /api/recordings/gif 端点，下载端点支持 .gif，前端导出面板 MP4/GIF 双按钮
-- 下一步优先：邮件告警推送、自定义模型加载
+- 自定义 AI 模型运行时切换：AiDetector reloadModel() 方法支持销毁旧 pipeline 加载新模型，加载失败自动回退，API GET /api/ai/model 查询状态 + POST /api/ai/reload-model 触发重载，RuntimeConfig 支持修改 ai.model，前端设置面板模型名称输入框 + 重载按钮 + 当前模型状态显示
+- 邮件告警推送：EmailNotifier 通过 SMTP（nodemailer）发送 HTML 彩色卡片格式告警邮件，支持变动/检测/离线/告警事件，RuntimeConfig notify.email 配置（SMTP 服务器/端口/SSL/认证/收发件人），前端设置面板邮件配置区域
+- PWA 离线缓存：vite-plugin-pwa 自动生成 Service Worker + Web App Manifest，standalone 模式添加到主屏幕，192/512px 图标，离线缓存所有静态资源，PWA 更新提示 toast
+- 多语言 i18n：vue-i18n 集成，zh-CN 和 en 双语语言包覆盖全部 UI，App header 语言切换按钮（EN/中），localStorage 持久化选择，所有面板组件（含 CameraView/RoiEditor/EventTimeline/RecordingsTimeline/MultiTimeline）已迁移到 t() 调用
+- 事件跳转录像定位：点击事件"查看录像"按钮，自动切换到录像标签、定位到对应摄像头和录像文件，视频播放器跳转到事件发生的时间点播放（loadedmetadata seek）
+- 事件面板筛选增强：日期选择器、摄像头下拉筛选、事件类型筛选，利用后端已有的 since/until/cameraId 参数；"加载更多"分页按钮（offset 参数）
+- 下一步优先：事件 CSV 导出、浏览器通知增强
