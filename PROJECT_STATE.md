@@ -247,4 +247,6 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像水印叠加：ffmpeg drawtext 滤镜在画面左上角叠加摄像头名称、左下角叠加实时时间戳（YYYY-MM-DD HH:MM:SS），NotoSansCJK 字体，半透明黑色背景框
 - 状态面板实时性能趋势图：SVG 折线图展示 FPS 和内存使用趋势，环形缓冲区 60 点（5 分钟），复用 /api/health 轮询
 - 告警历史点击跳转录像：AlertPanel 告警条目可点击，自动切换到录像标签并定位到对应时间点播放
-- 下一步优先：告警面板筛选与分页、检测目标逗留计时
+- 告警面板筛选与分页：摄像头下拉筛选、日期选择器、总数显示、加载更多按钮，后端 API 已支持全部筛选参数
+- 录像水印可配置化：RuntimeSettings 水印开关/名称位置/时间戳位置/字号，设置面板 UI，关闭时跳过 drawtext 节省编码开销
+- 下一步优先：前端摄像头灵敏度 per-camera 配置 UI、录像播放器帧预览缩略图条
