@@ -168,4 +168,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 全局 authFetch 迁移：8 个组件全部迁移到 authFetch（EventPanel/RecordingsPanel/CameraManagePanel/AlertPanel/SettingsPanel/CameraView/CameraStatusPanel/RoiEditor），authUrl() 给 video src / 下载链接附加 token
 - 摄像头画面检测框持久叠加：移除标注图3秒替代实时帧机制，displayUrl 始终显示实时帧，检测框通过叠加层持久渲染（跟随 detections），标注图仅用于截图下载，消除画面闪烁
 - 摄像头轮巡自动切换：header 轮巡按钮（多路时显示），可配置间隔（2-60秒）自动全屏切换摄像头，Esc 停止，P 键快捷切换，onUnmounted 清理
-- 下一步优先：邮件告警推送、摄像头管理面板添加摄像头时增加分组字段
+- 添加摄像头分组字段：CameraManagePanel 添加表单增加分组输入，addCameraToConfig 写入 YAML group，API 传递 group
+- 下一步优先：邮件告警推送、录像片段 GIF 导出
