@@ -5,7 +5,7 @@ import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
 import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, realpathSync } from "node:fs";
 
 /** WebSocket 客户端集合 */
 const wsClients = new Set<import("bun").ServerWebSocket>();
@@ -126,6 +126,10 @@ export function startServer(
         const filename = recordingMatch[2]!;
         const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
         if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        /** 防止路径遍历：确保解析后的路径仍在录像目录内 */
+        const storageRoot = realpathSync(recorder.getRecordingPath("."));
+        const resolved = realpathSync(filePath);
+        if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
         const stat = statSync(filePath);
         const file = Bun.file(filePath);
         return new Response(file, {
