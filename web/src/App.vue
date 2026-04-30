@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { EventClient, type Detection } from './services/events'
+import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
 import RecordingsPanel from './components/RecordingsPanel.vue'
@@ -48,6 +49,7 @@ const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
 const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
+const showShortcuts = ref(false)
 
 const client = new EventClient()
 
@@ -231,6 +233,23 @@ onMounted(() => {
   })
 
   client.connect()
+
+  /** 键盘快捷键 */
+  useKeyboardShortcuts()
+  registerShortcut({ key: '1', description: '事件面板', handler: () => switchTab('events') })
+  registerShortcut({ key: '2', description: '录像面板', handler: () => switchTab('recordings') })
+  registerShortcut({ key: '3', description: '状态面板', handler: () => switchTab('status') })
+  registerShortcut({ key: '4', description: '管理面板', handler: () => switchTab('cameras') })
+  registerShortcut({ key: '5', description: '告警面板', handler: () => switchTab('alerts') })
+  registerShortcut({ key: '6', description: '设置面板', handler: () => switchTab('settings') })
+  registerShortcut({ key: 'f', description: '全屏切换', handler: () => {
+    if (fullscreenCamera.value) exitFullscreen()
+    else if (cameras.value.length > 0) enterFullscreen(cameras.value[0]!.id)
+  }})
+  registerShortcut({ key: 'Escape', description: '退出全屏', handler: () => {
+    if (fullscreenCamera.value) exitFullscreen()
+  }})
+  registerShortcut({ key: '?', description: '快捷键帮助', handler: () => { showShortcuts.value = !showShortcuts.value }})
 })
 
 onUnmounted(() => {
@@ -358,6 +377,22 @@ onUnmounted(() => {
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" />
         <SettingsPanel v-if="activeTab === 'settings'" />
+      </div>
+    </div>
+
+    <!-- 快捷键帮助 -->
+    <div v-if="showShortcuts" class="shortcuts-overlay" @click="showShortcuts = false">
+      <div class="shortcuts-modal" @click.stop>
+        <div class="shortcuts-header">
+          <span>键盘快捷键</span>
+          <button class="close-btn" @click="showShortcuts = false">&times;</button>
+        </div>
+        <div class="shortcuts-list">
+          <div class="shortcut-row"><kbd>1</kbd> - <kbd>6</kbd><span>切换侧边栏标签</span></div>
+          <div class="shortcut-row"><kbd>F</kbd><span>全屏切换第一个摄像头</span></div>
+          <div class="shortcut-row"><kbd>Esc</kbd><span>退出全屏</span></div>
+          <div class="shortcut-row"><kbd>?</kbd><span>显示/隐藏快捷键帮助</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -513,5 +548,82 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   max-height: 55vh;
+}
+
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.shortcuts-modal {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.shortcuts-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2a4a;
+  color: #e0e0e0;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.close-btn:hover {
+  color: #e0e0e0;
+}
+
+.shortcuts-list {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.shortcut-row span {
+  margin-left: auto;
+  color: #888;
+  font-size: 12px;
+}
+
+kbd {
+  display: inline-block;
+  background: #16213e;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #4ECDC4;
+  min-width: 24px;
+  text-align: center;
 }
 </style>
