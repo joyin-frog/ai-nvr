@@ -18,6 +18,9 @@ export interface EventMap {
 /** 事件回调 */
 type EventCallback<T extends keyof EventMap> = (payload: EventMap[T]) => void
 
+/** 连接状态 */
+export type ConnectionState = 'connected' | 'connecting' | 'disconnected'
+
 /**
  * 事件 WebSocket 客户端
  * 二进制协议：[4字节头长度 LE uint32][JSON 头][可选二进制帧数据]
@@ -28,6 +31,13 @@ export class EventClient {
   private listeners = new Map<string, Set<EventCallback<keyof EventMap>>>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private url: string
+  /** 重连次数（用于指数退避） */
+  private reconnectAttempts = 0
+  /** 最大重连间隔（秒） */
+  private static readonly MAX_BACKOFF = 30
+  /** 连接状态监听器 */
+  private stateListeners = new Set<(state: ConnectionState) => void>()
+  private _state: ConnectionState = 'disconnected'
 
   constructor(url?: string) {
     if (url) {
@@ -40,14 +50,35 @@ export class EventClient {
     }
   }
 
+  /** 获取当前连接状态 */
+  get state(): ConnectionState {
+    return this._state
+  }
+
+  /** 监听连接状态变化 */
+  onStateChange(cb: (state: ConnectionState) => void): () => void {
+    this.stateListeners.add(cb)
+    return () => this.stateListeners.delete(cb)
+  }
+
+  private setState(state: ConnectionState): void {
+    this._state = state
+    for (const cb of this.stateListeners) {
+      try { cb(state) } catch { /* */ }
+    }
+  }
+
   /** 连接 */
   connect(): void {
+    this.setState('connecting')
     this.ws = new WebSocket(this.url)
     /** 使用二进制模式 */
     this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
       console.log('[EventClient] 已连接')
+      this.reconnectAttempts = 0
+      this.setState('connected')
     }
 
     this.ws.onmessage = (e) => {
@@ -55,7 +86,7 @@ export class EventClient {
     }
 
     this.ws.onclose = () => {
-      console.log('[EventClient] 断开，3 秒后重连')
+      this.setState('disconnected')
       this.scheduleReconnect()
     }
 
@@ -134,9 +165,13 @@ export class EventClient {
   }
 
   private scheduleReconnect(): void {
+    this.reconnectAttempts++
+    /** 指数退避：1s, 2s, 4s, 8s, 16s, 30s, 30s... */
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), EventClient.MAX_BACKOFF * 1000)
+    console.log(`[EventClient] 断开，${(delay / 1000).toFixed(0)} 秒后重连 (第 ${this.reconnectAttempts} 次)`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()
-    }, 3000)
+    }, delay)
   }
 }

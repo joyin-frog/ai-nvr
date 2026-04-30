@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { EventClient, type Detection } from './services/events'
+import { EventClient, type Detection, type ConnectionState } from './services/events'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
@@ -50,6 +50,9 @@ const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
 const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
 const showShortcuts = ref(false)
+
+/** WebSocket 连接状态 */
+const wsState = ref<ConnectionState>('disconnected')
 
 const client = new EventClient()
 
@@ -233,6 +236,9 @@ onMounted(() => {
   })
 
   client.connect()
+  client.onStateChange((state) => {
+    wsState.value = state
+  })
 
   /** 键盘快捷键 */
   useKeyboardShortcuts()
@@ -267,6 +273,9 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ cameras.length }} 路摄像头</span>
+      <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? '已连接' : wsState === 'connecting' ? '连接中...' : '已断开'">
+        {{ wsState === 'connected' ? '●' : wsState === 'connecting' ? '◐' : '○' }}
+      </span>
       <div class="header-actions">
         <button
           v-if="fullscreenCamera"
@@ -423,6 +432,29 @@ onUnmounted(() => {
 .status {
   font-size: 13px;
   color: #888;
+}
+
+.ws-indicator {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.ws-indicator.connected {
+  color: #4CAF50;
+}
+
+.ws-indicator.connecting {
+  color: #FFD93D;
+  animation: pulse-ws 1s infinite;
+}
+
+.ws-indicator.disconnected {
+  color: #F44336;
+}
+
+@keyframes pulse-ws {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 .app-body {
