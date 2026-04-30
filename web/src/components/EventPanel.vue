@@ -36,9 +36,9 @@ const events = ref<EventItem[]>([])
 const PAGE_SIZE = 50
 const loading = ref(false)
 const hasMore = ref(false)
-const filterType = ref('')
+const filterType = ref(localStorage.getItem('nvr-event-filter-type') ?? '')
 /** 摄像头筛选 */
-const filterCamera = ref('')
+const filterCamera = ref(localStorage.getItem('nvr-event-filter-camera') ?? '')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
 /** 搜索关键词 */
@@ -53,6 +53,13 @@ const totalCount = ref(0)
 const sortDesc = ref(true)
 /** 仅看收藏 */
 const filterStarred = ref(false)
+
+/** 筛选条件变更：持久化 + 重新加载 */
+function onFilterChange(field: 'type' | 'camera') {
+  if (field === 'type') localStorage.setItem('nvr-event-filter-type', filterType.value)
+  if (field === 'camera') localStorage.setItem('nvr-event-filter-camera', filterCamera.value)
+  loadHistory()
+}
 
 /** 当前子视图：'events' 事件列表 | 'gallery' 快照画廊 */
 const subView = ref<'events' | 'gallery'>('events')
@@ -409,11 +416,11 @@ defineExpose({ addEvent, loadHistory })
         :placeholder="t('event.searchPlaceholder')"
         :title="t('event.search')"
       />
-      <select v-model="filterCamera" @change="loadHistory" class="filter-select">
+      <select v-model="filterCamera" @change="onFilterChange('camera')" class="filter-select">
         <option value="">{{ t('event.allCameras') }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
-      <select v-model="filterType" @change="loadHistory" class="filter-select">
+      <select v-model="filterType" @change="onFilterChange('type')" class="filter-select">
         <option value="">{{ t('event.allTypesLabel') }}</option>
         <option value="motion">{{ t('event.motion') }}</option>
         <option value="detect">{{ t('event.detect') }}</option>
