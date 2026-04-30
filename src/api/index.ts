@@ -173,7 +173,12 @@ export function startServer(
       /** 更新运行时设置 */
       if (url.pathname === "/api/settings" && req.method === "PATCH") {
         return req.json().then((body: unknown) => {
+          const oldMode = runtimeConfig.get().recording.mode;
           const updated = runtimeConfig.patchFromJSON(body);
+          /** 录像模式变更时通知 recorder */
+          if (updated.recording.mode !== oldMode) {
+            recorder.reloadMode();
+          }
           return Response.json(updated);
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }

@@ -140,6 +140,35 @@ export class MotionRecorder {
     }
   }
 
+  /** 运行时切换录制模式（API 修改设置后调用） */
+  reloadMode(): void {
+    const mode = this.runtimeConfig.get().recording.mode;
+    console.log(`[Recorder] 模式切换: ${mode}`);
+
+    if (mode === "continuous") {
+      /** 停止所有 motion 定时器，启动持续录制 */
+      for (const [cameraId] of this.states) {
+        const state = this.states.get(cameraId);
+        if (state?.stopTimer) {
+          clearTimeout(state.stopTimer);
+          state.stopTimer = null;
+        }
+      }
+      for (const [cameraId] of this.hdStreams) {
+        this.startContinuous(cameraId);
+      }
+    } else {
+      /** 停止所有持续录制定时器，当前段自然结束后不再重启 */
+      for (const [cameraId] of this.states) {
+        const state = this.states.get(cameraId);
+        if (state?.continuousTimer) {
+          clearTimeout(state.continuousTimer);
+          state.continuousTimer = null;
+        }
+      }
+    }
+  }
+
   /** 列出录像文件 */
   listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
     const results: RecordingInfo[] = [];
