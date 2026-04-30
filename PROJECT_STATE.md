@@ -203,4 +203,9 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件搜索：后端 EventStorage query 支持 search 参数模糊匹配 detail，前端搜索框，搜索条件同步到分页和 CSV 导出
 - 实时事件筛选：addEvent 检查 filterType/filterCamera，不匹配的实时事件不插入列表
 - 移动端告警标签：移动端底部面板增加告警标签按钮，EventPanel 传递 snapshots/cameras props
+- 日期格式化 i18n 修复：6 个组件 10 处硬编码 zh-CN 改为 locale.value，切换语言后日期自动适配
+- 服务器时间戳：/api/health 返回 serverTime 毫秒时间戳
+- 网格列数切换：header 按钮循环切换 auto/1/2/3/4 列，持久化到 localStorage
+- 事件面板总数：显示当前筛选条件下的事件总数
+- 摄像头名称 OSD：画面左上角叠加摄像头名称标签
 - 下一步优先：PTZ 控制、事件统计图表增强
