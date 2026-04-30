@@ -34,7 +34,8 @@ interface CameraStatus {
 
 /** 侧边栏激活的标签 */
 type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'settings'
-const activeTab = ref<SidebarTab>('events')
+const savedTab = localStorage.getItem('nvr-active-tab') as SidebarTab | null
+const activeTab = ref<SidebarTab>(savedTab ?? 'events')
 
 /** 全屏摄像头 ID（null 为网格模式） */
 const fullscreenCamera = ref<string | null>(null)
@@ -155,6 +156,7 @@ async function onPlayRecording(cameraId: string, timestamp: number) {
 /** 切换到录像标签时刷新列表 */
 function switchTab(tab: SidebarTab) {
   activeTab.value = tab
+  localStorage.setItem('nvr-active-tab', tab)
   if (tab === 'recordings') {
     recordingsPanel.value?.loadRecordings()
   }
@@ -441,6 +443,7 @@ onUnmounted(() => {
           :camera-id="cam.id"
           :name="cam.name"
           :online="cam.online"
+          :last-frame-at="cam.lastFrameAt"
           :detections="detectionsMap[cam.id] ?? []"
           :detect-version="detectVersions[cam.id] ?? 0"
           :frame-image="frameImages[cam.id] ?? ''"
@@ -487,7 +490,7 @@ onUnmounted(() => {
             :cameras="cameras"
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-          <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" />
+          <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" />
           <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>

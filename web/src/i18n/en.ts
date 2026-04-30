@@ -26,6 +26,10 @@ export default {
     waiting: 'Waiting...',
     cameraOffline: 'Camera Offline',
     detections: '{count} detected',
+    lastSeenJustNow: 'Just went offline',
+    lastSeenMinutes: 'Last seen {count}m ago',
+    lastSeenHours: 'Last seen {count}h ago',
+    lastSeenDays: 'Last seen {count}d ago',
   },
   event: {
     title: 'Event Log',

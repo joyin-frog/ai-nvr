@@ -9,6 +9,8 @@ const props = defineProps<{
   cameraId: string
   name: string
   online: boolean
+  /** 最后收到帧的时间戳（ms） */
+  lastFrameAt: number
   detections: Detection[]
   detectVersion: number
   /** WebSocket 推送的实时帧 data URL */
@@ -84,6 +86,16 @@ const detectionBoxes = computed(() => {
   }))
 })
 
+/** 离线时显示"最后在线 x 分钟前" */
+const lastSeenText = computed(() => {
+  if (props.online || !props.lastFrameAt) return ''
+  const diffSec = Math.floor((Date.now() - props.lastFrameAt) / 1000)
+  if (diffSec < 60) return t('camera.lastSeenJustNow')
+  if (diffSec < 3600) return t('camera.lastSeenMinutes', { count: Math.floor(diffSec / 60) })
+  if (diffSec < 86400) return t('camera.lastSeenHours', { count: Math.floor(diffSec / 3600) })
+  return t('camera.lastSeenDays', { count: Math.floor(diffSec / 86400) })
+})
+
 /** 截图下载当前画面（优先标注图） */
 function takeScreenshot() {
   const src = annotatedUrl.value || displayUrl.value
@@ -126,6 +138,7 @@ onUnmounted(() => {
         <div v-if="online" class="placeholder-icon">&#9679;</div>
         <div v-else class="placeholder-icon offline-icon">&#10005;</div>
         <span>{{ online ? t('camera.waiting') : t('camera.cameraOffline') }}</span>
+        <span v-if="!online && lastSeenText" class="last-seen">{{ lastSeenText }}</span>
       </div>
 
       <!-- 检测框叠加层 -->
@@ -277,6 +290,12 @@ onUnmounted(() => {
   gap: 8px;
   color: #444;
   font-size: 13px;
+}
+
+.last-seen {
+  font-size: 11px;
+  color: #666;
+  margin-top: -4px;
 }
 
 .placeholder-icon {

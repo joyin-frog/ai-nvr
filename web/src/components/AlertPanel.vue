@@ -34,6 +34,20 @@ const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
 const loading = ref(false)
 
+const props = defineProps<{
+  /** 摄像头列表（用于名称映射） */
+  cameras?: Array<{ id: string; name: string }>
+}>()
+
+/** 摄像头 ID → 名称映射 */
+const cameraNameMap = computed(() => {
+  const map: Record<string, string> = {}
+  for (const cam of (props.cameras ?? [])) {
+    map[cam.id] = cam.name
+  }
+  return map
+})
+
 /** 显示添加表单 */
 const showAddForm = ref(false)
 /** 正在编辑的规则 ID（null 为新增模式） */
@@ -323,7 +337,7 @@ defineExpose({ loadAlerts })
           </div>
           <div class="rule-meta">
             <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
-            <span v-if="rule.cameraId" class="meta-tag cam">{{ rule.cameraId }}</span>
+            <span v-if="rule.cameraId" class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
             <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
@@ -339,7 +353,7 @@ defineExpose({ loadAlerts })
         <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
         <div class="alert-body">
           <span class="alert-rule">{{ alert.ruleName }}</span>
-          <span class="alert-cam">{{ alert.cameraId }}</span>
+          <span class="alert-cam">{{ cameraNameMap[alert.cameraId] ?? alert.cameraId }}</span>
         </div>
         <div v-if="alert.detail" class="alert-detail">{{ alert.detail }}</div>
       </div>

@@ -26,6 +26,10 @@ export default {
     waiting: '等待视频...',
     cameraOffline: '摄像头离线',
     detections: '{count} 个检测',
+    lastSeenJustNow: '刚刚离线',
+    lastSeenMinutes: '{count} 分钟前在线',
+    lastSeenHours: '{count} 小时前在线',
+    lastSeenDays: '{count} 天前在线',
   },
   event: {
     title: '事件日志',
