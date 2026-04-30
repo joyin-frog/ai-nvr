@@ -182,4 +182,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 告警面板摄像头名称：AlertPanel 接收 cameras prop，规则列表和告警历史显示摄像头友好名称替代原始 ID
 - 离线摄像头最后在线时间：CameraView 接收 lastFrameAt prop，离线时显示"X 分钟前在线"文本
 - 侧边栏 tab 持久化：activeTab 保存到 localStorage，刷新页面恢复上次选择的标签
-- 下一步优先：录像面板日期筛选、事件 CSV 导出
+- 录像面板日期筛选：RecordingsPanel 添加日期选择器，前端 computed 过滤录像列表和时间轴
+- 下一步优先：事件 CSV 导出、摄像头拖拽排序
