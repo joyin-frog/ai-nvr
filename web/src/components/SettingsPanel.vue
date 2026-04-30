@@ -34,6 +34,18 @@ interface RuntimeSettings {
       webhookUrl: string
       secret: string
     }
+    email: {
+      enabled: boolean
+      smtp: {
+        host: string
+        port: number
+        secure: boolean
+        user: string
+        pass: string
+      } | null
+      from: string
+      to: string
+    }
   }
   cleanup: {
     eventsRetentionDays: number
@@ -53,7 +65,13 @@ const modelInfo = ref<{ model: string; loading: boolean; initialized: boolean } 
 async function loadSettings() {
   try {
     const res = await authFetch('/api/settings')
-    if (res.ok) settings.value = await res.json()
+    if (res.ok) {
+      settings.value = await res.json()
+      /** 确保 email.smtp 有默认值，避免模板中 null 引用 */
+      if (settings.value && !settings.value.notify.email.smtp) {
+        settings.value.notify.email.smtp = { host: '', port: 465, secure: true, user: '', pass: '' }
+      }
+    }
   } catch {
     // ignore
   }
@@ -256,6 +274,72 @@ onMounted(() => {
             type="text"
             v-model="settings.notify.dingtalk.secret"
             placeholder="SEC...（可选）"
+            class="input-url"
+          />
+        </label>
+      </section>
+
+      <!-- 邮件告警通知 -->
+      <section class="section">
+        <h3>邮件告警通知</h3>
+        <label class="field">
+          <span class="field-label">启用</span>
+          <input type="checkbox" v-model="settings.notify.email.enabled" class="checkbox" />
+        </label>
+        <div class="field field-col">
+          <span class="field-label">SMTP 服务器</span>
+          <div class="smtp-row">
+            <input
+              type="text"
+              v-model="settings.notify.email.smtp!.host"
+              placeholder="smtp.example.com"
+              class="input-smtp-host"
+            />
+            <input
+              type="number"
+              v-model.number="settings.notify.email.smtp!.port"
+              placeholder="465"
+              class="input-smtp-port"
+            />
+            <label class="secure-label">
+              <input type="checkbox" v-model="settings.notify.email.smtp!.secure" class="checkbox" />
+              <span>SSL</span>
+            </label>
+          </div>
+        </div>
+        <label class="field">
+          <span class="field-label">用户名</span>
+          <input
+            type="text"
+            v-model="settings.notify.email.smtp!.user"
+            placeholder="user@example.com"
+            class="input-url"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">密码</span>
+          <input
+            type="password"
+            v-model="settings.notify.email.smtp!.pass"
+            placeholder="SMTP 密码或授权码"
+            class="input-url"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">发件人</span>
+          <input
+            type="text"
+            v-model="settings.notify.email.from"
+            placeholder="留空则使用用户名作为发件人"
+            class="input-url"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">收件人</span>
+          <input
+            type="text"
+            v-model="settings.notify.email.to"
+            placeholder="多个收件人用逗号分隔"
             class="input-url"
           />
         </label>
@@ -485,5 +569,53 @@ onMounted(() => {
   font-size: 11px;
   color: #666;
   margin-top: 2px;
+}
+
+.smtp-row {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+  align-items: center;
+}
+
+.input-smtp-host {
+  flex: 1;
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.input-smtp-host:focus {
+  outline: none;
+  border-color: #4ECDC4;
+}
+
+.input-smtp-port {
+  width: 60px;
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  text-align: right;
+}
+
+.input-smtp-port:focus {
+  outline: none;
+  border-color: #4ECDC4;
+}
+
+.secure-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #ccc;
+  font-size: 12px;
+  white-space: nowrap;
 }
 </style>

@@ -27,10 +27,38 @@ export interface DingTalkConfig {
   secret: string;
 }
 
+/** SMTP 邮件配置 */
+export interface EmailSmtpConfig {
+  /** SMTP 服务器地址 */
+  host: string;
+  /** SMTP 端口 */
+  port: number;
+  /** 是否使用 SSL（465 端口通常为 true） */
+  secure: boolean;
+  /** SMTP 用户名 */
+  user: string;
+  /** SMTP 密码 */
+  pass: string;
+}
+
+/** 邮件通知配置 */
+export interface EmailConfig {
+  /** 是否启用 */
+  enabled: boolean;
+  /** SMTP 服务器配置 */
+  smtp: EmailSmtpConfig | null;
+  /** 发件人地址（可选，默认用 SMTP 用户名） */
+  from: string;
+  /** 收件人地址（多个用逗号分隔） */
+  to: string;
+}
+
 /** 通知渠道配置 */
 export interface NotifyConfig {
   /** 钉钉机器人 */
   dingtalk: DingTalkConfig;
+  /** 邮件通知 */
+  email: EmailConfig;
 }
 
 /** 运行时可修改的设置 */
@@ -89,6 +117,12 @@ export class RuntimeConfig {
           enabled: false,
           webhookUrl: "",
           secret: "",
+        },
+        email: {
+          enabled: false,
+          smtp: null,
+          from: "",
+          to: "",
         },
       },
       cleanup: {
@@ -151,6 +185,22 @@ export class RuntimeConfig {
         if (typeof d.webhookUrl === "string") this.settings.notify.dingtalk.webhookUrl = d.webhookUrl;
         if (typeof d.secret === "string") this.settings.notify.dingtalk.secret = d.secret;
       }
+      if (n.email && typeof n.email === "object") {
+        const e = n.email as Record<string, unknown>;
+        if (typeof e.enabled === "boolean") this.settings.notify.email.enabled = e.enabled;
+        if (typeof e.from === "string") this.settings.notify.email.from = e.from;
+        if (typeof e.to === "string") this.settings.notify.email.to = e.to;
+        if (e.smtp && typeof e.smtp === "object") {
+          const s = e.smtp as Record<string, unknown>;
+          this.settings.notify.email.smtp = {
+            host: typeof s.host === "string" ? s.host : "",
+            port: typeof s.port === "number" ? s.port : 465,
+            secure: typeof s.secure === "boolean" ? s.secure : true,
+            user: typeof s.user === "string" ? s.user : "",
+            pass: typeof s.pass === "string" ? s.pass : "",
+          };
+        }
+      }
     }
 
     if (obj.cleanup && typeof obj.cleanup === "object") {
@@ -184,6 +234,7 @@ export class RuntimeConfig {
     if (updates.notify) {
       this.settings.notify = {
         dingtalk: { ...this.settings.notify.dingtalk, ...updates.notify.dingtalk },
+        email: { ...this.settings.notify.email, ...updates.notify.email },
       };
     }
     if (updates.cleanup) {

@@ -14,6 +14,7 @@ import { SystemMonitor } from "@/monitor";
 import { RuntimeConfig } from "@/runtime-config";
 import { WebhookNotifier } from "@/notify/webhook";
 import { DingTalkNotifier } from "@/notify/dingtalk";
+import { EmailNotifier } from "@/notify/email";
 import { SnapshotStorage } from "@/storage/snapshots";
 import { RoiStorage } from "@/storage/roi";
 import { AlertStorage } from "@/alert/storage";
@@ -73,6 +74,10 @@ webhookNotifier.start();
 /** 钉钉机器人通知 */
 const dingtalkNotifier = new DingTalkNotifier(runtimeConfig, eventBus);
 dingtalkNotifier.start();
+
+/** 邮件告警通知 */
+const emailNotifier = new EmailNotifier(runtimeConfig, eventBus);
+emailNotifier.start();
 
 /** 检测快照存储（保存标注图到磁盘） */
 const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);
