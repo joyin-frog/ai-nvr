@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { EventClient, type Detection } from './services/events'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
@@ -16,6 +16,12 @@ interface CameraStatus {
 /** 侧边栏激活的标签 */
 type SidebarTab = 'events' | 'recordings'
 const activeTab = ref<SidebarTab>('events')
+
+/** 全屏摄像头 ID（null 为网格模式） */
+const fullscreenCamera = ref<string | null>(null)
+
+/** 网格列数配置 */
+const gridCols = ref(0) // 0 = auto
 
 const cameras = ref<CameraStatus[]>([])
 const detectionsMap = ref<Record<string, Detection[]>>({})
@@ -50,6 +56,32 @@ function switchTab(tab: SidebarTab) {
     recordingsPanel.value?.loadRecordings()
   }
 }
+
+/** 进入全屏单路 */
+function enterFullscreen(cameraId: string) {
+  fullscreenCamera.value = cameraId
+}
+
+/** 退出全屏回到网格 */
+function exitFullscreen() {
+  fullscreenCamera.value = null
+}
+
+/** 网格列数样式 */
+const gridStyle = computed(() => {
+  if (fullscreenCamera.value) return {}
+  const n = gridCols.value
+  if (n > 0) return { 'grid-template-columns': `repeat(${n}, 1fr)` }
+  return { 'grid-template-columns': 'repeat(auto-fit, minmax(400px, 1fr))' }
+})
+
+/** 显示的摄像头列表 */
+const visibleCameras = computed(() => {
+  if (fullscreenCamera.value) {
+    return cameras.value.filter(c => c.id === fullscreenCamera.value)
+  }
+  return cameras.value
+})
 
 onMounted(() => {
   loadCameras()
@@ -102,11 +134,18 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ cameras.length }} 路摄像头</span>
+      <div class="header-actions">
+        <button
+          v-if="fullscreenCamera"
+          class="header-btn"
+          @click="exitFullscreen"
+        >返回网格</button>
+      </div>
     </header>
     <main class="app-body">
-      <div class="camera-grid">
+      <div class="camera-grid" :style="gridStyle" :class="{ fullscreen: !!fullscreenCamera }">
         <CameraView
-          v-for="cam in cameras"
+          v-for="cam in visibleCameras"
           :key="cam.id"
           :camera-id="cam.id"
           :name="cam.name"
@@ -114,6 +153,7 @@ onUnmounted(() => {
           :detections="detectionsMap[cam.id] ?? []"
           :detect-version="detectVersions[cam.id] ?? 0"
           :frame-image="frameImages[cam.id] ?? ''"
+          @fullscreen="enterFullscreen"
         />
       </div>
       <div class="sidebar">
@@ -178,9 +218,30 @@ onUnmounted(() => {
 .camera-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
   gap: 12px;
   overflow-y: auto;
+}
+
+.camera-grid.fullscreen {
+  grid-template-columns: 1fr;
+}
+
+.header-actions {
+  margin-left: auto;
+}
+
+.header-btn {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.header-btn:hover {
+  background: #3a3a5a;
 }
 
 .sidebar {

@@ -12,6 +12,10 @@ const props = defineProps<{
   frameImage: string
 }>()
 
+const emit = defineEmits<{
+  fullscreen: [cameraId: string]
+}>()
+
 /** 标注图片 URL */
 const annotatedUrl = ref<string>('')
 
@@ -54,6 +58,7 @@ onUnmounted(() => {
       <span class="detection-count" v-if="detections.length > 0">
         {{ detections.length }} 个目标
       </span>
+      <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" title="全屏">&#x26F6;</button>
     </div>
 
     <div class="camera-body">
@@ -114,6 +119,25 @@ onUnmounted(() => {
   margin-left: auto;
   color: #4ECDC4;
   font-size: 12px;
+}
+
+.fullscreen-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.fullscreen-btn:hover {
+  color: #e0e0e0;
+}
+
+.has-detections .fullscreen-btn {
+  margin-left: 0;
 }
 
 .camera-body {
