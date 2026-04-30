@@ -7,6 +7,7 @@ import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
+import { type AlertStorage } from "@/alert/storage";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -15,7 +16,7 @@ import { resolve, extname } from "node:path";
 const wsClients = new Set<import("bun").ServerWebSocket>();
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "alert"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -31,6 +32,7 @@ export function startServer(
   runtimeConfig: RuntimeConfig,
   snapshotStorage: SnapshotStorage,
   roiStorage: RoiStorage,
+  alertStorage: AlertStorage,
 ): void {
   Bun.serve({
     port,
@@ -272,6 +274,70 @@ export function startServer(
         const roiId = Number(roiIdMatch[1]!);
         roiStorage.remove(roiId);
         return Response.json({ ok: true });
+      }
+
+      /** 告警规则列表 */
+      if (url.pathname === "/api/alerts/rules" && req.method === "GET") {
+        return Response.json(alertStorage.listRules());
+      }
+
+      /** 添加告警规则 */
+      if (url.pathname === "/api/alerts/rules" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const name = obj.name as string | undefined;
+          const eventType = obj.eventType as string | undefined;
+          if (!name || !eventType) return new Response("Missing name or eventType", { status: 400 });
+          const id = alertStorage.addRule({
+            name,
+            eventType,
+            cameraId: (obj.cameraId as string) ?? "",
+            labels: (obj.labels as string) ?? "",
+            windowSeconds: (obj.windowSeconds as number) ?? 60,
+            threshold: (obj.threshold as number) ?? 3,
+            cooldownSeconds: (obj.cooldownSeconds as number) ?? 300,
+          });
+          return Response.json({ id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 更新告警规则 */
+      const alertRuleMatch = url.pathname.match(/^\/api\/alerts\/rules\/(\d+)$/);
+      if (alertRuleMatch && req.method === "PATCH") {
+        const ruleId = Number(alertRuleMatch[1]!);
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const updates: Record<string, unknown> = {};
+          for (const key of ["name", "eventType", "cameraId", "labels", "windowSeconds", "threshold", "cooldownSeconds", "enabled"]) {
+            if (obj[key] !== undefined) updates[key] = obj[key];
+          }
+          alertStorage.updateRule(ruleId, updates as never);
+          return Response.json({ ok: true });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 删除告警规则 */
+      if (alertRuleMatch && req.method === "DELETE") {
+        const ruleId = Number(alertRuleMatch[1]!);
+        alertStorage.removeRule(ruleId);
+        return Response.json({ ok: true });
+      }
+
+      /** 告警历史 */
+      if (url.pathname === "/api/alerts/history") {
+        const alerts = alertStorage.queryAlerts({
+          cameraId: url.searchParams.get("cameraId") ?? undefined,
+          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
+          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
+          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+        });
+        const total = alertStorage.countAlerts({
+          cameraId: url.searchParams.get("cameraId") ?? undefined,
+          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
+          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+        });
+        return Response.json({ alerts, total });
       }
 
       /** API 路径未匹配 → 404 */

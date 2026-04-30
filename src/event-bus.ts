@@ -1,3 +1,5 @@
+import { type Detection } from "@/ai/types";
+
 /** 事件载荷类型定义 */
 export interface EventPayloads {
   /** 原始帧事件：每到一个帧就触发 */
@@ -22,6 +24,18 @@ export interface EventPayloads {
     timestamp: number;
   };
 
+  /** AI 检测事件：检测到目标物体时触发 */
+  detect: {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 检测时间戳 */
+    timestamp: number;
+    /** 检测结果列表 */
+    detections: Detection[];
+    /** 标注后的图片（JPEG Buffer） */
+    annotatedImage: Buffer;
+  };
+
   /** 摄像头上线 */
   "camera:online": {
     cameraId: string;
@@ -30,6 +44,20 @@ export interface EventPayloads {
   /** 摄像头离线 */
   "camera:offline": {
     cameraId: string;
+  };
+
+  /** 告警触发：规则匹配时产生 */
+  alert: {
+    /** 触发的规则 ID */
+    ruleId: number;
+    /** 规则名称 */
+    ruleName: string;
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 触发详情 */
+    detail: string;
   };
 }
 

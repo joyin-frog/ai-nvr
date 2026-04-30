@@ -19,7 +19,7 @@ interface WebhookPayload {
  */
 export class WebhookNotifier {
   /** 要推送的事件类型 */
-  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline"];
+  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "alert"];
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -62,6 +62,9 @@ export class WebhookNotifier {
       const detections = payload.detections as Array<{ label: string; score: number }> | undefined;
       detail.detections = detections?.map(d => ({ label: d.label, score: d.score }));
       detail.count = detections?.length ?? 0;
+    } else if (event === "alert") {
+      detail.ruleId = payload.ruleId;
+      detail.ruleName = payload.ruleName;
     }
 
     return { event, cameraId, timestamp, detail };

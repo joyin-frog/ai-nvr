@@ -15,6 +15,8 @@ import { RuntimeConfig } from "@/runtime-config";
 import { WebhookNotifier } from "@/notify/webhook";
 import { SnapshotStorage } from "@/storage/snapshots";
 import { RoiStorage } from "@/storage/roi";
+import { AlertStorage } from "@/alert/storage";
+import { AlertEngine } from "@/alert/engine";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -67,13 +69,18 @@ webhookNotifier.start();
 const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);
 snapshotStorage.start();
 
+/** 告警存储与引擎 */
+const alertStorage = new AlertStorage(join(import.meta.dir, "../data/alerts.db"));
+const alertEngine = new AlertEngine(eventBus, alertStorage);
+alertEngine.start();
+
 /** 启动 HTTP 服务 */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage);
 
 /** 自动记录事件到 SQLite */
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     let detail: string | undefined;
@@ -82,6 +89,9 @@ for (const eventType of RECORDED_EVENTS) {
     } else if (eventType === "detect") {
       const p = payload as { detections: Array<{ label: string; score: number }> };
       detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score })) });
+    } else if (eventType === "alert") {
+      const p = payload as { ruleName: string; detail: string };
+      detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });
     }
     eventStorage.insert(eventType, (payload as { cameraId: string }).cameraId, (payload as { timestamp: number }).timestamp ?? Date.now(), detail);
   });
@@ -100,6 +110,7 @@ process.on("SIGINT", () => {
   cameraManager.stop();
   eventStorage.close();
   roiStorage.close();
+  alertStorage.close();
   eventBus.clear();
   process.exit(0);
 });
@@ -127,6 +138,12 @@ eventBus.on("detect", ({ cameraId, detections, timestamp }) => {
   const time = new Date(timestamp).toLocaleTimeString("zh-CN");
   const labels = detections.map((d) => `${d.label}(${(d.score * 100).toFixed(0)}%)`).join(", ");
   console.log(`[Detect] ${time} | ${cameraId} | ${detections.length} 个目标: ${labels}`);
+});
+
+/** 控制台日志：打印告警事件 */
+eventBus.on("alert", ({ ruleName, cameraId, timestamp, detail }) => {
+  const time = new Date(timestamp).toLocaleTimeString("zh-CN");
+  console.log(`[Alert] ${time} | ${cameraId} | ${ruleName}${detail ? ` | ${detail}` : ""}`);
 });
 
 /** 启动后保存前几帧截图到 data/snapshots 供验证 */
