@@ -13,6 +13,7 @@ import { MotionRecorder } from "@/storage/recorder";
 import { SystemMonitor } from "@/monitor";
 import { RuntimeConfig } from "@/runtime-config";
 import { WebhookNotifier } from "@/notify/webhook";
+import { SnapshotStorage } from "@/storage/snapshots";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -54,14 +55,18 @@ aiDetector.init().then(() => {
   console.error("[App] AI 检测器初始化失败:", err);
 });
 
-/** 启动 HTTP 服务 */
-const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
-const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig);
-
 /** Webhook 通知（事件推送到外部 URL） */
 const webhookNotifier = new WebhookNotifier(runtimeConfig, eventBus);
 webhookNotifier.start();
+
+/** 检测快照存储（保存标注图到磁盘） */
+const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);
+snapshotStorage.start();
+
+/** 启动 HTTP 服务 */
+const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
+const monitor = new SystemMonitor(eventBus);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline"] as const;

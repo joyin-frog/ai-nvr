@@ -5,6 +5,7 @@ import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
 import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
+import { type SnapshotStorage } from "@/storage/snapshots";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -27,6 +28,7 @@ export function startServer(
   recorder: MotionRecorder,
   monitor: SystemMonitor,
   runtimeConfig: RuntimeConfig,
+  snapshotStorage: SnapshotStorage,
 ): void {
   Bun.serve({
     port,
@@ -200,6 +202,31 @@ export function startServer(
         if (!image) return new Response("No annotated image", { status: 404 });
         return new Response(image, {
           headers: { "Content-Type": "image/jpeg" },
+        });
+      }
+
+      /** 快照列表 */
+      if (url.pathname === "/api/snapshots") {
+        const cameraId = url.searchParams.get("cameraId") ?? undefined;
+        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
+        const snapshots = snapshotStorage.listSnapshots(cameraId);
+        return Response.json(snapshots.slice(0, limit));
+      }
+
+      /** 快照图片 */
+      const snapFileMatch = url.pathname.match(/^\/api\/snapshots\/([^/]+)\/(.+\.jpg)$/);
+      if (snapFileMatch) {
+        const camId = snapFileMatch[1]!;
+        const filename = snapFileMatch[2]!;
+        const filePath = snapshotStorage.getSnapshotPath(`${camId}/${filename}`);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        /** 防止路径遍历 */
+        const snapRoot = realpathSync(snapshotStorage.getSnapshotPath("."));
+        const resolved = realpathSync(filePath);
+        if (!resolved.startsWith(snapRoot)) return new Response("Forbidden", { status: 403 });
+        const file = Bun.file(filePath);
+        return new Response(file, {
+          headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
         });
       }
 
