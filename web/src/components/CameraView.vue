@@ -240,6 +240,11 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- 摄像头名称叠加 -->
+      <div v-if="displayUrl" class="name-overlay">
+        <span class="name-text">{{ name }}</span>
+      </div>
+
       <!-- 数字时钟叠加 -->
       <div v-if="online && displayUrl" class="clock-overlay">
         <span class="clock-text">{{ clockText }}</span>
@@ -441,6 +446,23 @@ onUnmounted(() => {
 }
 
 /* 数字时钟叠加 */
+.name-overlay {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+  padding: 2px 8px;
+  pointer-events: none;
+}
+
+.name-text {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
 .clock-overlay {
   position: absolute;
   bottom: 6px;
