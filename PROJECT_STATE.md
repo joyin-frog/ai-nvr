@@ -124,4 +124,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 检测快照存储：detect 事件自动保存标注图到磁盘，API 列出/获取快照，前端事件面板显示缩略图
 - 生产模式：`bun run prod` 一键构建前端 + 启动后端
 - 今日事件统计：状态面板显示当日变动/检测次数，30秒自动刷新
+- Bug 修复：recorder forceStop 清理 recording 标志、快照文件名毫秒级精度、detectSnapshots blob URL 独立复制
 - 下一步优先：检测区域划定、告警规则引擎
