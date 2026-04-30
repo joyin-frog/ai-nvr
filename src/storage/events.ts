@@ -53,7 +53,7 @@ export class EventStorage {
   }
 
   /** 统计事件数量 */
-  count(options: { type?: string; cameraId?: string; since?: number; until?: number } = {}): number {
+  count(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string } = {}): number {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = this.db.query(`SELECT COUNT(*) as count FROM events ${where}`).get(...params) as { count: number };

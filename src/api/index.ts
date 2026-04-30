@@ -193,6 +193,7 @@ export function startServer(
           cameraId: queryOpts.cameraId,
           since: queryOpts.since,
           until: queryOpts.until,
+          search: queryOpts.search,
         });
         return Response.json({ events, total });
       }
