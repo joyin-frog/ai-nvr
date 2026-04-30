@@ -28,6 +28,8 @@ interface EventItem {
   rawDetail: string | null
   /** 是否已收藏 */
   starred: boolean
+  /** 是否为实时新增事件（用于入场动画） */
+  isNew?: boolean
 }
 
 const events = ref<EventItem[]>([])
@@ -166,7 +168,13 @@ function addEvent(type: string, cameraId: string, detail: string) {
   }
 
   const time = new Date(now).toLocaleTimeString(locale.value)
-  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail, starred: false })
+  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail, starred: false, isNew: true })
+  /** 1 秒后移除动画标记 */
+  const eventId = now
+  setTimeout(() => {
+    const ev = events.value.find(e => e.id === eventId)
+    if (ev) ev.isNew = false
+  }, 1000)
   if (events.value.length > PAGE_SIZE) {
     events.value = events.value.slice(0, PAGE_SIZE)
   }
@@ -444,7 +452,7 @@ defineExpose({ addEvent, loadHistory })
         v-for="e in sortedEvents"
         :key="e.id"
         class="event-row"
-        :class="{ expanded: expandedId === e.id }"
+        :class="{ expanded: expandedId === e.id, 'new-event': e.isNew }"
       >
         <div
           class="event-item"
@@ -694,6 +702,15 @@ defineExpose({ addEvent, loadHistory })
 
 .event-row {
   border-radius: 4px;
+}
+
+.event-row.new-event {
+  animation: event-flash 1s ease-out;
+}
+
+@keyframes event-flash {
+  0% { background: rgba(78, 205, 196, 0.25); }
+  100% { background: transparent; }
 }
 
 .event-row.expanded {
