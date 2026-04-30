@@ -113,10 +113,13 @@ export function startServer(
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
-      /** 帧事件只推送元信息，不推送帧数据（太大） */
       const wsPayload = { event, ...payload };
+
       if (event === "frame") {
+        /** 帧事件：推送 base64 编码的 JPEG，前端可直接渲染 */
         (wsPayload as Record<string, unknown>).data = undefined;
+        const base64 = Buffer.from((payload as { data: Buffer }).data).toString("base64");
+        (wsPayload as Record<string, unknown>).image = `data:image/jpeg;base64,${base64}`;
       }
       /** 检测事件不推送图片数据，前端通过 /api/detection/annotated 单独拉取 */
       if (event === "detect") {

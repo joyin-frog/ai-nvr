@@ -15,6 +15,8 @@ interface CameraStatus {
 const cameras = ref<CameraStatus[]>([])
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
+/** 每个摄像头的最新帧 data URL */
+const frameImages = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 
 const client = new EventClient()
@@ -41,6 +43,12 @@ onMounted(() => {
   /** 监听变动事件 */
   client.on('motion', (payload) => {
     eventPanel.value?.addEvent('motion', payload.cameraId, `变动 ${(payload.ratio * 100).toFixed(1)}%`)
+  })
+
+  /** 监听帧事件：实时推送帧图片 */
+  client.on('frame', (payload) => {
+    frameImages.value[payload.cameraId] = payload.image
+    frameImages.value = { ...frameImages.value }
   })
 
   /** 监听检测事件 */
@@ -91,6 +99,7 @@ onUnmounted(() => {
           :online="cam.online"
           :detections="detectionsMap[cam.id] ?? []"
           :detect-version="detectVersions[cam.id] ?? 0"
+          :frame-image="frameImages[cam.id] ?? ''"
         />
       </div>
       <div class="event-sidebar">
