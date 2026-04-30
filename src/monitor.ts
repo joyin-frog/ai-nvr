@@ -34,6 +34,8 @@ export interface SystemMetrics {
   cameras: CameraMetrics[];
   /** 系统启动时间 */
   startedAt: number;
+  /** 服务器当前时间（ms） */
+  serverTime: number;
 }
 
 /** 帧率统计窗口 */
@@ -132,6 +134,7 @@ export class SystemMonitor {
       onlineCameras: cameras.filter(c => c.online).length,
       cameras,
       startedAt: this.startedAt,
+      serverTime: Date.now(),
     };
   }
 }
