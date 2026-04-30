@@ -81,6 +81,8 @@ function checkMobile() {
 }
 
 const cameras = ref<CameraStatus[]>([])
+/** 摄像头排序（ID 数组，持久化到 localStorage） */
+const cameraOrder = ref<string[]>(JSON.parse(localStorage.getItem('nvr-camera-order') ?? '[]'))
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
 /** 每个摄像头的最新帧 data URL */
@@ -124,6 +126,30 @@ function updateTitle() {
   if (titleTimer) return
   const online = cameras.value.filter(c => c.online).length
   document.title = `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online })}`
+}
+
+/** 拖拽排序 */
+const dragCameraId = ref<string | null>(null)
+
+function onDragStart(cameraId: string) {
+  dragCameraId.value = cameraId
+}
+
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+}
+
+function onDrop(targetId: string) {
+  if (!dragCameraId.value || dragCameraId.value === targetId) return
+  const ids = sortedCameras.value.map(c => c.id)
+  const fromIdx = ids.indexOf(dragCameraId.value)
+  const toIdx = ids.indexOf(targetId)
+  if (fromIdx < 0 || toIdx < 0) return
+  ids.splice(fromIdx, 1)
+  ids.splice(toIdx, 0, dragCameraId.value)
+  cameraOrder.value = ids
+  localStorage.setItem('nvr-camera-order', JSON.stringify(ids))
+  dragCameraId.value = null
 }
 
 /** 加载摄像头列表 */
@@ -228,15 +254,25 @@ const gridStyle = computed(() => {
   return { 'grid-template-columns': 'repeat(auto-fit, minmax(400px, 1fr))' }
 })
 
+/** 按 cameraOrder 排序的摄像头列表 */
+const sortedCameras = computed(() => {
+  if (cameraOrder.value.length === 0) return cameras.value
+  const orderMap = new Map(cameraOrder.value.map((id, i) => [id, i]))
+  return [...cameras.value].sort((a, b) => {
+    const oa = orderMap.get(a.id) ?? Infinity
+    const ob = orderMap.get(b.id) ?? Infinity
+    return oa - ob
+  })
+})
+
 /** 显示的摄像头列表 */
 const visibleCameras = computed(() => {
-  if (fullscreenCamera.value) {
-    return cameras.value.filter(c => c.id === fullscreenCamera.value)
-  }
-  if (filterGroup.value) {
-    return cameras.value.filter(c => c.group === filterGroup.value)
-  }
-  return cameras.value
+  const list = fullscreenCamera.value
+    ? sortedCameras.value.filter(c => c.id === fullscreenCamera.value)
+    : filterGroup.value
+      ? sortedCameras.value.filter(c => c.group === filterGroup.value)
+      : sortedCameras.value
+  return list
 })
 
 /** 登录成功回调 */
@@ -442,18 +478,27 @@ onUnmounted(() => {
     </header>
     <main class="app-body">
       <div class="camera-grid" :style="gridStyle" :class="{ fullscreen: !!fullscreenCamera }">
-        <CameraView
+        <div
           v-for="cam in visibleCameras"
           :key="cam.id"
-          :camera-id="cam.id"
-          :name="cam.name"
-          :online="cam.online"
-          :last-frame-at="cam.lastFrameAt"
-          :detections="detectionsMap[cam.id] ?? []"
-          :detect-version="detectVersions[cam.id] ?? 0"
-          :frame-image="frameImages[cam.id] ?? ''"
-          @fullscreen="enterFullscreen"
-        />
+          class="camera-cell"
+          :class="{ dragging: dragCameraId === cam.id }"
+          draggable="true"
+          @dragstart="onDragStart(cam.id)"
+          @dragover="onDragOver"
+          @drop="onDrop(cam.id)"
+        >
+          <CameraView
+            :camera-id="cam.id"
+            :name="cam.name"
+            :online="cam.online"
+            :last-frame-at="cam.lastFrameAt"
+            :detections="detectionsMap[cam.id] ?? []"
+            :detect-version="detectVersions[cam.id] ?? 0"
+            :frame-image="frameImages[cam.id] ?? ''"
+            @fullscreen="enterFullscreen"
+          />
+        </div>
       </div>
       <!-- 桌面端侧边栏 -->
       <div v-if="!isMobile" class="sidebar">
@@ -643,6 +688,15 @@ onUnmounted(() => {
 
 .camera-grid.fullscreen {
   grid-template-columns: 1fr;
+}
+
+.camera-cell {
+  border-radius: 8px;
+  transition: opacity 0.2s;
+}
+
+.camera-cell.dragging {
+  opacity: 0.4;
 }
 
 .header-actions {
