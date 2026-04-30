@@ -50,8 +50,8 @@ export class CameraManager {
   }
 
   /** 获取所有摄像头状态 */
-  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number }> {
-    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number }> = [];
+  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string }> {
+    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string }> = [];
     for (const cam of this.cameraConfigs) {
       const extractor = this.extractors.get(cam.id);
       result.push({
@@ -59,6 +59,7 @@ export class CameraManager {
         name: cam.friendlyName,
         online: extractor?.isOnline ?? false,
         lastFrameAt: extractor?.lastFrameAt ?? 0,
+        group: cam.group,
       });
     }
     return result;

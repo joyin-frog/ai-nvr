@@ -27,6 +27,8 @@ export interface CameraConfig {
   detectHeight: number;
   /** 检测帧率（fps） */
   detectFps: number;
+  /** 所属分组（可选，用于前端筛选） */
+  group: string;
 }
 
 /** 变动检测配置 */
@@ -105,6 +107,7 @@ export function loadConfig(configPath?: string): AppConfig {
       detectWidth: 640,
       detectHeight: 360,
       detectFps: (cam.detect as Record<string, unknown>)?.fps as number ?? 5,
+      group: (cam.group as string) ?? "",
     });
   }
 

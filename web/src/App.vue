@@ -16,6 +16,7 @@ interface CameraStatus {
   name: string
   online: boolean
   lastFrameAt: number
+  group: string
 }
 
 /** 侧边栏激活的标签 */
@@ -27,6 +28,18 @@ const fullscreenCamera = ref<string | null>(null)
 
 /** 网格列数配置 */
 const gridCols = ref(0) // 0 = auto
+
+/** 分组筛选（空字符串表示全部） */
+const filterGroup = ref('')
+
+/** 所有分组列表 */
+const groups = computed(() => {
+  const set = new Set<string>()
+  for (const cam of cameras.value) {
+    if (cam.group) set.add(cam.group)
+  }
+  return [...set].sort()
+})
 
 /** 是否为移动端布局 */
 const isMobile = ref(false)
@@ -85,6 +98,7 @@ async function loadCameras() {
       name: c.name,
       online: c.online,
       lastFrameAt: c.lastFrameAt,
+      group: c.group ?? '',
     }))
     updateTitle()
   } catch {
@@ -137,6 +151,9 @@ const gridStyle = computed(() => {
 const visibleCameras = computed(() => {
   if (fullscreenCamera.value) {
     return cameras.value.filter(c => c.id === fullscreenCamera.value)
+  }
+  if (filterGroup.value) {
+    return cameras.value.filter(c => c.group === filterGroup.value)
   }
   return cameras.value
 })
@@ -276,6 +293,10 @@ onUnmounted(() => {
       <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? '已连接' : wsState === 'connecting' ? '连接中...' : '已断开'">
         {{ wsState === 'connected' ? '●' : wsState === 'connecting' ? '◐' : '○' }}
       </span>
+      <select v-if="groups.length > 0" v-model="filterGroup" class="group-select">
+        <option value="">全部分组</option>
+        <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
+      </select>
       <div class="header-actions">
         <button
           v-if="fullscreenCamera"
@@ -455,6 +476,15 @@ onUnmounted(() => {
 @keyframes pulse-ws {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
+}
+
+.group-select {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
 }
 
 .app-body {
