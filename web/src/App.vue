@@ -102,6 +102,33 @@ const authenticated = ref(false)
 /** WebSocket 连接状态 */
 const wsState = ref<ConnectionState>('disconnected')
 
+/** 磁盘空间预警 */
+const diskWarn = ref<{ percent: number; free: string } | null>(null)
+let diskCheckTimer: ReturnType<typeof setInterval> | null = null
+
+async function checkDiskSpace() {
+  try {
+    const res = await authFetch('/api/health')
+    if (!res.ok) return
+    const data = await res.json()
+    const storage = data.storage as { diskTotalBytes: number; diskFreeBytes: number } | undefined
+    if (!storage || storage.diskTotalBytes === 0) return
+    const used = storage.diskTotalBytes - storage.diskFreeBytes
+    const percent = Math.round((used / storage.diskTotalBytes) * 100)
+    if (percent >= 80) {
+      const free = storage.diskFreeBytes
+      const freeStr = free < 1024 * 1024 * 1024
+        ? `${(free / (1024 * 1024)).toFixed(0)} MB`
+        : `${(free / (1024 * 1024 * 1024)).toFixed(1)} GB`
+      diskWarn.value = { percent, free: freeStr }
+    } else {
+      diskWarn.value = null
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /** 创建带认证的 WebSocket 客户端 */
 const client = new EventClient(authWsUrl(
   import.meta.env.DEV
@@ -289,6 +316,8 @@ function startApp() {
   client.onStateChange((state) => {
     wsState.value = state
   })
+  checkDiskSpace()
+  diskCheckTimer = setInterval(checkDiskSpace, 60000)
 }
 
 /** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
@@ -423,6 +452,7 @@ onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
   stopPatrol()
+  if (diskCheckTimer) clearInterval(diskCheckTimer)
   /** 释放所有检测快照 blob URL */
   for (const url of Object.values(detectSnapshots.value)) {
     URL.revokeObjectURL(url)
@@ -435,6 +465,10 @@ onUnmounted(() => {
   <LoginView v-if="authRequired && !authenticated" @success="onLoginSuccess" />
   <!-- 主界面 -->
   <div v-else class="app" :class="{ mobile: isMobile }">
+    <!-- 磁盘空间预警横幅 -->
+    <div v-if="diskWarn" :class="['disk-warn-bar', { critical: diskWarn.percent >= 95 }]">
+      <span>&#9888; {{ t('status.diskUsage') }} {{ diskWarn.percent }}% — {{ t('status.remaining') }} {{ diskWarn.free }}</span>
+    </div>
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
@@ -617,6 +651,26 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+.disk-warn-bar {
+  background: #FFEAA7;
+  color: #1a1a2e;
+  text-align: center;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.disk-warn-bar.critical {
+  background: #e74c3c;
+  color: #fff;
+  animation: blink-warn 1s infinite;
+}
+
+@keyframes blink-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .app-header {
