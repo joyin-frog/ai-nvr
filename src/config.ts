@@ -1,4 +1,4 @@
-import { readFileSync, watchFile } from "node:fs";
+import { readFileSync, writeFileSync, watchFile } from "node:fs";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
 import { type AiConfig } from "@/ai/types";
@@ -61,13 +61,15 @@ export interface AppConfig {
   server: ServerConfig;
 }
 
+/** 配置文件路径（模块级别缓存） */
+let configFilePath: string;
+
 /** 从 nvr_config.yml 中的 go2rtc.streams 提取 RTSP 地址 */
 function extractStreamUrl(
   streams: Record<string, string[]>,
   cameraId: string,
   suffix: string,
 ): string {
-  /** key 格式为 "摄像头id_码流后缀"，如 ipc_gun_hd */
   const key = `${cameraId}_${suffix}`;
   const entries = streams[key];
   if (!entries || entries.length === 0) {
@@ -78,8 +80,8 @@ function extractStreamUrl(
 
 /** 加载并解析配置文件 */
 export function loadConfig(configPath?: string): AppConfig {
-  const path = configPath ?? resolve(import.meta.dir, "../nvr_config.yml");
-  const raw = readFileSync(path, "utf-8");
+  configFilePath = configPath ?? resolve(import.meta.dir, "../nvr_config.yml");
+  const raw = readFileSync(configFilePath, "utf-8");
   const doc = yaml.load(raw) as Record<string, unknown>;
 
   const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
@@ -100,7 +102,6 @@ export function loadConfig(configPath?: string): AppConfig {
         hd: extractStreamUrl(go2rtc.streams, id, "hd"),
         sd: extractStreamUrl(go2rtc.streams, id, "sd"),
       },
-      /** 检测用分辨率（独立于原始分辨率，用于 ffmpeg 缩放输出） */
       detectWidth: 640,
       detectHeight: 360,
       detectFps: (cam.detect as Record<string, unknown>)?.fps as number ?? 5,
@@ -129,6 +130,83 @@ export function loadConfig(configPath?: string): AppConfig {
       port: 3100,
     },
   };
+}
+
+/** 获取配置文件路径 */
+export function getConfigPath(): string {
+  return configFilePath;
+}
+
+/** 添加摄像头到配置文件并写回 YAML */
+export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number }): void {
+  const raw = readFileSync(configFilePath, "utf-8");
+  const doc = yaml.load(raw) as Record<string, unknown>;
+
+  const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+  const go2rtc = doc.go2rtc as { streams: Record<string, string[]> };
+
+  /** 添加 go2rtc 流定义 */
+  go2rtc.streams[`${cam.id}_hd`] = [cam.hdUrl];
+  go2rtc.streams[`${cam.id}_sd`] = [cam.sdUrl];
+
+  /** 添加摄像头配置 */
+  camerasNode[cam.id] = {
+    enabled: true,
+    friendly_name: cam.friendlyName,
+    ffmpeg: {
+      inputs: [
+        { path: `rtsp://127.0.0.1:8554/${cam.id}_hd`, input_args: "preset-rtsp-restream", roles: ["detect", "record"] },
+        { path: `rtsp://127.0.0.1:8554/${cam.id}_sd`, input_args: "preset-rtsp-restream", roles: [] },
+      ],
+    },
+    live: { streams: { "主码流": `${cam.id}_hd`, "子码流": `${cam.id}_sd` } },
+    record: { enabled: true, continuous: { days: 0 }, motion: { days: 7 } },
+    detect: { enabled: true, width: 2880, height: 1620, fps: cam.detectFps ?? 5 },
+  };
+
+  const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
+  writeFileSync(configFilePath, yamlContent, "utf-8");
+}
+
+/** 删除摄像头从配置文件 */
+export function removeCameraFromConfig(cameraId: string): void {
+  const raw = readFileSync(configFilePath, "utf-8");
+  const doc = yaml.load(raw) as Record<string, unknown>;
+
+  const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+  const go2rtc = doc.go2rtc as { streams: Record<string, string[]> };
+
+  delete camerasNode[cameraId];
+  delete go2rtc.streams[`${cameraId}_hd`];
+  delete go2rtc.streams[`${cameraId}_sd`];
+
+  const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
+  writeFileSync(configFilePath, yamlContent, "utf-8");
+}
+
+/** 更新摄像头名称 */
+export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string }): void {
+  const raw = readFileSync(configFilePath, "utf-8");
+  const doc = yaml.load(raw) as Record<string, unknown>;
+
+  const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+  const go2rtc = doc.go2rtc as { streams: Record<string, string[]> };
+
+  const cam = camerasNode[cameraId];
+  if (!cam) throw new Error(`摄像头 ${cameraId} 不存在`);
+
+  if (updates.friendlyName) {
+    (cam as Record<string, unknown>).friendly_name = updates.friendlyName;
+  }
+  if (updates.hdUrl) {
+    go2rtc.streams[`${cameraId}_hd`] = [updates.hdUrl];
+  }
+  if (updates.sdUrl) {
+    go2rtc.streams[`${cameraId}_sd`] = [updates.sdUrl];
+  }
+
+  const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
+  writeFileSync(configFilePath, yamlContent, "utf-8");
 }
 
 /** 监听配置文件变更，触发回调 */

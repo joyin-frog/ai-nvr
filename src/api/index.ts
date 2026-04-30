@@ -5,6 +5,7 @@ import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
 import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
+import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 
 /** WebSocket 客户端集合 */
@@ -45,6 +46,9 @@ export function startServer(
           cameras: cameraManager.getStatus().length,
           endpoints: [
             "GET /api/cameras",
+            "POST /api/cameras",
+            "PATCH /api/cameras/:id",
+            "DELETE /api/cameras/:id",
             "GET /api/health",
             "GET /api/settings",
             "PATCH /api/settings",
@@ -57,8 +61,54 @@ export function startServer(
         });
       }
 
-      if (url.pathname === "/api/cameras") {
+      if (url.pathname === "/api/cameras" && req.method === "GET") {
         return Response.json(cameraManager.getStatus());
+      }
+
+      /** 添加摄像头 */
+      if (url.pathname === "/api/cameras" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const id = obj.id as string | undefined;
+          const friendlyName = obj.friendlyName as string | undefined;
+          const hdUrl = obj.hdUrl as string | undefined;
+          const sdUrl = obj.sdUrl as string | undefined;
+          if (!id || !friendlyName || !hdUrl || !sdUrl) {
+            return new Response("Missing required fields: id, friendlyName, hdUrl, sdUrl", { status: 400 });
+          }
+          addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined });
+          /** 触发配置热重载 */
+          const newConfig = loadConfig();
+          cameraManager.reloadConfig(newConfig);
+          return Response.json({ ok: true, cameraId: id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 更新 / 删除摄像头 */
+      const cameraByIdMatch = url.pathname.match(/^\/api\/cameras\/([^/]+)$/);
+      if (cameraByIdMatch) {
+        const cameraId = cameraByIdMatch[1]!;
+
+        if (req.method === "PATCH") {
+          return req.json().then((body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            updateCameraInConfig(cameraId, {
+              friendlyName: obj.friendlyName as string | undefined,
+              hdUrl: obj.hdUrl as string | undefined,
+              sdUrl: obj.sdUrl as string | undefined,
+            });
+            const newConfig = loadConfig();
+            cameraManager.reloadConfig(newConfig);
+            return Response.json({ ok: true });
+          }).catch(() => new Response("Invalid JSON", { status: 400 }));
+        }
+
+        if (req.method === "DELETE") {
+          removeCameraFromConfig(cameraId);
+          const newConfig = loadConfig();
+          cameraManager.reloadConfig(newConfig);
+          return Response.json({ ok: true });
+        }
       }
 
       /** 系统健康检查 + 性能指标 */
