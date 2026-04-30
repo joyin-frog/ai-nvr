@@ -27,6 +27,13 @@ interface RuntimeSettings {
   webhook: {
     urls: string[]
   }
+  notify: {
+    dingtalk: {
+      enabled: boolean
+      webhookUrl: string
+      secret: string
+    }
+  }
   cleanup: {
     eventsRetentionDays: number
     alertsRetentionDays: number
@@ -169,6 +176,33 @@ onMounted(() => {
           <button class="remove-btn" @click="removeWebhook(i)">✕</button>
         </div>
         <button class="add-btn" @click="addWebhook">+ 添加 Webhook</button>
+      </section>
+
+      <!-- 钉钉机器人通知 -->
+      <section class="section">
+        <h3>钉钉机器人通知</h3>
+        <label class="field">
+          <span class="field-label">启用</span>
+          <input type="checkbox" v-model="settings.notify.dingtalk.enabled" class="checkbox" />
+        </label>
+        <label class="field">
+          <span class="field-label">Webhook URL</span>
+          <input
+            type="url"
+            v-model="settings.notify.dingtalk.webhookUrl"
+            placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
+            class="input-url"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">加签密钥</span>
+          <input
+            type="text"
+            v-model="settings.notify.dingtalk.secret"
+            placeholder="SEC...（可选）"
+            class="input-url"
+          />
+        </label>
       </section>
 
       <!-- 数据清理 -->

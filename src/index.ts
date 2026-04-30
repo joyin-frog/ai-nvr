@@ -13,6 +13,7 @@ import { MotionRecorder } from "@/storage/recorder";
 import { SystemMonitor } from "@/monitor";
 import { RuntimeConfig } from "@/runtime-config";
 import { WebhookNotifier } from "@/notify/webhook";
+import { DingTalkNotifier } from "@/notify/dingtalk";
 import { SnapshotStorage } from "@/storage/snapshots";
 import { RoiStorage } from "@/storage/roi";
 import { AlertStorage } from "@/alert/storage";
@@ -68,6 +69,10 @@ aiDetector.init().then(() => {
 /** Webhook 通知（事件推送到外部 URL） */
 const webhookNotifier = new WebhookNotifier(runtimeConfig, eventBus);
 webhookNotifier.start();
+
+/** 钉钉机器人通知 */
+const dingtalkNotifier = new DingTalkNotifier(runtimeConfig, eventBus);
+dingtalkNotifier.start();
 
 /** 检测快照存储（保存标注图到磁盘） */
 const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);

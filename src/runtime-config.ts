@@ -17,6 +17,22 @@ export interface WebhookConfig {
   urls: string[];
 }
 
+/** 钉钉机器人通知配置 */
+export interface DingTalkConfig {
+  /** 是否启用 */
+  enabled: boolean;
+  /** 钉钉自定义机器人 Webhook URL */
+  webhookUrl: string;
+  /** 加签密钥（可选，不填则不加签） */
+  secret: string;
+}
+
+/** 通知渠道配置 */
+export interface NotifyConfig {
+  /** 钉钉机器人 */
+  dingtalk: DingTalkConfig;
+}
+
 /** 运行时可修改的设置 */
 export interface RuntimeSettings {
   /** 全局变动检测配置 */
@@ -34,6 +50,8 @@ export interface RuntimeSettings {
   };
   /** Webhook 通知配置 */
   webhook: WebhookConfig;
+  /** 通知渠道配置 */
+  notify: NotifyConfig;
   /** 存储清理配置 */
   cleanup: {
     /** 事件历史保留天数 */
@@ -65,6 +83,13 @@ export class RuntimeConfig {
       },
       webhook: {
         urls: [],
+      },
+      notify: {
+        dingtalk: {
+          enabled: false,
+          webhookUrl: "",
+          secret: "",
+        },
       },
       cleanup: {
         eventsRetentionDays: 30,
@@ -117,6 +142,16 @@ export class RuntimeConfig {
       }
     }
 
+    if (obj.notify && typeof obj.notify === "object") {
+      const n = obj.notify as Record<string, unknown>;
+      if (n.dingtalk && typeof n.dingtalk === "object") {
+        const d = n.dingtalk as Record<string, unknown>;
+        if (typeof d.enabled === "boolean") this.settings.notify.dingtalk.enabled = d.enabled;
+        if (typeof d.webhookUrl === "string") this.settings.notify.dingtalk.webhookUrl = d.webhookUrl;
+        if (typeof d.secret === "string") this.settings.notify.dingtalk.secret = d.secret;
+      }
+    }
+
     if (obj.cleanup && typeof obj.cleanup === "object") {
       const c = obj.cleanup as Record<string, unknown>;
       if (typeof c.eventsRetentionDays === "number") this.settings.cleanup.eventsRetentionDays = c.eventsRetentionDays;
@@ -144,6 +179,11 @@ export class RuntimeConfig {
     }
     if (updates.webhook) {
       this.settings.webhook = { ...this.settings.webhook, ...updates.webhook };
+    }
+    if (updates.notify) {
+      this.settings.notify = {
+        dingtalk: { ...this.settings.notify.dingtalk, ...updates.notify.dingtalk },
+      };
     }
     if (updates.cleanup) {
       this.settings.cleanup = { ...this.settings.cleanup, ...updates.cleanup };
