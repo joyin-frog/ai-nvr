@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { EventClient, type Detection, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl } from './services/auth'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
@@ -12,6 +13,15 @@ import CameraManagePanel from './components/CameraManagePanel.vue'
 import AlertPanel from './components/AlertPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import LoginView from './components/LoginView.vue'
+
+const { t, locale } = useI18n()
+
+/** 切换语言 */
+function toggleLocale() {
+  const next = locale.value === 'zh-CN' ? 'en' : 'zh-CN'
+  locale.value = next
+  localStorage.setItem('nvr-locale', next)
+}
 
 /** 摄像头状态 */
 interface CameraStatus {
@@ -389,7 +399,7 @@ onUnmounted(() => {
         {{ wsState === 'connected' ? '●' : wsState === 'connecting' ? '◐' : '○' }}
       </span>
       <select v-if="groups.length > 0" v-model="filterGroup" class="group-select">
-        <option value="">全部分组</option>
+        <option value="">{{ t('header.groupAll') }}</option>
         <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
       </select>
       <div class="header-actions">
@@ -397,8 +407,8 @@ onUnmounted(() => {
           v-if="cameras.length > 1"
           :class="['header-btn', { active: patrolActive }]"
           @click="togglePatrol"
-          :title="patrolActive ? '停止轮巡' : '开始轮巡'"
-        >轮巡</button>
+          :title="patrolActive ? t('header.patrolOff') : t('header.patrol')"
+        >{{ t('header.patrol') }}</button>
         <input
           v-if="patrolActive"
           type="number"
@@ -406,7 +416,7 @@ onUnmounted(() => {
           min="2"
           max="60"
           class="patrol-input"
-          title="轮巡间隔（秒）"
+          :title="t('header.patrolInterval')"
         />
         <button
           v-if="fullscreenCamera && !patrolActive"
@@ -418,6 +428,9 @@ onUnmounted(() => {
           class="header-btn"
           @click="mobilePanelOpen = !mobilePanelOpen"
         >{{ mobilePanelOpen ? '关闭' : '面板' }}</button>
+        <button class="header-btn lang-btn" @click="toggleLocale" :title="locale === 'zh-CN' ? 'English' : '中文'">
+          {{ locale === 'zh-CN' ? 'EN' : '中' }}
+        </button>
       </div>
     </header>
     <main class="app-body">
@@ -440,27 +453,27 @@ onUnmounted(() => {
           <button
             :class="['tab-btn', { active: activeTab === 'events' }]"
             @click="switchTab('events')"
-          >事件</button>
+          >{{ t('tab.events') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'recordings' }]"
             @click="switchTab('recordings')"
-          >录像</button>
+          >{{ t('tab.recordings') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'status' }]"
             @click="switchTab('status')"
-          >状态</button>
+          >{{ t('tab.status') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'cameras' }]"
             @click="switchTab('cameras')"
-          >管理</button>
+          >{{ t('tab.cameras') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'alerts' }]"
             @click="switchTab('alerts')"
-          >告警</button>
+          >{{ t('tab.alerts') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
-          >设置</button>
+          >{{ t('tab.settings') }}</button>
         </div>
         <div class="sidebar-content">
           <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" @play-recording="onPlayRecording" />
@@ -485,23 +498,23 @@ onUnmounted(() => {
         <button
           :class="['tab-btn', { active: activeTab === 'events' }]"
           @click="switchTab('events')"
-        >事件</button>
+        >{{ t('tab.events') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'recordings' }]"
           @click="switchTab('recordings')"
-        >录像</button>
+        >{{ t('tab.recordings') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'status' }]"
           @click="switchTab('status')"
-        >状态</button>
+        >{{ t('tab.status') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'cameras' }]"
           @click="switchTab('cameras')"
-        >管理</button>
+        >{{ t('tab.cameras') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
-        >设置</button>
+        >{{ t('tab.settings') }}</button>
       </div>
       <div class="mobile-content">
         <EventPanel v-show="activeTab === 'events'" ref="eventPanel" @play-recording="onPlayRecording" />
@@ -524,24 +537,24 @@ onUnmounted(() => {
     <div v-if="showShortcuts" class="shortcuts-overlay" @click="showShortcuts = false">
       <div class="shortcuts-modal" @click.stop>
         <div class="shortcuts-header">
-          <span>键盘快捷键</span>
+          <span>{{ t('shortcuts.title') }}</span>
           <button class="close-btn" @click="showShortcuts = false">&times;</button>
         </div>
         <div class="shortcuts-list">
-          <div class="shortcut-row"><kbd>1</kbd> - <kbd>6</kbd><span>切换侧边栏标签</span></div>
-          <div class="shortcut-row"><kbd>F</kbd><span>全屏切换第一个摄像头</span></div>
-          <div class="shortcut-row"><kbd>Esc</kbd><span>退出全屏</span></div>
-          <div class="shortcut-row"><kbd>?</kbd><span>显示/隐藏快捷键帮助</span></div>
+          <div class="shortcut-row"><kbd>1</kbd> - <kbd>6</kbd><span>{{ t('shortcuts.switchTab') }}</span></div>
+          <div class="shortcut-row"><kbd>F</kbd><span>{{ t('shortcuts.fullscreen') }}</span></div>
+          <div class="shortcut-row"><kbd>Esc</kbd><span>{{ t('shortcuts.exit') }}</span></div>
+          <div class="shortcut-row"><kbd>?</kbd><span>{{ t('shortcuts.help') }}</span></div>
         </div>
       </div>
     </div>
 
     <!-- PWA 更新提示 -->
     <div v-if="showPwaPrompt" class="pwa-toast">
-      <span v-if="offlineReady">应用已就绪，可离线使用</span>
-      <span v-else>发现新版本，点击刷新更新</span>
-      <button v-if="needRefresh" class="pwa-btn" @click="updateServiceWorker(true)">刷新</button>
-      <button class="pwa-btn pwa-btn-close" @click="closePwaPrompt">关闭</button>
+      <span v-if="offlineReady">{{ t('pwa.offlineReady') }}</span>
+      <span v-else>{{ t('pwa.needRefresh') }}</span>
+      <button v-if="needRefresh" class="pwa-btn" @click="updateServiceWorker(true)">{{ t('pwa.refresh') }}</button>
+      <button class="pwa-btn pwa-btn-close" @click="closePwaPrompt">{{ t('pwa.close') }}</button>
     </div>
   </div>
 </template>
@@ -646,6 +659,13 @@ onUnmounted(() => {
   background: #4ECDC4;
   color: #1a1a2e;
   font-weight: 600;
+}
+
+.lang-btn {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  min-width: 32px;
 }
 
 .patrol-input {

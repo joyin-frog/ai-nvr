@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+
+const { t } = useI18n()
 
 /** 运行时设置 */
 interface RuntimeSettings {
@@ -170,35 +173,35 @@ onMounted(() => {
 <template>
   <div class="settings-panel">
     <div class="panel-header">
-      <span>设置</span>
+      <span>{{ t('settings.title') }}</span>
       <button class="save-btn" @click="saveSettings" :disabled="saving">
-        {{ saving ? '保存中...' : success ? '已保存' : '保存' }}
+        {{ saving ? t('settings.saving') : success ? t('settings.saved') : t('settings.save') }}
       </button>
     </div>
 
     <div v-if="settings" class="settings-form">
       <!-- 变动检测 -->
       <section class="section">
-        <h3>变动检测</h3>
+        <h3>{{ t('settings.motion') }}</h3>
         <label class="field">
-          <span class="field-label">阈值 (0-1)</span>
+          <span class="field-label">{{ t('settings.motionThreshold') }}</span>
           <input type="number" v-model.number="settings.motion.threshold" step="0.001" min="0.001" max="1" class="input" />
         </label>
         <label class="field">
-          <span class="field-label">冷却间隔 (ms)</span>
+          <span class="field-label">{{ t('settings.motionCooldown') }}</span>
           <input type="number" v-model.number="settings.motion.cooldown" step="100" min="0" class="input" />
         </label>
       </section>
 
       <!-- AI 检测 -->
       <section class="section">
-        <h3>AI 目标检测</h3>
+        <h3>{{ t('settings.ai') }}</h3>
         <label class="field">
-          <span class="field-label">启用</span>
+          <span class="field-label">{{ t('settings.aiEnabled') }}</span>
           <input type="checkbox" v-model="settings.ai.enabled" class="checkbox" />
         </label>
         <div class="field field-col">
-          <span class="field-label">检测模型</span>
+          <span class="field-label">{{ t('settings.aiModel') }}</span>
           <div class="model-row">
             <input
               type="text"
@@ -207,39 +210,39 @@ onMounted(() => {
               class="input-model"
             />
             <button class="reload-btn" @click="reloadModel" :disabled="modelReloading">
-              {{ modelReloading ? '加载中...' : '重载' }}
+              {{ modelReloading ? t('settings.aiModelLoading') : t('settings.aiModelReload') }}
             </button>
           </div>
           <span v-if="modelInfo" class="model-status">
-            {{ modelInfo.loading ? '加载中...' : modelInfo.initialized ? `当前: ${modelInfo.model}` : '未初始化' }}
+            {{ modelInfo.loading ? t('settings.aiModelLoading') : modelInfo.initialized ? t('settings.aiModelCurrent', { model: modelInfo.model }) : t('settings.aiModelNotInit') }}
           </span>
         </div>
         <label class="field">
-          <span class="field-label">置信度阈值</span>
+          <span class="field-label">{{ t('settings.aiThreshold') }}</span>
           <input type="number" v-model.number="settings.ai.threshold" step="0.05" min="0.1" max="1" class="input" />
         </label>
         <label class="field">
-          <span class="field-label">最大检测数</span>
+          <span class="field-label">{{ t('settings.aiMaxDetections') }}</span>
           <input type="number" v-model.number="settings.ai.maxDetections" step="1" min="1" max="100" class="input" />
         </label>
       </section>
 
       <!-- 录像 -->
       <section class="section">
-        <h3>录像</h3>
+        <h3>{{ t('settings.recording') }}</h3>
         <label class="field">
-          <span class="field-label">运动后延时 (ms)</span>
+          <span class="field-label">{{ t('settings.postMotionDuration') }}</span>
           <input type="number" v-model.number="settings.recording.postMotionDuration" step="1000" min="1000" class="input" />
         </label>
         <label class="field">
-          <span class="field-label">保留天数</span>
+          <span class="field-label">{{ t('settings.retentionDays') }}</span>
           <input type="number" v-model.number="settings.recording.retentionDays" step="1" min="1" max="90" class="input" />
         </label>
       </section>
 
       <!-- Webhook 通知 -->
       <section class="section">
-        <h3>Webhook 通知</h3>
+        <h3>{{ t('settings.webhook') }}</h3>
         <div v-for="(_url, i) in settings.webhook.urls" :key="i" class="field">
           <input
             type="url"
@@ -249,18 +252,18 @@ onMounted(() => {
           />
           <button class="remove-btn" @click="removeWebhook(i)">✕</button>
         </div>
-        <button class="add-btn" @click="addWebhook">+ 添加 Webhook</button>
+        <button class="add-btn" @click="addWebhook">{{ t('settings.addWebhook') }}</button>
       </section>
 
       <!-- 钉钉机器人通知 -->
       <section class="section">
-        <h3>钉钉机器人通知</h3>
+        <h3>{{ t('settings.dingtalk') }}</h3>
         <label class="field">
-          <span class="field-label">启用</span>
+          <span class="field-label">{{ t('settings.aiEnabled') }}</span>
           <input type="checkbox" v-model="settings.notify.dingtalk.enabled" class="checkbox" />
         </label>
         <label class="field">
-          <span class="field-label">Webhook URL</span>
+          <span class="field-label">{{ t('settings.dingtalkWebhook') }}</span>
           <input
             type="url"
             v-model="settings.notify.dingtalk.webhookUrl"
@@ -269,7 +272,7 @@ onMounted(() => {
           />
         </label>
         <label class="field">
-          <span class="field-label">加签密钥</span>
+          <span class="field-label">{{ t('settings.dingtalkSecret') }}</span>
           <input
             type="text"
             v-model="settings.notify.dingtalk.secret"
@@ -281,13 +284,13 @@ onMounted(() => {
 
       <!-- 邮件告警通知 -->
       <section class="section">
-        <h3>邮件告警通知</h3>
+        <h3>{{ t('settings.email') }}</h3>
         <label class="field">
-          <span class="field-label">启用</span>
+          <span class="field-label">{{ t('settings.aiEnabled') }}</span>
           <input type="checkbox" v-model="settings.notify.email.enabled" class="checkbox" />
         </label>
         <div class="field field-col">
-          <span class="field-label">SMTP 服务器</span>
+          <span class="field-label">{{ t('settings.emailSmtpHost') }}</span>
           <div class="smtp-row">
             <input
               type="text"
@@ -303,12 +306,12 @@ onMounted(() => {
             />
             <label class="secure-label">
               <input type="checkbox" v-model="settings.notify.email.smtp!.secure" class="checkbox" />
-              <span>SSL</span>
+              <span>{{ t('settings.emailSmtpSsl') }}</span>
             </label>
           </div>
         </div>
         <label class="field">
-          <span class="field-label">用户名</span>
+          <span class="field-label">{{ t('settings.emailUser') }}</span>
           <input
             type="text"
             v-model="settings.notify.email.smtp!.user"
@@ -317,29 +320,29 @@ onMounted(() => {
           />
         </label>
         <label class="field">
-          <span class="field-label">密码</span>
+          <span class="field-label">{{ t('settings.emailPass') }}</span>
           <input
             type="password"
             v-model="settings.notify.email.smtp!.pass"
-            placeholder="SMTP 密码或授权码"
+            :placeholder="t('settings.emailPass')"
             class="input-url"
           />
         </label>
         <label class="field">
-          <span class="field-label">发件人</span>
+          <span class="field-label">{{ t('settings.emailFrom') }}</span>
           <input
             type="text"
             v-model="settings.notify.email.from"
-            placeholder="留空则使用用户名作为发件人"
+            :placeholder="t('settings.emailFromPlaceholder')"
             class="input-url"
           />
         </label>
         <label class="field">
-          <span class="field-label">收件人</span>
+          <span class="field-label">{{ t('settings.emailTo') }}</span>
           <input
             type="text"
             v-model="settings.notify.email.to"
-            placeholder="多个收件人用逗号分隔"
+            :placeholder="t('settings.emailToPlaceholder')"
             class="input-url"
           />
         </label>
@@ -347,24 +350,24 @@ onMounted(() => {
 
       <!-- 数据清理 -->
       <section class="section">
-        <h3>数据清理</h3>
+        <h3>{{ t('settings.cleanup') }}</h3>
         <label class="field">
-          <span class="field-label">事件保留天数</span>
+          <span class="field-label">{{ t('settings.eventsRetention') }}</span>
           <input type="number" v-model.number="settings.cleanup.eventsRetentionDays" step="1" min="1" max="365" class="input" />
         </label>
         <label class="field">
-          <span class="field-label">告警保留天数</span>
+          <span class="field-label">{{ t('settings.alertsRetention') }}</span>
           <input type="number" v-model.number="settings.cleanup.alertsRetentionDays" step="1" min="1" max="365" class="input" />
         </label>
         <label class="field">
-          <span class="field-label">快照保留天数</span>
+          <span class="field-label">{{ t('settings.snapshotsRetention') }}</span>
           <input type="number" v-model.number="settings.cleanup.snapshotsRetentionDays" step="1" min="1" max="90" class="input" />
         </label>
         <label class="field">
-          <span class="field-label">缩略图缓存天数</span>
+          <span class="field-label">{{ t('settings.thumbnailsRetention') }}</span>
           <input type="number" v-model.number="settings.cleanup.thumbnailsRetentionDays" step="1" min="1" max="30" class="input" />
         </label>
-        <button class="add-btn" @click="runCleanup">立即清理</button>
+        <button class="add-btn" @click="runCleanup">{{ t('settings.runCleanup') }}</button>
       </section>
     </div>
     <div v-else class="empty">加载中...</div>

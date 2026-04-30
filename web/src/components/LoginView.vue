@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { login } from '../services/auth'
 
+const { t } = useI18n()
 const token = ref('')
 const error = ref(false)
 const loading = ref(false)
@@ -28,20 +30,20 @@ async function submit() {
   <div class="login-overlay">
     <div class="login-card">
       <h1 class="login-title">JK NVR</h1>
-      <p class="login-subtitle">请输入访问令牌</p>
+      <p class="login-subtitle">{{ t('login.tokenPlaceholder') }}</p>
       <form @submit.prevent="submit" class="login-form">
         <input
           v-model="token"
           type="password"
-          placeholder="Access Token"
+          :placeholder="t('login.token')"
           class="login-input"
           autofocus
         />
         <button type="submit" class="login-btn" :disabled="loading || !token.trim()">
-          {{ loading ? '验证中...' : '登录' }}
+          {{ loading ? '...' : t('login.submit') }}
         </button>
       </form>
-      <p v-if="error" class="login-error">令牌无效，请重试</p>
+      <p v-if="error" class="login-error">{{ t('login.invalid') }}</p>
     </div>
   </div>
 </template>
