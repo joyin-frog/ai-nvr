@@ -55,6 +55,9 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 ## API 端点
 - `GET /` / `GET /api` — 服务状态
 - `GET /api/cameras` — 摄像头列表与状态
+- `POST /api/cameras` — 添加摄像头
+- `PATCH /api/cameras/:id` — 更新摄像头
+- `DELETE /api/cameras/:id` — 删除摄像头
 - `GET /api/health` — 系统健康检查 + 性能指标（FPS/内存/运行时长/检测计数）
 - `GET /api/settings` — 获取运行时设置
 - `PATCH /api/settings` — 更新运行时设置（motion/ai/recording）
@@ -107,7 +110,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 浏览器通知：person/car 等重要目标检测 + 摄像头离线时推送
 - 配置热重载：修改 YAML 后自动增删摄像头，无需重启
 - 运行时设置 API：通过 PATCH /api/settings 动态修改灵敏度/AI/录像参数
-- 前端设置面板：4个侧边栏标签（事件/录像/状态/设置），支持运行时参数调整
+- 前端设置面板：5个侧边栏标签（事件/录像/状态/管理/设置），支持运行时参数调整
 - 二进制 WebSocket 协议：替代 base64 JSON，消除 ~33% 编码开销
 - blob URL 内存管理：帧更新时释放旧 URL 避免泄漏
 - 双码流策略：子码流（SD）预览/检测，主码流（HD）直接 RTSP 录像
@@ -115,4 +118,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 路径遍历防护：录像端点验证 resolved path 在存储目录内
 - SQLite 优雅关闭：SIGINT 时 flush WAL
 - Webhook 通知：事件推送到外部 URL，前端可配置 Webhook 地址
+- 摄像头管理 UI：Web 端添加/编辑/删除摄像头，YAML 持久化 + 热重载
 - 下一步优先：检测区域划定、事件时间线、告警规则引擎
