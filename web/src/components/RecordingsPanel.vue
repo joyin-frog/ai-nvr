@@ -21,6 +21,12 @@ const selectedRecording = ref<Recording | null>(null)
 const filterCamera = ref('')
 const loading = ref(false)
 
+/** 多选模式 */
+const multiSelectMode = ref(false)
+const selectedFiles = ref<Set<string>>(new Set())
+const merging = ref(false)
+const mergeFilename = ref('')
+
 /** 缩略图 URL 缓存（filename → URL） */
 const thumbUrls = ref<Record<string, string>>({})
 
@@ -183,6 +189,64 @@ function downloadExport() {
   link.click()
 }
 
+/** 切换多选模式 */
+function toggleMultiSelect() {
+  multiSelectMode.value = !multiSelectMode.value
+  selectedFiles.value = new Set()
+  mergeFilename.value = ''
+}
+
+/** 切换选中文件 */
+function toggleFileSelect(filename: string) {
+  const s = new Set(selectedFiles.value)
+  if (s.has(filename)) s.delete(filename)
+  else s.add(filename)
+  selectedFiles.value = s
+  mergeFilename.value = ''
+}
+
+/** 选中的文件按时间排序 */
+const sortedSelectedFiles = computed(() => {
+  return recordings.value
+    .filter(r => selectedFiles.value.has(r.filename))
+    .sort((a, b) => a.startTime - b.startTime)
+})
+
+/** 合并导出选中录像 */
+async function doMergeExport() {
+  if (sortedSelectedFiles.value.length < 1) return
+  merging.value = true
+  mergeFilename.value = ''
+  const cameraId = sortedSelectedFiles.value[0]!.cameraId
+  try {
+    const res = await fetch('/api/recordings/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        files: sortedSelectedFiles.value.map(r => r.filename),
+        cameraId,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      mergeFilename.value = data.filename
+    }
+  } catch {
+    // ignore
+  } finally {
+    merging.value = false
+  }
+}
+
+/** 下载合并导出文件 */
+function downloadMerge() {
+  if (!mergeFilename.value) return
+  const link = document.createElement('a')
+  link.href = `/api/recordings/export/${mergeFilename.value}`
+  link.download = mergeFilename.value
+  link.click()
+}
+
 /** 根据摄像头和时间戳查找并播放对应录像 */
 async function playAtTime(cameraId: string, timestamp: number): Promise<boolean> {
   /** 加载该摄像头的录像列表 */
@@ -259,6 +323,7 @@ defineExpose({ loadRecordings, playAtTime })
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">刷新</button>
+      <button :class="['select-btn', { active: multiSelectMode }]" @click="toggleMultiSelect">{{ multiSelectMode ? '取消' : '多选' }}</button>
     </div>
 
     <!-- 多路同步时间轴（全部摄像头时显示） -->
@@ -284,10 +349,17 @@ defineExpose({ loadRecordings, playAtTime })
       <div
         v-for="rec in recordings"
         :key="rec.filename"
-        class="recording-item"
-        @click="play(rec)"
+        :class="['recording-item', { selected: selectedFiles.has(rec.filename) }]"
+        @click="multiSelectMode ? toggleFileSelect(rec.filename) : play(rec)"
         @mouseenter="onRecordingHover(rec)"
       >
+        <input
+          v-if="multiSelectMode"
+          type="checkbox"
+          :checked="selectedFiles.has(rec.filename)"
+          class="rec-checkbox"
+          @click.stop="toggleFileSelect(rec.filename)"
+        />
         <div class="rec-thumb">
           <img v-if="thumbUrls[rec.filename]" :src="thumbUrls[rec.filename]" alt="" class="thumb-img" />
           <span v-else class="thumb-icon">&#9654;</span>
@@ -303,6 +375,18 @@ defineExpose({ loadRecordings, playAtTime })
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
         </div>
       </div>
+    </div>
+
+    <!-- 多选合并操作栏 -->
+    <div v-if="multiSelectMode" class="merge-bar">
+      <span class="merge-info">已选 {{ selectedFiles.size }} 段</span>
+      <span v-if="sortedSelectedFiles.length > 1" class="merge-duration">
+        总时长 {{ duration(sortedSelectedFiles[0].startTime, sortedSelectedFiles[sortedSelectedFiles.length - 1].endTime) }}
+      </span>
+      <button v-if="!mergeFilename" class="merge-btn" @click="doMergeExport" :disabled="merging || selectedFiles.size < 1">
+        {{ merging ? '合并中...' : '合并导出' }}
+      </button>
+      <button v-else class="download-btn" @click="downloadMerge">下载合并文件</button>
     </div>
   </div>
 </template>
@@ -359,6 +443,25 @@ defineExpose({ loadRecordings, playAtTime })
   cursor: not-allowed;
 }
 
+.select-btn {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.select-btn:hover {
+  background: #3a3a5a;
+}
+
+.select-btn.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
+}
+
 .recordings-list {
   flex: 1;
   overflow-y: auto;
@@ -384,6 +487,17 @@ defineExpose({ loadRecordings, playAtTime })
 
 .recording-item:hover {
   background: #2a2a4a;
+}
+
+.recording-item.selected {
+  background: #1a3a3a;
+  border-left: 3px solid #4ECDC4;
+}
+
+.rec-checkbox {
+  accent-color: #4ECDC4;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .rec-thumb {
@@ -603,6 +717,48 @@ defineExpose({ loadRecordings, playAtTime })
 
 .download-btn:hover {
   opacity: 0.85;
+}
+
+/* 合并操作栏 */
+.merge-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #16213e;
+  border-top: 1px solid #2a2a4a;
+}
+
+.merge-info {
+  color: #e0e0e0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.merge-duration {
+  color: #4ECDC4;
+  font-size: 12px;
+}
+
+.merge-btn {
+  margin-left: auto;
+  background: #FFD93D;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.merge-btn:hover {
+  opacity: 0.85;
+}
+
+.merge-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* 移动端适配 */

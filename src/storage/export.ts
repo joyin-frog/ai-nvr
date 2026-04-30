@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** 导出任务结果 */
@@ -70,6 +70,70 @@ export class RecordingExporter {
   /** 获取导出文件路径（供下载服务使用） */
   getExportPath(filename: string): string {
     return join(this.exportDir, filename);
+  }
+
+  /**
+   * 合并多个视频文件为一个
+   * 使用 ffmpeg concat demuxer，要求输入文件编码参数一致
+   * @param sourcePaths 源 MP4 文件绝对路径列表（按顺序合并）
+   * @param cameraId 摄像头 ID（用于文件命名）
+   * @returns 导出结果
+   */
+  merge(sourcePaths: string[], cameraId: string): ExportResult | null {
+    if (sourcePaths.length === 0) return null;
+    /** 单文件直接复制 */
+    if (sourcePaths.length === 1) {
+      const src = sourcePaths[0]!;
+      if (!existsSync(src)) return null;
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+      const filename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
+      const outputPath = join(this.exportDir, filename);
+      const args = ["-i", src, "-c", "copy", "-movflags", "+faststart", "-y", outputPath];
+      const result = spawnSync(this.ffmpegPath, args, { timeout: 30_000, stdio: "ignore" });
+      if (result.status !== 0 || !existsSync(outputPath)) return null;
+      return { filePath: outputPath, size: statSync(outputPath).size };
+    }
+
+    /** 验证所有文件存在 */
+    for (const p of sourcePaths) {
+      if (!existsSync(p)) return null;
+    }
+
+    /** 生成 concat 列表文件 */
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const outputFilename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
+    const outputPath = join(this.exportDir, outputFilename);
+    const concatListPath = join(this.exportDir, `_concat_${dateStr}_${timeStr}.txt`);
+
+    /** ffmpeg concat demuxer 格式：file 'path' */
+    const lines = sourcePaths.map(p => `file '${p}'`);
+    writeFileSync(concatListPath, lines.join("\n"));
+
+    const args = [
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatListPath,
+      "-c", "copy",
+      "-movflags", "+faststart",
+      "-y",
+      outputPath,
+    ];
+
+    const result = spawnSync(this.ffmpegPath, args, {
+      timeout: 60_000,
+      stdio: "ignore",
+    });
+
+    /** 清理 concat 列表文件 */
+    try { unlinkSync(concatListPath); } catch { /* ignore */ }
+
+    if (result.status !== 0 || !existsSync(outputPath)) return null;
+
+    return { filePath: outputPath, size: statSync(outputPath).size };
   }
 
   /** 列出所有导出文件 */

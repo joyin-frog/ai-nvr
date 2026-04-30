@@ -272,6 +272,35 @@ export function startServer(
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
+      /** 录像合并导出：合并多个录像文件 */
+      if (url.pathname === "/api/recordings/merge" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const files = obj.files as string[] | undefined;
+          const cameraId = obj.cameraId as string | undefined;
+          if (!files || !Array.isArray(files) || files.length === 0) {
+            return new Response("Missing files array", { status: 400 });
+          }
+
+          /** 防止路径遍历：验证所有文件 */
+          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const resolvedPaths: string[] = [];
+          for (const relPath of files) {
+            const videoPath = recorder.getRecordingPath(relPath);
+            if (!existsSync(videoPath)) return new Response(`Not Found: ${relPath}`, { status: 404 });
+            const resolved = realpathSync(videoPath);
+            if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+            resolvedPaths.push(resolved);
+          }
+
+          const result = exporter.merge(resolvedPaths, cameraId ?? "unknown");
+          if (!result) return new Response("Merge failed", { status: 500 });
+
+          const exportFilename = result.filePath.split("/").pop()!;
+          return Response.json({ filename: exportFilename, size: result.size });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
       /** 下载导出文件 */
       const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.mp4)$/);
       if (exportDownloadMatch && req.method === "GET") {
