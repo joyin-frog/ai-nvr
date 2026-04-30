@@ -351,6 +351,7 @@ export default {
     exit: 'Exit fullscreen',
     help: 'Toggle shortcut help',
     patrol: 'Patrol switch',
+    screenshot: 'Screenshot current camera',
   },
   notify: {
     detectTarget: '{name} - Target detected',

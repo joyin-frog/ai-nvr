@@ -600,6 +600,16 @@ onMounted(async () => {
   }})
   registerShortcut({ key: '?', description: t('shortcuts.help'), handler: () => { showShortcuts.value = !showShortcuts.value }})
   registerShortcut({ key: 'p', description: t('shortcuts.patrol'), handler: () => { togglePatrol() }})
+  registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: () => {
+    const targetCam = fullscreenCamera.value ?? visibleCameras.value[0]?.id
+    if (!targetCam) return
+    const imageUrl = frameImages.value[targetCam]
+    if (!imageUrl) return
+    const link = document.createElement('a')
+    link.href = imageUrl
+    link.download = `screenshot_${targetCam}_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`
+    link.click()
+  }})
 })
 
 onUnmounted(() => {
@@ -827,6 +837,8 @@ onUnmounted(() => {
           <div class="shortcut-row"><kbd>F</kbd><span>{{ t('shortcuts.fullscreen') }}</span></div>
           <div class="shortcut-row"><kbd>Esc</kbd><span>{{ t('shortcuts.exit') }}</span></div>
           <div class="shortcut-row"><kbd>?</kbd><span>{{ t('shortcuts.help') }}</span></div>
+          <div class="shortcut-row"><kbd>P</kbd><span>{{ t('shortcuts.patrol') }}</span></div>
+          <div class="shortcut-row"><kbd>S</kbd><span>{{ t('shortcuts.screenshot') }}</span></div>
         </div>
       </div>
     </div>
