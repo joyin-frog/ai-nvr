@@ -193,6 +193,44 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
   return items
 }
 
+/** 导出当前筛选的事件为 CSV */
+async function exportCsv() {
+  loading.value = true
+  try {
+    const params = new URLSearchParams({ limit: '10000' })
+    if (filterType.value) params.set('type', filterType.value)
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      const until = since + 86_400_000
+      params.set('since', String(since))
+      params.set('until', String(until))
+    }
+    const res = await authFetch(`/api/events/history?${params}`)
+    if (!res.ok) return
+    const data = await res.json()
+    const rows = (data.events as EventRecord[]).map((e) => {
+      const time = new Date(e.timestamp).toISOString()
+      const detail = (e.detail ?? '').replace(/"/g, '""')
+      return `${e.id},"${time}","${e.type}","${e.camera_id}","${detail}"`
+    })
+    const header = 'id,time,type,camera_id,detail'
+    const csv = [header, ...rows].join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
+    link.download = `events_${dateStr}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    // ignore
+  } finally {
+    loading.value = false
+  }
+}
+
 defineExpose({ addEvent, loadHistory })
 </script>
 
@@ -220,6 +258,9 @@ defineExpose({ addEvent, loadHistory })
       </select>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}
+      </button>
+      <button class="export-btn" @click="exportCsv" :disabled="loading" :title="t('event.exportCsv')">
+        CSV
       </button>
     </div>
     <EventTimeline :events="events" />
@@ -339,6 +380,25 @@ defineExpose({ addEvent, loadHistory })
 
 .refresh-btn:disabled {
   opacity: 0.5;
+}
+
+.export-btn {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.export-btn:disabled {
+  opacity: 0.5;
+}
+
+.export-btn:hover:not(:disabled) {
+  opacity: 0.85;
 }
 
 .event-list {

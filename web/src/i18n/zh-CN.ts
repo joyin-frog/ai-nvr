@@ -54,6 +54,7 @@ export default {
     motionRatio: '变动 {ratio}%',
     allCameras: '全部摄像头',
     filterDate: '筛选日期',
+    exportCsv: '导出 CSV',
   },
   recording: {
     title: '录像',

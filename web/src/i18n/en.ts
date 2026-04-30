@@ -54,6 +54,7 @@ export default {
     motionRatio: 'Motion {ratio}%',
     allCameras: 'All Cameras',
     filterDate: 'Filter by date',
+    exportCsv: 'Export CSV',
   },
   recording: {
     title: 'Recordings',
