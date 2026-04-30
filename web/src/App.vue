@@ -4,6 +4,7 @@ import { EventClient, type Detection } from './services/events'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
 import RecordingsPanel from './components/RecordingsPanel.vue'
+import CameraStatusPanel from './components/CameraStatusPanel.vue'
 
 /** 摄像头状态 */
 interface CameraStatus {
@@ -14,7 +15,7 @@ interface CameraStatus {
 }
 
 /** 侧边栏激活的标签 */
-type SidebarTab = 'events' | 'recordings'
+type SidebarTab = 'events' | 'recordings' | 'status'
 const activeTab = ref<SidebarTab>('events')
 
 /** 全屏摄像头 ID（null 为网格模式） */
@@ -54,6 +55,9 @@ function switchTab(tab: SidebarTab) {
   activeTab.value = tab
   if (tab === 'recordings') {
     recordingsPanel.value?.loadRecordings()
+  }
+  if (tab === 'events') {
+    eventPanel.value?.loadHistory()
   }
 }
 
@@ -161,17 +165,25 @@ onUnmounted(() => {
           <button
             :class="['tab-btn', { active: activeTab === 'events' }]"
             @click="switchTab('events')"
-          >事件日志</button>
+          >事件</button>
           <button
             :class="['tab-btn', { active: activeTab === 'recordings' }]"
             @click="switchTab('recordings')"
-          >录像回放</button>
+          >录像</button>
+          <button
+            :class="['tab-btn', { active: activeTab === 'status' }]"
+            @click="switchTab('status')"
+          >状态</button>
         </div>
         <div class="sidebar-content">
           <EventPanel v-show="activeTab === 'events'" ref="eventPanel" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"
+            :cameras="cameras"
+          />
+          <CameraStatusPanel
+            v-if="activeTab === 'status'"
             :cameras="cameras"
           />
         </div>
