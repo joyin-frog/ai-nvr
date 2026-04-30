@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 
@@ -43,7 +43,36 @@ const todayStats = ref<{
   motionCount: number
   detectCount: number
   byCamera: Array<{ cameraId: string; count: number }>
+  byHour: Array<{ hour: number; count: number; type: string }>
 } | null>(null)
+
+/** 小时趋势图数据：24 个桶，每个桶包含 motion 和 detect 计数 */
+const hourlyChart = computed(() => {
+  const buckets = Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    motion: 0,
+    detect: 0,
+  }))
+  if (!todayStats.value?.byHour) return buckets
+  for (const item of todayStats.value.byHour) {
+    const h = new Date(item.hour).getHours()
+    if (h >= 0 && h < 24) {
+      const bucket = buckets[h]!
+      if (item.type === 'motion') bucket.motion = item.count
+      else if (item.type === 'detect') bucket.detect = item.count
+    }
+  }
+  return buckets
+})
+
+/** 趋势图最大值 */
+const chartMax = computed(() => {
+  let max = 0
+  for (const b of hourlyChart.value) {
+    max = Math.max(max, b.motion + b.detect)
+  }
+  return max || 1
+})
 let timer: ReturnType<typeof setInterval> | null = null
 
 /** 摄像头 ID → 名称 */
@@ -121,6 +150,7 @@ async function loadTodayStats() {
         cameraId: c.camera_id,
         count: c.count,
       })),
+      byHour: data.byHour as Array<{ hour: number; count: number; type: string }>,
     }
   } catch {
     // ignore
@@ -175,6 +205,32 @@ onUnmounted(() => {
           <span class="stat-num detect">{{ todayStats.detectCount }}</span>
           <span class="stat-desc">{{ t('status.todayDetect') }}</span>
         </div>
+      </div>
+    </div>
+
+    <!-- 事件趋势图 -->
+    <div v-if="todayStats" class="chart-section">
+      <div class="stats-title">{{ t('status.todayEvents') }}</div>
+      <div class="hourly-chart">
+        <div v-for="b in hourlyChart" :key="b.hour" class="chart-bar-wrap" :title="`${b.hour}:00 — motion: ${b.motion} detect: ${b.detect}`">
+          <div class="chart-bar">
+            <div
+              v-if="b.detect > 0"
+              class="bar-segment detect"
+              :style="{ height: (b.detect / chartMax * 100) + '%' }"
+            />
+            <div
+              v-if="b.motion > 0"
+              class="bar-segment motion"
+              :style="{ height: (b.motion / chartMax * 100) + '%' }"
+            />
+          </div>
+          <span class="bar-label">{{ b.hour }}</span>
+        </div>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-dot motion" />{{ t('event.motion') }}</span>
+        <span class="legend-item"><span class="legend-dot detect" />{{ t('event.detect') }}</span>
       </div>
     </div>
 
@@ -485,4 +541,77 @@ onUnmounted(() => {
   color: #555;
   font-size: 11px;
 }
+
+/* 事件趋势图 */
+.chart-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.hourly-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 80px;
+  padding: 4px 0;
+}
+
+.chart-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
+}
+
+.chart-bar {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 1px;
+}
+
+.bar-segment {
+  width: 100%;
+  border-radius: 1px;
+  min-height: 1px;
+  transition: height 0.3s;
+}
+
+.bar-segment.motion { background: #FFEAA7; }
+.bar-segment.detect { background: #4ECDC4; }
+
+.bar-label {
+  font-size: 8px;
+  color: #555;
+  line-height: 1;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #888;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.legend-dot.motion { background: #FFEAA7; }
+.legend-dot.detect { background: #4ECDC4; }
 </style>
