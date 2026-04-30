@@ -28,7 +28,7 @@ interface AlertRecord {
   detail: string
 }
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
@@ -190,7 +190,7 @@ async function deleteRule(id: number) {
 
 /** 格式化时间 */
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN')
+  return new Date(ts).toLocaleString(locale.value)
 }
 
 /** 事件类型中文 */

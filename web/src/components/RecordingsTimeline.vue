@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 /** 录像片段 */
 interface Recording {
@@ -211,7 +211,7 @@ function onSegmentEnter(e: MouseEvent, rec: Recording) {
     x: e.clientX,
     y: e.clientY,
     url: `/api/recordings/thumb?file=${encodeURIComponent(rec.filename)}&time=${dur.toFixed(1)}`,
-    time: new Date(rec.startTime).toLocaleTimeString('zh-CN'),
+    time: new Date(rec.startTime).toLocaleTimeString(locale.value),
   }
 }
 
@@ -227,7 +227,7 @@ function onSegmentLeave() {
 /** 格式化日期标签 */
 const dateLabel = computed(() => {
   if (viewMode.value === 'day') {
-    return new Date(selectedDate.value + 'T00:00:00').toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
+    return new Date(selectedDate.value + 'T00:00:00').toLocaleDateString(locale.value, { month: 'long', day: 'numeric' })
   }
   return `${selectedHour.value}:00 - ${selectedHour.value}:59`
 })
@@ -292,7 +292,7 @@ function goToday() {
         :class="['date-tab', { active: date === selectedDate }]"
         @click="selectedDate = date"
       >
-        {{ new Date(date + 'T00:00:00').toLocaleDateString('zh-CN', { day: 'numeric', weekday: 'short' }) }}
+        {{ new Date(date + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', weekday: 'short' }) }}
       </button>
     </div>
   </div>

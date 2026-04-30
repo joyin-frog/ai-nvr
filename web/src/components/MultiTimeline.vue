@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 /** 录像片段 */
 interface Recording {
@@ -130,7 +130,7 @@ function segmentStyle(rec: Recording) {
 /** 日期标签 */
 const dateLabel = computed(() => {
   if (viewMode.value === 'day') {
-    return new Date(selectedDate.value + 'T00:00:00').toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })
+    return new Date(selectedDate.value + 'T00:00:00').toLocaleDateString(locale.value, { month: 'long', day: 'numeric' })
   }
   return `${selectedHour.value}:00 - ${selectedHour.value}:59`
 })
@@ -230,7 +230,7 @@ function goToday() {
             :key="rec.filename"
             class="mtl-segment"
             :style="segmentStyle(rec)"
-            :title="new Date(rec.startTime).toLocaleTimeString('zh-CN')"
+            :title="new Date(rec.startTime).toLocaleTimeString(locale)"
             @click="emit('play', rec)"
           />
           <!-- 当前时间指示器 -->
@@ -250,7 +250,7 @@ function goToday() {
         :class="['date-tab', { active: date === selectedDate }]"
         @click="selectedDate = date"
       >
-        {{ new Date(date + 'T00:00:00').toLocaleDateString('zh-CN', { day: 'numeric', weekday: 'short' }) }}
+        {{ new Date(date + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', weekday: 'short' }) }}
       </button>
     </div>
   </div>

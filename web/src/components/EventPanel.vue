@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch } from '../services/auth'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 /** 事件记录 */
 interface EventRecord {
@@ -66,7 +66,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
   if (filterType.value && filterType.value !== type) return
   if (filterCamera.value && filterCamera.value !== cameraId) return
   const now = Date.now()
-  const time = new Date(now).toLocaleTimeString('zh-CN')
+  const time = new Date(now).toLocaleTimeString(locale.value)
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
   if (events.value.length > PAGE_SIZE) {
     events.value = events.value.slice(0, PAGE_SIZE)
@@ -75,7 +75,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
 
 /** 格式化时间戳 */
 function formatTimestamp(ts: number): string {
-  return new Date(ts).toLocaleTimeString('zh-CN')
+  return new Date(ts).toLocaleTimeString(locale.value)
 }
 
 /** 解析 detail JSON */

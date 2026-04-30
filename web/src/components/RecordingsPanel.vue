@@ -5,7 +5,7 @@ import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 /** 录像信息 */
 interface Recording {
@@ -149,7 +149,7 @@ function formatSize(bytes: number): string {
 
 /** 格式化时间 */
 function formatTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN', {
+  return new Date(ts).toLocaleString(locale.value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
