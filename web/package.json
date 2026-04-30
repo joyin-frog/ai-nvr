@@ -18,6 +18,8 @@
     "typescript": "~6.0.2",
     "vite": "^8.0.10",
     "vite-plugin-pilot": "^1.0.24",
-    "vue-tsc": "^3.2.7"
+    "vite-plugin-pwa": "^1.2.0",
+    "vue-tsc": "^3.2.7",
+    "workbox-window": "^7.4.0"
   }
 }

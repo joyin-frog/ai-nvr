@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { EventClient, type Detection, type ConnectionState } from './services/events'
-import { isAuthEnabled, getToken, clearToken, authFetch, authWsUrl } from './services/auth'
+import { isAuthEnabled, getToken, authFetch, authWsUrl } from './services/auth'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
+import { useRegisterSW } from 'virtual:pwa-register/vue'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
 import RecordingsPanel from './components/RecordingsPanel.vue'
@@ -27,6 +28,21 @@ const activeTab = ref<SidebarTab>('events')
 
 /** 全屏摄像头 ID（null 为网格模式） */
 const fullscreenCamera = ref<string | null>(null)
+
+/** PWA 更新提示 */
+const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW({
+  immediate: true,
+  onRegisteredSW(_swUrl: string, registration: ServiceWorkerRegistration | undefined) {
+    if (registration) {
+      setInterval(() => { registration.update() }, 60 * 60 * 1000)
+    }
+  },
+})
+const showPwaPrompt = computed(() => offlineReady.value || needRefresh.value)
+function closePwaPrompt() {
+  offlineReady.value = false
+  needRefresh.value = false
+}
 
 /** 网格列数配置 */
 const gridCols = ref(0) // 0 = auto
@@ -519,6 +535,14 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- PWA 更新提示 -->
+    <div v-if="showPwaPrompt" class="pwa-toast">
+      <span v-if="offlineReady">应用已就绪，可离线使用</span>
+      <span v-else>发现新版本，点击刷新更新</span>
+      <button v-if="needRefresh" class="pwa-btn" @click="updateServiceWorker(true)">刷新</button>
+      <button class="pwa-btn pwa-btn-close" @click="closePwaPrompt">关闭</button>
+    </div>
   </div>
 </template>
 
@@ -803,5 +827,40 @@ kbd {
   color: #4ECDC4;
   min-width: 24px;
   text-align: center;
+}
+
+.pwa-toast {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  border: 1px solid #4ECDC4;
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #e0e0e0;
+  font-size: 13px;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.pwa-btn {
+  background: #4ECDC4;
+  color: #0a0a1a;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pwa-btn-close {
+  background: transparent;
+  color: #888;
+  border: 1px solid #2a2a4a;
 }
 </style>

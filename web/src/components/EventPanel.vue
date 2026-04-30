@@ -368,13 +368,6 @@ defineExpose({ addEvent, loadHistory })
 .play-btn:hover {
   opacity: 0.85;
 }
-  width: 32px;
-  height: 24px;
-  object-fit: cover;
-  border-radius: 2px;
-  flex-shrink: 0;
-  border: 1px solid #2a2a4a;
-}
 
 /* 移动端适配 */
 @media (max-width: 768px) {

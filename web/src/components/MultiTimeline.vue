@@ -25,9 +25,6 @@ const emit = defineEmits<{
   play: [recording: Recording]
 }>()
 
-/** 时间轴容器 */
-const timelineEl = ref<HTMLDivElement | null>(null)
-
 /** 视图模式 */
 const viewMode = ref<'day' | 'hour'>('day')
 const selectedDate = ref(new Date().toISOString().slice(0, 10))
