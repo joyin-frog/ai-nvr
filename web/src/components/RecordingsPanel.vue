@@ -194,6 +194,7 @@ async function loadRecordings() {
     const res = await authFetch(`/api/recordings?${params}`)
     if (res.ok) {
       recordings.value = await res.json()
+      thumbUrls.value = {}
     }
   } catch {
     // ignore
