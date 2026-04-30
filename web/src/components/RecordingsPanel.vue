@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
@@ -71,6 +71,7 @@ function onRateChange() {
 function onLoadedMetadata() {
   if (!playerRef.value) return
   playerRef.value.playbackRate = playbackSpeed.value
+  initVolume()
   if (seekOffset.value >= 0) {
     playerRef.value.currentTime = seekOffset.value
     seekOffset.value = -1
@@ -149,6 +150,28 @@ function onProgressDragStart(e: MouseEvent) {
 /** video play/pause 事件同步 isPlaying */
 function onPlay() { isPlaying.value = true }
 function onPause() { isPlaying.value = false }
+
+/** 音量控制 */
+const volume = ref(Number(localStorage.getItem('nvr-volume') ?? 1) * 100)
+const isMuted = ref(false)
+watch(volume, (v) => {
+  if (playerRef.value) {
+    playerRef.value.volume = v / 100
+    localStorage.setItem('nvr-volume', String(v / 100))
+  }
+})
+function toggleMute() {
+  if (!playerRef.value) return
+  isMuted.value = !isMuted.value
+  playerRef.value.muted = isMuted.value
+}
+/** 初始化音量 */
+function initVolume() {
+  if (!playerRef.value) return
+  const v = Number(localStorage.getItem('nvr-volume') ?? 1)
+  playerRef.value.volume = v
+  volume.value = Math.round(v * 100)
+}
 
 /** 格式化绝对时间为 HH:MM:SS */
 function formatAbsTime(ts: number): string {
@@ -526,6 +549,12 @@ defineExpose({ loadRecordings, playAtTime })
             <span class="time-current">{{ formatAbsTime(currentAbsTime) }}</span>
             <span class="time-sep">/</span>
             <span class="time-end">{{ formatAbsTime(selectedRecording.endTime) }}</span>
+          </div>
+          <div class="volume-control">
+            <button class="ctrl-btn volume-icon" @click="toggleMute">
+              {{ isMuted || volume === 0 ? '&#128264;' : volume < 50 ? '&#128265;' : '&#128266;' }}
+            </button>
+            <input type="range" v-model.number="volume" min="0" max="100" class="volume-slider" />
           </div>
         </div>
         <!-- 导出面板 -->
@@ -1021,6 +1050,39 @@ defineExpose({ loadRecordings, playAtTime })
 
 .time-end {
   min-width: 60px;
+}
+
+/* 音量控制 */
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.volume-icon {
+  font-size: 16px;
+  padding: 0;
+}
+
+.volume-slider {
+  width: 60px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #333;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4ECDC4;
+  cursor: pointer;
 }
 
 /* 导出面板 */
