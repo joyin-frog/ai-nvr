@@ -161,4 +161,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件面板时间线可视化：EventTimeline 按小时分布显示当日事件密度柱状图，主导事件类型着色（变动黄/检测青/离线红），当前小时高亮，集成到 EventPanel 头部
 - 事件详情展开面板：EventPanel 点击事件行展开显示完整详情（变动比例/检测目标置信度/告警规则），展开面板内"查看录像"按钮跳转播放
 - 摄像头分组筛选：CameraConfig 添加 group 字段（YAML cameras.<id>.group），API 返回 group，App header 分组下拉筛选器，按分组过滤摄像头网格
-- 下一步优先：告警推送渠道（邮件/钉钉）、摄像头管理面板分组编辑
+- 摄像头管理面板分组编辑：API PATCH /api/cameras/:id 支持 group 字段，CameraManagePanel 编辑表单增加分组输入，列表中显示分组标签
+- 下一步优先：告警推送渠道（钉钉机器人/邮件）、录像回放增强
