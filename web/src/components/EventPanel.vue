@@ -40,6 +40,8 @@ const filterDate = ref('')
 const filterSearch = ref('')
 /** 当前展开的事件 ID */
 const expandedId = ref<number | null>(null)
+/** 当前筛选条件下的事件总数 */
+const totalCount = ref(0)
 
 const props = defineProps<{
   /** 每个摄像头的最新检测帧快照 */
@@ -120,6 +122,7 @@ async function loadHistory() {
         rawDetail: e.detail,
       }))
       events.value = historyEvents
+      totalCount.value = (data.total as number) ?? 0
       hasMore.value = historyEvents.length >= PAGE_SIZE
     }
   } catch {
@@ -244,7 +247,7 @@ defineExpose({ addEvent, loadHistory })
 <template>
   <div class="event-panel">
     <div class="panel-header">
-      <span>{{ t('event.title') }}</span>
+      <span>{{ t('event.title') }} <span v-if="totalCount > 0" class="total-count">{{ totalCount }}</span></span>
       <input
         type="date"
         v-model="filterDate"
@@ -424,6 +427,16 @@ defineExpose({ addEvent, loadHistory })
 
 .export-btn:hover:not(:disabled) {
   opacity: 0.85;
+}
+
+.total-count {
+  background: #2a2a4a;
+  color: #888;
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 4px;
 }
 
 .event-list {
