@@ -285,7 +285,7 @@ defineExpose({ addEvent, loadHistory })
             class="event-type"
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
-          <span class="event-cam">{{ e.cameraId }}</span>
+          <span class="event-cam">{{ cameras?.find(c => c.id === e.cameraId)?.name ?? e.cameraId }}</span>
           <img
             v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
             :src="snapshots[e.cameraId]"
