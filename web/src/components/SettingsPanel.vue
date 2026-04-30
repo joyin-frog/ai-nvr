@@ -20,8 +20,10 @@ interface RuntimeSettings {
     maxDetections: number
   }
   recording: {
+    mode: string
     postMotionDuration: number
     retentionDays: number
+    segmentDuration: number
   }
   cameraOverrides: Record<string, {
     motionThreshold?: number
@@ -231,8 +233,19 @@ onMounted(() => {
       <section class="section">
         <h3>{{ t('settings.recording') }}</h3>
         <label class="field">
+          <span class="field-label">{{ t('settings.recordingMode') }}</span>
+          <select v-model="settings.recording.mode" class="input">
+            <option value="motion">{{ t('settings.recordingMotion') }}</option>
+            <option value="continuous">{{ t('settings.recordingContinuous') }}</option>
+          </select>
+        </label>
+        <label v-if="settings.recording.mode === 'motion'" class="field">
           <span class="field-label">{{ t('settings.postMotionDuration') }}</span>
           <input type="number" v-model.number="settings.recording.postMotionDuration" step="1000" min="1000" class="input" />
+        </label>
+        <label v-if="settings.recording.mode === 'continuous'" class="field">
+          <span class="field-label">{{ t('settings.segmentDuration') }}</span>
+          <input type="number" v-model.number="settings.recording.segmentDuration" step="60" min="60" max="3600" class="input" />
         </label>
         <label class="field">
           <span class="field-label">{{ t('settings.retentionDays') }}</span>

@@ -61,6 +61,9 @@ export interface NotifyConfig {
   email: EmailConfig;
 }
 
+/** 录像模式：变动触发 / 持续录制 */
+export type RecordingMode = "motion" | "continuous";
+
 /** 运行时可修改的设置 */
 export interface RuntimeSettings {
   /** 全局变动检测配置 */
@@ -71,10 +74,14 @@ export interface RuntimeSettings {
   cameraOverrides: Record<string, CameraOverride>;
   /** 录像配置 */
   recording: {
-    /** 无运动后继续录像时间（ms） */
+    /** 录像模式 */
+    mode: RecordingMode;
+    /** 无运动后继续录像时间（ms，仅 motion 模式） */
     postMotionDuration: number;
     /** 自动清理天数 */
     retentionDays: number;
+    /** 持续录制分段时长（秒） */
+    segmentDuration: number;
   };
   /** Webhook 通知配置 */
   webhook: WebhookConfig;
@@ -106,8 +113,10 @@ export class RuntimeConfig {
       ai: { ...config.ai },
       cameraOverrides: {},
       recording: {
+        mode: "motion",
         postMotionDuration: 5000,
         retentionDays: 7,
+        segmentDuration: 300,
       },
       webhook: {
         urls: [],
@@ -162,8 +171,10 @@ export class RuntimeConfig {
 
     if (obj.recording && typeof obj.recording === "object") {
       const r = obj.recording as Record<string, unknown>;
+      if (r.mode === "motion" || r.mode === "continuous") this.settings.recording.mode = r.mode;
       if (typeof r.postMotionDuration === "number") this.settings.recording.postMotionDuration = r.postMotionDuration;
       if (typeof r.retentionDays === "number") this.settings.recording.retentionDays = r.retentionDays;
+      if (typeof r.segmentDuration === "number") this.settings.recording.segmentDuration = r.segmentDuration;
     }
 
     if (obj.cameraOverrides && typeof obj.cameraOverrides === "object") {
