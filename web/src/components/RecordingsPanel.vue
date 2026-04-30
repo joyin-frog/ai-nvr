@@ -206,6 +206,24 @@ function togglePlayerFullscreen() {
   }
 }
 
+/** 截取当前视频帧并下载 */
+function takePlayerScreenshot() {
+  if (!playerRef.value || !selectedRecording.value) return
+  const video = playerRef.value
+  const canvas = document.createElement('canvas')
+  canvas.width = video.videoWidth || 1920
+  canvas.height = video.videoHeight || 1080
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  const link = document.createElement('a')
+  const now = new Date()
+  const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+  link.download = `${selectedRecording.value.cameraId}_${ts}.jpg`
+  link.href = canvas.toDataURL('image/jpeg', 0.95)
+  link.click()
+}
+
 /** 播放器键盘快捷键 */
 function onPlayerKeydown(e: KeyboardEvent) {
   if (!selectedRecording.value || !playerRef.value) return
@@ -600,6 +618,7 @@ defineExpose({ loadRecordings, playAtTime })
             :title="t('recording.autoPlayNext')"
           >&#9654;&#9654;</button>
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
+          <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
         <video
@@ -1031,6 +1050,20 @@ defineExpose({ loadRecordings, playAtTime })
 
 .fullscreen-btn:hover {
   color: #e0e0e0;
+}
+
+.screenshot-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.screenshot-btn:hover {
+  color: #4ECDC4;
 }
 
 .speed-select {
