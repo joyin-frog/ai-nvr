@@ -22,6 +22,12 @@ export class EventStorage {
     this.db.run("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_events_camera ON events(camera_id)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)");
+    /** 迁移：添加 starred 列 */
+    const cols = this.db.query("PRAGMA table_info(events)").all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === "starred")) {
+      this.db.run("ALTER TABLE events ADD COLUMN starred INTEGER DEFAULT 0");
+      this.db.run("CREATE INDEX IF NOT EXISTS idx_events_starred ON events(starred)");
+    }
   }
 
   /** 插入事件 */
@@ -41,6 +47,7 @@ export class EventStorage {
     limit?: number;
     offset?: number;
     search?: string;
+    starred?: boolean;
   } = {}): EventRecord[] {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -53,11 +60,20 @@ export class EventStorage {
   }
 
   /** 统计事件数量 */
-  count(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string } = {}): number {
+  count(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean } = {}): number {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = this.db.query(`SELECT COUNT(*) as count FROM events ${where}`).get(...params) as { count: number };
     return result.count;
+  }
+
+  /** 切换事件收藏状态 */
+  toggleStar(id: number): boolean {
+    const row = this.db.query("SELECT starred FROM events WHERE id = ?").get(id) as { starred: number } | null;
+    if (!row) return false;
+    const newVal = row.starred ? 0 : 1;
+    this.db.run("UPDATE events SET starred = ? WHERE id = ?", [newVal, id]);
+    return newVal === 1;
   }
 
   /** 删除过期事件 */
@@ -104,7 +120,7 @@ export class EventStorage {
   }
 
   /** 构建查询条件 */
-  private buildConditions(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string }): { conditions: string[]; params: SQLQueryBindings[] } {
+  private buildConditions(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean }): { conditions: string[]; params: SQLQueryBindings[] } {
     const conditions: string[] = [];
     const params: SQLQueryBindings[] = [];
 
@@ -127,6 +143,9 @@ export class EventStorage {
     if (options.search) {
       conditions.push("detail LIKE ?");
       params.push(`%${options.search}%`);
+    }
+    if (options.starred) {
+      conditions.push("starred = 1");
     }
 
     return { conditions, params };

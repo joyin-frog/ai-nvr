@@ -193,6 +193,7 @@ export function startServer(
           limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
           offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
           search: url.searchParams.get("search") ?? undefined,
+          starred: url.searchParams.get("starred") === "true" ? true : undefined,
         };
         const events = eventStorage.query(queryOpts);
         const total = eventStorage.count({
@@ -201,6 +202,7 @@ export function startServer(
           since: queryOpts.since,
           until: queryOpts.until,
           search: queryOpts.search,
+          starred: queryOpts.starred,
         });
         return Response.json({ events, total });
       }
@@ -215,6 +217,14 @@ export function startServer(
           byHour: eventStorage.countByHour(opts),
           byCamera: eventStorage.countByCamera(opts),
         });
+      }
+
+      /** 切换事件收藏状态 */
+      const eventStarMatch = url.pathname.match(/^\/api\/events\/(\d+)\/star$/);
+      if (eventStarMatch && req.method === "POST") {
+        const id = Number(eventStarMatch[1]);
+        const starred = eventStorage.toggleStar(id);
+        return Response.json({ id, starred });
       }
 
       /** 获取摄像头最新帧（实时视频用，已预压缩） */

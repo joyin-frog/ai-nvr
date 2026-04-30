@@ -13,6 +13,7 @@ interface EventRecord {
   camera_id: string
   timestamp: number
   detail: string | null
+  starred: number
 }
 
 interface EventItem {
@@ -25,6 +26,8 @@ interface EventItem {
   detail: string
   /** 原始 JSON detail（用于展开详情解析） */
   rawDetail: string | null
+  /** 是否已收藏 */
+  starred: boolean
 }
 
 const events = ref<EventItem[]>([])
@@ -46,6 +49,8 @@ const expandedId = ref<number | null>(null)
 const totalCount = ref(0)
 /** 排序方向（默认最新在前） */
 const sortDesc = ref(true)
+/** 仅看收藏 */
+const filterStarred = ref(false)
 
 /** 当前子视图：'events' 事件列表 | 'gallery' 快照画廊 */
 const subView = ref<'events' | 'gallery'>('events')
@@ -161,7 +166,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
   }
 
   const time = new Date(now).toLocaleTimeString(locale.value)
-  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
+  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail, starred: false })
   if (events.value.length > PAGE_SIZE) {
     events.value = events.value.slice(0, PAGE_SIZE)
   }
@@ -195,6 +200,7 @@ async function loadHistory() {
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
     if (filterSearch.value) params.set('search', filterSearch.value)
+    if (filterStarred.value) params.set('starred', 'true')
     if (filterRange.value) {
       const now = Date.now()
       const since = filterRange.value === '1h' ? now - 3600000 : now - 86400000
@@ -216,6 +222,7 @@ async function loadHistory() {
         cameraId: e.camera_id,
         detail: parseDetail(e.type, e.detail),
         rawDetail: e.detail,
+        starred: e.starred === 1,
       }))
       events.value = historyEvents
       totalCount.value = (data.total as number) ?? 0
@@ -258,6 +265,7 @@ async function loadMore() {
         cameraId: e.camera_id,
         detail: parseDetail(e.type, e.detail),
         rawDetail: e.detail,
+        starred: e.starred === 1,
       }))
       events.value.push(...moreEvents)
       hasMore.value = moreEvents.length >= PAGE_SIZE
@@ -352,6 +360,20 @@ function setRange(range: string) {
   loadHistory()
 }
 
+/** 切换事件收藏状态 */
+async function toggleStar(id: number) {
+  try {
+    const res = await authFetch(`/api/events/${id}/star`, { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      const item = events.value.find(e => e.id === id)
+      if (item) item.starred = data.starred
+    }
+  } catch {
+    // ignore
+  }
+}
+
 defineExpose({ addEvent, loadHistory })
 </script>
 
@@ -399,6 +421,9 @@ defineExpose({ addEvent, loadHistory })
       <button :class="['sort-btn', { desc: sortDesc }]" @click="sortDesc = !sortDesc" :title="sortDesc ? t('event.sortOldest') : t('event.sortNewest')">
         {{ sortDesc ? '↓' : '↑' }}
       </button>
+      <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred; loadHistory()" :title="t('event.filterStarred')">
+        {{ filterStarred ? '★' : '☆' }}
+      </button>
       </template>
       <template v-if="subView === 'gallery'">
       <select v-model="snapFilterCamera" @change="loadSnapshots" class="filter-select">
@@ -441,6 +466,9 @@ defineExpose({ addEvent, loadHistory })
           />
           <span class="event-detail">{{ e.detail }}</span>
           <span class="expand-icon">{{ expandedId === e.id ? '▾' : '▸' }}</span>
+          <button :class="['star-btn', { starred: e.starred }]" @click.stop="toggleStar(e.id)" :title="t('event.toggleStar')">
+            {{ e.starred ? '★' : '☆' }}
+          </button>
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
@@ -794,6 +822,48 @@ defineExpose({ addEvent, loadHistory })
 .view-toggle.active {
   background: #4ECDC4;
   border-color: #4ECDC4;
+  color: #1a1a2e;
+}
+
+/* 收藏星标 */
+.star-btn {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.star-btn:hover {
+  color: #FFD93D;
+}
+
+.star-btn.starred {
+  color: #FFD93D;
+}
+
+.star-filter-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.star-filter-btn:hover {
+  border-color: #FFD93D;
+  color: #FFD93D;
+}
+
+.star-filter-btn.active {
+  background: #FFD93D;
+  border-color: #FFD93D;
   color: #1a1a2e;
 }
 

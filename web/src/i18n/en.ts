@@ -76,6 +76,8 @@ export default {
     viewEvents: 'Event list',
     viewGallery: 'Snapshot gallery',
     noSnapshots: 'No detection snapshots',
+    filterStarred: 'Starred only',
+    toggleStar: 'Star/unstar',
   },
   recording: {
     title: 'Recordings',
@@ -106,6 +108,8 @@ export default {
     confirmBatchDelete: 'Delete {count} selected recordings? This cannot be undone.',
     downloadZip: 'Download ZIP',
     zipping: 'Zipping...',
+    filterStarred: 'Starred only',
+    toggleStar: 'Star/unstar',
   },
   timeline: {
     today: 'Today',

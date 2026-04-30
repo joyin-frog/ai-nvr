@@ -39,6 +39,21 @@ const mergeFilename = ref('')
 const zipping = ref(false)
 const zipFilename = ref('')
 
+/** 收藏录像集合（localStorage 持久化） */
+const STORAGE_KEY = 'nvr-starred-recordings'
+const starredFiles = ref<Set<string>>(new Set(
+  JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+))
+/** 仅看收藏 */
+const filterStarred = ref(false)
+function toggleRecStar(filename: string) {
+  const s = new Set(starredFiles.value)
+  if (s.has(filename)) s.delete(filename)
+  else s.add(filename)
+  starredFiles.value = s
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...s]))
+}
+
 /** 缩略图 URL 缓存（filename → URL） */
 const thumbUrls = ref<Record<string, string>>({})
 
@@ -286,9 +301,13 @@ const cameraNameMap = computed(() => {
   return map
 })
 
-/** 按日期过滤后的录像列表 */
+/** 按日期和收藏过滤后的录像列表 */
 const filteredRecordings = computed(() => {
-  if (!filterDate.value) return recordings.value
+  let list = recordings.value
+  if (filterStarred.value) {
+    list = list.filter(r => starredFiles.value.has(r.filename))
+  }
+  if (!filterDate.value) return list
   const since = new Date(`${filterDate.value}T00:00:00`).getTime()
   const until = since + 86_400_000
   return recordings.value.filter(r => r.startTime < until && r.endTime > since)
@@ -726,6 +745,9 @@ defineExpose({ loadRecordings, playAtTime })
       </select>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
       <button :class="['select-btn', { active: multiSelectMode }]" @click="toggleMultiSelect">{{ multiSelectMode ? t('recording.cancelSelect') : t('recording.selectMultiple') }}</button>
+      <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred" :title="t('recording.filterStarred')">
+        {{ filterStarred ? '★' : '☆' }}
+      </button>
     </div>
 
     <!-- 多路同步时间轴（全部摄像头时显示） -->
@@ -775,6 +797,9 @@ defineExpose({ loadRecordings, playAtTime })
             {{ duration(rec.startTime, rec.endTime) }}
           </span>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
+          <button :class="['rec-star', { starred: starredFiles.has(rec.filename) }]" @click.stop="toggleRecStar(rec.filename)" :title="t('recording.toggleStar')">
+            {{ starredFiles.has(rec.filename) ? '★' : '☆' }}
+          </button>
           <button class="rec-delete" @click.stop="deleteRecording(rec)" :title="t('recording.delete')">&#10005;</button>
         </div>
       </div>
@@ -893,6 +918,27 @@ defineExpose({ loadRecordings, playAtTime })
   color: #1a1a2e;
 }
 
+.star-filter-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.star-filter-btn:hover {
+  border-color: #FFD93D;
+  color: #FFD93D;
+}
+
+.star-filter-btn.active {
+  background: #FFD93D;
+  border-color: #FFD93D;
+  color: #1a1a2e;
+}
+
 .recordings-list {
   flex: 1;
   overflow-y: auto;
@@ -1001,8 +1047,29 @@ defineExpose({ loadRecordings, playAtTime })
   transition: opacity 0.2s, color 0.2s;
 }
 
+.rec-star {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.rec-star.starred {
+  color: #FFD93D;
+  opacity: 1;
+}
+
+.recording-item:hover .rec-star,
 .recording-item:hover .rec-delete {
   opacity: 1;
+}
+
+.rec-star:hover {
+  color: #FFD93D;
 }
 
 .rec-delete:hover {

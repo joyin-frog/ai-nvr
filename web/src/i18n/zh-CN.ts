@@ -76,6 +76,8 @@ export default {
     viewEvents: '事件列表',
     viewGallery: '快照画廊',
     noSnapshots: '暂无检测快照',
+    filterStarred: '仅看收藏',
+    toggleStar: '收藏/取消收藏',
   },
   recording: {
     title: '录像',
@@ -106,6 +108,8 @@ export default {
     confirmBatchDelete: '确认删除选中的 {count} 个录像文件？此操作不可恢复。',
     downloadZip: '下载 ZIP',
     zipping: '打包中...',
+    filterStarred: '仅看收藏',
+    toggleStar: '收藏/取消收藏',
   },
   timeline: {
     today: '今天',
