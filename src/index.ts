@@ -18,6 +18,7 @@ import { RoiStorage } from "@/storage/roi";
 import { AlertStorage } from "@/alert/storage";
 import { AlertEngine } from "@/alert/engine";
 import { ThumbnailGenerator } from "@/storage/thumbnails";
+import { StorageCleaner } from "@/storage/cleaner";
 
 /** 设置 Hugging Face 镜像（国内网络加速模型下载） */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -78,10 +79,16 @@ alertEngine.start();
 /** 录像缩略图生成器 */
 const thumbnailGenerator = new ThumbnailGenerator(join(import.meta.dir, "../data/thumbnails"), config.ffmpegPath);
 
-/** 启动 HTTP 服务 */
+/** 事件存储（cleaner 和 server 都需要） */
 const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
+
+/** 统一存储清理管理器 */
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator);
+cleaner.start();
+
+/** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;
@@ -112,6 +119,7 @@ process.on("SIGINT", () => {
   console.log("\n[App] 正在关闭...");
   recorder.stop();
   cameraManager.stop();
+  cleaner.stop();
   eventStorage.close();
   roiStorage.close();
   alertStorage.close();

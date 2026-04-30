@@ -27,6 +27,12 @@ interface RuntimeSettings {
   webhook: {
     urls: string[]
   }
+  cleanup: {
+    eventsRetentionDays: number
+    alertsRetentionDays: number
+    snapshotsRetentionDays: number
+    thumbnailsRetentionDays: number
+  }
 }
 
 const settings = ref<RuntimeSettings | null>(null)
@@ -76,6 +82,20 @@ function addWebhook() {
 function removeWebhook(index: number) {
   if (!settings.value) return
   settings.value.webhook.urls.splice(index, 1)
+}
+
+/** 手动触发清理 */
+async function runCleanup() {
+  try {
+    const res = await fetch('/api/cleanup/run', { method: 'POST' })
+    if (res.ok) {
+      const report = await res.json()
+      const total = (report.events ?? 0) + (report.alerts ?? 0) + (report.snapshots ?? 0)
+      alert(`清理完成: ${total} 条记录已删除`)
+    }
+  } catch {
+    // ignore
+  }
 }
 
 onMounted(() => {
@@ -149,6 +169,28 @@ onMounted(() => {
           <button class="remove-btn" @click="removeWebhook(i)">✕</button>
         </div>
         <button class="add-btn" @click="addWebhook">+ 添加 Webhook</button>
+      </section>
+
+      <!-- 数据清理 -->
+      <section class="section">
+        <h3>数据清理</h3>
+        <label class="field">
+          <span class="field-label">事件保留天数</span>
+          <input type="number" v-model.number="settings.cleanup.eventsRetentionDays" step="1" min="1" max="365" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">告警保留天数</span>
+          <input type="number" v-model.number="settings.cleanup.alertsRetentionDays" step="1" min="1" max="365" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">快照保留天数</span>
+          <input type="number" v-model.number="settings.cleanup.snapshotsRetentionDays" step="1" min="1" max="90" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">缩略图缓存天数</span>
+          <input type="number" v-model.number="settings.cleanup.thumbnailsRetentionDays" step="1" min="1" max="30" class="input" />
+        </label>
+        <button class="add-btn" @click="runCleanup">立即清理</button>
       </section>
     </div>
     <div v-else class="empty">加载中...</div>

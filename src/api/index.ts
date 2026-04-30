@@ -9,6 +9,7 @@ import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
 import { type AlertStorage } from "@/alert/storage";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
+import { type StorageCleaner } from "@/storage/cleaner";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -35,6 +36,7 @@ export function startServer(
   roiStorage: RoiStorage,
   alertStorage: AlertStorage,
   thumbnailGenerator: ThumbnailGenerator,
+  cleaner: StorageCleaner,
 ): void {
   Bun.serve({
     port,
@@ -364,6 +366,17 @@ export function startServer(
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
         });
         return Response.json({ alerts, total });
+      }
+
+      /** 存储清理状态 */
+      if (url.pathname === "/api/cleanup/stats" && req.method === "GET") {
+        return Response.json(cleaner.getStats());
+      }
+
+      /** 手动触发清理 */
+      if (url.pathname === "/api/cleanup/run" && req.method === "POST") {
+        const report = cleaner.runCleanup();
+        return Response.json(report);
       }
 
       /** API 路径未匹配 → 404 */

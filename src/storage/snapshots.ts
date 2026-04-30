@@ -21,12 +21,9 @@ export interface SnapshotInfo {
  */
 export class SnapshotStorage {
   private storagePath: string;
-  /** 自动清理天数 */
-  private retentionDays: number;
 
-  constructor(storagePath: string, private eventBus: EventBus, retentionDays = 30) {
+  constructor(storagePath: string, private eventBus: EventBus) {
     this.storagePath = storagePath;
-    this.retentionDays = retentionDays;
     mkdirSync(storagePath, { recursive: true });
   }
 
@@ -35,9 +32,6 @@ export class SnapshotStorage {
     this.eventBus.on("detect", ({ cameraId, timestamp, annotatedImage }) => {
       this.saveSnapshot(cameraId, timestamp, annotatedImage);
     });
-
-    /** 每小时清理过期快照 */
-    setInterval(() => this.purgeOldSnapshots(), 3600_000);
     console.log("[Snapshot] 快照存储已启动");
   }
 
@@ -109,9 +103,10 @@ export class SnapshotStorage {
     return join(this.storagePath, relativePath);
   }
 
-  /** 清理过期快照 */
-  private purgeOldSnapshots(): void {
-    const cutoff = Date.now() - this.retentionDays * 86400_000;
+  /** 清理过期快照（公开，返回清理数量） */
+  purge(retentionDays: number): number {
+    const cutoff = Date.now() - retentionDays * 86_400_000;
+    let count = 0;
 
     try {
       const camDirs = readdirSync(this.storagePath);
@@ -126,12 +121,14 @@ export class SnapshotStorage {
           const stat = statSync(filePath);
           if (stat.mtimeMs < cutoff) {
             unlinkSync(filePath);
+            count++;
           }
         }
       }
     } catch {
       // ignore
     }
+    return count;
   }
 
   /** 从文件名解析时间戳 */

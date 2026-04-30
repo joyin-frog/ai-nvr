@@ -34,6 +34,17 @@ export interface RuntimeSettings {
   };
   /** Webhook 通知配置 */
   webhook: WebhookConfig;
+  /** 存储清理配置 */
+  cleanup: {
+    /** 事件历史保留天数 */
+    eventsRetentionDays: number;
+    /** 告警记录保留天数 */
+    alertsRetentionDays: number;
+    /** 检测快照保留天数 */
+    snapshotsRetentionDays: number;
+    /** 缩略图缓存保留天数 */
+    thumbnailsRetentionDays: number;
+  };
 }
 
 /**
@@ -54,6 +65,12 @@ export class RuntimeConfig {
       },
       webhook: {
         urls: [],
+      },
+      cleanup: {
+        eventsRetentionDays: 30,
+        alertsRetentionDays: 90,
+        snapshotsRetentionDays: 30,
+        thumbnailsRetentionDays: 7,
       },
     };
   }
@@ -100,6 +117,14 @@ export class RuntimeConfig {
       }
     }
 
+    if (obj.cleanup && typeof obj.cleanup === "object") {
+      const c = obj.cleanup as Record<string, unknown>;
+      if (typeof c.eventsRetentionDays === "number") this.settings.cleanup.eventsRetentionDays = c.eventsRetentionDays;
+      if (typeof c.alertsRetentionDays === "number") this.settings.cleanup.alertsRetentionDays = c.alertsRetentionDays;
+      if (typeof c.snapshotsRetentionDays === "number") this.settings.cleanup.snapshotsRetentionDays = c.snapshotsRetentionDays;
+      if (typeof c.thumbnailsRetentionDays === "number") this.settings.cleanup.thumbnailsRetentionDays = c.thumbnailsRetentionDays;
+    }
+
     return this.settings;
   }
 
@@ -119,6 +144,9 @@ export class RuntimeConfig {
     }
     if (updates.webhook) {
       this.settings.webhook = { ...this.settings.webhook, ...updates.webhook };
+    }
+    if (updates.cleanup) {
+      this.settings.cleanup = { ...this.settings.cleanup, ...updates.cleanup };
     }
     return this.settings;
   }
