@@ -64,6 +64,21 @@ export interface NotifyConfig {
 /** 录像模式：变动触发 / 持续录制 */
 export type RecordingMode = "motion" | "continuous";
 
+/** 水印位置 */
+export type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+/** 水印配置 */
+export interface WatermarkConfig {
+  /** 是否启用水印 */
+  enabled: boolean;
+  /** 摄像头名称位置 */
+  namePosition: WatermarkPosition;
+  /** 时间戳位置 */
+  timePosition: WatermarkPosition;
+  /** 字号 */
+  fontSize: number;
+}
+
 /** 运行时可修改的设置 */
 export interface RuntimeSettings {
   /** 全局变动检测配置 */
@@ -82,6 +97,8 @@ export interface RuntimeSettings {
     retentionDays: number;
     /** 持续录制分段时长（秒） */
     segmentDuration: number;
+    /** 水印配置 */
+    watermark: WatermarkConfig;
   };
   /** Webhook 通知配置 */
   webhook: WebhookConfig;
@@ -117,6 +134,12 @@ export class RuntimeConfig {
         postMotionDuration: 5000,
         retentionDays: 7,
         segmentDuration: 300,
+        watermark: {
+          enabled: true,
+          namePosition: "top-left",
+          timePosition: "bottom-left",
+          fontSize: 24,
+        },
       },
       webhook: {
         urls: [],
@@ -175,6 +198,18 @@ export class RuntimeConfig {
       if (typeof r.postMotionDuration === "number") this.settings.recording.postMotionDuration = r.postMotionDuration;
       if (typeof r.retentionDays === "number") this.settings.recording.retentionDays = r.retentionDays;
       if (typeof r.segmentDuration === "number") this.settings.recording.segmentDuration = r.segmentDuration;
+      if (r.watermark && typeof r.watermark === "object") {
+        const wm = r.watermark as Record<string, unknown>;
+        if (typeof wm.enabled === "boolean") this.settings.recording.watermark.enabled = wm.enabled;
+        if (typeof wm.fontSize === "number") this.settings.recording.watermark.fontSize = wm.fontSize;
+        const validPositions = ["top-left", "top-right", "bottom-left", "bottom-right"];
+        if (typeof wm.namePosition === "string" && validPositions.includes(wm.namePosition)) {
+          this.settings.recording.watermark.namePosition = wm.namePosition as WatermarkPosition;
+        }
+        if (typeof wm.timePosition === "string" && validPositions.includes(wm.timePosition)) {
+          this.settings.recording.watermark.timePosition = wm.timePosition as WatermarkPosition;
+        }
+      }
     }
 
     if (obj.cameraOverrides && typeof obj.cameraOverrides === "object") {

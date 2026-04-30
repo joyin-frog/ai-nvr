@@ -265,25 +265,37 @@ export class MotionRecorder {
     const outputPath = join(dir, filename);
 
     /** 构建 drawtext 水印滤镜 */
+    const wm = this.runtimeConfig.get().recording.watermark;
     const filterParts: string[] = [];
-    const camName = this.cameraNames.get(cameraId);
-    if (camName) {
-      /** 转义摄像头名称中的单引号 */
-      const safeName = camName.replace(/'/g, "'\\''");
+    if (wm.enabled) {
+      const camName = this.cameraNames.get(cameraId);
+      /** 根据位置计算 drawtext x/y 坐标 */
+      const posCoords = (pos: string) => {
+        switch (pos) {
+          case "top-right": return { x: "w-tw-10", y: "10" };
+          case "bottom-left": return { x: "10", y: "h-th-10" };
+          case "bottom-right": return { x: "w-tw-10", y: "h-th-10" };
+          default: return { x: "10", y: "10" };
+        }
+      };
+      if (camName) {
+        const safeName = camName.replace(/'/g, "'\\''");
+        const { x, y } = posCoords(wm.namePosition);
+        filterParts.push(
+          `drawtext=fontfile='${DEFAULT_FONT}':text='${safeName}':x=${x}:y=${y}:fontsize=${wm.fontSize + 4}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`,
+        );
+      }
+      const { x, y } = posCoords(wm.timePosition);
+      const timeText = "%{localtime\\:%Y-%m-%d %H\\:%M\\:%S}";
       filterParts.push(
-        `drawtext=fontfile='${DEFAULT_FONT}':text='${safeName}':x=10:y=10:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`,
+        `drawtext=fontfile='${DEFAULT_FONT}':text='${timeText}':x=${x}:y=${y}:fontsize=${wm.fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`,
       );
     }
-    /** 左下角：实时时间戳，%{localtime:...} 内冒号用 \: 转义 */
-    const timeText = "%{localtime\\:%Y-%m-%d %H\\:%M\\:%S}";
-    filterParts.push(
-      `drawtext=fontfile='${DEFAULT_FONT}':text='${timeText}':x=10:y=h-th-10:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=4`,
-    );
 
     const args = [
       "-rtsp_transport", "tcp",
       "-i", hdUrl,
-      "-vf", filterParts.join(","),
+      ...(filterParts.length > 0 ? ["-vf", filterParts.join(",")] : []),
       "-c:v", "libx264",
       "-preset", "ultrafast",
       "-crf", "23",

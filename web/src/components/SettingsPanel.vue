@@ -24,6 +24,12 @@ interface RuntimeSettings {
     postMotionDuration: number
     retentionDays: number
     segmentDuration: number
+    watermark: {
+      enabled: boolean
+      namePosition: string
+      timePosition: string
+      fontSize: number
+    }
   }
   cameraOverrides: Record<string, {
     motionThreshold?: number
@@ -75,6 +81,10 @@ async function loadSettings() {
       /** 确保 email.smtp 有默认值，避免模板中 null 引用 */
       if (settings.value && !settings.value.notify.email.smtp) {
         settings.value.notify.email.smtp = { host: '', port: 465, secure: true, user: '', pass: '' }
+      }
+      /** 确保 watermark 有默认值（向后兼容旧版后端） */
+      if (settings.value && !settings.value.recording.watermark) {
+        settings.value.recording.watermark = { enabled: true, namePosition: 'top-left', timePosition: 'bottom-left', fontSize: 24 }
       }
     }
   } catch {
@@ -251,6 +261,34 @@ onMounted(() => {
           <span class="field-label">{{ t('settings.retentionDays') }}</span>
           <input type="number" v-model.number="settings.recording.retentionDays" step="1" min="1" max="90" class="input" />
         </label>
+        <div class="field watermark-toggle">
+          <span class="field-label">{{ t('settings.watermarkEnabled') }}</span>
+          <input type="checkbox" v-model="settings.recording.watermark.enabled" />
+        </div>
+        <template v-if="settings.recording.watermark.enabled">
+          <label class="field">
+            <span class="field-label">{{ t('settings.watermarkNamePos') }}</span>
+            <select v-model="settings.recording.watermark.namePosition" class="input">
+              <option value="top-left">↖ {{ t('settings.posTopLeft') }}</option>
+              <option value="top-right">↗ {{ t('settings.posTopRight') }}</option>
+              <option value="bottom-left">↙ {{ t('settings.posBottomLeft') }}</option>
+              <option value="bottom-right">↘ {{ t('settings.posBottomRight') }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.watermarkTimePos') }}</span>
+            <select v-model="settings.recording.watermark.timePosition" class="input">
+              <option value="top-left">↖ {{ t('settings.posTopLeft') }}</option>
+              <option value="top-right">↗ {{ t('settings.posTopRight') }}</option>
+              <option value="bottom-left">↙ {{ t('settings.posBottomLeft') }}</option>
+              <option value="bottom-right">↘ {{ t('settings.posBottomRight') }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.watermarkFontSize') }}</span>
+            <input type="number" v-model.number="settings.recording.watermark.fontSize" step="2" min="12" max="48" class="input" />
+          </label>
+        </template>
       </section>
 
       <!-- Webhook 通知 -->
@@ -633,5 +671,12 @@ onMounted(() => {
   color: #ccc;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.watermark-toggle input[type="checkbox"] {
+  accent-color: #4ECDC4;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
 }
 </style>
