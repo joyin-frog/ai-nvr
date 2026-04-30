@@ -599,12 +599,16 @@ onUnmounted(() => {
           @click="switchTab('cameras')"
         >{{ t('tab.cameras') }}</button>
         <button
+          :class="['tab-btn', { active: activeTab === 'alerts' }]"
+          @click="switchTab('alerts')"
+        >{{ t('tab.alerts') }}</button>
+        <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
         >{{ t('tab.settings') }}</button>
       </div>
       <div class="mobile-content">
-        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" @play-recording="onPlayRecording" />
+        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" :cameras="cameras" @play-recording="onPlayRecording" />
         <RecordingsPanel
           v-show="activeTab === 'recordings'"
           ref="recordingsPanel"
