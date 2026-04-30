@@ -87,4 +87,18 @@ export class ThumbnailGenerator {
       // ignore
     }
   }
+
+  /**
+   * 批量预生成缩略图（异步，不阻塞调用方）
+   * 跳过已有缓存的文件，只生成缺失的
+   */
+  pregenerate(videoPaths: Array<{ path: string; durationSec: number }>): void {
+    /** 不阻塞，让 ffmpeg 在后台逐个生成 */
+    setTimeout(() => {
+      for (const { path, durationSec } of videoPaths) {
+        const timeSec = Math.max(0, durationSec / 2)
+        this.getOrCreate(path, timeSec)
+      }
+    }, 0)
+  }
 }

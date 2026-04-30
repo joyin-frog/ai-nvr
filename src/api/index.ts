@@ -319,6 +319,27 @@ export function startServer(
         });
       }
 
+      /** 批量预生成缩略图 */
+      if (url.pathname === "/api/recordings/thumb-preload" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>
+          const files = obj.files as Array<{ filename: string; durationSec: number }> | undefined
+          if (!files || !Array.isArray(files)) return new Response("Invalid body", { status: 400 })
+
+          const storageRoot = realpathSync(recorder.getRecordingPath("."))
+          const tasks: Array<{ path: string; durationSec: number }> = []
+          for (const f of files) {
+            const videoPath = recorder.getRecordingPath(f.filename)
+            if (!existsSync(videoPath)) continue
+            const resolved = realpathSync(videoPath)
+            if (!resolved.startsWith(storageRoot)) continue
+            tasks.push({ path: resolved, durationSec: f.durationSec })
+          }
+          thumbnailGenerator.pregenerate(tasks)
+          return Response.json({ queued: tasks.length })
+        })
+      }
+
       /** 录像导出：裁剪视频片段 */
       if (url.pathname === "/api/recordings/export" && req.method === "POST") {
         return req.json().then((body: unknown) => {

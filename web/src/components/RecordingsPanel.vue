@@ -356,6 +356,7 @@ function formatSec(sec: number): string {
 /** 加载录像列表 */
 async function loadRecordings() {
   loading.value = true
+  preloadedSet = new Set<string>()
   try {
     const params = new URLSearchParams()
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
@@ -369,6 +370,8 @@ async function loadRecordings() {
     if (res.ok) {
       recordings.value = await res.json()
       thumbUrls.value = {}
+      /** 静默预生成缩略图（后台批量请求，不阻塞 UI） */
+      preloadThumbnails()
     }
   } catch {
     // ignore
@@ -387,6 +390,23 @@ function play(rec: Recording, seekToSec: number = -1) {
   exportEndSec.value = totalDurationSec.value || 0
   /** 聚焦播放器 modal 以接收键盘事件 */
   nextTick(() => playerModalEl.value?.focus())
+}
+
+/** 批量预生成缩略图（后台静默请求，只发一次） */
+let preloadedSet = new Set<string>()
+function preloadThumbnails() {
+  const files: Array<{ filename: string; durationSec: number }> = []
+  for (const rec of recordings.value) {
+    if (preloadedSet.has(rec.filename)) continue
+    preloadedSet.add(rec.filename)
+    files.push({ filename: rec.filename, durationSec: (rec.endTime - rec.startTime) / 1000 })
+  }
+  if (files.length === 0) return
+  authFetch('/api/recordings/thumb-preload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ files }),
+  }).catch(() => { /* ignore */ })
 }
 
 /** 悬停时懒加载缩略图 */
