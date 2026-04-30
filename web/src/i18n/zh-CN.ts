@@ -91,6 +91,8 @@ export default {
     gifExport: 'GIF 导出',
     filterDate: '筛选日期',
     autoPlayNext: '连续播放',
+    delete: '删除',
+    confirmDelete: '确认删除此录像文件？此操作不可恢复。',
   },
   timeline: {
     today: '今天',

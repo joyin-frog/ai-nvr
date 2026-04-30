@@ -15,7 +15,7 @@ import { type RecordingExporter } from "@/storage/export";
 import { type AiDetector } from "@/ai/detector";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
-import { existsSync, statSync, realpathSync } from "node:fs";
+import { existsSync, statSync, realpathSync, unlinkSync } from "node:fs";
 import { resolve, extname } from "node:path";
 
 /** WebSocket 客户端集合 */
@@ -235,6 +235,19 @@ export function startServer(
             "Accept-Ranges": "bytes",
           },
         });
+      }
+
+      /** 删除录像文件 */
+      if (recordingMatch && req.method === "DELETE") {
+        const camId = recordingMatch[1]!;
+        const filename = recordingMatch[2]!;
+        const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        const storageRoot = realpathSync(recorder.getRecordingPath("."));
+        const resolved = realpathSync(filePath);
+        if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+        unlinkSync(resolved);
+        return Response.json({ ok: true });
       }
 
       /** 获取标注后的图片 */

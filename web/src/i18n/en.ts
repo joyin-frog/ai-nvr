@@ -91,6 +91,8 @@ export default {
     gifExport: 'GIF Export',
     filterDate: 'Filter by date',
     autoPlayNext: 'Auto play next',
+    delete: 'Delete',
+    confirmDelete: 'Delete this recording? This cannot be undone.',
   },
   timeline: {
     today: 'Today',

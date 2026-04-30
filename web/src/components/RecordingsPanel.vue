@@ -206,6 +206,20 @@ function closePlayer() {
   gifFilename.value = ''
 }
 
+/** 删除录像 */
+async function deleteRecording(rec: Recording) {
+  if (!confirm(t('recording.confirmDelete'))) return
+  try {
+    const res = await authFetch(`/api/recordings/${rec.filename}`, { method: 'DELETE' })
+    if (res.ok) {
+      if (selectedRecording.value?.filename === rec.filename) closePlayer()
+      recordings.value = recordings.value.filter(r => r.filename !== rec.filename)
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /** 打开导出面板 */
 function openExport() {
   if (!selectedRecording.value) return
@@ -499,6 +513,7 @@ defineExpose({ loadRecordings, playAtTime })
             {{ duration(rec.startTime, rec.endTime) }}
           </span>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
+          <button class="rec-delete" @click.stop="deleteRecording(rec)" :title="t('recording.delete')">&#10005;</button>
         </div>
       </div>
     </div>
@@ -694,6 +709,26 @@ defineExpose({ loadRecordings, playAtTime })
   font-size: 11px;
   color: #888;
   margin-top: 2px;
+}
+
+.rec-delete {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.recording-item:hover .rec-delete {
+  opacity: 1;
+}
+
+.rec-delete:hover {
+  color: #e74c3c;
 }
 
 /* 播放器弹窗 */
