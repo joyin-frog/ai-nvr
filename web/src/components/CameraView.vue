@@ -18,6 +18,10 @@ const props = defineProps<{
   frameImage: string
   /** 是否支持 PTZ 云台控制 */
   ptz?: boolean
+  /** 视频宽度（用于计算画面比例） */
+  videoWidth?: number
+  /** 视频高度（用于计算画面比例） */
+  videoHeight?: number
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +77,14 @@ watch(() => props.detectVersion, async (v: number) => {
 
 /** 始终显示实时帧，检测框通过叠加层渲染 */
 const displayUrl = computed(() => props.frameImage)
+
+/** 画面比例：根据视频分辨率计算，默认 16:9 */
+const cameraBodyStyle = computed(() => {
+  if (props.videoWidth && props.videoHeight && props.videoWidth > 0 && props.videoHeight > 0) {
+    return { 'aspect-ratio': `${props.videoWidth} / ${props.videoHeight}` }
+  }
+  return { 'aspect-ratio': '16 / 9' }
+})
 
 /** 检测框叠加在画面上的样式 */
 const detectionBoxes = computed(() => {
@@ -214,6 +226,7 @@ onUnmounted(() => {
 
     <div
       class="camera-body"
+      :style="cameraBodyStyle"
       @dblclick="emit('fullscreen', cameraId)"
       @wheel="onWheel"
       @mousedown="onPanStart"
@@ -387,7 +400,6 @@ onUnmounted(() => {
 .camera-body {
   position: relative;
   background: #0a0a1a;
-  aspect-ratio: 16 / 9;
   display: flex;
   align-items: center;
   justify-content: center;
