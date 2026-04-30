@@ -529,6 +529,11 @@ onUnmounted(() => {
     </header>
     <main class="app-body">
       <div class="camera-grid" :style="gridStyle" :class="{ fullscreen: !!fullscreenCamera }">
+        <div v-if="cameras.length === 0" class="empty-state">
+          <div class="empty-icon">&#x1F4F7;</div>
+          <p>{{ t('manage.noCameras') }}</p>
+          <button class="header-btn" @click="switchTab('cameras')">{{ t('manage.addCamera') }}</button>
+        </div>
         <div
           v-for="cam in visibleCameras"
           :key="cam.id"
@@ -768,6 +773,42 @@ onUnmounted(() => {
 .camera-cell {
   border-radius: 8px;
   transition: opacity 0.2s;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: #666;
+  grid-column: 1 / -1;
+}
+
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+
+.empty-state p {
+  font-size: 16px;
+  margin: 0;
+}
+
+.empty-state .header-btn {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.empty-state .header-btn:hover {
+  opacity: 0.9;
 }
 
 .camera-cell.dragging {
