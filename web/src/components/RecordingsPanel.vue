@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import RecordingsTimeline from './RecordingsTimeline.vue'
@@ -184,6 +184,42 @@ function togglePlayerFullscreen() {
   }
 }
 
+/** 播放器键盘快捷键 */
+function onPlayerKeydown(e: KeyboardEvent) {
+  if (!selectedRecording.value || !playerRef.value) return
+  const video = playerRef.value
+  switch (e.key) {
+    case ' ':
+      e.preventDefault()
+      isPlaying.value ? video.pause() : video.play()
+      break
+    case 'ArrowLeft':
+      e.preventDefault()
+      video.currentTime = Math.max(0, video.currentTime - (e.shiftKey ? 30 : 5))
+      break
+    case 'ArrowRight':
+      e.preventDefault()
+      video.currentTime = Math.min(video.duration, video.currentTime + (e.shiftKey ? 30 : 5))
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      volume.value = Math.min(100, volume.value + 5)
+      break
+    case 'ArrowDown':
+      e.preventDefault()
+      volume.value = Math.max(0, volume.value - 5)
+      break
+    case 'm':
+    case 'M':
+      toggleMute()
+      break
+    case 'f':
+    case 'F':
+      togglePlayerFullscreen()
+      break
+  }
+}
+
 /** 格式化绝对时间为 HH:MM:SS */
 function formatAbsTime(ts: number): string {
   const d = new Date(ts)
@@ -286,6 +322,8 @@ function play(rec: Recording, seekToSec: number = -1) {
   exportFilename.value = ''
   exportStartSec.value = 0
   exportEndSec.value = totalDurationSec.value || 0
+  /** 聚焦播放器 modal 以接收键盘事件 */
+  nextTick(() => playerModalEl.value?.focus())
 }
 
 /** 悬停时懒加载缩略图 */
@@ -515,7 +553,7 @@ defineExpose({ loadRecordings, playAtTime })
   <div class="recordings-panel">
     <!-- 播放器弹窗 -->
     <div v-if="selectedRecording" class="player-overlay" @click.self="closePlayer">
-      <div ref="playerModalEl" class="player-modal">
+      <div ref="playerModalEl" class="player-modal" tabindex="-1" @keydown="onPlayerKeydown">
         <div class="player-header">
           <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
