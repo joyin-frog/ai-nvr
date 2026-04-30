@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import RecordingsTimeline from './RecordingsTimeline.vue'
 
 /** 录像信息 */
 interface Recording {
@@ -143,6 +144,13 @@ defineExpose({ loadRecordings, playAtTime })
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">刷新</button>
     </div>
 
+    <!-- 时间轴 -->
+    <RecordingsTimeline
+      :recordings="recordings"
+      :selected-camera="filterCamera"
+      @play="play"
+    />
+
     <div class="recordings-list">
       <div v-if="recordings.length === 0" class="empty">
         {{ loading ? '加载中...' : '暂无录像' }}
@@ -172,8 +180,9 @@ defineExpose({ loadRecordings, playAtTime })
 <style scoped>
 .recordings-panel {
   background: #1a1a2e;
-  border-radius: 8px;
+  border-radius: 0 0 8px 8px;
   border: 1px solid #2a2a4a;
+  border-top: none;
   display: flex;
   flex-direction: column;
   height: 100%;
