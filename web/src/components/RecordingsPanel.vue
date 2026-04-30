@@ -48,6 +48,9 @@ const playbackSpeed = ref(1)
 /** video 元素引用 */
 const playerRef = ref<HTMLVideoElement | null>(null)
 
+/** 播放后需要跳转到的时间点（秒偏移，-1 表示不跳转） */
+const seekOffset = ref(-1)
+
 /** 倍速变更时同步到 video 元素 */
 function changeSpeed(speed: number) {
   playbackSpeed.value = speed
@@ -57,6 +60,16 @@ function changeSpeed(speed: number) {
 /** video 元素 ratechange 事件（用户通过浏览器原生控件改倍速时同步下拉框） */
 function onRateChange() {
   if (playerRef.value) playbackSpeed.value = playerRef.value.playbackRate
+}
+
+/** video 元素 loadedmetadata 事件：恢复倍速 + 执行 seek 跳转 */
+function onLoadedMetadata() {
+  if (!playerRef.value) return
+  playerRef.value.playbackRate = playbackSpeed.value
+  if (seekOffset.value >= 0) {
+    playerRef.value.currentTime = seekOffset.value
+    seekOffset.value = -1
+  }
 }
 
 /** 当前播放的录像 URL */
@@ -140,8 +153,9 @@ async function loadRecordings() {
 }
 
 /** 选择录像播放 */
-function play(rec: Recording) {
+function play(rec: Recording, seekToSec: number = -1) {
   selectedRecording.value = rec
+  seekOffset.value = seekToSec
   showExport.value = false
   exportFilename.value = ''
   exportStartSec.value = 0
@@ -326,7 +340,8 @@ async function playAtTime(cameraId: string, timestamp: number): Promise<boolean>
     .sort((a, b) => Math.abs(a.startTime - timestamp) - Math.abs(b.startTime - timestamp))[0]
 
   if (closest) {
-    play(closest)
+    const offsetSec = Math.max(0, (timestamp - closest.startTime) / 1000)
+    play(closest, offsetSec)
     return true
   }
   return false
@@ -365,6 +380,7 @@ defineExpose({ loadRecordings, playAtTime })
           autoplay
           class="player-video"
           @ratechange="onRateChange"
+          @loadedmetadata="onLoadedMetadata"
         />
         <!-- 导出面板 -->
         <div v-if="showExport" class="export-panel">
