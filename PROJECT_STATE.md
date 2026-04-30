@@ -41,11 +41,12 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 | Config | `src/config.ts` | 从 YAML 加载配置，`watchConfig` 支持热重载 |
 | CameraManager | `src/camera/manager.ts` | 管理多个 FrameExtractor，`reloadConfig` 支持动态增删 |
 | FrameExtractor | `src/camera/stream.ts` | ffmpeg 子进程 + JPEG 帧分割器，发射 online/offline 事件 |
-| MotionDetector | `src/detection/motion.ts` | 灰度像素差异比对，检测画面变动 |
+| MotionDetector | `src/detection/motion.ts` | 灰度像素差异比对，ROI mask 过滤，扫描线光栅化多边形填充 |
 | AiDetector | `src/ai/detector.ts` | HuggingFace pipeline 目标检测 |
 | AiTypes | `src/ai/types.ts` | AI 检测类型定义 |
 | Annotator | `src/ai/annotator.ts` | SVG 叠加检测框 + sharp 合成标注图 |
 | EventStorage | `src/storage/events.ts` | bun:sqlite 事件持久化，支持查询/统计/清理 |
+| RoiStorage | `src/storage/roi.ts` | bun:sqlite ROI 多边形区域存储，CRUD + getEnabledPolygons |
 | MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，ffmpeg 编码 MP4，`scheduleStop` 支持运动超时自动停止 |
 | SystemMonitor | `src/monitor.ts` | 系统性能监控，FPS/内存/检测计数 |
 | RuntimeConfig | `src/runtime-config.ts` | 运行时配置管理，API 可修改灵敏度/AI/录像参数 |
@@ -64,6 +65,10 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - `GET /api/snapshot/:cameraId` — 最新帧（JPEG，回退用）
 - `GET /api/detection/annotated/:cameraId` — 标注后的图片
 - `GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=` — 事件历史查询
+- `GET /api/roi/:cameraId` — 获取摄像头 ROI 区域列表
+- `POST /api/roi` — 添加 ROI 区域（多边形顶点）
+- `PATCH /api/roi/item/:id` — 更新 ROI（启用/禁用/顶点/名称）
+- `DELETE /api/roi/item/:id` — 删除 ROI 区域
 - `GET /api/recordings?cameraId=` — 录像列表
 - `GET /api/recordings/:cameraId/:filename` — 录像文件播放
 - `WS /api/events` — 实时事件推送（二进制协议：4B头长度 + JSON + 可选二进制帧）
@@ -84,6 +89,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 
 ## 数据存储
 - `data/nvr.db` — SQLite 数据库（事件记录，WAL 模式）
+- `data/roi.db` — SQLite 数据库（ROI 检测区域，WAL 模式）
 - `data/recordings/<cameraId>/` — MP4 录像文件（按摄像头分目录）
 - `data/snapshots/` — 启动时保存的验证帧（WebP）
 
@@ -126,4 +132,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 今日事件统计：状态面板显示当日变动/检测次数，30秒自动刷新
 - Bug 修复：recorder forceStop 清理 recording 标志、快照文件名毫秒级精度、detectSnapshots blob URL 独立复制
 - CameraView UX 增强：检测框直接叠加画面、16:9 固定宽高比、离线状态标识、标注图3秒自动恢复实时帧
-- 下一步优先：检测区域划定、告警规则引擎
+- ROI（检测区域）功能：SQLite 存储多边形区域、API CRUD 端点、MotionDetector 扫描线光栅化算法实现 ROI 内像素差异比对、前端点击画面绘制多边形区域
+- 下一步优先：告警规则引擎、时间轴回放
