@@ -40,6 +40,9 @@ type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 's
 const savedTab = localStorage.getItem('nvr-active-tab') as SidebarTab | null
 const activeTab = ref<SidebarTab>(savedTab ?? 'events')
 
+/** 摄像头 FPS 映射（从 health API 更新） */
+const cameraFpsMap = ref<Record<string, number>>({})
+
 /** 全屏摄像头 ID（null 为网格模式） */
 const fullscreenCamera = ref<string | null>(null)
 
@@ -171,6 +174,14 @@ async function checkDiskSpace() {
     const res = await authFetch('/api/health')
     if (!res.ok) return
     const data = await res.json()
+    /** 更新摄像头 FPS */
+    if (data.cameras && Array.isArray(data.cameras)) {
+      const fpsMap: Record<string, number> = {}
+      for (const cam of data.cameras as Array<{ cameraId: string; fps: number }>) {
+        fpsMap[cam.cameraId] = cam.fps
+      }
+      cameraFpsMap.value = fpsMap
+    }
     const storage = data.storage as { diskTotalBytes: number; diskFreeBytes: number } | undefined
     if (!storage || storage.diskTotalBytes === 0) return
     const used = storage.diskTotalBytes - storage.diskFreeBytes
@@ -640,6 +651,7 @@ onUnmounted(() => {
             :ptz="cam.ptz"
             :video-width="cam.width"
             :video-height="cam.height"
+            :fps="cameraFpsMap[cam.id] ?? 0"
             @fullscreen="enterFullscreen"
           />
         </div>

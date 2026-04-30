@@ -22,6 +22,8 @@ const props = defineProps<{
   videoWidth?: number
   /** 视频高度（用于计算画面比例） */
   videoHeight?: number
+  /** 实时帧率（从 health API 获取） */
+  fps?: number
 }>()
 
 const emit = defineEmits<{
@@ -109,6 +111,14 @@ const lastSeenText = computed(() => {
   if (diffSec < 3600) return t('camera.lastSeenMinutes', { count: Math.floor(diffSec / 60) })
   if (diffSec < 86400) return t('camera.lastSeenHours', { count: Math.floor(diffSec / 3600) })
   return t('camera.lastSeenDays', { count: Math.floor(diffSec / 86400) })
+})
+
+/** FPS 质量等级 */
+const fpsQuality = computed(() => {
+  const fps = props.fps ?? 0
+  if (fps >= 10) return 'good'
+  if (fps >= 5) return 'fair'
+  return 'poor'
 })
 
 /** 截图下载当前画面（优先标注图） */
@@ -268,6 +278,11 @@ onUnmounted(() => {
       <!-- 数字时钟叠加 -->
       <div v-if="online && displayUrl" class="clock-overlay">
         <span class="clock-text">{{ clockText }}</span>
+      </div>
+
+      <!-- FPS 质量指示 -->
+      <div v-if="online && displayUrl && (fps ?? 0) > 0" :class="['fps-badge', fpsQuality]">
+        {{ (fps ?? 0).toFixed(0) }} fps
       </div>
     </div>
 
@@ -462,6 +477,33 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* FPS 质量徽标 */
+.fps-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+  pointer-events: none;
+  color: #fff;
+}
+
+.fps-badge.good {
+  background: rgba(76, 175, 80, 0.75);
+}
+
+.fps-badge.fair {
+  background: rgba(255, 193, 7, 0.8);
+  color: #1a1a2e;
+}
+
+.fps-badge.poor {
+  background: rgba(244, 67, 54, 0.8);
 }
 
 /* 数字时钟叠加 */
