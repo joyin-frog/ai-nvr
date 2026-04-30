@@ -117,6 +117,9 @@ const saturation = ref(100)
 /** CSS filter 字符串 */
 const imageFilter = computed(() => {
   const parts: string[] = []
+  if (!props.online) {
+    parts.push('grayscale(100%)', 'opacity(0.6)')
+  }
   if (brightness.value !== 100) parts.push(`brightness(${brightness.value}%)`)
   if (contrast.value !== 100) parts.push(`contrast(${contrast.value}%)`)
   if (saturation.value !== 100) parts.push(`saturate(${saturation.value}%)`)
