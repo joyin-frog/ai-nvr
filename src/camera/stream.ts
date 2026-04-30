@@ -105,6 +105,8 @@ export class FrameExtractor {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** 上一次接收到帧的时间 */
   private lastFrameTime = 0;
+  /** 当前是否在线（用于检测状态变化） */
+  private online = false;
 
   constructor(
     private config: CameraConfig,
@@ -126,13 +128,16 @@ export class FrameExtractor {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
+    if (this.online) {
+      this.online = false;
+      this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+    }
     this.killProcess();
   }
 
   /** 获取摄像头在线状态 */
   get isOnline(): boolean {
-    /** 10 秒内收到过帧视为在线 */
-    return this.lastFrameTime > Date.now() - 10_000;
+    return this.online;
   }
 
   /** 获取最近一帧的时间 */
@@ -142,15 +147,15 @@ export class FrameExtractor {
 
   /** 启动 ffmpeg 子进程 */
   private spawnFfmpeg(): void {
-    const { detectWidth, detectHeight, detectFps, stream } = this.config;
+    const { detectFps, stream } = this.config;
 
     const args = [
       "-rtsp_transport", "tcp",
-      "-i", stream.sd,
-      "-vf", `fps=${detectFps},scale=${detectWidth}:${detectHeight}`,
+      "-i", stream.hd,
+      "-vf", `fps=${detectFps},scale=960:-4`,
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
-      "-q:v", "5",
+      "-q:v", "2",
       "-an",
       "pipe:1",
     ];
@@ -168,12 +173,18 @@ export class FrameExtractor {
       stdout.on("data", (chunk: Buffer) => {
         const frames = this.splitter.feed(chunk);
         for (const frame of frames) {
-          this.lastFrameTime = Date.now();
+          const now = Date.now();
+          this.lastFrameTime = now;
           this.retryCount = 0;
+          if (!this.online) {
+            this.online = true;
+            this.eventBus.emit("camera:online", { cameraId: this.config.id });
+            console.log(`[${this.config.id}] 摄像头上线`);
+          }
           this.eventBus.emit("frame", {
             cameraId: this.config.id,
             data: frame,
-            timestamp: this.lastFrameTime,
+            timestamp: now,
           });
         }
       });
@@ -192,6 +203,11 @@ export class FrameExtractor {
     this.proc.on("exit", (code: number | null) => {
       console.log(`[${this.config.id}] ffmpeg 进程退出, code=${code}`);
       this.proc = null;
+      if (this.online) {
+        this.online = false;
+        this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+        console.log(`[${this.config.id}] 摄像头离线`);
+      }
       if (this.running) {
         this.scheduleReconnect();
       }

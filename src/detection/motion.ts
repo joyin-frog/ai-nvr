@@ -8,6 +8,8 @@ interface CameraState {
   prevPixels: Uint8Array | null;
   /** 上次触发变动事件的时间 */
   lastMotionTime: number;
+  /** 是否正在处理中（防止帧堆积） */
+  processing: boolean;
 }
 
 /**
@@ -22,6 +24,16 @@ export class MotionDetector {
     private config: MotionConfig,
     private eventBus: EventBus,
   ) {}
+
+  /** 获取或创建摄像头状态 */
+  private getOrCreateState(cameraId: string): CameraState {
+    let state = this.states.get(cameraId);
+    if (!state) {
+      state = { prevPixels: null, lastMotionTime: 0, processing: false };
+      this.states.set(cameraId, state);
+    }
+    return state;
+  }
 
   /** 启动检测：监听帧事件 */
   start(): void {
@@ -53,12 +65,7 @@ export class MotionDetector {
     const { data, info } = rawData;
 
     const pixels = new Uint8Array(data.buffer);
-    let state = this.states.get(cameraId);
-
-    if (!state) {
-      state = { prevPixels: null, lastMotionTime: 0 };
-      this.states.set(cameraId, state);
-    }
+    const state = this.getOrCreateState(cameraId);
 
     /** 第一帧，没有可对比的，存储后返回 */
     if (!state.prevPixels) {
