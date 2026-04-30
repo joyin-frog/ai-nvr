@@ -133,6 +133,8 @@ const authenticated = ref(false)
 
 /** WebSocket 连接状态 */
 const wsState = ref<ConnectionState>('disconnected')
+/** 是否为首次连接（区分首次连接和重连） */
+let firstConnection = true
 
 /** 磁盘空间预警 */
 const diskWarn = ref<{ percent: number; free: string } | null>(null)
@@ -349,6 +351,14 @@ function startApp() {
   client.connect()
   client.onStateChange((state) => {
     wsState.value = state
+    if (state === 'connected') {
+      if (firstConnection) {
+        firstConnection = false
+      } else {
+        loadCameras()
+        eventPanel.value?.loadHistory()
+      }
+    }
   })
   checkDiskSpace()
   diskCheckTimer = setInterval(checkDiskSpace, 300000)
