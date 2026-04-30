@@ -148,6 +148,47 @@ function enterFullscreen(cameraId: string) {
 /** 退出全屏回到网格 */
 function exitFullscreen() {
   fullscreenCamera.value = null
+  stopPatrol()
+}
+
+/** 轮巡模式 */
+const patrolActive = ref(false)
+/** 轮巡间隔（秒） */
+const patrolInterval = ref(5)
+/** 轮巡定时器 */
+let patrolTimer: ReturnType<typeof setInterval> | null = null
+/** 当前轮巡索引 */
+let patrolIndex = 0
+
+/** 开始轮巡 */
+function startPatrol() {
+  if (cameras.value.length === 0) return
+  patrolActive.value = true
+  patrolIndex = 0
+  /** 立即显示第一路 */
+  fullscreenCamera.value = cameras.value[0]!.id
+  patrolTimer = setInterval(() => {
+    patrolIndex = (patrolIndex + 1) % cameras.value.length
+    fullscreenCamera.value = cameras.value[patrolIndex]!.id
+  }, patrolInterval.value * 1000)
+}
+
+/** 停止轮巡 */
+function stopPatrol() {
+  patrolActive.value = false
+  if (patrolTimer) {
+    clearInterval(patrolTimer)
+    patrolTimer = null
+  }
+}
+
+/** 切换轮巡 */
+function togglePatrol() {
+  if (patrolActive.value) {
+    stopPatrol()
+  } else {
+    startPatrol()
+  }
 }
 
 /** 网格列数样式 */
@@ -306,11 +347,13 @@ onMounted(async () => {
     if (fullscreenCamera.value) exitFullscreen()
   }})
   registerShortcut({ key: '?', description: '快捷键帮助', handler: () => { showShortcuts.value = !showShortcuts.value }})
+  registerShortcut({ key: 'p', description: '轮巡切换', handler: () => { togglePatrol() }})
 })
 
 onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
+  stopPatrol()
   /** 释放所有检测快照 blob URL */
   for (const url of Object.values(detectSnapshots.value)) {
     URL.revokeObjectURL(url)
@@ -335,7 +378,22 @@ onUnmounted(() => {
       </select>
       <div class="header-actions">
         <button
-          v-if="fullscreenCamera"
+          v-if="cameras.length > 1"
+          :class="['header-btn', { active: patrolActive }]"
+          @click="togglePatrol"
+          :title="patrolActive ? '停止轮巡' : '开始轮巡'"
+        >轮巡</button>
+        <input
+          v-if="patrolActive"
+          type="number"
+          v-model.number="patrolInterval"
+          min="2"
+          max="60"
+          class="patrol-input"
+          title="轮巡间隔（秒）"
+        />
+        <button
+          v-if="fullscreenCamera && !patrolActive"
           class="header-btn"
           @click="exitFullscreen"
         >返回网格</button>
@@ -558,6 +616,28 @@ onUnmounted(() => {
 
 .header-btn:hover {
   background: #3a3a5a;
+}
+
+.header-btn.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  font-weight: 600;
+}
+
+.patrol-input {
+  width: 48px;
+  background: #0a0a1a;
+  color: #4ECDC4;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.patrol-input:focus {
+  outline: none;
+  border-color: #4ECDC4;
 }
 
 .sidebar {
