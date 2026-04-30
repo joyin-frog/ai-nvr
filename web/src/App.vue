@@ -114,7 +114,7 @@ function flashTitle(message: string, duration = 5000) {
   if (titleTimer) clearTimeout(titleTimer)
   titleTimer = setTimeout(() => {
     const online = cameras.value.filter(c => c.online).length
-    document.title = `JK NVR - ${cameras.value.length} 路 (${online} 在线)`
+    document.title = `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online })}`
     titleTimer = null
   }, duration)
 }
@@ -123,7 +123,7 @@ function flashTitle(message: string, duration = 5000) {
 function updateTitle() {
   if (titleTimer) return
   const online = cameras.value.filter(c => c.online).length
-  document.title = `JK NVR - ${cameras.value.length} 路 (${online} 在线)`
+  document.title = `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online })}`
 }
 
 /** 加载摄像头列表 */
@@ -255,10 +255,15 @@ function startApp() {
   })
 }
 
-/** 浏览器通知 */
-function notify(title: string, body: string) {
+/** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
+function notify(title: string, body: string, cameraId?: string) {
   if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification(title, { body })
+    const n = new Notification(title, { body })
+    n.onclick = () => {
+      window.focus()
+      if (cameraId) enterFullscreen(cameraId)
+      n.close()
+    }
   }
 }
 
@@ -273,7 +278,7 @@ function setupEventListeners() {
   }
 
   client.on('motion', (payload) => {
-    eventPanel.value?.addEvent('motion', payload.cameraId, `变动 ${(payload.ratio * 100).toFixed(1)}%`)
+    eventPanel.value?.addEvent('motion', payload.cameraId, `${t('event.motion')} ${(payload.ratio * 100).toFixed(1)}%`)
   })
 
   client.on('frame', (payload) => {
@@ -307,32 +312,32 @@ function setupEventListeners() {
     if (important.length > 0) {
       const cam = cameras.value.find(c => c.id === payload.cameraId)
       const name = cam?.name ?? payload.cameraId
-      notify(`${name} - 检测到目标`, important.map(d => `${d.label} (${(d.score * 100).toFixed(0)}%)`).join(', '))
+      notify(t('notify.detectTarget', { name }), important.map(d => `${d.label} (${(d.score * 100).toFixed(0)}%)`).join(', '), payload.cameraId)
       const detLabels = important.map(d => d.label).join(', ')
-      flashTitle(`检测: ${detLabels} - ${name}`)
+      flashTitle(`${t('notify.detect')}: ${detLabels} - ${name}`)
     }
   })
 
   client.on('camera:online', (payload) => {
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.online = true
-    eventPanel.value?.addEvent('camera:online', payload.cameraId, '上线')
+    eventPanel.value?.addEvent('camera:online', payload.cameraId, t('event.online'))
     updateTitle()
   })
 
   client.on('camera:offline', (payload) => {
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.online = false
-    eventPanel.value?.addEvent('camera:offline', payload.cameraId, '离线')
-    notify(`${cam?.name ?? payload.cameraId} 离线`, '摄像头连接已断开')
-    flashTitle(`${cam?.name ?? payload.cameraId} 离线`, 10000)
+    eventPanel.value?.addEvent('camera:offline', payload.cameraId, t('event.offline'))
+    notify(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), t('notify.cameraOfflineBody'), payload.cameraId)
+    flashTitle(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), 10000)
   })
 
   client.on('alert', (payload) => {
-    eventPanel.value?.addEvent('alert', payload.cameraId, `告警: ${payload.ruleName}`)
+    eventPanel.value?.addEvent('alert', payload.cameraId, `${t('notify.alertPrefix')}: ${payload.ruleName}`)
     alertPanel.value?.loadAlerts()
-    notify(`告警: ${payload.ruleName}`, payload.cameraId)
-    flashTitle(`告警: ${payload.ruleName} - ${payload.cameraId}`, 10000)
+    notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId)
+    flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 }
 

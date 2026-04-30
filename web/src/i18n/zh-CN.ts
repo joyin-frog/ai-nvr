@@ -288,4 +288,13 @@ export default {
     help: '显示/隐藏快捷键帮助',
     patrol: '轮巡切换',
   },
+  notify: {
+    detectTarget: '{name} - 检测到目标',
+    cameraOffline: '{name} 离线',
+    cameraOfflineBody: '摄像头连接已断开',
+    alert: '告警: {ruleName}',
+    detect: '检测',
+    alertPrefix: '告警',
+    titleOnline: '{total} 路 ({online} 在线)',
+  },
 }

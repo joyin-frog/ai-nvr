@@ -286,4 +286,13 @@ export default {
     help: 'Toggle shortcut help',
     patrol: 'Patrol switch',
   },
+  notify: {
+    detectTarget: '{name} - Target detected',
+    cameraOffline: '{name} offline',
+    cameraOfflineBody: 'Camera connection lost',
+    alert: 'Alert: {ruleName}',
+    detect: 'Detect',
+    alertPrefix: 'Alert',
+    titleOnline: '{total} cams ({online} online)',
+  },
 }
