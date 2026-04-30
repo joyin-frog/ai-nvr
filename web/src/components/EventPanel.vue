@@ -61,8 +61,10 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   alert: { labelKey: 'event.alert', bg: '#FFD93D', color: '#333' },
 }
 
-/** 添加实时事件 */
+/** 添加实时事件（受筛选条件过滤） */
 function addEvent(type: string, cameraId: string, detail: string) {
+  if (filterType.value && filterType.value !== type) return
+  if (filterCamera.value && filterCamera.value !== cameraId) return
   const now = Date.now()
   const time = new Date(now).toLocaleTimeString('zh-CN')
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail })
