@@ -114,6 +114,21 @@ onMounted(() => {
     frameImages.value = { ...frameImages.value }
   })
 
+  /** 请求通知权限 */
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission()
+  }
+
+  /** 发送浏览器通知 */
+  function notify(title: string, body: string) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body })
+    }
+  }
+
+  /** 重要检测目标 */
+  const IMPORTANT_LABELS = new Set(['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'])
+
   /** 监听检测事件 */
   client.on('detect', (payload) => {
     detectionsMap.value[payload.cameraId] = payload.detections
@@ -122,6 +137,14 @@ onMounted(() => {
     detectVersions.value = { ...detectVersions.value }
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)
+
+    /** 重要目标触发通知 */
+    const important = payload.detections.filter(d => IMPORTANT_LABELS.has(d.label))
+    if (important.length > 0) {
+      const cam = cameras.value.find(c => c.id === payload.cameraId)
+      const name = cam?.name ?? payload.cameraId
+      notify(`${name} - 检测到目标`, important.map(d => `${d.label} (${(d.score * 100).toFixed(0)}%)`).join(', '))
+    }
   })
 
   /** 监听摄像头上线 */
@@ -136,6 +159,7 @@ onMounted(() => {
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.online = false
     eventPanel.value?.addEvent('camera:offline', payload.cameraId, '离线')
+    notify(`${cam?.name ?? payload.cameraId} 离线`, '摄像头连接已断开')
   })
 
   client.connect()
