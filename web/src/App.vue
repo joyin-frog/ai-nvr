@@ -510,6 +510,10 @@ onUnmounted(() => {
   for (const url of Object.values(detectSnapshots.value)) {
     URL.revokeObjectURL(url)
   }
+  /** 释放所有帧 blob URL */
+  for (const url of Object.values(frameImages.value)) {
+    URL.revokeObjectURL(url)
+  }
 })
 </script>
 
