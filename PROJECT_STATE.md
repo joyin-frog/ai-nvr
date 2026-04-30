@@ -251,4 +251,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像水印可配置化：RuntimeSettings 水印开关/名称位置/时间戳位置/字号，设置面板 UI，关闭时跳过 drawtext 节省编码开销
 - 前端摄像头灵敏度 per-camera 配置 UI：设置面板新增摄像头独立阈值/冷却时间/检测帧率覆盖，后端已有 getMotionConfig(cameraId)
 - 告警实时推送优化：WebSocket alert 事件前端直接追加到列表，替代每次全量 loadAlerts() HTTP 请求
-- 下一步优先：事件面板实时推送优化（detect 事件追加去重）、录像播放器进度条悬停时间提示
+- 录像播放器进度条悬停时间提示：鼠标悬停进度条显示浮动绝对时间（HH:MM:SS），根据录像起止时间和悬停百分比计算
+- 录像面板定时自动刷新：30 秒间隔自动刷新录像列表，新录像无需手动刷新
+- 录像播放器截图功能：播放器头部截图按钮，video → canvas → JPEG 下载
+- 下一步优先：事件面板 detect 事件去重、录像播放器双击全屏
