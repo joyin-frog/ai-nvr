@@ -204,9 +204,9 @@ defineExpose({ loadCameras })
             <span class="cam-status-text" :class="{ offline: !cam.online }">{{ statusText(cam) }}</span>
           </div>
           <div class="camera-actions">
-            <button class="action-btn roi" :class="{ active: roiCameraId === cam.id }" @click="roiCameraId = roiCameraId === cam.id ? null : cam.id">区域</button>
-            <button class="action-btn edit" @click="startEdit(cam)">编辑</button>
-            <button class="action-btn delete" @click="deleteCamera(cam.id)">删除</button>
+            <button class="action-btn roi" :class="{ active: roiCameraId === cam.id }" @click="roiCameraId = roiCameraId === cam.id ? null : cam.id">{{ t('manage.roi') }}</button>
+            <button class="action-btn edit" @click="startEdit(cam)">{{ t('manage.edit') }}</button>
+            <button class="action-btn delete" @click="deleteCamera(cam.id)">{{ t('manage.deleteCamera') }}</button>
           </div>
           <!-- ROI 编辑器 -->
           <div v-if="roiCameraId === cam.id" class="roi-section">

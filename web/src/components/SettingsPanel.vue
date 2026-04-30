@@ -106,10 +106,10 @@ async function reloadModel() {
       success.value = true
       setTimeout(() => { success.value = false }, 2000)
     } else {
-      alert(`模型加载失败: ${result.error ?? '未知错误'}`)
+      alert(t('settings.modelLoadFailed', { error: result.error ?? 'Unknown' }))
     }
   } catch {
-    alert('模型加载请求失败')
+    alert(t('settings.modelLoadError'))
   } finally {
     modelReloading.value = false
   }
@@ -157,7 +157,7 @@ async function runCleanup() {
     if (res.ok) {
       const report = await res.json()
       const total = (report.events ?? 0) + (report.alerts ?? 0) + (report.snapshots ?? 0)
-      alert(`清理完成: ${total} 条记录已删除`)
+      alert(t('settings.cleanupDone', { count: total }))
     }
   } catch {
     // ignore
@@ -276,7 +276,7 @@ onMounted(() => {
           <input
             type="text"
             v-model="settings.notify.dingtalk.secret"
-            placeholder="SEC...（可选）"
+            :placeholder="t('settings.dingtalkSecretPlaceholder')"
             class="input-url"
           />
         </label>
@@ -370,7 +370,7 @@ onMounted(() => {
         <button class="add-btn" @click="runCleanup">{{ t('settings.runCleanup') }}</button>
       </section>
     </div>
-    <div v-else class="empty">加载中...</div>
+    <div v-else class="empty">{{ t('settings.loading') }}</div>
   </div>
 </template>
 

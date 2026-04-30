@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 /** 事件条目 */
 interface EventItem {
@@ -76,13 +79,13 @@ const currentHour = new Date().getHours()
 
 <template>
   <div class="event-timeline">
-    <div class="timeline-label">今日事件分布</div>
+    <div class="timeline-label">{{ t('event.timelineTitle') }}</div>
     <div class="timeline-bars">
       <div
         v-for="(bucket, h) in hourlyBuckets"
         :key="h"
         :class="['hour-col', { current: h === currentHour }]"
-        :title="`${String(h).padStart(2, '0')}:00 - ${bucket.count} 个事件`"
+        :title="t('event.hourEvents', { hour: String(h).padStart(2, '0'), count: bucket.count })"
       >
         <div class="bar-track">
           <div class="bar-fill" :style="barStyle(bucket)" />

@@ -206,108 +206,108 @@ defineExpose({ loadAlerts })
     <!-- 添加表单 -->
     <div v-if="showAddForm" class="add-form">
       <div class="form-field">
-        <label>名称</label>
-        <input v-model="form.name" placeholder="如：频繁人员检测" class="input" />
+        <label>{{ t('alert.nameLabel') }}</label>
+        <input v-model="form.name" :placeholder="t('alert.namePlaceholder')" class="input" />
       </div>
       <div class="form-field">
-        <label>事件类型</label>
+        <label>{{ t('alert.eventType') }}</label>
         <select v-model="form.eventType" class="input">
-          <option v-for="t in eventTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+          <option v-for="et in eventTypes" :key="et.value" :value="et.value">{{ et.label }}</option>
         </select>
       </div>
       <div class="form-field">
-        <label>摄像头</label>
-        <input v-model="form.cameraId" placeholder="留空表示所有" class="input" />
+        <label>{{ t('alert.cameraFilter') }}</label>
+        <input v-model="form.cameraId" :placeholder="t('alert.cameraPlaceholder')" class="input" />
       </div>
       <div class="form-field" v-if="form.eventType === 'detect'">
-        <label>标签过滤</label>
-        <input v-model="form.labels" placeholder="person, car（逗号分隔）" class="input" />
+        <label>{{ t('alert.labelFilter') }}</label>
+        <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholder')" class="input" />
       </div>
       <div class="form-row">
         <div class="form-field half">
-          <label>时间窗口(秒)</label>
+          <label>{{ t('alert.windowSeconds') }}</label>
           <input v-model.number="form.windowSeconds" type="number" class="input" />
         </div>
         <div class="form-field half">
-          <label>触发次数</label>
+          <label>{{ t('alert.triggerCount') }}</label>
           <input v-model.number="form.threshold" type="number" class="input" />
         </div>
       </div>
       <div class="form-field">
-        <label>冷却时间(秒)</label>
+        <label>{{ t('alert.cooldown') }}</label>
         <input v-model.number="form.cooldownSeconds" type="number" class="input" />
       </div>
       <div class="form-row">
         <div class="form-field half">
-          <label>静默开始</label>
+          <label>{{ t('alert.silentStartLabel') }}</label>
           <input v-model="form.silentStart" type="time" class="input" />
         </div>
         <div class="form-field half">
-          <label>静默结束</label>
+          <label>{{ t('alert.silentEndLabel') }}</label>
           <input v-model="form.silentEnd" type="time" class="input" />
         </div>
       </div>
-      <button class="submit-btn" @click="addRule">确认添加</button>
+      <button class="submit-btn" @click="addRule">{{ t('alert.confirmAdd') }}</button>
     </div>
 
     <!-- 视图切换 -->
     <div class="view-tabs">
-      <button :class="['view-btn', { active: activeView === 'rules' }]" @click="activeView = 'rules'">规则 ({{ rules.length }})</button>
-      <button :class="['view-btn', { active: activeView === 'history' }]" @click="activeView = 'history'; loadAlerts()">历史 ({{ alerts.length }})</button>
+      <button :class="['view-btn', { active: activeView === 'rules' }]" @click="activeView = 'rules'">{{ t('alert.rulesTab') }} ({{ rules.length }})</button>
+      <button :class="['view-btn', { active: activeView === 'history' }]" @click="activeView = 'history'; loadAlerts()">{{ t('alert.historyTab') }} ({{ alerts.length }})</button>
     </div>
 
     <!-- 规则列表 -->
     <div v-if="activeView === 'rules'" class="rule-list">
-      <div v-if="rules.length === 0" class="empty">{{ loading ? '加载中...' : '暂无规则' }}</div>
+      <div v-if="rules.length === 0" class="empty">{{ loading ? t('alert.loading') : t('alert.noRules') }}</div>
       <div v-for="rule in rules" :key="rule.id" class="rule-item">
         <!-- 编辑模式 -->
         <template v-if="editingRuleId === rule.id">
           <div class="edit-form">
             <div class="form-field">
-              <label>名称</label>
+              <label>{{ t('alert.nameLabel') }}</label>
               <input v-model="form.name" class="input" />
             </div>
             <div class="form-field">
-              <label>事件类型</label>
+              <label>{{ t('alert.eventType') }}</label>
               <select v-model="form.eventType" class="input">
-                <option v-for="t in eventTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+                <option v-for="et in eventTypes" :key="et.value" :value="et.value">{{ et.label }}</option>
               </select>
             </div>
             <div class="form-field">
-              <label>摄像头</label>
-              <input v-model="form.cameraId" placeholder="留空表示所有" class="input" />
+              <label>{{ t('alert.cameraFilter') }}</label>
+              <input v-model="form.cameraId" :placeholder="t('alert.cameraPlaceholder')" class="input" />
             </div>
             <div class="form-field" v-if="form.eventType === 'detect'">
-              <label>标签过滤</label>
-              <input v-model="form.labels" placeholder="person, car" class="input" />
+              <label>{{ t('alert.labelFilter') }}</label>
+              <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholderShort')" class="input" />
             </div>
             <div class="form-row">
               <div class="form-field half">
-                <label>时间窗口(秒)</label>
+                <label>{{ t('alert.windowSeconds') }}</label>
                 <input v-model.number="form.windowSeconds" type="number" class="input" />
               </div>
               <div class="form-field half">
-                <label>触发次数</label>
+                <label>{{ t('alert.triggerCount') }}</label>
                 <input v-model.number="form.threshold" type="number" class="input" />
               </div>
             </div>
             <div class="form-field">
-              <label>冷却时间(秒)</label>
+              <label>{{ t('alert.cooldown') }}</label>
               <input v-model.number="form.cooldownSeconds" type="number" class="input" />
             </div>
             <div class="form-row">
               <div class="form-field half">
-                <label>静默开始</label>
+                <label>{{ t('alert.silentStartLabel') }}</label>
                 <input v-model="form.silentStart" type="time" class="input" />
               </div>
               <div class="form-field half">
-                <label>静默结束</label>
+                <label>{{ t('alert.silentEndLabel') }}</label>
                 <input v-model="form.silentEnd" type="time" class="input" />
               </div>
             </div>
             <div class="edit-actions">
-              <button class="save-btn" @click="saveEdit">保存</button>
-              <button class="cancel-btn" @click="cancelEdit">取消</button>
+              <button class="save-btn" @click="saveEdit">{{ t('alert.save') }}</button>
+              <button class="cancel-btn" @click="cancelEdit">{{ t('alert.cancel') }}</button>
             </div>
           </div>
         </template>
@@ -318,15 +318,15 @@ defineExpose({ loadAlerts })
               {{ rule.enabled ? '●' : '○' }}
             </button>
             <span class="rule-name" :class="{ disabled: !rule.enabled }">{{ rule.name }}</span>
-            <button class="edit-btn" @click="startEdit(rule)">编辑</button>
-            <button class="delete-btn" @click="deleteRule(rule.id)">删除</button>
+            <button class="edit-btn" @click="startEdit(rule)">{{ t('alert.edit') }}</button>
+            <button class="delete-btn" @click="deleteRule(rule.id)">{{ t('alert.delete') }}</button>
           </div>
           <div class="rule-meta">
             <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
             <span v-if="rule.cameraId" class="meta-tag cam">{{ rule.cameraId }}</span>
             <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
-            <span class="meta-info">{{ rule.threshold }}次 / {{ rule.windowSeconds }}秒 · 冷却{{ rule.cooldownSeconds }}秒</span>
-            <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">静默 {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
+            <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
+            <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
           </div>
         </template>
       </div>
@@ -334,7 +334,7 @@ defineExpose({ loadAlerts })
 
     <!-- 告警历史 -->
     <div v-if="activeView === 'history'" class="alert-list">
-      <div v-if="alerts.length === 0" class="empty">暂无告警记录</div>
+      <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
       <div v-for="alert in alerts" :key="alert.id" class="alert-item">
         <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
         <div class="alert-body">

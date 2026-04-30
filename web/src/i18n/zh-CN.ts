@@ -21,7 +21,10 @@ export default {
   camera: {
     offline: '离线',
     screenshot: '截图',
+    fullscreen: '全屏',
     noFrame: '无画面',
+    waiting: '等待视频...',
+    cameraOffline: '摄像头离线',
     detections: '{count} 个检测',
   },
   event: {
@@ -42,6 +45,8 @@ export default {
     noEvents: '暂无事件',
     loadMore: '加载更多',
     refresh: '刷新',
+    timelineTitle: '今日事件分布',
+    hourEvents: '{hour}:00 - {count} 个事件',
     motionRatio: '变动 {ratio}%',
   },
   recording: {
@@ -71,6 +76,10 @@ export default {
     allDay: '24h',
     oneHour: '1h',
     noSegments: '无录像段',
+    now: '现在',
+    segments: '段',
+    tracks: '路',
+    noRecordingsInRange: '当前时段无录像',
   },
   status: {
     title: '系统状态',
@@ -228,6 +237,11 @@ export default {
     snapshotsRetention: '快照保留天数',
     thumbnailsRetention: '缩略图缓存天数',
     runCleanup: '立即清理',
+    modelLoadFailed: '模型加载失败: {error}',
+    modelLoadError: '模型加载请求失败',
+    cleanupDone: '清理完成: {count} 条记录已删除',
+    loading: '加载中...',
+    dingtalkSecretPlaceholder: 'SEC...（可选）',
   },
   login: {
     title: 'JK NVR 登录',
@@ -248,6 +262,9 @@ export default {
     name: '区域名称',
     noRoi: '暂无检测区域',
     drawingHint: '点击画面添加多边形顶点，右键或双击完成',
+    drawHint: '{count} 个顶点（至少3个）',
+    vertices: '顶点',
+    regionDefault: '区域 {n}',
   },
   pwa: {
     offlineReady: '应用已就绪，可离线使用',

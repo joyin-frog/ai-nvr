@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 /** 录像片段 */
 interface Recording {
@@ -201,8 +204,8 @@ function goToday() {
       <button class="mode-btn" @click="viewMode = viewMode === 'day' ? 'hour' : 'day'">
         {{ viewMode === 'day' ? '24h' : '1h' }}
       </button>
-      <button class="today-btn" @click="goToday">现在</button>
-      <span class="count-badge">{{ totalSegments }} 段 · {{ cameraRows.length }} 路</span>
+      <button class="today-btn" @click="goToday">{{ t('timeline.now') }}</button>
+      <span class="count-badge">{{ totalSegments }} {{ t('timeline.segments') }} · {{ cameraRows.length }} {{ t('timeline.tracks') }}</span>
     </div>
 
     <!-- 时间刻度 -->
@@ -235,7 +238,7 @@ function goToday() {
         </div>
       </div>
       <div v-if="cameraRows.length === 0" class="mtl-empty">
-        当前时段无录像
+        {{ t('timeline.noRecordingsInRange') }}
       </div>
     </div>
 

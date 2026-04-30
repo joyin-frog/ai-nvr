@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 
+const { t } = useI18n()
 const props = defineProps<{
   cameraId: string
   name: string
@@ -108,9 +110,9 @@ onUnmounted(() => {
       <span v-if="online && detections.length > 0" class="detection-count">
         {{ detections.length }}
       </span>
-      <span v-if="!online" class="offline-badge">离线</span>
-      <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" title="全屏">&#x26F6;</button>
-      <button v-if="online" class="screenshot-btn" @click="takeScreenshot" title="截图">&#x1F4F7;</button>
+      <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
+      <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
+      <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
     </div>
 
     <div class="camera-body">
@@ -123,7 +125,7 @@ onUnmounted(() => {
       <div v-else class="camera-placeholder">
         <div v-if="online" class="placeholder-icon">&#9679;</div>
         <div v-else class="placeholder-icon offline-icon">&#10005;</div>
-        <span>{{ online ? '等待视频...' : '摄像头离线' }}</span>
+        <span>{{ online ? t('camera.waiting') : t('camera.cameraOffline') }}</span>
       </div>
 
       <!-- 检测框叠加层 -->

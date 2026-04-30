@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+
+const { t } = useI18n()
 
 /** ROI 区域 */
 interface RoiRegion {
@@ -45,7 +48,7 @@ async function loadRegions() {
 function startDrawing() {
   drawing.value = true
   currentPoints.value = []
-  newRegionName.value = `区域 ${regions.value.length + 1}`
+  newRegionName.value = t('roi.regionDefault', { n: regions.value.length + 1 })
 }
 
 /** 取消绘制 */
@@ -130,12 +133,12 @@ onMounted(() => {
     <!-- 绘制区域 -->
     <div class="draw-area">
       <div class="draw-header">
-        <span class="draw-title">检测区域</span>
-        <button v-if="!drawing" class="draw-btn" @click="startDrawing">+ 绘制区域</button>
+        <span class="draw-title">{{ t('roi.title') }}</span>
+        <button v-if="!drawing" class="draw-btn" @click="startDrawing">{{ t('roi.addPoint') }}</button>
         <template v-else>
-          <span class="draw-hint">{{ currentPoints.length }} 个顶点（至少3个）</span>
-          <button class="save-btn" :disabled="currentPoints.length < 3" @click="finishDrawing">完成</button>
-          <button class="cancel-btn" @click="cancelDrawing">取消</button>
+          <span class="draw-hint">{{ t('roi.drawHint', { count: currentPoints.length }) }}</span>
+          <button class="save-btn" :disabled="currentPoints.length < 3" @click="finishDrawing">{{ t('roi.save') }}</button>
+          <button class="cancel-btn" @click="cancelDrawing">{{ t('settings.cancel') }}</button>
         </template>
       </div>
 
@@ -149,7 +152,7 @@ onMounted(() => {
           :class="{ clickable: drawing }"
           alt=""
         />
-        <div v-else class="no-frame">无画面</div>
+        <div v-else class="no-frame">{{ t('camera.noFrame') }}</div>
 
         <!-- SVG 叠加层 -->
         <svg class="roi-overlay" viewBox="0 0 1 1" preserveAspectRatio="none">
@@ -181,8 +184,8 @@ onMounted(() => {
           {{ region.enabled ? '●' : '○' }}
         </button>
         <span class="region-name">{{ region.name }}</span>
-        <span class="region-vertices">{{ parsePoints(region.points).length }} 顶点</span>
-        <button class="delete-btn" @click="deleteRegion(region.id)">删除</button>
+        <span class="region-vertices">{{ parsePoints(region.points).length }} {{ t('roi.vertices') }}</span>
+        <button class="delete-btn" @click="deleteRegion(region.id)">{{ t('roi.delete') }}</button>
       </div>
     </div>
   </div>

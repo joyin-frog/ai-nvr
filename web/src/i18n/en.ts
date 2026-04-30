@@ -21,7 +21,10 @@ export default {
   camera: {
     offline: 'Offline',
     screenshot: 'Screenshot',
+    fullscreen: 'Fullscreen',
     noFrame: 'No Frame',
+    waiting: 'Waiting...',
+    cameraOffline: 'Camera Offline',
     detections: '{count} detected',
   },
   event: {
@@ -42,6 +45,8 @@ export default {
     noEvents: 'No events',
     loadMore: 'Load More',
     refresh: 'Refresh',
+    timelineTitle: "Today's Events",
+    hourEvents: '{hour}:00 - {count} events',
     motionRatio: 'Motion {ratio}%',
   },
   recording: {
@@ -71,6 +76,10 @@ export default {
     allDay: '24h',
     oneHour: '1h',
     noSegments: 'No segments',
+    now: 'Now',
+    segments: 'segments',
+    tracks: 'cameras',
+    noRecordingsInRange: 'No recordings in this period',
   },
   status: {
     title: 'System Status',
@@ -226,6 +235,11 @@ export default {
     snapshotsRetention: 'Snapshots Retention (days)',
     thumbnailsRetention: 'Thumbnails Cache (days)',
     runCleanup: 'Run Cleanup Now',
+    modelLoadFailed: 'Model load failed: {error}',
+    modelLoadError: 'Model load request failed',
+    cleanupDone: 'Cleanup done: {count} records deleted',
+    loading: 'Loading...',
+    dingtalkSecretPlaceholder: 'SEC... (optional)',
   },
   login: {
     title: 'JK NVR Login',
@@ -246,6 +260,9 @@ export default {
     name: 'Zone Name',
     noRoi: 'No detection zones',
     drawingHint: 'Click to add polygon vertices, right-click or double-click to finish',
+    drawHint: '{count} vertices (min 3)',
+    vertices: 'vertices',
+    regionDefault: 'Zone {n}',
   },
   pwa: {
     offlineReady: 'App ready to work offline',
