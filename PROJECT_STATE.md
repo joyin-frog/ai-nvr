@@ -47,12 +47,14 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 | Annotator | `src/ai/annotator.ts` | SVG 叠加检测框 + sharp 合成标注图 |
 | EventStorage | `src/storage/events.ts` | bun:sqlite 事件持久化，支持查询/统计/清理 |
 | MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，ffmpeg 编码 MP4，自动分段/清理 |
+| SystemMonitor | `src/monitor.ts` | 系统性能监控，FPS/内存/检测计数 |
 | API | `src/api/index.ts` | HTTP REST + WebSocket 服务，帧通过 WS base64 推送 |
-| 前端 | `web/src/` | Vue3 SPA，WebSocket 实时帧 + 事件日志 |
+| 前端 | `web/src/` | Vue3 SPA，WebSocket 实时帧 + 事件日志 + 录像回放 + 状态面板 |
 
 ## API 端点
 - `GET /` / `GET /api` — 服务状态
 - `GET /api/cameras` — 摄像头列表与状态
+- `GET /api/health` — 系统健康检查 + 性能指标（FPS/内存/运行时长/检测计数）
 - `GET /api/snapshot/:cameraId` — 最新帧（JPEG，回退用）
 - `GET /api/detection/annotated/:cameraId` — 标注后的图片
 - `GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=` — 事件历史查询
@@ -85,8 +87,9 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 变动检测 + AI 检测完整：motion → DETR 目标检测 → 标注图
 - 摄像头在线状态：自动检测上线/离线，WS 实时推送
 - 事件持久化：所有事件存 SQLite，支持历史查询
-- 变动触发录像：MP4 录像，自动分段，7天自动清理
+- 变动触发录像：MP4 录像，自动分段，motion 超时停止，7天自动清理
 - 录像回放 UI：列表 + 视频播放器弹窗，按摄像头筛选
 - 事件面板增强：历史事件加载、类型筛选、中文标签
 - 多视图布局：网格自适应 + 单路全屏切换
-- 下一步优先：摄像头管理页、配置热重载、健康检查
+- 系统监控：FPS、内存、运行时长、检测计数，前端状态面板实时展示
+- 下一步优先：配置热重载、移动端适配、通知推送
