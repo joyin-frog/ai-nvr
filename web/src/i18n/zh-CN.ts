@@ -16,6 +16,7 @@ export default {
     backToGrid: '返回网格',
     close: '关闭',
     panel: '面板',
+    gridCols: '网格 {n} 列',
   },
   tab: {
     events: '事件',

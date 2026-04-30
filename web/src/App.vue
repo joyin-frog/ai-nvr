@@ -56,7 +56,15 @@ function closePwaPrompt() {
 }
 
 /** 网格列数配置 */
-const gridCols = ref(0) // 0 = auto
+const gridCols = ref(Number(localStorage.getItem('nvr-grid-cols')) || 0) // 0 = auto
+
+/** 循环切换网格列数：auto → 1 → 2 → 3 → 4 → auto */
+function cycleGridCols() {
+  const cycle = [0, 1, 2, 3, 4]
+  const idx = cycle.indexOf(gridCols.value)
+  gridCols.value = cycle[(idx + 1) % cycle.length]!
+  localStorage.setItem('nvr-grid-cols', String(gridCols.value))
+}
 
 /** 分组筛选（空字符串表示全部） */
 const filterGroup = ref('')
@@ -480,6 +488,12 @@ onUnmounted(() => {
         <option v-for="g in groups" :key="g" :value="g">{{ g }}</option>
       </select>
       <div class="header-actions">
+        <button
+          v-if="cameras.length > 1 && !fullscreenCamera && !isMobile"
+          class="header-btn"
+          @click="cycleGridCols"
+          :title="t('header.gridCols', { n: gridCols || 'auto' })"
+        >{{ gridCols || 'auto' }}</button>
         <button
           v-if="cameras.length > 1"
           :class="['header-btn', { active: patrolActive }]"

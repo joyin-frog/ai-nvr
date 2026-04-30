@@ -16,6 +16,7 @@ export default {
     backToGrid: 'Back to grid',
     close: 'Close',
     panel: 'Panel',
+    gridCols: 'Grid {n} cols',
   },
   tab: {
     events: 'Events',
