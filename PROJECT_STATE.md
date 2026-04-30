@@ -164,4 +164,5 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 摄像头管理面板分组编辑：API PATCH /api/cameras/:id 支持 group 字段，CameraManagePanel 编辑表单增加分组输入，列表中显示分组标签
 - 钉钉机器人告警通知：DingTalkNotifier 监听 motion/detect/offline/alert 事件，通过钉钉自定义机器人 Webhook 推送 markdown 消息，支持 HmacSHA256 加签，RuntimeConfig notify.dingtalk 配置（enabled/webhookUrl/secret），设置面板可配置
 - 录像播放器倍速控制：播放器头部倍速选择器（0.5x/1x/1.5x/2x/4x/8x），与 video playbackRate 双向同步
-- 下一步优先：邮件告警推送、录像播放器快捷键
+- Token 认证保护：YAML 配置 auth.token 启用认证（空则不启用），checkAuth 中间件检查 Bearer header 或 ?token= 参数，/api/auth/check 和 /api/auth/login 端点，前端 LoginView 登录页 + localStorage 持久化 token，authFetch 自动带 Authorization，WebSocket URL 附加 token，401 自动跳转登录
+- 下一步优先：邮件告警推送、子组件 authFetch 迁移
