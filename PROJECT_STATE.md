@@ -269,4 +269,7 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 事件实时入场动画：新增事件青色高亮渐隐效果（1秒），EventPanel 和 AlertPanel 均支持
 - 告警面板实时入场动画：新增告警黄色高亮渐隐效果（1秒）
 - 自定义确认弹窗：替换所有浏览器原生 confirm()，深色主题模态对话框，useConfirm composable + ConfirmDialog Teleport 组件
-- 下一步优先：录像缩略图预生成、事件详情增强
+- 录像缩略图批量预生成：ThumbnailGenerator.pregenerate() 后台批量生成，API POST /api/recordings/thumb-preload，前端列表加载后静默请求，悬停即显
+- 录像逐帧步进：播放器控制栏 ◂/▸ 逐帧按钮，逗号/句号键快捷键（1/30秒步进），自动暂停
+- 事件/录像面板筛选持久化：filterCamera/filterType 保存到 localStorage，切换标签后恢复
+- 下一步优先：事件详情增强、录像文件大小可视化
