@@ -8,6 +8,7 @@ import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
 import { type AlertStorage } from "@/alert/storage";
+import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig } from "@/config";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
@@ -33,6 +34,7 @@ export function startServer(
   snapshotStorage: SnapshotStorage,
   roiStorage: RoiStorage,
   alertStorage: AlertStorage,
+  thumbnailGenerator: ThumbnailGenerator,
 ): void {
   Bun.serve({
     port,
@@ -206,6 +208,30 @@ export function startServer(
         if (!image) return new Response("No annotated image", { status: 404 });
         return new Response(image, {
           headers: { "Content-Type": "image/jpeg" },
+        });
+      }
+
+      /** 录像缩略图 */
+      const thumbMatch = url.pathname.match(/^\/api\/recordings\/thumb$/);
+      if (thumbMatch && req.method === "GET") {
+        const videoRelPath = url.searchParams.get("file");
+        const timeSec = url.searchParams.has("time") ? Number(url.searchParams.get("time")) : 0;
+        if (!videoRelPath) return new Response("Missing file param", { status: 400 });
+
+        const videoPath = recorder.getRecordingPath(videoRelPath);
+        if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
+
+        /** 防止路径遍历 */
+        const storageRoot = realpathSync(recorder.getRecordingPath("."));
+        const resolved = realpathSync(videoPath);
+        if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+
+        const thumbPath = thumbnailGenerator.getOrCreate(resolved, timeSec);
+        if (!thumbPath) return new Response("Thumbnail generation failed", { status: 500 });
+
+        const file = Bun.file(thumbPath);
+        return new Response(file, {
+          headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
         });
       }
 

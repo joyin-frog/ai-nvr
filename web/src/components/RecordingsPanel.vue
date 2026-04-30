@@ -20,6 +20,9 @@ const selectedRecording = ref<Recording | null>(null)
 const filterCamera = ref('')
 const loading = ref(false)
 
+/** 缩略图 URL 缓存（filename → URL） */
+const thumbUrls = ref<Record<string, string>>({})
+
 /** 当前播放的录像 URL */
 const videoUrl = computed(() => {
   if (!selectedRecording.value) return ''
@@ -80,6 +83,16 @@ async function loadRecordings() {
 /** 选择录像播放 */
 function play(rec: Recording) {
   selectedRecording.value = rec
+}
+
+/** 悬停时懒加载缩略图 */
+function onRecordingHover(rec: Recording) {
+  if (thumbUrls.value[rec.filename]) return
+  const dur = Math.max(0, (rec.endTime - rec.startTime) / 1000 / 2)
+  thumbUrls.value = {
+    ...thumbUrls.value,
+    [rec.filename]: `/api/recordings/thumb?file=${encodeURIComponent(rec.filename)}&time=${dur.toFixed(1)}`,
+  }
 }
 
 /** 关闭播放器 */
@@ -160,8 +173,12 @@ defineExpose({ loadRecordings, playAtTime })
         :key="rec.filename"
         class="recording-item"
         @click="play(rec)"
+        @mouseenter="onRecordingHover(rec)"
       >
-        <div class="rec-icon">&#9654;</div>
+        <div class="rec-thumb">
+          <img v-if="thumbUrls[rec.filename]" :src="thumbUrls[rec.filename]" alt="" class="thumb-img" />
+          <span v-else class="thumb-icon">&#9654;</span>
+        </div>
         <div class="rec-info">
           <div class="rec-cam">{{ cameraNameMap[rec.cameraId] ?? rec.cameraId }}</div>
           <div class="rec-time">{{ formatTime(rec.startTime) }}</div>
@@ -256,10 +273,27 @@ defineExpose({ loadRecordings, playAtTime })
   background: #2a2a4a;
 }
 
-.rec-icon {
-  color: #4ECDC4;
-  font-size: 14px;
+.rec-thumb {
+  width: 64px;
+  height: 36px;
+  background: #0a0a1a;
+  border-radius: 3px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-icon {
+  color: #4ECDC4;
+  font-size: 12px;
 }
 
 .rec-info {

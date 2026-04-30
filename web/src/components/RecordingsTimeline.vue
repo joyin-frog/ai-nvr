@@ -25,6 +25,9 @@ const emit = defineEmits<{
 /** 时间轴容器引用 */
 const timelineEl = ref<HTMLDivElement | null>(null)
 
+/** tooltip 状态 */
+const tooltip = ref<{ x: number; y: number; url: string; time: string } | null>(null)
+
 /** 视图模式：小时/全天 */
 const viewMode = ref<'hour' | 'day'>('hour')
 
@@ -198,6 +201,26 @@ function onTimelineClick(e: MouseEvent) {
   if (closest) emit('play', closest)
 }
 
+/** 片段悬停：显示缩略图 tooltip */
+function onSegmentEnter(e: MouseEvent, rec: Recording) {
+  const dur = Math.max(0, (rec.endTime - rec.startTime) / 1000 / 2)
+  tooltip.value = {
+    x: e.clientX,
+    y: e.clientY,
+    url: `/api/recordings/thumb?file=${encodeURIComponent(rec.filename)}&time=${dur.toFixed(1)}`,
+    time: new Date(rec.startTime).toLocaleTimeString('zh-CN'),
+  }
+}
+
+function onSegmentMove(e: MouseEvent) {
+  if (!tooltip.value) return
+  tooltip.value = { ...tooltip.value, x: e.clientX, y: e.clientY }
+}
+
+function onSegmentLeave() {
+  tooltip.value = null
+}
+
 /** 格式化日期标签 */
 const dateLabel = computed(() => {
   if (viewMode.value === 'day') {
@@ -244,8 +267,10 @@ function goToday() {
           :key="i"
           class="segment"
           :style="{ left: seg.left, width: seg.width }"
-          :title="new Date(seg.recording.startTime).toLocaleTimeString('zh-CN')"
           @click.stop="emit('play', seg.recording)"
+          @mouseenter="onSegmentEnter($event, seg.recording)"
+          @mousemove="onSegmentMove"
+          @mouseleave="onSegmentLeave"
         />
       </div>
 
@@ -268,6 +293,13 @@ function goToday() {
       </button>
     </div>
   </div>
+  <!-- 缩略图 tooltip -->
+  <Teleport to="body">
+    <div v-if="tooltip" class="thumb-tooltip" :style="{ left: tooltip.x + 'px', top: (tooltip.y - 120) + 'px' }">
+      <img :src="tooltip.url" alt="" class="tooltip-img" />
+      <span class="tooltip-time">{{ tooltip.time }}</span>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -454,5 +486,35 @@ function goToday() {
   background: #4ECDC4;
   color: #1a1a2e;
   font-weight: 600;
+}
+
+/* 缩略图 tooltip */
+.thumb-tooltip {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  transform: translateX(-50%);
+}
+
+.tooltip-img {
+  width: 192px;
+  height: 108px;
+  object-fit: cover;
+  display: block;
+  background: #0a0a1a;
+}
+
+.tooltip-time {
+  display: block;
+  text-align: center;
+  font-size: 10px;
+  color: #aaa;
+  padding: 2px 0 3px;
+  background: #16213e;
 }
 </style>
