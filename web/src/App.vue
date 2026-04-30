@@ -51,6 +51,25 @@ const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
 
 const client = new EventClient()
 
+/** 动态标题：闪烁后自动恢复 */
+let titleTimer: ReturnType<typeof setTimeout> | null = null
+function flashTitle(message: string, duration = 5000) {
+  document.title = `⚠ ${message}`
+  if (titleTimer) clearTimeout(titleTimer)
+  titleTimer = setTimeout(() => {
+    const online = cameras.value.filter(c => c.online).length
+    document.title = `JK NVR - ${cameras.value.length} 路 (${online} 在线)`
+    titleTimer = null
+  }, duration)
+}
+
+/** 更新常态标题 */
+function updateTitle() {
+  if (titleTimer) return
+  const online = cameras.value.filter(c => c.online).length
+  document.title = `JK NVR - ${cameras.value.length} 路 (${online} 在线)`
+}
+
 /** 加载摄像头列表 */
 async function loadCameras() {
   try {
@@ -62,6 +81,7 @@ async function loadCameras() {
       online: c.online,
       lastFrameAt: c.lastFrameAt,
     }))
+    updateTitle()
   } catch {
     // retry later
   }
@@ -179,6 +199,9 @@ onMounted(() => {
       const cam = cameras.value.find(c => c.id === payload.cameraId)
       const name = cam?.name ?? payload.cameraId
       notify(`${name} - 检测到目标`, important.map(d => `${d.label} (${(d.score * 100).toFixed(0)}%)`).join(', '))
+      /** 闪烁标题提醒 */
+      const labels = important.map(d => d.label).join(', ')
+      flashTitle(`检测: ${labels} - ${name}`)
     }
   })
 
@@ -187,6 +210,7 @@ onMounted(() => {
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.online = true
     eventPanel.value?.addEvent('camera:online', payload.cameraId, '上线')
+    updateTitle()
   })
 
   /** 监听摄像头离线 */
@@ -195,6 +219,7 @@ onMounted(() => {
     if (cam) cam.online = false
     eventPanel.value?.addEvent('camera:offline', payload.cameraId, '离线')
     notify(`${cam?.name ?? payload.cameraId} 离线`, '摄像头连接已断开')
+    flashTitle(`${cam?.name ?? payload.cameraId} 离线`, 10000)
   })
 
   /** 监听告警事件 */
@@ -202,6 +227,7 @@ onMounted(() => {
     eventPanel.value?.addEvent('alert', payload.cameraId, `告警: ${payload.ruleName}`)
     alertPanel.value?.loadAlerts()
     notify(`告警: ${payload.ruleName}`, payload.cameraId)
+    flashTitle(`告警: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 
   client.connect()

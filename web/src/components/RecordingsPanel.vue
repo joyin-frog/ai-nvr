@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import RecordingsTimeline from './RecordingsTimeline.vue'
+import MultiTimeline from './MultiTimeline.vue'
 
 /** 录像信息 */
 interface Recording {
@@ -157,8 +158,17 @@ defineExpose({ loadRecordings, playAtTime })
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">刷新</button>
     </div>
 
-    <!-- 时间轴 -->
+    <!-- 多路同步时间轴（全部摄像头时显示） -->
+    <MultiTimeline
+      v-if="!filterCamera"
+      :recordings="recordings"
+      :cameras="cameras"
+      @play="play"
+    />
+
+    <!-- 单路时间轴 -->
     <RecordingsTimeline
+      v-if="filterCamera"
       :recordings="recordings"
       :selected-camera="filterCamera"
       @play="play"
