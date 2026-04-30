@@ -44,6 +44,7 @@ export default {
     saturation: 'Saturation',
     resetAdjust: 'Reset',
     resetZoom: 'Reset zoom',
+    jumpToRecording: 'View recording',
   },
   event: {
     title: 'Event Log',

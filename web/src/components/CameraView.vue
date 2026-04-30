@@ -28,6 +28,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   fullscreen: [cameraId: string]
+  jumpToRecording: [cameraId: string, timestamp: number]
 }>()
 
 /** 实时时钟 */
@@ -230,6 +231,7 @@ onUnmounted(() => {
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+      <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
       <PtzControl v-if="ptz && online" :camera-id="cameraId" />
       <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
     </div>
@@ -410,6 +412,20 @@ onUnmounted(() => {
 
 .screenshot-btn:hover {
   color: #4ECDC4;
+}
+
+.recording-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.recording-btn:hover {
+  color: #FFD93D;
 }
 
 .camera-body {

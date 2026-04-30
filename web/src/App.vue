@@ -653,6 +653,7 @@ onUnmounted(() => {
             :video-height="cam.height"
             :fps="cameraFpsMap[cam.id] ?? 0"
             @fullscreen="enterFullscreen"
+            @jump-to-recording="onPlayRecording"
           />
         </div>
         <!-- WS 断开覆盖 -->

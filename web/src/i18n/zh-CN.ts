@@ -44,6 +44,7 @@ export default {
     saturation: '饱和度',
     resetAdjust: '重置',
     resetZoom: '重置缩放',
+    jumpToRecording: '查看录像',
   },
   event: {
     title: '事件日志',
