@@ -19,7 +19,8 @@ type EventCallback<T extends keyof EventMap> = (payload: EventMap[T]) => void
 
 /**
  * 事件 WebSocket 客户端
- * 连接后端 /api/events，自动重连
+ * 二进制协议：[4字节头长度 LE uint32][JSON 头][可选二进制帧数据]
+ * frame 事件的二进制部分是 JPEG，会被转为 data URL
  */
 export class EventClient {
   private ws: WebSocket | null = null
@@ -31,7 +32,6 @@ export class EventClient {
     if (url) {
       this.url = url
     } else if (import.meta.env.DEV) {
-      /** 开发环境直接连后端，避免 Vite WS 代理不兼容 */
       this.url = 'ws://localhost:3100/api/events'
     } else {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -42,18 +42,15 @@ export class EventClient {
   /** 连接 */
   connect(): void {
     this.ws = new WebSocket(this.url)
+    /** 使用二进制模式 */
+    this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
       console.log('[EventClient] 已连接')
     }
 
     this.ws.onmessage = (e) => {
-      try {
-        const { event, ...payload } = JSON.parse(e.data as string)
-        this.dispatch(event, payload)
-      } catch {
-        // ignore
-      }
+      this.handleMessage(e.data)
     }
 
     this.ws.onclose = () => {
@@ -64,6 +61,50 @@ export class EventClient {
     this.ws.onerror = () => {
       this.ws?.close()
     }
+  }
+
+  /** 解析二进制协议消息 */
+  private handleMessage(data: ArrayBuffer | string): void {
+    /** 兼容文本消息（向后兼容） */
+    if (typeof data === 'string') {
+      try {
+        const { event, ...payload } = JSON.parse(data)
+        this.dispatch(event, payload)
+      } catch { /* ignore */ }
+      return
+    }
+
+    const buf = new Uint8Array(data)
+    if (buf.length < 4) return
+
+    /** 读取 4 字节头长度 */
+    const headerLen = buf[0]! | (buf[1]! << 8) | (buf[2]! << 16) | (buf[3]! << 24)
+    if (buf.length < 4 + headerLen) return
+
+    /** 解析 JSON 头 */
+    const headerBytes = buf.slice(4, 4 + headerLen)
+    let header: Record<string, unknown>
+    try {
+      header = JSON.parse(new TextDecoder().decode(headerBytes))
+    } catch {
+      return
+    }
+
+    const event = header.event as string
+    if (!event) return
+
+    /** 构建载荷 */
+    const payload: Record<string, unknown> = { ...header }
+    delete payload.event
+
+    /** frame 事件：提取二进制 JPEG，转为 data URL */
+    if (event === 'frame' && buf.length > 4 + headerLen) {
+      const jpegBytes = buf.slice(4 + headerLen)
+      const blob = new Blob([jpegBytes], { type: 'image/jpeg' })
+      payload.image = URL.createObjectURL(blob)
+    }
+
+    this.dispatch(event, payload)
   }
 
   /** 订阅事件 */

@@ -151,21 +151,31 @@ export function startServer(
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
-      const wsPayload = { event, ...payload };
+      /** 构建 JSON 头（不含二进制数据） */
+      const header: Record<string, unknown> = { event, ...payload };
+
+      let frameData: Buffer | null = null;
 
       if (event === "frame") {
-        /** 帧事件：推送 base64 编码的 JPEG，前端可直接渲染 */
-        (wsPayload as Record<string, unknown>).data = undefined;
-        const base64 = Buffer.from((payload as { data: Buffer }).data).toString("base64");
-        (wsPayload as Record<string, unknown>).image = `data:image/jpeg;base64,${base64}`;
+        /** 帧事件：提取二进制数据，头中不包含 */
+        frameData = (payload as { data: Buffer }).data;
+        header.data = undefined;
       }
-      /** 检测事件不推送图片数据，前端通过 /api/detection/annotated 单独拉取 */
       if (event === "detect") {
-        (wsPayload as Record<string, unknown>).annotatedImage = undefined;
+        header.annotatedImage = undefined;
       }
-      const msg = JSON.stringify(wsPayload);
+
+      /** 二进制协议：[4字节头长度 LE uint32][JSON头][可选二进制帧] */
+      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
+      const headerLen = Buffer.alloc(4);
+      headerLen.writeUInt32LE(headerBuf.length, 0);
+
       for (const ws of wsClients) {
-        ws.send(msg);
+        if (frameData) {
+          ws.send(Buffer.concat([headerLen, headerBuf, frameData]));
+        } else {
+          ws.send(Buffer.concat([headerLen, headerBuf]));
+        }
       }
     });
   }
