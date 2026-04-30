@@ -68,6 +68,8 @@ export default {
     allCameras: 'All Cameras',
     filterDate: 'Filter by date',
     exportCsv: 'Export CSV',
+    search: 'Search',
+    searchPlaceholder: 'Search events...',
   },
   recording: {
     title: 'Recordings',

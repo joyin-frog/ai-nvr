@@ -36,6 +36,8 @@ const filterType = ref('')
 const filterCamera = ref('')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
+/** 搜索关键词 */
+const filterSearch = ref('')
 /** 当前展开的事件 ID */
 const expandedId = ref<number | null>(null)
 
@@ -96,6 +98,7 @@ async function loadHistory() {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterSearch.value) params.set('search', filterSearch.value)
     if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
       const until = since + 86_400_000
@@ -132,6 +135,7 @@ async function loadMore() {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(events.value.length) })
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterSearch.value) params.set('search', filterSearch.value)
     if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
       const until = since + 86_400_000
@@ -200,6 +204,7 @@ async function exportCsv() {
     const params = new URLSearchParams({ limit: '10000' })
     if (filterType.value) params.set('type', filterType.value)
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterSearch.value) params.set('search', filterSearch.value)
     if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
       const until = since + 86_400_000
@@ -244,6 +249,14 @@ defineExpose({ addEvent, loadHistory })
         @change="loadHistory"
         class="filter-date"
         :title="t('event.filterDate')"
+      />
+      <input
+        type="text"
+        v-model="filterSearch"
+        @change="loadHistory"
+        class="filter-search"
+        :placeholder="t('event.searchPlaceholder')"
+        :title="t('event.search')"
       />
       <select v-model="filterCamera" @change="loadHistory" class="filter-select">
         <option value="">{{ t('event.allCameras') }}</option>
@@ -362,6 +375,16 @@ defineExpose({ addEvent, loadHistory })
 
 .filter-date::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
+}
+
+.filter-search {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  width: 100px;
 }
 
 .refresh-btn {

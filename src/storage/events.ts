@@ -40,6 +40,7 @@ export class EventStorage {
     until?: number;
     limit?: number;
     offset?: number;
+    search?: string;
   } = {}): EventRecord[] {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -103,7 +104,7 @@ export class EventStorage {
   }
 
   /** 构建查询条件 */
-  private buildConditions(options: { type?: string; cameraId?: string; since?: number; until?: number }): { conditions: string[]; params: SQLQueryBindings[] } {
+  private buildConditions(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string }): { conditions: string[]; params: SQLQueryBindings[] } {
     const conditions: string[] = [];
     const params: SQLQueryBindings[] = [];
 
@@ -122,6 +123,10 @@ export class EventStorage {
     if (options.until) {
       conditions.push("timestamp <= ?");
       params.push(options.until);
+    }
+    if (options.search) {
+      conditions.push("detail LIKE ?");
+      params.push(`%${options.search}%`);
     }
 
     return { conditions, params };

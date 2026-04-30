@@ -68,6 +68,8 @@ export default {
     allCameras: '全部摄像头',
     filterDate: '筛选日期',
     exportCsv: '导出 CSV',
+    search: '搜索',
+    searchPlaceholder: '搜索事件...',
   },
   recording: {
     title: '录像',

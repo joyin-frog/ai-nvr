@@ -178,19 +178,21 @@ export function startServer(
 
       /** 查询事件历史 */
       if (url.pathname === "/api/events/history") {
-        const events = eventStorage.query({
+        const queryOpts = {
           type: url.searchParams.get("type") ?? undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
           limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
           offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
-        });
+          search: url.searchParams.get("search") ?? undefined,
+        };
+        const events = eventStorage.query(queryOpts);
         const total = eventStorage.count({
-          type: url.searchParams.get("type") ?? undefined,
-          cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          type: queryOpts.type,
+          cameraId: queryOpts.cameraId,
+          since: queryOpts.since,
+          until: queryOpts.until,
         });
         return Response.json({ events, total });
       }
