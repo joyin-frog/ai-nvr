@@ -166,8 +166,17 @@ export class MotionRecorder {
     });
   }
 
+  /** 录像列表缓存（TTL 5 秒，避免频繁 stat 文件系统） */
+  private listCache = new Map<string, { data: RecordingInfo[]; expiry: number }>();
+  private static readonly LIST_CACHE_TTL = 5000;
+
   /** 列出录像文件 */
   listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
+    /** 检查缓存 */
+    const cacheKey = `${cameraId ?? ""}:${since ?? 0}:${until ?? 0}`;
+    const cached = this.listCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiry) return cached.data;
+
     const results: RecordingInfo[] = [];
 
     const scanDir = cameraId ? join(this.storagePath, cameraId) : this.storagePath;
@@ -212,7 +221,9 @@ export class MotionRecorder {
       }
     }
 
-    return results.sort((a, b) => b.startTime - a.startTime);
+    const sorted = results.sort((a, b) => b.startTime - a.startTime);
+    this.listCache.set(cacheKey, { data: sorted, expiry: Date.now() + MotionRecorder.LIST_CACHE_TTL });
+    return sorted;
   }
 
   /** 获取录像文件路径 */
@@ -432,6 +443,8 @@ export class MotionRecorder {
     } catch {
       // ignore
     }
+    /** 清理后使缓存失效 */
+    this.listCache.clear();
   }
 
   /** 解析录像文件名获取时间信息 */
