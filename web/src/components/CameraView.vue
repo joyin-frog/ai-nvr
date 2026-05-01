@@ -987,6 +987,11 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
         const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
         if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
       }
+      /** 未命名目标显示匹配建议 */
+      if (!isNamed && tid) {
+        const suggest = suggestMap.get(tid)
+        if (suggest) lines.push(`≈ ${suggest}`)
+      }
       const tipX = x + w + 4
       const tipY = y
       const tipPad = 6
