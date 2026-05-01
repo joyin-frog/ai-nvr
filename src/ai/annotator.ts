@@ -63,14 +63,21 @@ export class Annotator {
       /** 标签背景 + 文字 */
       const labelText = `${det.label} ${(det.score * 100).toFixed(0)}%`;
       const fontSize = Math.max(14, Math.min(width, height) / 30);
-      const textWidth = labelText.length * fontSize * 0.6;
+      /** 估算文字宽度：中文等宽字符约 1.0em，ASCII 约 0.6em */
+      let charWidthSum = 0;
+      for (const ch of labelText) {
+        charWidthSum += ch.charCodeAt(0) > 0x7f ? 1.0 : 0.6;
+      }
+      const textWidth = charWidthSum * fontSize + 8;
       const textHeight = fontSize + 6;
+      /** 标签在框上方，如果太靠近顶部则放到框内下方 */
+      const labelY = ymin > textHeight + 2 ? ymin - textHeight : ymax;
 
       svgElements.push(
-        `<rect x="${xmin}" y="${ymin - textHeight}" width="${textWidth}" height="${textHeight}" fill="${color}" opacity="0.85"/>`,
+        `<rect x="${xmin}" y="${labelY}" width="${textWidth}" height="${textHeight}" fill="${color}" opacity="0.85"/>`,
       );
       svgElements.push(
-        `<text x="${xmin + 4}" y="${ymin - 4}" fill="white" font-size="${fontSize}" font-family="sans-serif" font-weight="bold">${labelText}</text>`,
+        `<text x="${xmin + 4}" y="${labelY + fontSize + 1}" fill="white" font-size="${fontSize}" font-family="sans-serif" font-weight="bold">${labelText}</text>`,
       );
     }
 
