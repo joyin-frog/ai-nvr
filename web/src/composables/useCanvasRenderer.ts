@@ -17,6 +17,10 @@ export function useCanvasRenderer() {
   /** 当前显示的帧宽度（用于检测分辨率变化） */
   let lastWidth = 0
   let lastHeight = 0
+  /** 是否正在解码中（防止 decode Promise 堆积） */
+  let decoding = false
+  /** 解码期间最新到达的帧数据（确保解码完后处理最新帧） */
+  let latestBuffer: ArrayBuffer | null = null
 
   /** Canvas 元素引用 */
   const canvasRef: Ref<HTMLCanvasElement | null> = ref(null)
@@ -45,7 +49,6 @@ export function useCanvasRenderer() {
       ctx.drawImage(bitmap, 0, 0)
       bitmap.close()
     }
-    /** 无论是否有帧都保持 rAF 循环（低功耗：无帧时只空转） */
     rafId = requestAnimationFrame(renderLoop)
   }
 
@@ -69,23 +72,40 @@ export function useCanvasRenderer() {
     }
   }
 
-  /**
-   * 喂入一帧 JPEG ArrayBuffer
-   * createImageBitmap 解码后放入 pending，由 rAF 消费
-   * 如果 pending 还没被消费（渲染跟不上），直接替换（跳帧）
-   */
-  async function feedFrame(jpegArrayBuffer: ArrayBuffer) {
+  /** 解码一帧并放入 pending */
+  async function decodeAndQueue(buffer: ArrayBuffer) {
+    decoding = true
     try {
       const bitmap = await createImageBitmap(
-        new Blob([jpegArrayBuffer], { type: 'image/jpeg' }),
+        new Blob([buffer], { type: 'image/jpeg' }),
         { premultiplyAlpha: 'none', colorSpaceConversion: 'none' },
       )
-      /** 替换 pending（跳帧策略：只渲染最新帧） */
       if (pendingBitmap) pendingBitmap.close()
       pendingBitmap = bitmap
     } catch {
-      /** 解码失败忽略（可能是不完整帧） */
+      /** 解码失败忽略 */
     }
+    /** 解码期间如果有新帧到达，立即处理最新的 */
+    if (latestBuffer) {
+      const next = latestBuffer
+      latestBuffer = null
+      decodeAndQueue(next)
+    } else {
+      decoding = false
+    }
+  }
+
+  /**
+   * 喂入一帧 JPEG ArrayBuffer
+   * 解码锁防止并发 createImageBitmap 堆积
+   */
+  function feedFrame(jpegArrayBuffer: ArrayBuffer) {
+    if (decoding) {
+      /** 正在解码 → 只保留最新一帧，等解码完后处理 */
+      latestBuffer = jpegArrayBuffer
+      return
+    }
+    decodeAndQueue(jpegArrayBuffer)
   }
 
   /** 截取当前 Canvas 为 JPEG Blob（用于截图下载） */
