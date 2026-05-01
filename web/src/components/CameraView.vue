@@ -59,7 +59,7 @@ const fmp4CameraId = computed(() => props.cameraId)
 const fmp4 = useFmp4Stream(fmp4CameraId)
 
 /** 当前渲染模式：MSE 优先，Canvas fallback */
-const useMse = ref(true)
+const useMse = ref(typeof MediaSource !== 'undefined')
 const mjpegStream = useMjpegStream()
 
 /** MSE 模式的检测框 overlay canvas */
