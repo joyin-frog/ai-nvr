@@ -685,6 +685,16 @@ function toggleMultiSelect() {
   mergeFilename.value = ''
 }
 
+/** 全选/取消全选 */
+function toggleSelectAll() {
+  if (selectedFiles.value.size === filteredRecordings.value.length) {
+    selectedFiles.value = new Set()
+  } else {
+    selectedFiles.value = new Set(filteredRecordings.value.map(r => r.filename))
+  }
+  mergeFilename.value = ''
+}
+
 /** 切换选中文件 */
 function toggleFileSelect(filename: string) {
   const s = new Set(selectedFiles.value)
@@ -980,6 +990,7 @@ defineExpose({ loadRecordings, playAtTime })
 
     <!-- 多选合并操作栏 -->
     <div v-if="multiSelectMode" class="merge-bar">
+      <button class="select-all-btn" @click="toggleSelectAll">{{ selectedFiles.size === filteredRecordings.length ? t('recording.cancelSelect') : '☑' }}</button>
       <span class="merge-info">{{ t('recording.selectedCount', { count: selectedFiles.size }) }}</span>
       <span v-if="sortedSelectedFiles.length > 1" class="merge-duration">
         {{ duration(sortedSelectedFiles[0].startTime, sortedSelectedFiles[sortedSelectedFiles.length - 1].endTime) }}
@@ -1736,6 +1747,20 @@ defineExpose({ loadRecordings, playAtTime })
   padding: 8px 12px;
   background: #16213e;
   border-top: 1px solid #2a2a4a;
+}
+
+.select-all-btn {
+  background: #2a2a4a;
+  color: #4ECDC4;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.select-all-btn:hover {
+  background: #3a3a5a;
 }
 
 .merge-info {
