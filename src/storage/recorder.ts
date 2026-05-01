@@ -34,6 +34,8 @@ interface RecordingState {
   continuousTimer: ReturnType<typeof setTimeout> | null;
   /** ffmpeg stdin 写锁（避免并发 write） */
   writing: boolean;
+  /** 上次写入帧的时间戳（用于帧率节流） */
+  lastWriteTime: number;
 }
 
 /** drawtext 水印默认字体路径 */
@@ -145,10 +147,18 @@ export class MotionRecorder {
     }
   }
 
+  /** 录像帧写入节流间隔（~15fps） */
+  private static readonly WRITE_THROTTLE_MS = 67;
+
   /** 将帧数据写入录像进程 */
   private writeFrame(cameraId: string, jpegData: Buffer): void {
     const state = this.states.get(cameraId);
     if (!state?.recording || !state.proc?.stdin?.writable || state.writing) return;
+
+    /** 帧率节流：避免双流模式下 HD 高帧率写入过多帧 */
+    const now = Date.now();
+    if (now - state.lastWriteTime < MotionRecorder.WRITE_THROTTLE_MS) return;
+    state.lastWriteTime = now;
 
     state.writing = true;
     state.proc.stdin.write(jpegData, () => {
@@ -427,7 +437,7 @@ export class MotionRecorder {
     const existing = this.states.get(cameraId);
     if (existing) return existing;
 
-    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false };
+    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false, lastWriteTime: 0 };
     this.states.set(cameraId, state);
     return state;
   }
