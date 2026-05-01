@@ -108,9 +108,22 @@ function cleanupTrails() {
   }
 }
 
-/** 检测框列表（按置信度排序，非响应式，overlay 使用） */
-function getSortedDetections() {
-  return [...localDetections].sort((a, b) => b.score - a.score)
+/** 缓存的排序后检测结果（避免每次绘制重复排序） */
+let sortedDetectionsCache: Detection[] = []
+let sortedDetectionsDirty = true
+
+/** 标记检测结果已更新，需要重新排序 */
+function invalidateSortedDetections() {
+  sortedDetectionsDirty = true
+}
+
+/** 获取排序后的检测列表（带缓存） */
+function getSortedDetections(): Detection[] {
+  if (sortedDetectionsDirty) {
+    sortedDetectionsCache = [...localDetections].sort((a, b) => b.score - a.score)
+    sortedDetectionsDirty = false
+  }
+  return sortedDetectionsCache
 }
 
 /** 检测计数（响应式，用于模板徽标和 footer） */
@@ -209,6 +222,7 @@ setFramePollFn(() => {
   if (detectResult) {
     consumedDetectVersion = detectResult.version
     localDetections = detectResult.detections
+    invalidateSortedDetections()
     updateDetectionSummary()
   }
 
@@ -375,13 +389,14 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   recordTrails()
   cleanupTrails()
 
-  if (getSortedDetections().length === 0) return
+  const sorted = getSortedDetections()
+  if (sorted.length === 0) return
 
   ctx.save()
   ctx.font = 'bold 12px monospace'
   ctx.textBaseline = 'bottom'
 
-  for (const d of getSortedDetections()) {
+  for (const d of sorted) {
     const { stroke, fill } = getColor(d.label, d.trackId)
     const x = d.box.xmin * width
     const y = d.box.ymin * height
@@ -526,7 +541,8 @@ const namingPopupStyle = computed(() => {
 
 /** Canvas contextmenu 事件：根据点击位置匹配最近的检测框 */
 function onCanvasContext(e: MouseEvent) {
-  if (getSortedDetections().length === 0) return
+  const sorted = getSortedDetections()
+  if (sorted.length === 0) return
   const canvas = e.currentTarget as HTMLElement
   const rect = canvas.getBoundingClientRect()
   const nx = (e.clientX - rect.left) / rect.width
@@ -535,7 +551,7 @@ function onCanvasContext(e: MouseEvent) {
   /** 找到包含点击位置且面积最小的检测框（最精确匹配） */
   let best: { trackId?: number; label: string; box: Detection['box'] } | null = null
   let bestArea = Infinity
-  for (const d of getSortedDetections()) {
+  for (const d of sorted) {
     if (nx >= d.box.xmin && nx <= d.box.xmax && ny >= d.box.ymin && ny <= d.box.ymax) {
       const area = (d.box.xmax - d.box.xmin) * (d.box.ymax - d.box.ymin)
       if (area < bestArea) {

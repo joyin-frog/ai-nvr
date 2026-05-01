@@ -252,7 +252,7 @@ function flashTitle(message: string, duration = 5000) {
   document.title = `⚠ ${message}`
   if (titleTimer) clearTimeout(titleTimer)
   titleTimer = setTimeout(() => {
-    const online = cameras.value.filter(c => c.online).length
+    const online = onlineCameras.value.length
     document.title = `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online })}`
     titleTimer = null
   }, duration)
@@ -261,7 +261,7 @@ function flashTitle(message: string, duration = 5000) {
 /** 更新常态标题 */
 function updateTitle() {
   if (titleTimer) return
-  const online = cameras.value.filter(c => c.online).length
+  const online = onlineCameras.value.length
   document.title = `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online })}`
 }
 
@@ -471,8 +471,8 @@ const groupedCameras = computed(() => {
   return result
 })
 
-/** 折叠的分组集合 */
-const collapsedGroups = ref(new Set<string>())
+/** 折叠的分组（用 Record 确保响应式） */
+const collapsedGroups = ref<Record<string, boolean>>({})
 
 /** 登录成功回调 */
 function onLoginSuccess() {
@@ -857,12 +857,12 @@ onUnmounted(() => {
           <button class="header-btn" @click="switchTab('cameras')">{{ t('manage.addCamera') }}</button>
         </div>
         <template v-for="group in groupedCameras" :key="group.group">
-          <div v-if="group.group && groupedCameras.length > 1" class="group-header" @click="collapsedGroups.has(group.group) ? collapsedGroups.delete(group.group) : collapsedGroups.add(group.group)">
-            <span class="group-toggle">{{ collapsedGroups.has(group.group) ? '▸' : '▾' }}</span>
+          <div v-if="group.group && groupedCameras.length > 1" class="group-header" @click="collapsedGroups[group.group] = !collapsedGroups[group.group]">
+            <span class="group-toggle">{{ collapsedGroups[group.group] ? '▸' : '▾' }}</span>
             <span class="group-name">{{ group.group }}</span>
             <span class="group-count">{{ group.cameras.filter(c => c.online).length }}/{{ group.cameras.length }}</span>
           </div>
-          <template v-if="!collapsedGroups.has(group.group)">
+          <template v-if="!collapsedGroups[group.group]">
             <div
               v-for="cam in group.cameras"
               :key="cam.id"
