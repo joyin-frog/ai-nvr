@@ -68,9 +68,12 @@ export class DingTalkNotifier {
       const ratio = payload.ratio as number | undefined;
       body = ratio !== undefined ? `变动比例: ${(ratio * 100).toFixed(1)}%` : "";
     } else if (event === "detect") {
-      const detections = payload.detections as Array<{ label: string; score: number }> | undefined;
+      const detections = payload.detections as Array<{ label: string; score: number; trackId?: number }> | undefined;
       if (detections && detections.length > 0) {
-        body = "检测目标:\n" + detections.map(d => `- ${d.label} (${(d.score * 100).toFixed(0)}%)`).join("\n");
+        body = "检测目标:\n" + detections.map(d => {
+          const id = d.trackId ? ` #${d.trackId}` : "";
+          return `- ${d.label}${id} (${(d.score * 100).toFixed(0)}%)`;
+        }).join("\n");
       }
     } else if (event === "alert") {
       const ruleName = payload.ruleName as string | undefined;

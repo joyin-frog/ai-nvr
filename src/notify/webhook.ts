@@ -59,9 +59,12 @@ export class WebhookNotifier {
     if (event === "motion") {
       detail.ratio = payload.ratio;
     } else if (event === "detect") {
-      const detections = payload.detections as Array<{ label: string; score: number }> | undefined;
-      detail.detections = detections?.map(d => ({ label: d.label, score: d.score }));
+      const detections = payload.detections as Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number }> | undefined;
+      detail.detections = detections?.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId }));
       detail.count = detections?.length ?? 0;
+      /** 附带标注快照 URL（供外部系统展示） */
+      detail.snapshotUrl = `/api/detection/annotated/${cameraId}`;
+      detail.frameUrl = `/api/snapshot/${cameraId}`;
     } else if (event === "alert") {
       detail.ruleId = payload.ruleId;
       detail.ruleName = payload.ruleName;
