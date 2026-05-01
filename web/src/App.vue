@@ -797,14 +797,14 @@ function setupEventListeners() {
   client.on('track:match-suggest', (payload) => {
     const best = payload.matches[0]
     if (!best) return
-    const dist = ((64 - best.distance) / 64 * 100).toFixed(0)
+    const dist = ((1 - best.distance) * 100).toFixed(0)
     eventPanel.value?.addEvent('track:match-suggest', payload.cameraId, `${payload.label} #${payload.trackId} 可能是 "${best.customName}" (${dist}% 相似)`)
     pushMatchSuggestion(payload.cameraId, { trackId: payload.trackId, label: payload.label, matches: payload.matches, timestamp: payload.timestamp })
   })
 
   /** 其他客户端更新了追踪标签 → 实时同步 */
   client.on('track:label-updated', (payload) => {
-    const map = { ...trackLabelsMap.value }
+    const map = trackLabelsMap.value
     const camMap = { ...(map[payload.cameraId] ?? {}) }
     if (payload.name) {
       camMap[payload.trackId] = payload.name
@@ -812,7 +812,7 @@ function setupEventListeners() {
       delete camMap[payload.trackId]
     }
     map[payload.cameraId] = camMap
-    trackLabelsMap.value = map
+    trackLabelsMap.value = { ...map }
   })
 
 }
