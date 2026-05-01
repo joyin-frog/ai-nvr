@@ -144,9 +144,38 @@ const totalDurationSec = computed(() => {
 const currentAbsTime = ref(0)
 /** 是否正在播放 */
 const isPlaying = ref(false)
+/** A-B 循环播放 */
+const loopStart = ref(-1)
+const loopEnd = ref(-1)
+
 function onTimeUpdate() {
   if (!playerRef.value || !selectedRecording.value) return
   currentAbsTime.value = selectedRecording.value.startTime + playerRef.value.currentTime * 1000
+  /** A-B 循环：到达 B 点时跳回 A 点 */
+  if (loopStart.value >= 0 && loopEnd.value > loopStart.value) {
+    if (playerRef.value.currentTime >= loopEnd.value) {
+      playerRef.value.currentTime = loopStart.value
+    }
+  }
+}
+
+/** 设置循环起点/终点 */
+function setLoopPoint(which: 'a' | 'b') {
+  if (!playerRef.value) return
+  const t = playerRef.value.currentTime
+  if (which === 'a') {
+    loopStart.value = t
+    if (loopEnd.value >= 0 && loopEnd.value <= t) loopEnd.value = -1
+  } else {
+    if (t > (loopStart.value >= 0 ? loopStart.value : 0)) {
+      loopEnd.value = t
+    }
+  }
+}
+
+function clearLoop() {
+  loopStart.value = -1
+  loopEnd.value = -1
 }
 
 /** 播放进度百分比 */
@@ -311,6 +340,18 @@ function onPlayerKeydown(e: KeyboardEvent) {
     case '.':
       e.preventDefault()
       stepFrame(1)
+      break
+    case '[':
+      e.preventDefault()
+      setLoopPoint('a')
+      break
+    case ']':
+      e.preventDefault()
+      setLoopPoint('b')
+      break
+    case '\\':
+      e.preventDefault()
+      clearLoop()
       break
   }
 }
@@ -792,7 +833,10 @@ defineExpose({ loadRecordings, playAtTime })
           </button>
           <button class="ctrl-btn frame-btn" @click="stepFrame(-1)" title="◀ 1帧 (,)">◂</button>
           <button class="ctrl-btn frame-btn" @click="stepFrame(1)" title="1帧 ▸ (.)">▸</button>
+          <button :class="['ctrl-btn', 'loop-btn', { active: loopStart >= 0 }]" @click="loopStart >= 0 ? clearLoop() : setLoopPoint('a')" :title="loopStart >= 0 ? '清除循环 (\\)' : '设A点 ([)'">A</button>
+          <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" title="设B点 (])">B</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
+            <div v-if="loopStart >= 0 && loopEnd > loopStart && playerRef" class="loop-region" :style="{ left: (loopStart / playerRef.duration * 100) + '%', width: ((loopEnd - loopStart) / playerRef.duration * 100) + '%' }" />
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
             <div v-if="hoverPct >= 0 && selectedRecording" class="progress-tooltip" :style="{ left: (hoverPct * 100) + '%' }">
@@ -1399,6 +1443,17 @@ defineExpose({ loadRecordings, playAtTime })
   padding: 2px 6px;
 }
 
+.loop-btn {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 5px;
+  color: #888;
+}
+
+.loop-btn.active {
+  color: #FFD93D;
+}
+
 .progress-bar {
   flex: 1;
   height: 6px;
@@ -1406,6 +1461,17 @@ defineExpose({ loadRecordings, playAtTime })
   border-radius: 3px;
   cursor: pointer;
   position: relative;
+}
+
+.loop-region {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(255, 217, 61, 0.2);
+  border-left: 1px solid #FFD93D;
+  border-right: 1px solid #FFD93D;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .progress-fill {
