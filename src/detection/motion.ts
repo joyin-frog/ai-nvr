@@ -11,6 +11,8 @@ interface CameraState {
   lastMotionTime: number;
   /** 是否正在处理中（防止帧堆积） */
   processing: boolean;
+  /** 上次处理帧的时间戳（用于处理帧率节流） */
+  lastProcessTime: number;
   /** ROI 缓存的 key（摄像头 ID + ROI 版本） */
   roiCacheKey: string;
   /** 预计算的 ROI mask（true = 在检测区域内） */
@@ -36,7 +38,7 @@ export class MotionDetector {
   private getOrCreateState(cameraId: string): CameraState {
     let state = this.states.get(cameraId);
     if (!state) {
-      state = { prevPixels: null, lastMotionTime: 0, processing: false, roiCacheKey: "", roiMask: null };
+      state = { prevPixels: null, lastMotionTime: 0, processing: false, lastProcessTime: 0, roiCacheKey: "", roiMask: null };
       this.states.set(cameraId, state);
     }
     return state;
@@ -51,6 +53,14 @@ export class MotionDetector {
 
   /** 处理一帧 */
   private async processFrame(cameraId: string, jpeg: Buffer, timestamp: number): Promise<void> {
+    const state = this.getOrCreateState(cameraId);
+
+    /** 处理锁：上一帧还在处理中则跳过 */
+    if (state.processing) return;
+
+    /** 处理帧率节流：每 200ms 最多处理一次（5fps），无论输入帧率多高 */
+    if (timestamp - state.lastProcessTime < 200) return;
+
     /** 快速校验：JPEG 必须以 FF D8 开头、FF D9 结尾 */
     if (jpeg.length < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg[jpeg.length - 2] !== 0xff || jpeg[jpeg.length - 1] !== 0xd9) {
       return;
@@ -77,8 +87,11 @@ export class MotionDetector {
     const totalPixels = width * height;
 
     const pixels = new Uint8Array(data.buffer);
-    const state = this.getOrCreateState(cameraId);
 
+    state.processing = true;
+    state.lastProcessTime = timestamp;
+
+    try {
     /** 构建 ROI mask（每60秒刷新一次） */
     const roiKey = `${cameraId}:${Math.floor(timestamp / 60000)}`;
     if (state.roiCacheKey !== roiKey) {
@@ -136,6 +149,9 @@ export class MotionDetector {
         data: jpeg,
         timestamp,
       });
+    }
+    } finally {
+      state.processing = false;
     }
   }
 
