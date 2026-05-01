@@ -601,13 +601,13 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ cameraName(e.cameraId) }}</span>
-          <div v-if="e.type === 'detect' && e.snapshotUrl" class="thumb-wrap">
+          <div v-if="(e.type === 'detect' || e.type === 'alert') && e.snapshotUrl" class="thumb-wrap">
             <img
               :src="authUrl(e.snapshotUrl)"
               class="event-thumb"
               alt=""
             />
-            <div v-if="showDetectionBoxes && e.snapshotDetections?.length" class="thumb-boxes">
+            <div v-if="e.type === 'detect' && showDetectionBoxes && e.snapshotDetections?.length" class="thumb-boxes">
               <div
                 v-for="(d, i) in e.snapshotDetections"
                 :key="i"
@@ -627,13 +627,13 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
-          <div v-if="e.type === 'detect' && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
+          <div v-if="(e.type === 'detect' || e.type === 'alert') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
             <img
               :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshotMapByCamera.get(e.cameraId)"
               class="expand-snapshot"
               alt=""
             />
-            <div v-if="showDetectionBoxes && e.snapshotDetections?.length" class="expand-boxes">
+            <div v-if="e.type === 'detect' && showDetectionBoxes && e.snapshotDetections?.length" class="expand-boxes">
               <div
                 v-for="(d, i) in e.snapshotDetections"
                 :key="i"

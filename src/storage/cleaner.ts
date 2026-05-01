@@ -29,6 +29,7 @@ export class StorageCleaner {
     private diskUsage: DiskUsage,
     private recorder: MotionRecorder,
     private trackStorage?: TrackStorage,
+    private alertSnapshotStorage?: SnapshotStorage,
   ) {}
 
   /** 启动定时清理（每小时执行一次） */
@@ -98,6 +99,11 @@ export class StorageCleaner {
 
     /** 清理检测快照 */
     report.snapshots = this.snapshotStorage.purge(snapshotsDays);
+
+    /** 清理告警快照（复用快照保留天数配置） */
+    if (this.alertSnapshotStorage) {
+      this.alertSnapshotStorage.purge(snapshotsDays);
+    }
 
     /** 清理缩略图缓存 */
     this.thumbnailGenerator.purge(thumbnailsDays);
