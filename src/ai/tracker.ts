@@ -112,16 +112,26 @@ export class ObjectTracker {
       highDets.length,
     );
 
-    /** 更新匹配到的追踪 */
+    /** EMA 平滑系数（0.3 = 30% 新值 + 70% 旧值） */
+    const smoothAlpha = 0.3;
+
+    /** 更新匹配到的追踪（框位置 EMA 平滑） */
     for (const [ti, di] of matchedTracks) {
       const track = this.tracks[ti]!;
       const det = highDets[di]!;
-      track.box = { ...det.box };
+      const prev = track.box;
+      const curr = det.box;
+      track.box = {
+        xmin: prev.xmin + smoothAlpha * (curr.xmin - prev.xmin),
+        ymin: prev.ymin + smoothAlpha * (curr.ymin - prev.ymin),
+        xmax: prev.xmax + smoothAlpha * (curr.xmax - prev.xmax),
+        ymax: prev.ymax + smoothAlpha * (curr.ymax - prev.ymax),
+      };
       track.score = det.score;
       track.label = det.label;
       track.age++;
       track.lastMatched = this.frameIndex;
-      results.push({ ...det, trackId: track.trackId });
+      results.push({ label: track.label, score: track.score, box: { ...track.box }, trackId: track.trackId });
     }
 
     /** 未匹配的检测 → 新建追踪 */
