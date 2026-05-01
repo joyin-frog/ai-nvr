@@ -6,6 +6,7 @@ import { authFetch, authUrl } from '../services/auth'
 import { useCanvasRenderer } from '../composables/useCanvasRenderer'
 import { useMjpegStream } from '../composables/useMjpegStream'
 import { takeFrame } from '../services/ws-frame-cache'
+import { takeDetections, getInferMs } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 
 const { t } = useI18n()
@@ -15,8 +16,6 @@ const props = defineProps<{
   online: boolean
   /** 最后收到帧的时间戳（ms） */
   lastFrameAt: number
-  detections: Detection[]
-  detectVersion: number
   /** 是否支持 PTZ 云台控制 */
   ptz?: boolean
   /** 视频宽度（用于计算画面比例） */
@@ -35,8 +34,6 @@ const props = defineProps<{
   showBoxes?: boolean
   /** 追踪标签映射：trackId -> 自定义名称 */
   trackLabels?: Record<number, string>
-  /** AI 推理耗时（ms） */
-  inferMs?: number
   /** 是否双流模式 */
   dualStream?: boolean
   /** 检测流帧率 */
@@ -92,7 +89,7 @@ const trackTrails = new Map<number, Array<{ x: number; y: number }>>()
 
 /** 记录当前帧中所有检测目标的中心点到轨迹缓存 */
 function recordTrails() {
-  for (const d of props.detections) {
+  for (const d of localDetections) {
     if (d.trackId == null) continue
     const cx = (d.box.xmin + d.box.xmax) / 2
     const cy = (d.box.ymin + d.box.ymax) / 2
@@ -108,21 +105,26 @@ function recordTrails() {
 
 /** 清理不再活跃的轨迹（超过 MAX_TRAIL_POINTS 帧未更新的） */
 function cleanupTrails() {
-  const activeIds = new Set(props.detections.filter(d => d.trackId != null).map(d => d.trackId!))
+  const activeIds = new Set(localDetections.filter(d => d.trackId != null).map(d => d.trackId!))
   for (const id of trackTrails.keys()) {
     if (!activeIds.has(id)) trackTrails.delete(id)
   }
 }
 
-/** 检测框列表（按置信度排序） */
-const sortedDetections = computed(() =>
-  [...props.detections].sort((a, b) => b.score - a.score)
-)
+/** 检测框列表（按置信度排序，非响应式，overlay 使用） */
+function getSortedDetections() {
+  return [...localDetections].sort((a, b) => b.score - a.score)
+}
 
-/** 检测标签摘要（按 label 聚合计数） */
-const detectionSummary = computed(() => {
+/** 检测计数（响应式，用于模板徽标和 footer） */
+const detectCount = ref(0)
+const detectionSummary = ref('')
+
+/** 更新检测摘要（在 poll 回调中调用） */
+function updateDetectionSummary() {
+  detectCount.value = localDetections.length
   const counts = new Map<string, { count: number; customNames: string[] }>()
-  for (const det of props.detections) {
+  for (const det of localDetections) {
     const entry = counts.get(det.label) ?? { count: 0, customNames: [] }
     entry.count++
     const camLabels = props.trackLabels
@@ -140,23 +142,8 @@ const detectionSummary = computed(() => {
       parts.push(count > 1 ? `${label} ×${count}` : label)
     }
   }
-  return parts.join(' · ')
-})
-
-/** 收到检测事件时拉取标注图片（仅截图用） */
-watch(() => props.detectVersion, async (v: number) => {
-  if (v === 0) return
-  try {
-    const res = await authFetch(`/api/detection/annotated/${props.cameraId}`)
-    if (res.ok) {
-      const blob = await res.blob()
-      if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
-      annotatedUrl.value = URL.createObjectURL(blob)
-    }
-  } catch {
-    // ignore
-  }
-})
+  detectionSummary.value = parts.join(' · ')
+}
 
 /** 是否有帧数据 */
 const hasFrame = computed(() => props.online)
@@ -208,8 +195,21 @@ watch(() => props.online, (on) => {
 let mjpegSuppressed = false
 let mjpegRestoreTimer: ReturnType<typeof setTimeout> | null = null
 
+/** 本地检测结果缓存（从 ws-detect-cache poll） */
+let localDetections: Detection[] = []
+let consumedDetectVersion = 0
+
 setFramePollFn(() => {
   if (!props.online) return
+
+  /** poll 检测结果 */
+  const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
+  if (detectResult) {
+    consumedDetectVersion = detectResult.version
+    localDetections = detectResult.detections
+    updateDetectionSummary()
+  }
+
   const result = takeFrame(props.cameraId, consumedWsVersion)
   if (result) {
     consumedWsVersion = result.version
@@ -289,13 +289,13 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   recordTrails()
   cleanupTrails()
 
-  if (sortedDetections.value.length === 0) return
+  if (getSortedDetections().length === 0) return
 
   ctx.save()
   ctx.font = 'bold 12px monospace'
   ctx.textBaseline = 'bottom'
 
-  for (const d of sortedDetections.value) {
+  for (const d of getSortedDetections()) {
     const { stroke, fill } = getColor(d.label, d.trackId)
     const x = d.box.xmin * width
     const y = d.box.ymin * height
@@ -440,7 +440,7 @@ const namingPopupStyle = computed(() => {
 
 /** Canvas contextmenu 事件：根据点击位置匹配最近的检测框 */
 function onCanvasContext(e: MouseEvent) {
-  if (sortedDetections.value.length === 0) return
+  if (getSortedDetections().length === 0) return
   const canvas = e.currentTarget as HTMLElement
   const rect = canvas.getBoundingClientRect()
   const nx = (e.clientX - rect.left) / rect.width
@@ -449,7 +449,7 @@ function onCanvasContext(e: MouseEvent) {
   /** 找到包含点击位置且面积最小的检测框（最精确匹配） */
   let best: { trackId?: number; label: string; box: Detection['box'] } | null = null
   let bestArea = Infinity
-  for (const d of sortedDetections.value) {
+  for (const d of getSortedDetections()) {
     if (nx >= d.box.xmin && nx <= d.box.xmax && ny >= d.box.ymin && ny <= d.box.ymax) {
       const area = (d.box.xmax - d.box.xmin) * (d.box.ymax - d.box.ymin)
       if (area < bestArea) {
@@ -748,16 +748,16 @@ onUnmounted(() => {
         {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
       </div>
       <!-- AI 推理耗时 -->
-      <div v-if="online && hasFrame && (inferMs ?? 0) > 0" class="infer-badge">
-        AI {{ inferMs!.toFixed(0) }}ms
+      <div v-if="online && hasFrame && getInferMs(cameraId) > 0" class="infer-badge">
+        AI {{ getInferMs(cameraId).toFixed(0) }}ms
       </div>
       <!-- 实时目标计数 -->
-      <div v-if="online && hasFrame && showBoxes && sortedDetections.length > 0" class="detect-count-badge">
+      <div v-if="online && hasFrame && showBoxes && detectCount > 0" class="detect-count-badge">
         {{ detectionSummary }}
       </div>
     </div>
 
-    <div class="camera-footer" v-if="showBoxes && sortedDetections.length > 0">
+    <div class="camera-footer" v-if="showBoxes && detectCount > 0">
       <span class="detection-summary">{{ detectionSummary }}</span>
     </div>
 

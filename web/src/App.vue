@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type Detection, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl } from './services/auth'
 import { putFrame } from './services/ws-frame-cache'
+import { putDetections } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import CameraView from './components/CameraView.vue'
@@ -155,10 +156,6 @@ function checkMobile() {
 const cameras = ref<CameraStatus[]>([])
 /** 摄像头排序（ID 数组，持久化到 localStorage） */
 const cameraOrder = ref<string[]>(JSON.parse(localStorage.getItem('nvr-camera-order') ?? '[]'))
-const detectionsMap = ref<Record<string, Detection[]>>({})
-const detectVersions = ref<Record<string, number>>({})
-/** 每个摄像头的 AI 推理耗时（ms） */
-const cameraInferMs = ref<Record<string, number>>({})
 /** 是否显示检测框（从 settings API 获取） */
 const showBoxes = ref(true)
 /** 每个摄像头的追踪标签映射：cameraId -> { trackId: name } */
@@ -615,14 +612,8 @@ function setupEventListeners() {
   })
 
   client.on('detect', (payload) => {
-    detectionsMap.value[payload.cameraId] = payload.detections
-    detectionsMap.value = { ...detectionsMap.value }
-    detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
-    detectVersions.value = { ...detectVersions.value }
-    if (payload.inferMs) {
-      cameraInferMs.value[payload.cameraId] = payload.inferMs
-      cameraInferMs.value = { ...cameraInferMs.value }
-    }
+    /** 存入非响应式缓存，CameraView 通过 rAF poll 消费 */
+    putDetections(payload.cameraId, payload.detections, payload.inferMs)
     /** 0 目标或重复检测时只更新 UI 状态，不记录事件/通知 */
     if (payload.detections.length === 0 || payload.changed === false) return
 
@@ -834,8 +825,6 @@ onUnmounted(() => {
                 :name="cam.name"
                 :online="cam.online"
                 :last-frame-at="cam.lastFrameAt"
-                :detections="detectionsMap[cam.id] ?? []"
-                :detect-version="detectVersions[cam.id] ?? 0"
                 :ptz="cam.ptz"
                 :video-width="cam.width"
                 :video-height="cam.height"
@@ -845,7 +834,6 @@ onUnmounted(() => {
                 :recording-start="cam.recordingStart"
                 :show-boxes="showBoxes"
                 :track-labels="trackLabelsMap[cam.id]"
-                :infer-ms="cameraInferMs[cam.id] ?? 0"
                 :dual-stream="cam.dualStream"
                 :detect-fps="cam.detectFps"
                 :roi-regions="parsedRoiMap[cam.id]"
