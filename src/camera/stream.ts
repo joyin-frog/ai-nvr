@@ -163,6 +163,8 @@ export class FrameExtractor {
   /** 启动 ffmpeg 子进程 */
   private spawnFfmpeg(): void {
     const { detectWidth, jpegQuality, stream } = this.config;
+    /** 显示流使用更高质量（更小的 q 值），检测流保持默认 */
+    const effectiveQuality = this.purpose === "display" ? Math.min(jpegQuality, 5) : jpegQuality;
 
     /** 显示流用 HD，检测流用 SD（fallback 到 HD） */
     const rtspUrl = this.rtspOverride ?? (stream.hd || stream.sd);
@@ -196,7 +198,7 @@ export class FrameExtractor {
     args.push(
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
-      "-q:v", String(jpegQuality),
+      "-q:v", String(effectiveQuality),
       "-an",
       /** 线程数：利用多核加速 HEVC 解码 + MJPEG 编码 */
       "-threads", "4",
