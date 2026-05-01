@@ -850,7 +850,9 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   const pulse = reduceMotion ? 0.8 : 0.5 + 0.5 * Math.sin(Date.now() / 500)
 
   ctx.save()
-  ctx.font = 'bold 12px monospace'
+  const FONT_LABEL = 'bold 12px monospace'
+  const FONT_SMALL = '11px sans-serif'
+  ctx.font = FONT_LABEL
   ctx.textBaseline = 'bottom'
 
   /** 获取外观匹配建议 */
@@ -958,7 +960,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       const suggest = suggestMap.get(tid)
       if (suggest) {
         const sugY = y > labelH * 2 + 4 ? labelY - labelH - 2 : y + h + 2
-        ctx.font = '11px sans-serif'
+        ctx.font = FONT_SMALL
         const sugTm = ctx.measureText(`≈ ${suggest}`)
         const sugW = sugTm.width + 8
         ctx.fillStyle = 'rgba(233, 30, 99, 0.85)'
@@ -967,13 +969,13 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
         ctx.fill()
         ctx.fillStyle = '#fff'
         ctx.fillText(`≈ ${suggest}`, x + 4, sugY - 3)
-        ctx.font = 'bold 12px monospace'
+        ctx.font = FONT_LABEL
       }
     }
 
     /** 悬停详情 tooltip */
     if (isHovered && tid != null) {
-      ctx.font = '11px sans-serif'
+      ctx.font = FONT_SMALL
       const lines: string[] = []
       lines.push(`${d.label} #${tid}`)
       if (customName) lines.push(`名称: ${customName}`)
@@ -1042,7 +1044,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
         }
       }
       ctx.textBaseline = 'bottom'
-      ctx.font = 'bold 12px monospace'
+      ctx.font = FONT_LABEL
     }
     if (d.velocity && (Math.abs(d.velocity.dx) > 0.005 || Math.abs(d.velocity.dy) > 0.005)) {
       const cx = x + w / 2
