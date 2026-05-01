@@ -448,6 +448,22 @@ const hasFrame = computed(() => props.online)
 /** 帧冻结检测：在线但超过 10 秒无新帧 */
 const frozen = ref(false)
 let frozenTimer: ReturnType<typeof setInterval> | null = null
+
+/** 画中画模式 */
+const isPip = ref(false)
+async function togglePip() {
+  const video = fmp4.videoRef.value
+  if (!video || !useMse.value) return
+  if (document.pictureInPictureElement) {
+    await document.exitPictureInPicture()
+    return
+  }
+  try {
+    await video.requestPictureInPicture()
+    isPip.value = true
+    video.addEventListener('leavepictureinpicture', () => { isPip.value = false }, { once: true })
+  } catch { /* 浏览器不支持或被阻止 */ }
+}
 function checkFrozen() {
   if (!props.online) { frozen.value = false; return }
   frozen.value = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
@@ -1725,6 +1741,7 @@ onUnmounted(() => {
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
       <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
+      <button v-if="online && useMse" :class="['pip-btn', { active: isPip }]" @click="togglePip" :title="t('camera.pip')">&#x1F4BB;</button>
       <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
       <PtzControl v-if="ptz && online" :camera-id="cameraId" />
       <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
@@ -2009,6 +2026,22 @@ onUnmounted(() => {
 .heatmap-btn:hover,
 .heatmap-btn.active {
   color: #ff6b6b;
+}
+
+.pip-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.pip-btn:hover,
+.pip-btn.active {
+  color: #74b9ff;
 }
 
 .recording-btn {

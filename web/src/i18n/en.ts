@@ -43,6 +43,7 @@ export default {
     lastSeenDays: 'Last seen {count}d ago',
     adjust: 'Adjust image',
     heatmap: 'Activity heatmap',
+    pip: 'Picture-in-Picture',
     brightness: 'Brightness',
     contrast: 'Contrast',
     saturation: 'Saturation',
