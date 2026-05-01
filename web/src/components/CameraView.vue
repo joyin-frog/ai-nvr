@@ -138,10 +138,11 @@ const resolutionText = computed(() => {
   return ''
 })
 
-/** 检测框叠加在画面上的样式 */
+/** 检测框叠加在画面上的样式（用 trackId 做 key 保持稳定） */
 const detectionBoxes = computed(() => {
   if (!sortedDetections.value.length) return []
   return sortedDetections.value.map(d => ({
+    key: d.trackId ?? `${d.label}-${Math.round(d.box.xmin * 100)}`,
     label: d.label,
     score: d.score,
     trackId: d.trackId,
@@ -385,16 +386,21 @@ onUnmounted(() => {
         </div>
 
         <!-- 检测框叠加层 -->
-        <div v-if="showBoxes && hasFrame && detectionBoxes.length > 0" class="detection-overlay">
+        <TransitionGroup
+          v-if="showBoxes && hasFrame && detectionBoxes.length > 0"
+          name="detect-box"
+          tag="div"
+          class="detection-overlay"
+        >
           <div
-            v-for="(box, i) in detectionBoxes"
-            :key="i"
+            v-for="box in detectionBoxes"
+            :key="box.key"
             class="detect-box"
             :style="box.style"
           >
             <span class="detect-label">{{ box.trackId ? '#' + box.trackId + ' ' : '' }}{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
           </div>
-        </div>
+        </TransitionGroup>
 
         <!-- 摄像头名称叠加 -->
         <div v-if="hasFrame" class="name-overlay">
@@ -668,6 +674,27 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* 检测框过渡动画 */
+.detect-box-enter-active {
+  transition: opacity 0.3s ease-out;
+}
+
+.detect-box-leave-active {
+  transition: opacity 0.8s ease-in;
+}
+
+.detect-box-enter-from {
+  opacity: 0;
+}
+
+.detect-box-leave-to {
+  opacity: 0;
+}
+
+.detect-box-move {
+  transition: transform 0.3s ease-out;
 }
 
 /* FPS 质量徽标 */
