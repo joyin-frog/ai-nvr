@@ -429,5 +429,9 @@ export default {
     history: '事件历史',
     noEvents: '暂无事件',
     delete: '删除',
+    secondsAgo: '{n}秒前',
+    minutesAgo: '{n}分钟前',
+    hoursAgo: '{n}小时前',
+    daysAgo: '{n}天前',
   },
 }

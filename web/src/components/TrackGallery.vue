@@ -197,10 +197,10 @@ function formatTime(ts: number): string {
 /** 格式化相对时间 */
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts
-  if (diff < 60000) return `${Math.floor(diff / 1000)}秒前`
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
-  return `${Math.floor(diff / 86400000)}天前`
+  if (diff < 60000) return t('tracks.secondsAgo', { n: Math.floor(diff / 1000) })
+  if (diff < 3600000) return t('tracks.minutesAgo', { n: Math.floor(diff / 60000) })
+  if (diff < 86400000) return t('tracks.hoursAgo', { n: Math.floor(diff / 3600000) })
+  return t('tracks.daysAgo', { n: Math.floor(diff / 86400000) })
 }
 
 /** 判断目标是否活跃（最近 30 秒内被检测到） */

@@ -427,5 +427,9 @@ export default {
     history: 'Event History',
     noEvents: 'No events',
     delete: 'Delete',
+    secondsAgo: '{n}s ago',
+    minutesAgo: '{n}m ago',
+    hoursAgo: '{n}h ago',
+    daysAgo: '{n}d ago',
   },
 }
