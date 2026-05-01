@@ -484,6 +484,34 @@ function onCameraFilterChange() {
   loadRecordings()
 }
 
+/** 录像列表键盘导航 */
+const focusedIndex = ref(-1)
+const recListEl = ref<HTMLDivElement | null>(null)
+
+function onRecListKeydown(e: KeyboardEvent) {
+  if (filteredRecordings.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    focusedIndex.value = Math.min(focusedIndex.value + 1, filteredRecordings.value.length - 1)
+    scrollToFocused()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    focusedIndex.value = Math.max(focusedIndex.value - 1, 0)
+    scrollToFocused()
+  } else if (e.key === 'Enter' && focusedIndex.value >= 0) {
+    e.preventDefault()
+    const rec = filteredRecordings.value[focusedIndex.value]
+    if (rec) play(rec)
+  }
+}
+
+function scrollToFocused() {
+  nextTick(() => {
+    const items = recListEl.value?.querySelectorAll('.recording-item')
+    items?.[focusedIndex.value]?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 /** 日期前后导航 */
 function shiftDate(delta: number) {
   if (!filterDate.value) {
@@ -1054,15 +1082,15 @@ defineExpose({ loadRecordings, playAtTime })
       @play="play"
     />
 
-    <div class="recordings-list">
+    <div ref="recListEl" class="recordings-list" tabindex="0" @keydown="onRecListKeydown">
       <div v-if="filteredRecordings.length === 0" class="empty">
         {{ loading ? t('app.loading') : t('recording.noRecordings') }}
       </div>
       <div
-        v-for="rec in filteredRecordings"
+        v-for="(rec, idx) in filteredRecordings"
         :key="rec.filename"
         :data-rec="rec.filename"
-        :class="['recording-item', { selected: selectedFiles.has(rec.filename), highlighted: highlightFilename === rec.filename }]"
+        :class="['recording-item', { selected: selectedFiles.has(rec.filename), highlighted: highlightFilename === rec.filename, focused: idx === focusedIndex }]"
         @click="multiSelectMode ? toggleFileSelect(rec.filename) : play(rec)"
         @mouseenter="onRecordingHover(rec)"
       >
@@ -1374,6 +1402,11 @@ defineExpose({ loadRecordings, playAtTime })
 @keyframes rec-highlight {
   0% { background: #4ECDC440; }
   100% { background: transparent; }
+}
+
+.recording-item.focused {
+  outline: 1px solid #4ECDC4;
+  outline-offset: -1px;
 }
 
 .rec-checkbox {
