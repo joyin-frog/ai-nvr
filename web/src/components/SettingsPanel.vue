@@ -89,6 +89,8 @@ interface RuntimeSettings {
     mode: string
     interval: number
     autoMatchThreshold: number
+    speedThreshold: number
+    loiterThreshold: number
   }
   recording: {
     mode: string
@@ -422,6 +424,16 @@ onMounted(() => {
           <span class="field-label">{{ t('settings.autoMatchThreshold', '自动匹配阈值') }}</span>
           <input type="number" v-model.number="settings.ai.autoMatchThreshold" step="0.05" min="0" max="0.5" class="input" />
           <span class="field-hint">0 = 禁用, 0.25 = 默认</span>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.speedThreshold', '速度告警阈值') }}</span>
+          <input type="number" v-model.number="settings.ai.speedThreshold" step="0.005" min="0" max="0.1" class="input" />
+          <span class="field-hint">0 = 禁用, 0.02 = 默认</span>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.loiterThreshold', '徘徊检测阈值(秒)') }}</span>
+          <input type="number" v-model.number="settings.ai.loiterThreshold" step="5" min="0" max="600" class="input" />
+          <span class="field-hint">0 = 禁用</span>
         </label>
         <label class="field">
           <span class="field-label">{{ t('settings.aiMode') }}</span>

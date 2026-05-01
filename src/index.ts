@@ -153,7 +153,7 @@ alertEngine.start();
 
 /** 行为分析器（区域进入/离开/停留/越线语义事件） */
 import { BehaviorAnalyzer } from "@/ai/behavior";
-const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage);
+const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage, runtimeConfig);
 behaviorAnalyzer.start();
 
 /** 用户偏好设置存储 */
@@ -197,7 +197,7 @@ const monitor = new SystemMonitor(eventBus);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage);
 
 /** 自动记录事件到 SQLite */
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */

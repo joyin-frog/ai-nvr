@@ -200,6 +200,8 @@ export class RuntimeConfig {
       if (a.mode === "motion" || a.mode === "continuous") this.settings.ai.mode = a.mode;
       if (typeof a.interval === "number") this.settings.ai.interval = a.interval;
       if (typeof a.autoMatchThreshold === "number") this.settings.ai.autoMatchThreshold = a.autoMatchThreshold;
+      if (typeof a.speedThreshold === "number") this.settings.ai.speedThreshold = a.speedThreshold;
+      if (typeof a.loiterThreshold === "number") this.settings.ai.loiterThreshold = a.loiterThreshold;
     }
 
     if (obj.recording && typeof obj.recording === "object") {

@@ -52,4 +52,8 @@ export interface AiConfig {
   importantLabels: string[];
   /** 自动匹配关联阈值（0-1，低于此值自动关联已命名目标，0 = 禁用自动匹配） */
   autoMatchThreshold: number;
+  /** 速度告警阈值（归一化坐标/帧，0 = 禁用速度告警，默认 0.02） */
+  speedThreshold: number;
+  /** 徘徊检测阈值（秒，目标在 ROI 内来回移动超过此时间触发，0 = 禁用） */
+  loiterThreshold: number;
 }

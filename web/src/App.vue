@@ -786,6 +786,14 @@ function setupEventListeners() {
     pushZoneNotification(payload.cameraId, { type: 'line-cross', name: customName || payload.label, zoneName: payload.lineName, timestamp: payload.timestamp, direction: payload.direction })
   })
 
+  client.on('track:loiter', (payload) => {
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
+    const durationSec = (payload.durationMs / 1000).toFixed(0)
+    eventPanel.value?.addEvent('track:loiter', payload.cameraId, `${displayName} 徘徊 ${payload.zoneName || '区域'} (${durationSec}s)`)
+    pushZoneNotification(payload.cameraId, { type: 'loiter', name: customName || payload.label, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.durationMs })
+  })
+
   client.on('track:match-suggest', (payload) => {
     const best = payload.matches[0]
     if (!best) return

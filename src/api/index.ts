@@ -70,7 +70,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:match-suggest"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:match-suggest"];
 
 /**
  * 启动 HTTP + WebSocket 服务

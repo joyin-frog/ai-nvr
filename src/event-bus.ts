@@ -214,6 +214,22 @@ export interface EventPayloads {
     }>;
   };
 
+  /** 追踪目标徘徊检测（目标在区域内来回移动超过阈值） */
+  "track:loiter": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+    trackName?: string;
+    /** 所在区域 ID（0 = 不在任何 ROI 区域内） */
+    zoneId: number;
+    zoneName: string;
+    /** 徘徊持续时间（ms） */
+    durationMs: number;
+    /** 位置包围盒面积（归一化） */
+    bboxArea: number;
+  };
+
   /** fMP4 初始化段（ftyp + moov） */
   "fmp4:init": {
     cameraId: string;

@@ -1,6 +1,7 @@
 import { type EventBus } from "@/event-bus";
 import { type RoiStorage } from "@/storage/roi";
 import { type CrossLineStorage } from "@/storage/cross-lines";
+import { type RuntimeConfig } from "@/runtime-config";
 
 /** 追踪目标在区域内的状态 */
 interface ZoneOccupancy {
@@ -25,6 +26,10 @@ interface TrackZoneState {
   prevCy?: number;
   /** 每条线段的穿越冷却时间（避免连续重复触发） */
   lineCrossCooldown: Map<number, number>;
+  /** 上次徘徊告警时间 */
+  lastLoiterAlertAt: number;
+  /** 徘徊追踪：最近 N 个位置点（用于判断来回移动） */
+  loiterPositions: Array<{ ts: number; cx: number; cy: number }>;
 }
 
 /** 停留事件触发间隔（毫秒） */
@@ -39,15 +44,22 @@ const SPEED_ALERT_INTERVAL_MS = 10000;
 /** 越线检测冷却时间（毫秒）— 同一目标对同一线段的触发间隔 */
 const LINE_CROSS_COOLDOWN_MS = 5000;
 
+/** 徘徊检测：保留的最近位置点数量 */
+const LOITER_POSITION_COUNT = 30;
+
+/** 徘徊告警冷却时间（毫秒） */
+const LOITER_ALERT_INTERVAL_MS = 30000;
+
 /**
  * 行为分析器
  * 监听 detect 事件，维护追踪目标的位置与 ROI 区域的关系
- * 产出语义事件：track:enter-zone / track:leave-zone / track:dwell / track:speed / track:line-cross
+ * 产出语义事件：track:enter-zone / track:leave-zone / track:dwell / track:speed / track:line-cross / track:loiter
  */
 export class BehaviorAnalyzer {
   private eventBus: EventBus;
   private roiStorage: RoiStorage;
   private crossLineStorage?: CrossLineStorage;
+  private runtimeConfig?: RuntimeConfig;
   /** cameraId → trackId → TrackZoneState */
   private states = new Map<string, Map<number, TrackZoneState>>();
   /** cameraId → 解析后的 ROI 多边形（带缓存） */
@@ -61,10 +73,11 @@ export class BehaviorAnalyzer {
   /** 定期清理过期状态 */
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(eventBus: EventBus, roiStorage: RoiStorage, crossLineStorage?: CrossLineStorage) {
+  constructor(eventBus: EventBus, roiStorage: RoiStorage, crossLineStorage?: CrossLineStorage, runtimeConfig?: RuntimeConfig) {
     this.eventBus = eventBus;
     this.roiStorage = roiStorage;
     this.crossLineStorage = crossLineStorage;
+    this.runtimeConfig = runtimeConfig;
   }
 
   /** 启动：订阅 detect 事件 */
@@ -232,11 +245,11 @@ export class BehaviorAnalyzer {
     }
 
     /** 速度告警：检测高速移动的目标 */
+    const speedThreshold = this.runtimeConfig?.get().ai.speedThreshold ?? 0.02;
     for (const det of detections) {
       if (det.trackId == null || !det.velocity) continue;
       const speed = Math.sqrt(det.velocity.dx * det.velocity.dx + det.velocity.dy * det.velocity.dy);
-      /** 速度阈值：归一化坐标/帧，0.02 约等于画面宽度 2%/帧，对 1080p 约 20px/帧 */
-      if (speed < 0.02) continue;
+      if (speed < speedThreshold || speedThreshold === 0) continue;
       const trackState = cameraStates.get(det.trackId);
       if (!trackState) continue;
       /** 冷却期检查 */
@@ -251,6 +264,83 @@ export class BehaviorAnalyzer {
         speed,
         velocity: det.velocity,
       });
+    }
+
+    /** 徘徊检测：目标在同一区域反复来回移动 */
+    const loiterThreshold = this.runtimeConfig?.get().ai.loiterThreshold ?? 0;
+    if (loiterThreshold > 0) {
+      for (const det of detections) {
+        if (det.trackId == null) continue;
+        const trackState = cameraStates.get(det.trackId);
+        if (!trackState) continue;
+        const cx = (det.box.xmin + det.box.xmax) / 2;
+        const cy = (det.box.ymin + det.box.ymax) / 2;
+
+        /** 记录位置 */
+        trackState.loiterPositions.push({ ts: timestamp, cx, cy });
+        if (trackState.loiterPositions.length > LOITER_POSITION_COUNT) {
+          trackState.loiterPositions.shift();
+        }
+
+        /** 冷却期检查 */
+        if (timestamp - trackState.lastLoiterAlertAt < LOITER_ALERT_INTERVAL_MS) continue;
+        /** 至少需要 10 个点才能判断徘徊 */
+        if (trackState.loiterPositions.length < 10) continue;
+
+        /** 判断徘徊：最近的位置点跨越的时间段内，目标在区域内来回移动 */
+        const loiterSec = loiterThreshold;
+        const cutoff = timestamp - loiterSec * 1000;
+        const recentPts = trackState.loiterPositions.filter(p => p.ts >= cutoff);
+        if (recentPts.length < 8) continue;
+
+        /** 计算位置覆盖面积（归一化包围盒面积）vs 实际移动距离 */
+        let minCx = Infinity, maxCx = -Infinity, minCy = Infinity, maxCy = -Infinity;
+        for (const p of recentPts) {
+          if (p.cx < minCx) minCx = p.cx;
+          if (p.cx > maxCx) maxCx = p.cx;
+          if (p.cy < minCy) minCy = p.cy;
+          if (p.cy > maxCy) maxCy = p.cy;
+        }
+        const bboxArea = (maxCx - minCx) * (maxCy - minCy);
+        /** 计算总移动距离 */
+        let totalDist = 0;
+        for (let i = 1; i < recentPts.length; i++) {
+          const dx = recentPts[i]!.cx - recentPts[i - 1]!.cx;
+          const dy = recentPts[i]!.cy - recentPts[i - 1]!.cy;
+          totalDist += Math.sqrt(dx * dx + dy * dy);
+        }
+
+        /**
+         * 徘徊判定：总移动距离远大于包围盒对角线（说明在来回移动）
+         * 且包围盒面积不等于 0（不是静止不动）
+         */
+        const diagLen = Math.sqrt((maxCx - minCx) ** 2 + (maxCy - minCy) ** 2);
+        const isMoving = totalDist > diagLen * 2 && bboxArea > 0.001 && bboxArea < 0.3;
+        if (!isMoving) continue;
+
+        /** 检查是否在 ROI 区域内 */
+        let zoneId = 0;
+        let zoneName = "";
+        if (zones.length > 0) {
+          const inZone = zones.find(z => this.pointInPolygon(cx, cy, z.points));
+          if (!inZone) continue;
+          zoneId = inZone.id;
+          zoneName = inZone.name;
+        }
+
+        trackState.lastLoiterAlertAt = timestamp;
+        this.eventBus.emit("track:loiter", {
+          cameraId,
+          timestamp,
+          trackId: det.trackId,
+          label: det.label,
+          trackName: trackState.trackName,
+          zoneId,
+          zoneName,
+          durationMs: timestamp - recentPts[0]!.ts,
+          bboxArea,
+        });
+      }
     }
   }
 
@@ -301,7 +391,7 @@ export class BehaviorAnalyzer {
   private getOrCreateTrackState(cameraStates: Map<number, TrackZoneState>, trackId: number, label: string): TrackZoneState {
     let state = cameraStates.get(trackId);
     if (!state) {
-      state = { zones: new Map(), label, lastSpeedAlertAt: 0, lineCrossCooldown: new Map() };
+      state = { zones: new Map(), label, lastSpeedAlertAt: 0, lineCrossCooldown: new Map(), lastLoiterAlertAt: 0, loiterPositions: [] };
       cameraStates.set(trackId, state);
     }
     return state;
