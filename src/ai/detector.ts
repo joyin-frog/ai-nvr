@@ -341,32 +341,19 @@ export class AiDetector {
       const changed = result.fingerprint !== prevFp;
       this.lastDetectFingerprint.set(cameraId, result.fingerprint);
 
-      /** 标注图片：只在检测结果变化时重新生成，减少 sharp 开销 */
-      const t3 = performance.now();
-      let annotatedImage: Buffer;
-      if (trackResult.detections.length > 0 && changed) {
-        annotatedImage = await this.annotator.annotate(jpeg, trackResult.detections, cameraId);
-        this.annotator.setLatest(cameraId, annotatedImage);
-      } else if (trackResult.detections.length === 0) {
-        annotatedImage = jpeg;
-        this.annotator.setLatest(cameraId, jpeg);
-      } else {
-        /** 检测未变化，复用上次的标注图 */
-        annotatedImage = this.annotator.getLatest(cameraId) ?? jpeg;
-      }
-      const annotateMs = performance.now() - t3;
+      /** 缓存最新帧和检测结果（用于按需生成标注图） */
+      this.annotator.setLatestFrame(cameraId, jpeg, trackResult.detections);
 
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
         detections: trackResult.detections,
-        annotatedImage,
         frameImage: jpeg,
         changed,
         inferMs: result.inferMs,
       });
       const trackIds = trackResult.detections.map(d => `${d.label}#${d.trackId}`).join(", ");
-      console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
+      console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
     }

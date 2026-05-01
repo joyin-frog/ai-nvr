@@ -12,7 +12,7 @@ export interface Detection {
 export interface EventMap {
   frame: { cameraId: string; timestamp: number; jpegData: ArrayBuffer }
   motion: { cameraId: string; ratio: number; timestamp: number }
-  detect: { cameraId: string; timestamp: number; detections: Detection[]; annotatedData?: ArrayBuffer; changed?: boolean; inferMs?: number }
+  detect: { cameraId: string; timestamp: number; detections: Detection[]; changed?: boolean; inferMs?: number }
   'camera:online': { cameraId: string }
   'camera:offline': { cameraId: string }
   'camera:lowfps': { cameraId: string; fps: number }
@@ -136,12 +136,6 @@ export class EventClient {
     if (event === 'frame' && buf.length > 4 + headerLen) {
       const jpegBytes = buf.slice(4 + headerLen)
       payload.jpegData = jpegBytes.buffer as ArrayBuffer
-    }
-
-    /** detect 事件：提取标注图二进制数据 */
-    if (event === 'detect' && buf.length > 4 + headerLen) {
-      const annotatedBytes = buf.slice(4 + headerLen)
-      payload.annotatedData = annotatedBytes.buffer as ArrayBuffer
     }
 
     this.dispatch(event, payload)

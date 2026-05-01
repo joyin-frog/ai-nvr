@@ -133,8 +133,6 @@ const sortedEvents = computed(() => {
 })
 
 const props = defineProps<{
-  /** 每个摄像头的最新检测帧快照 */
-  snapshots?: Record<string, string>
   /** 摄像头列表（用于筛选） */
   cameras?: Array<{ id: string; name: string }>
 }>()
@@ -500,9 +498,9 @@ defineExpose({ addEvent, loadHistory })
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ cameras?.find(c => c.id === e.cameraId)?.name ?? e.cameraId }}</span>
-          <div v-if="e.type === 'detect' && (e.snapshotUrl || snapshots?.[e.cameraId])" class="thumb-wrap">
+          <div v-if="e.type === 'detect' && e.snapshotUrl" class="thumb-wrap">
             <img
-              :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshots![e.cameraId]"
+              :src="authUrl(e.snapshotUrl)"
               class="event-thumb"
               alt=""
             />

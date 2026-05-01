@@ -155,8 +155,6 @@ const cameraInferMs = ref<Record<string, number>>({})
 const showBoxes = ref(true)
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
 const frameLatency = ref<Record<string, number>>({})
-/** 每个摄像头最近检测事件的帧快照 */
-const detectSnapshots = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
@@ -536,13 +534,6 @@ function setupEventListeners() {
       cameraInferMs.value[payload.cameraId] = payload.inferMs
       cameraInferMs.value = { ...cameraInferMs.value }
     }
-    /** 标注图快照 */
-    if (payload.annotatedData) {
-      const oldSnap = detectSnapshots.value[payload.cameraId]
-      if (oldSnap) URL.revokeObjectURL(oldSnap)
-      detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([payload.annotatedData], { type: 'image/jpeg' }))
-      detectSnapshots.value = { ...detectSnapshots.value }
-    }
     /** 0 目标或重复检测时只更新 UI 状态，不记录事件/通知 */
     if (payload.detections.length === 0 || payload.changed === false) return
 
@@ -651,10 +642,6 @@ onUnmounted(() => {
   stopPatrol()
   if (diskCheckTimer) clearInterval(diskCheckTimer)
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
-  /** 释放所有检测快照 blob URL */
-  for (const url of Object.values(detectSnapshots.value)) {
-    URL.revokeObjectURL(url)
-  }
 })
 </script>
 
@@ -794,7 +781,7 @@ onUnmounted(() => {
           >⚙ {{ t('tab.settings') }}</button>
         </div>
         <div class="sidebar-content">
-          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" :cameras="cameras" @play-recording="onPlayRecording" />
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" @play-recording="onPlayRecording" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"

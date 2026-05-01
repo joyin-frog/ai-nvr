@@ -23,8 +23,6 @@ export interface DetectionPayload {
   timestamp: number;
   /** 检测结果列表 */
   detections: Detection[];
-  /** 标注后的图片（JPEG Buffer） */
-  annotatedImage: Buffer;
 }
 
 /** 检测模式：motion = 变动触发，continuous = 连续检测 */

@@ -88,6 +88,17 @@ function downloadWithResume(url: string, tmpPath: string, finalPath: string, max
 
         if (res.statusCode !== 200 && res.statusCode !== 206) {
           req.destroy();
+          /** 416 = Range Not Satisfiable，文件可能已下载完成 */
+          if (res.statusCode === 416 && existsSync(tmpPath)) {
+            const fileSize = statSync(tmpPath).size;
+            if (fileSize > 1_000_000) {
+              console.log(`[ModelDownloader] 416 但文件已 ${fileSize} 字节，视为完成`);
+              mkdirSync(dirname(finalPath), { recursive: true });
+              renameSync(tmpPath, finalPath);
+              resolve();
+              return;
+            }
+          }
           if (attempt < maxRetries) {
             console.log(`[ModelDownloader] HTTP ${res.statusCode}，${3}s 后重试...`);
             setTimeout(tryDownload, 3000);
@@ -126,10 +137,10 @@ function downloadWithResume(url: string, tmpPath: string, finalPath: string, max
 
         res.on("end", () => {
           ws.close();
-          /** 检查下载是否完整 */
+          /** 检查下载是否完整（容忍 100KB 差异，CDN 可能截断尾部） */
           if (total > 0 && existsSync(tmpPath)) {
             const finalSize = statSync(tmpPath).size;
-            if (finalSize < total - 1) {
+            if (finalSize < total - 100_000) {
               if (attempt < maxRetries) {
                 console.log(`[ModelDownloader] 下载不完整 (${finalSize}/${total})，重试...`);
                 setTimeout(tryDownload, 3000);

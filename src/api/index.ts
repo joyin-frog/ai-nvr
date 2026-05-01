@@ -448,11 +448,11 @@ export function startServer(
         return Response.json({ ok: true });
       }
 
-      /** 获取标注后的图片 */
+      /** 获取标注后的图片（按需生成） */
       const annotatedMatch = url.pathname.match(/^\/api\/detection\/annotated\/(.+)$/);
       if (annotatedMatch) {
         const cameraId = annotatedMatch[1]!;
-        const image = annotator.getLatest(cameraId);
+        const image = await annotator.generateAnnotated(cameraId);
         if (!image) return new Response("No annotated image", { status: 404 });
         return new Response(image, {
           headers: { "Content-Type": "image/jpeg" },
@@ -1009,8 +1009,7 @@ export function startServer(
         if (now - lastSent < FRAME_THROTTLE_MS) return;
         lastFrameSent.set(cameraId, now);
       } else if (event === "detect") {
-        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer; changed?: boolean; inferMs?: number };
-        frameData = detectPayload.annotatedImage ?? null;
+        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; changed?: boolean; inferMs?: number };
         header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections, changed: detectPayload.changed, inferMs: detectPayload.inferMs };
       } else {
         header = { event, ...payload };

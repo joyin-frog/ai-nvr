@@ -22,21 +22,33 @@ const DEFAULT_COLOR = "#FF4444";
 /**
  * 图片标注器
  * 在 JPEG 图片上画检测框 + 标签文字
+ * 标注图按需生成（API 请求时才生成），不再随每帧检测自动生成
  */
 export class Annotator {
-  /** 最近一次标注后的图片（按摄像头 ID 存储） */
-  private latestAnnotated = new Map<string, Buffer>();
   /** 缓存的图片尺寸（按摄像头 ID） */
   private cachedDimensions = new Map<string, { width: number; height: number }>();
+  /** 缓存的最新帧（用于按需生成标注图） */
+  private latestFrames = new Map<string, { jpeg: Buffer; detections: Detection[] }>();
 
-  /** 保存标注后的图片 */
-  setLatest(cameraId: string, image: Buffer): void {
-    this.latestAnnotated.set(cameraId, image);
+  /** 缓存最新帧和检测结果 */
+  setLatestFrame(cameraId: string, jpeg: Buffer, detections: Detection[]): void {
+    this.latestFrames.set(cameraId, { jpeg, detections });
   }
 
-  /** 获取最近标注后的图片 */
+  /** 获取最近标注后的图片（按需生成） */
   getLatest(cameraId: string): Buffer | undefined {
-    return this.latestAnnotated.get(cameraId);
+    const cached = this.latestFrames.get(cameraId);
+    if (!cached || cached.detections.length === 0) return cached?.jpeg;
+    /** 同步返回 undefined，标注图通过 generateAnnotated 获取 */
+    return undefined;
+  }
+
+  /** 按需生成标注图 */
+  async generateAnnotated(cameraId: string): Promise<Buffer | undefined> {
+    const cached = this.latestFrames.get(cameraId);
+    if (!cached) return undefined;
+    if (cached.detections.length === 0) return cached.jpeg;
+    return this.annotate(cached.jpeg, cached.detections, cameraId);
   }
 
   /** 在图片上画检测框和标签 */
