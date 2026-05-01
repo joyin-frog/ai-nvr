@@ -98,6 +98,16 @@ export function startServer(
   storageFs: StorageFs,
   alertSnapshotStorage?: SnapshotStorage,
 ): void {
+  /** 登录速率限制：IP → { count, resetAt } */
+  const loginRateLimits = new Map<string, { count: number; resetAt: number }>();
+  /** 定期清理过期的速率限制记录 */
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, bucket] of loginRateLimits) {
+      if (now - bucket.resetAt > 120_000) loginRateLimits.delete(ip);
+    }
+  }, 120_000);
+
   /** fMP4 流连接管理 */
   const fmp4Unsubs = new WeakMap<WsClient, (() => void)[]>();
 
@@ -198,8 +208,23 @@ export function startServer(
       return Response.json({ enabled: !!authConfig.token });
     }
 
-    /** 登录端点：验证 token */
+    /** 登录端点：验证 token（带速率限制） */
     if (url.pathname === "/api/auth/login" && req.method === "POST") {
+        /** IP 速率限制：每分钟最多 10 次登录尝试 */
+        const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+          ?? req.headers.get("x-real-ip")
+          ?? "unknown";
+        const now = Date.now();
+        let bucket = loginRateLimits.get(clientIp);
+        if (!bucket || now - bucket.resetAt > 60_000) {
+          bucket = { count: 0, resetAt: now };
+          loginRateLimits.set(clientIp, bucket);
+        }
+        bucket.count++;
+        if (bucket.count > 10) {
+          return new Response("Too many login attempts", { status: 429 });
+        }
+
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const token = obj.token as string | undefined;
