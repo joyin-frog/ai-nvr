@@ -1,4 +1,5 @@
 import { type Detection } from "@/ai/types";
+import { type Fmp4InitSegment } from "@/camera/fmp4-stream";
 
 /** 事件载荷类型定义 */
 export interface EventPayloads {
@@ -109,12 +110,21 @@ export interface EventPayloads {
 
   /** 追踪目标标签更新（广播给其他客户端） */
   "track:label-updated": {
-    /** 摄像头 ID */
     cameraId: string;
-    /** 追踪 ID */
     trackId: number;
-    /** 自定义名称 */
     name: string;
+  };
+
+  /** fMP4 初始化段（ftyp + moov） */
+  "fmp4:init": {
+    cameraId: string;
+    segment: Fmp4InitSegment;
+  };
+
+  /** fMP4 媒体段（moof + mdat） */
+  "fmp4:segment": {
+    cameraId: string;
+    data: Buffer;
   };
 
 }
