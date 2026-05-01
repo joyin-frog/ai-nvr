@@ -689,15 +689,13 @@ function setupEventListeners() {
   })
 
   client.on('track:appeared', (payload) => {
-    const cam = getCamera(payload.cameraId)
-    const customName = trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:appeared', payload.cameraId, `${displayName} ${t('event.trackAppeared', '出现')}`)
   })
 
   client.on('track:disappeared', (payload) => {
-    const cam = getCamera(payload.cameraId)
-    const customName = trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:disappeared', payload.cameraId, `${displayName} ${t('event.trackDisappeared', '消失')}`)
   })

@@ -19,8 +19,8 @@ export interface EventMap {
   'camera:offline': { cameraId: string }
   'camera:lowfps': { cameraId: string; fps: number }
   alert: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }
-  'track:appeared': { cameraId: string; timestamp: number; trackId: number; label: string; score: number }
-  'track:disappeared': { cameraId: string; timestamp: number; trackId: number; label: string }
+  'track:appeared': { cameraId: string; timestamp: number; trackId: number; label: string; score: number; trackName?: string }
+  'track:disappeared': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string }
   'track:label-updated': { cameraId: string; trackId: number; name: string }
 }
 
