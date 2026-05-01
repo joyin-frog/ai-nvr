@@ -344,6 +344,20 @@ export class MotionRecorder {
         state.proc = null;
       }
       state.recording = false;
+
+      /** 连续录制模式下非正常退出：3 秒后自动重启（避免长时间无录像） */
+      if (code !== 0 && state.continuousTimer) {
+        /** 清理旧的分段定时器，避免与重启后的定时器冲突 */
+        clearTimeout(state.continuousTimer);
+        state.continuousTimer = null;
+        console.warn(`[Recorder] ${cameraId} ffmpeg 异常退出 (code=${code})，3 秒后重启连续录制`);
+        setTimeout(() => {
+          /** 确认仍然处于连续录制模式（用户未手动停止） */
+          if (!state.continuousTimer && !state.recording) {
+            this.startContinuous(cameraId);
+          }
+        }, 3000);
+      }
     });
 
     state.recording = true;
