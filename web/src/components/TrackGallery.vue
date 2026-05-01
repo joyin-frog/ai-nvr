@@ -63,6 +63,8 @@ const expandedTrackId = ref<number | null>(null)
 const trackEvents = ref<Record<number, Array<{ id: number; type: string; camera_id: string; timestamp: number; detail: string | null }>>>({})
 /** 事件历史加载中 */
 const loadingEvents = ref(false)
+/** trackId → 轨迹点（归一化坐标） */
+const trackTrajectories = ref<Record<number, Array<{ x: number; y: number }>>>({})
 
 /** 事件类型标签样式 */
 const EVENT_TYPE_STYLE: Record<string, { label: string; bg: string; color: string }> = {
@@ -216,13 +218,28 @@ async function loadTrackEvents(trackId: number) {
     return
   }
   expandedTrackId.value = trackId
-  if (trackEvents.value[trackId]) return
-  loadingEvents.value = true
-  const res = await authFetch(`/api/tracks/${trackId}/events?limit=20`)
-  if (res.ok) {
-    trackEvents.value = { ...trackEvents.value, [trackId]: await res.json() }
+  /** 并行加载事件历史和轨迹数据 */
+  const promises: Promise<void>[] = []
+  if (!trackEvents.value[trackId]) {
+    loadingEvents.value = true
+    promises.push(
+      authFetch(`/api/tracks/${trackId}/events?limit=20`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => { trackEvents.value = { ...trackEvents.value, [trackId]: data } })
+        .finally(() => { loadingEvents.value = false })
+    )
   }
-  loadingEvents.value = false
+  if (!trackTrajectories.value[trackId]) {
+    promises.push(
+      authFetch(`/api/tracks/trajectory/${trackId}`)
+        .then(res => res.ok ? res.json() : { points: [] })
+        .then((data: { points: Array<{ x: number; y: number }> }) => {
+          trackTrajectories.value = { ...trackTrajectories.value, [trackId]: data.points }
+        })
+        .catch(() => {})
+    )
+  }
+  await Promise.all(promises)
 }
 
 /** 格式化时间 */
@@ -243,6 +260,15 @@ function relativeTime(ts: number): string {
 function isTrackActive(track: TrackInfo): boolean {
   void viewTick.value
   return Date.now() - track.lastSeen < 30000
+}
+
+/** 生成轨迹 SVG polyline 的 points 属性 */
+function trailSvgPoints(trackId: number): string {
+  const pts = trackTrajectories.value[trackId]
+  if (!pts || pts.length < 2) return ''
+  const svgW = 200
+  const svgH = 100
+  return pts.map(p => `${(p.x * svgW).toFixed(1)},${(p.y * svgH).toFixed(1)}`).join(' ')
 }
 
 /** 所有出现过的标签 */
@@ -523,6 +549,14 @@ onUnmounted(() => {
               <button class="delete-confirm-btn" @click="deleteTrack(track.trackId)">{{ t('manage.confirm', '确认') }}</button>
               <button class="delete-cancel-btn" @click="confirmDelete = null">{{ t('manage.cancel', '取消') }}</button>
             </template>
+          </div>
+          <!-- 迷你轨迹图 -->
+          <div v-if="expandedTrackId === track.trackId && trailSvgPoints(track.trackId)" class="trail-mini">
+            <svg viewBox="0 0 200 100" class="trail-svg">
+              <rect width="200" height="100" fill="#0a0a1a" rx="3" />
+              <polyline :points="trailSvgPoints(track.trackId)" fill="none" :stroke="COLOR_MAP[track.dominantColor ?? ''] ?? '#4ECDC4'" stroke-width="1.5" stroke-linejoin="round" />
+              <circle v-if="trackTrajectories[track.trackId]?.length" :cx="(trackTrajectories[track.trackId].at(-1)!.x * 200).toFixed(1)" :cy="(trackTrajectories[track.trackId].at(-1)!.y * 100).toFixed(1)" r="3" fill="#fff" />
+            </svg>
           </div>
           <!-- 事件历史列表 -->
           <div v-if="expandedTrackId === track.trackId && trackEvents[track.trackId]" class="event-list">
@@ -1017,6 +1051,18 @@ onUnmounted(() => {
   padding: 2px 6px;
   font-size: 10px;
   cursor: pointer;
+}
+
+/* 迷你轨迹图 */
+.trail-mini {
+  margin-top: 6px;
+}
+
+.trail-svg {
+  width: 100%;
+  height: 80px;
+  display: block;
+  border-radius: 4px;
 }
 
 .event-list {
