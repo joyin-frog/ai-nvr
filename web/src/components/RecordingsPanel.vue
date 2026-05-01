@@ -419,6 +419,20 @@ const totalSize = computed(() => {
   return filteredRecordings.value.reduce((sum, r) => sum + r.size, 0)
 })
 
+/** 筛选后录像总时长（秒） */
+const totalRecDurationSec = computed(() => {
+  return filteredRecordings.value.reduce((sum, r) => sum + Math.max(0, (r.endTime - r.startTime) / 1000), 0)
+})
+
+/** 格式化时长 */
+function formatDuration(totalSec: number): string {
+  if (totalSec < 60) return `${Math.round(totalSec)}s`
+  if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m${Math.round(totalSec % 60)}s`
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  return `${h}h${m}m`
+}
+
 /** 格式化文件大小 */
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -884,7 +898,7 @@ defineExpose({ loadRecordings, playAtTime })
     </div>
 
     <div class="panel-header">
-      <span>{{ t('recording.title') }} <span v-if="filteredRecordings.length > 0" class="rec-summary">{{ filteredRecordings.length }} / {{ formatSize(totalSize) }}</span></span>
+      <span>{{ t('recording.title') }} <span v-if="filteredRecordings.length > 0" class="rec-summary">{{ filteredRecordings.length }} · {{ formatSize(totalSize) }} · {{ formatDuration(totalRecDurationSec) }}</span></span>
       <input type="date" v-model="filterDate" class="filter-date" :title="t('recording.filterDate')" />
       <select v-model="filterCamera" @change="onCameraFilterChange" class="filter-select">
         <option value="">{{ t("recording.allCameras") }}</option>
