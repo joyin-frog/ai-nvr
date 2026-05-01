@@ -300,6 +300,16 @@ function takePlayerScreenshot() {
   link.click()
 }
 
+/** 下载当前播放录像的原始 MP4 文件 */
+function downloadRecording(rec?: Recording) {
+  const target = rec ?? selectedRecording.value
+  if (!target) return
+  const link = document.createElement('a')
+  link.href = authUrl(`/api/recordings/${target.filename}`)
+  link.download = target.filename.split('/').pop() ?? 'recording.mp4'
+  link.click()
+}
+
 /** 播放器键盘快捷键 */
 function onPlayerKeydown(e: KeyboardEvent) {
   if (!selectedRecording.value || !playerRef.value) return
@@ -835,6 +845,7 @@ defineExpose({ loadRecordings, playAtTime })
           >&#9654;&#9654;</button>
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+          <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
         <video
@@ -983,6 +994,7 @@ defineExpose({ loadRecordings, playAtTime })
           <button :class="['rec-star', { starred: starredFiles.has(rec.filename) }]" @click.stop="toggleRecStar(rec.filename)" :title="t('recording.toggleStar')">
             {{ starredFiles.has(rec.filename) ? '★' : '☆' }}
           </button>
+          <button class="rec-download" @click.stop="downloadRecording(rec)" :title="t('recording.download')">&#x2B07;</button>
           <button class="rec-delete" @click.stop="deleteRecording(rec)" :title="t('recording.delete')">&#10005;</button>
         </div>
       </div>
@@ -1290,7 +1302,8 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .recording-item:hover .rec-star,
-.recording-item:hover .rec-delete {
+.recording-item:hover .rec-delete,
+.recording-item:hover .rec-download {
   opacity: 1;
 }
 
@@ -1300,6 +1313,22 @@ defineExpose({ loadRecordings, playAtTime })
 
 .rec-delete:hover {
   color: #e74c3c;
+}
+
+.rec-download {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.rec-download:hover {
+  color: #4ECDC4;
 }
 
 /* 播放器弹窗 */
@@ -1392,6 +1421,20 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .screenshot-btn:hover {
+  color: #4ECDC4;
+}
+
+.download-raw-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.download-raw-btn:hover {
   color: #4ECDC4;
 }
 
@@ -1875,7 +1918,8 @@ defineExpose({ loadRecordings, playAtTime })
   }
 
   .rec-star,
-  .rec-delete {
+  .rec-delete,
+  .rec-download {
     opacity: 0.6;
   }
 }
