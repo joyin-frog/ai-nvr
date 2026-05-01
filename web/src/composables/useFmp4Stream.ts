@@ -14,7 +14,7 @@ const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
 /** 保留当前播放位置前多少秒缓冲区 */
-const BUFFER_RETAIN_SECONDS = 2
+const BUFFER_RETAIN_SECONDS = 4
 
 /** 播放延迟超过此值（秒）时自动 seek 到最新位置 */
 const LIVE_CATCHUP_THRESHOLD = 0.8
@@ -375,8 +375,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (buffered.length > 0) {
       const currentTime = videoRef.value.currentTime
       const start = buffered.start(0)
-      /** 保留当前播放位置前 BUFFER_RETAIN_SECONDS 秒 */
-      if (currentTime - start > BUFFER_RETAIN_SECONDS) {
+      const behindDuration = currentTime - start
+      /** 只在已播放缓冲区超过 2 倍保留时长时才清理（减少 remove 调用频率） */
+      if (behindDuration > BUFFER_RETAIN_SECONDS * 2) {
         try {
           sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
         } catch { /* ignore */ }
