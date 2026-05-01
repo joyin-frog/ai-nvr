@@ -68,6 +68,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     /** 绑定 video 元素事件 */
     if (el) {
       bindVideoEvents(el)
+      /** 如果已有 MediaSource 但还没绑定到 video，现在绑定 */
+      if (mediaSource && !el.src) {
+        el.src = URL.createObjectURL(mediaSource)
+      }
     }
   }
 
