@@ -882,6 +882,7 @@ onUnmounted(() => {
   position: absolute;
   border: 2px solid #4ECDC4;
   border-radius: 3px;
+  transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out;
 }
 
 .detect-label {

@@ -153,6 +153,8 @@ const detectVersions = ref<Record<string, number>>({})
 const cameraInferMs = ref<Record<string, number>>({})
 /** 是否显示检测框（从 settings API 获取） */
 const showBoxes = ref(true)
+/** 每个摄像头的追踪标签映射：cameraId -> { trackId: name } */
+const trackLabelsMap = ref<Record<string, Record<number, string>>>({})
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
 const frameLatency = ref<Record<string, number>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
@@ -430,9 +432,28 @@ async function loadShowBoxes() {
   }
 }
 
+/** 加载所有摄像头的追踪标签 */
+async function loadTrackLabels() {
+  const map: Record<string, Record<number, string>> = {}
+  for (const cam of cameras.value) {
+    try {
+      const res = await authFetch(`/api/track-labels?cameraId=${cam.id}`)
+      if (res.ok) {
+        const labels = await res.json() as Array<{ trackId: number; name: string }>
+        const entries: Record<number, string> = {}
+        for (const l of labels) {
+          if (l.name) entries[l.trackId] = l.name
+        }
+        if (Object.keys(entries).length > 0) map[cam.id] = entries
+      }
+    } catch { /* ignore */ }
+  }
+  trackLabelsMap.value = map
+}
+
 /** 启动应用主逻辑 */
 function startApp() {
-  loadCameras()
+  loadCameras().then(() => loadTrackLabels())
   loadShowBoxes()
   setupEventListeners()
   client.connect()
@@ -740,9 +761,11 @@ onUnmounted(() => {
                 :recording="cam.recording"
                 :recording-start="cam.recordingStart"
                 :show-boxes="showBoxes"
+                :track-labels="trackLabelsMap[cam.id]"
                 :infer-ms="cameraInferMs[cam.id] ?? 0"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
+                @track-label-updated="loadTrackLabels"
               />
             </div>
           </template>
@@ -829,7 +852,7 @@ onUnmounted(() => {
         >⚙ {{ t('tab.settings') }}</button>
       </div>
       <div class="mobile-content">
-        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" :cameras="cameras" @play-recording="onPlayRecording" />
+        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" @play-recording="onPlayRecording" />
         <RecordingsPanel
           v-show="activeTab === 'recordings'"
           ref="recordingsPanel"
