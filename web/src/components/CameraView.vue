@@ -219,7 +219,11 @@ const resolutionText = computed(() => {
   return ''
 })
 
-/** 标签类别 → 颜色映射 */
+/**
+ * 基于 trackId 生成稳定唯一颜色
+ * 使用黄金角（~137.5°）分布色相，确保相邻 ID 差异最大化
+ * 无 trackId 时按 label 类别 fallback 到固定色
+ */
 const LABEL_COLORS: Record<string, string> = {
   person: '#FF6B6B',
   car: '#4ECDC4',
@@ -230,12 +234,15 @@ const LABEL_COLORS: Record<string, string> = {
   dog: '#F4A460',
   cat: '#FFB6C1',
 }
-/** 默认颜色 */
-const DEFAULT_COLOR = '#4ECDC4'
 
-/** 根据标签获取颜色 */
-function getColor(label: string): string {
-  return LABEL_COLORS[label] ?? DEFAULT_COLOR
+/** 根据 trackId + label 获取颜色（trackId 优先保证唯一性） */
+function getColor(label: string, trackId?: number): string {
+  if (trackId != null) {
+    /** 黄金角分布：每个 trackId 色相间隔 ~137.5°，饱和度 75%，亮度 60% */
+    const hue = (trackId * 137.508) % 360
+    return `hsl(${hue}, 75%, 60%)`
+  }
+  return LABEL_COLORS[label] ?? '#4ECDC4'
 }
 
 /** Canvas overlay 绘制检测框（替代 HTML TransitionGroup，减少 DOM 操作开销） */
@@ -248,7 +255,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   ctx.textBaseline = 'bottom'
 
   for (const d of sortedDetections.value) {
-    const color = getColor(d.label)
+    const color = getColor(d.label, d.trackId)
     const x = d.box.xmin * width
     const y = d.box.ymin * height
     const w = (d.box.xmax - d.box.xmin) * width
