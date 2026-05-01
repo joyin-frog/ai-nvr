@@ -29,6 +29,14 @@ const EVENT_MARKER_COLORS: Record<string, string> = {
   motion: '#f0ad4e',
   alert: '#d9534f',
   'camera:offline': '#d9534f',
+  'track:enter-zone': '#2ecc71',
+  'track:leave-zone': '#9b59b6',
+  'track:dwell': '#e67e22',
+  'track:loiter': '#8d6e63',
+  'track:speed': '#e91e63',
+  'track:line-cross': '#00bcd4',
+  'track:appeared': '#66bb6a',
+  'track:disappeared': '#ef5350',
 }
 
 const props = defineProps<{
@@ -192,9 +200,15 @@ const eventMarkers = computed(() => {
   }
 
   return groups.map(g => {
-    /** 取优先级最高的类型作为代表色：alert > detect > motion */
+    /** 取优先级最高的类型作为代表色：alert > track:* > detect > motion */
     let primaryType = 'motion'
     if (g.types.has('alert')) primaryType = 'alert'
+    else if (g.types.has('track:loiter')) primaryType = 'track:loiter'
+    else if (g.types.has('track:speed')) primaryType = 'track:speed'
+    else if (g.types.has('track:line-cross')) primaryType = 'track:line-cross'
+    else if (g.types.has('track:dwell')) primaryType = 'track:dwell'
+    else if (g.types.has('track:enter-zone')) primaryType = 'track:enter-zone'
+    else if (g.types.has('track:leave-zone')) primaryType = 'track:leave-zone'
     else if (g.types.has('detect')) primaryType = 'detect'
 
     return {

@@ -45,6 +45,7 @@ export class EventStorage {
   /** 查询事件列表 */
   query(options: {
     type?: string;
+    typeLike?: string;
     cameraId?: string;
     since?: number;
     until?: number;
@@ -64,7 +65,7 @@ export class EventStorage {
   }
 
   /** 统计事件数量 */
-  count(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean } = {}): number {
+  count(options: { type?: string; typeLike?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean } = {}): number {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = this.db.query(`SELECT COUNT(*) as count FROM events ${where}`).get(...params) as { count: number };
@@ -164,13 +165,17 @@ export class EventStorage {
   }
 
   /** 构建查询条件 */
-  private buildConditions(options: { type?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean }): { conditions: string[]; params: SQLQueryBindings[] } {
+  private buildConditions(options: { type?: string; typeLike?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean }): { conditions: string[]; params: SQLQueryBindings[] } {
     const conditions: string[] = [];
     const params: SQLQueryBindings[] = [];
 
     if (options.type) {
       conditions.push("type = ?");
       params.push(options.type);
+    }
+    if (options.typeLike) {
+      conditions.push("type LIKE ?");
+      params.push(options.typeLike);
     }
     if (options.cameraId) {
       conditions.push("camera_id = ?");

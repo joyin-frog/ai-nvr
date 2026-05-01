@@ -926,28 +926,67 @@ async function loadTimelineEvents() {
   }
   const allStart = recordings.value.reduce((min, r) => Math.min(min, r.startTime), Infinity)
   const allEnd = recordings.value.reduce((max, r) => Math.max(max, r.endTime), -Infinity)
-  const params = new URLSearchParams({
+
+  /** 并行加载 detect 事件和 track 行为事件 */
+  const detectParams = new URLSearchParams({
     type: 'detect',
     since: String(allStart),
     until: String(allEnd),
-    limit: '500',
+    limit: '300',
   })
-  if (filterCamera.value) params.set('cameraId', filterCamera.value)
+  const trackParams = new URLSearchParams({
+    typeLike: 'track:%',
+    since: String(allStart),
+    until: String(allEnd),
+    limit: '200',
+  })
+  if (filterCamera.value) {
+    detectParams.set('cameraId', filterCamera.value)
+    trackParams.set('cameraId', filterCamera.value)
+  }
+
   try {
-    const res = await authFetch(`/api/events/history?${params}`)
-    if (res.ok) {
-      const data = await res.json()
-      timelineEvents.value = (data.events as Array<{ timestamp: number; type: string; detail: string | null; camera_id: string }>).map(e => {
-        /** 从 detail JSON 提取检测标签 */
+    const [detectRes, trackRes] = await Promise.all([
+      authFetch(`/api/events/history?${detectParams}`),
+      authFetch(`/api/events/history?${trackParams}`),
+    ])
+
+    const allEvents: TimelineEvent[] = []
+
+    /** 解析 detect 事件 */
+    if (detectRes.ok) {
+      const data = await detectRes.json()
+      for (const e of data.events as Array<{ timestamp: number; type: string; detail: string | null; camera_id: string }>) {
         let label: string | undefined
         if (e.detail) {
-          const detail = JSON.parse(e.detail) as { detections?: Array<{ label: string }> }
+          const detail = JSON.parse(e.detail) as { detections?: Array<{ label: string; trackName?: string }> }
           if (detail.detections && detail.detections.length > 0) {
-            label = detail.detections.map(d => d.label).join(', ')
+            label = detail.detections.map(d => d.trackName || d.label).join(', ')
           }
         }
-        return { timestamp: e.timestamp, type: e.type, label, cameraId: e.camera_id }
-      })
+        allEvents.push({ timestamp: e.timestamp, type: e.type, label, cameraId: e.camera_id })
+      }
+    }
+
+    /** 解析 track 行为事件（enter-zone/leave-zone/dwell/loiter/speed/line-cross） */
+    if (trackRes.ok) {
+      const data = await trackRes.json()
+      for (const e of data.events as Array<{ timestamp: number; type: string; detail: string | null; camera_id: string }>) {
+        let label: string | undefined
+        if (e.detail) {
+          const detail = JSON.parse(e.detail) as { trackName?: string; label?: string; zoneName?: string; lineName?: string }
+          const parts: string[] = []
+          if (detail.trackName) parts.push(detail.trackName)
+          else if (detail.label) parts.push(detail.label)
+          if (detail.zoneName) parts.push(detail.zoneName)
+          if (detail.lineName) parts.push(detail.lineName)
+          label = parts.join(' → ') || undefined
+        }
+        allEvents.push({ timestamp: e.timestamp, type: e.type, label, cameraId: e.camera_id })
+      }
+    }
+
+    timelineEvents.value = allEvents
     }
   } catch {
     timelineEvents.value = []

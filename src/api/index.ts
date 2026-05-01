@@ -389,6 +389,7 @@ export function startServer(
       if (url.pathname === "/api/events/history") {
         const queryOpts = {
           type: url.searchParams.get("type") ?? undefined,
+          typeLike: url.searchParams.get("typeLike") ?? undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
@@ -400,6 +401,7 @@ export function startServer(
         const rawEvents = eventStorage.query(queryOpts);
         const total = eventStorage.count({
           type: queryOpts.type,
+          typeLike: queryOpts.typeLike,
           cameraId: queryOpts.cameraId,
           since: queryOpts.since,
           until: queryOpts.until,
