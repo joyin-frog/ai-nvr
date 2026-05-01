@@ -58,33 +58,40 @@ export function useCanvasRenderer() {
     if (!loopActive) return
     /** 在渲染前调用帧 poll 回调（消费 ws-frame-cache） */
     if (framePollFn) framePollFn()
-    if (pendingBitmap && ctx && canvasRef.value) {
-      const bitmap = pendingBitmap
-      pendingBitmap = null
 
-      /** 分辨率变化时调整 Canvas 尺寸 */
-      if (bitmap.width !== lastWidth || bitmap.height !== lastHeight) {
-        canvasRef.value.width = bitmap.width
-        canvasRef.value.height = bitmap.height
-        lastWidth = bitmap.width
-        lastHeight = bitmap.height
-      }
+    if (pendingBitmap) {
+      /** 页面不可见时跳过渲染，释放 bitmap 节省 GPU 内存 */
+      if (document.hidden) {
+        pendingBitmap.close()
+        pendingBitmap = null
+      } else if (ctx && canvasRef.value) {
+        const bitmap = pendingBitmap
+        pendingBitmap = null
 
-      ctx.drawImage(bitmap, 0, 0)
-      bitmap.close()
+        /** 分辨率变化时调整 Canvas 尺寸 */
+        if (bitmap.width !== lastWidth || bitmap.height !== lastHeight) {
+          canvasRef.value.width = bitmap.width
+          canvasRef.value.height = bitmap.height
+          lastWidth = bitmap.width
+          lastHeight = bitmap.height
+        }
 
-      /** 渲染帧率统计 */
-      renderCount++
-      const now = performance.now()
-      if (now - renderFpsStart >= 1000) {
-        renderFps = renderCount * 1000 / (now - renderFpsStart)
-        renderCount = 0
-        renderFpsStart = now
-      }
+        ctx.drawImage(bitmap, 0, 0)
+        bitmap.close()
 
-      /** 绘制叠加层（检测框等） */
-      if (overlayFn) {
-        overlayFn(ctx, lastWidth, lastHeight)
+        /** 渲染帧率统计 */
+        renderCount++
+        const now = performance.now()
+        if (now - renderFpsStart >= 1000) {
+          renderFps = renderCount * 1000 / (now - renderFpsStart)
+          renderCount = 0
+          renderFpsStart = now
+        }
+
+        /** 绘制叠加层（检测框等） */
+        if (overlayFn) {
+          overlayFn(ctx, lastWidth, lastHeight)
+        }
       }
     }
     rafId = requestAnimationFrame(renderLoop)

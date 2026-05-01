@@ -91,6 +91,8 @@ function startOverlayLoop() {
   if (overlayRafId) return
   const draw = () => {
     overlayRafId = requestAnimationFrame(draw)
+    /** 页面不可见时跳过 overlay 绘制 */
+    if (document.hidden) return
     const canvas = overlayCanvas.value
     const video = fmp4.videoRef.value
     if (!canvas || !video) return
