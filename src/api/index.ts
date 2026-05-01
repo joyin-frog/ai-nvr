@@ -1240,6 +1240,11 @@ export function startServer(
         return Response.json(all.slice(0, limit));
       }
 
+      /** 未命名目标的 dHash 匹配建议 */
+      if (url.pathname === "/api/tracks/suggestions" && req.method === "GET") {
+        return Response.json(trackStorage.getSuggestions());
+      }
+
       /** 更新追踪目标自定义名称 */
       if (url.pathname.startsWith("/api/tracks/") && req.method === "PATCH") {
         const trackId = parseInt(url.pathname.split("/").pop() ?? "");

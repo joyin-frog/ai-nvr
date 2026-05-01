@@ -191,6 +191,41 @@ export class TrackStorage {
     return this.tracks.get(trackId);
   }
 
+  /**
+   * 批量获取未命名目标的匹配建议
+   * 对每个未命名且有 dhash 的目标，查找同标签已命名目标中最相似的
+   */
+  getSuggestions(): Array<{ trackId: number; label: string; suggestedName: string; distance: number }> {
+    /** 收集所有已命名目标（有 dhash） */
+    const named: Array<{ trackId: number; label: string; customName: string; dhash: string }> = [];
+    for (const r of this.tracks.values()) {
+      if (r.customName && r.dhash) {
+        named.push({ trackId: r.trackId, label: r.label, customName: r.customName, dhash: r.dhash });
+      }
+    }
+    if (named.length === 0) return [];
+
+    const results: Array<{ trackId: number; label: string; suggestedName: string; distance: number }> = [];
+    for (const r of this.tracks.values()) {
+      if (r.customName || !r.dhash) continue;
+      let bestDist = Infinity;
+      let bestName = "";
+      for (const n of named) {
+        if (n.label !== r.label) continue;
+        const dist = TrackStorage.hammingDistance(r.dhash, n.dhash);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestName = n.customName;
+        }
+      }
+      /** 汉明距离 <= 15（约 23% 差异）才返回 */
+      if (bestName && bestDist <= 15) {
+        results.push({ trackId: r.trackId, label: r.label, suggestedName: bestName, distance: bestDist });
+      }
+    }
+    return results;
+  }
+
   /** 获取单个追踪目标 */
   getTrack(trackId: number): TrackInfo | undefined {
     const r = this.tracks.get(trackId);

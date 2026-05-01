@@ -21,6 +21,8 @@ interface TrackInfo {
 
 const tracks = ref<TrackInfo[]>([])
 const loading = ref(false)
+/** dHash 匹配建议：trackId → { name, distance } */
+const suggestions = ref<Map<number, { name: string; distance: number }>>(new Map())
 /** 强制视图更新的 tick（用于活跃状态刷新） */
 const viewTick = ref(0)
 /** 正在编辑名称的 trackId */
@@ -52,6 +54,16 @@ async function loadTracks() {
   const res = await authFetch('/api/tracks')
   if (res.ok) {
     tracks.value = await res.json()
+  }
+  /** 加载 dHash 匹配建议 */
+  const sugRes = await authFetch('/api/tracks/suggestions')
+  if (sugRes.ok) {
+    const data = await sugRes.json() as Array<{ trackId: number; suggestedName: string; distance: number }>
+    const map = new Map<number, { name: string; distance: number }>()
+    for (const s of data) {
+      map.set(s.trackId, { name: s.suggestedName, distance: s.distance })
+    }
+    suggestions.value = map
   }
   loading.value = false
 }
@@ -88,6 +100,13 @@ const mergeConfirm = ref<{ sourceId: number; targetId: number; name: string } | 
 /** 查找使用指定名称的其他目标 */
 function findTrackByName(name: string, excludeId: number): TrackInfo | undefined {
   return tracks.value.find(t => t.customName === name && t.trackId !== excludeId)
+}
+
+/** 一键应用 dHash 匹配建议 */
+async function applySuggestion(trackId: number) {
+  const sug = suggestions.value.get(trackId)
+  if (!sug) return
+  await doSaveName(trackId, sug.name)
 }
 
 /** 保存名称 */
@@ -327,6 +346,15 @@ onUnmounted(() => {
                 {{ track.customName || track.label }}
               </span>
               <span v-if="track.customName" class="track-original-label">{{ track.label }}</span>
+              <!-- dHash 匹配建议：一键应用 -->
+              <button
+                v-if="!track.customName && suggestions.get(track.trackId)"
+                class="suggest-btn"
+                @click.stop="applySuggestion(track.trackId)"
+                :title="t('tracks.applySuggestion', '点击应用建议名称')"
+              >
+                ≈ {{ suggestions.get(track.trackId)!.name }} ({{ ((64 - suggestions.get(track.trackId)!.distance) / 64 * 100).toFixed(0) }}%)
+              </button>
             </template>
           </div>
           <div class="track-meta">
@@ -549,6 +577,22 @@ onUnmounted(() => {
 .track-original-label {
   color: #666;
   font-size: 10px;
+}
+
+.suggest-btn {
+  display: inline-block;
+  background: rgba(156, 39, 176, 0.2);
+  border: 1px solid rgba(156, 39, 176, 0.4);
+  border-radius: 3px;
+  color: #CE93D8;
+  font-size: 10px;
+  padding: 1px 5px;
+  cursor: pointer;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.suggest-btn:hover {
+  background: rgba(156, 39, 176, 0.35);
 }
 
 .name-input {
