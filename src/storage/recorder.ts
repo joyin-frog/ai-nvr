@@ -147,6 +147,29 @@ export class MotionRecorder {
     }
   }
 
+  /** 根据配置返回 ffmpeg 编码器参数 */
+  private getEncoderArgs(): string[] {
+    const encoder = this.runtimeConfig.get().recording.encoder;
+    switch (encoder) {
+      case "h264_v4l2m2m":
+        return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p"];
+      case "h264_vaapi":
+        return [
+          "-vaapi_device", "/dev/dri/renderD128",
+          "-c:v", "h264_vaapi",
+          "-vf", "format=nv12,hwupload",
+          "-qp", "23",
+        ];
+      case "h264_nvenc":
+        return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-cq", "23"];
+      case "libx264":
+        return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"];
+      default:
+        /** auto：尝试硬件加速，失败回退 libx264 */
+        return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"];
+    }
+  }
+
   /** 录像帧写入节流间隔（~15fps） */
   private static readonly WRITE_THROTTLE_MS = 67;
 
@@ -316,16 +339,14 @@ export class MotionRecorder {
     }
 
     /** ffmpeg 从 stdin 读取 JPEG 帧，编码为 MP4 */
+    const encoderConfig = this.getEncoderArgs();
     const args = [
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
       "-i", "pipe:0",
       ...(filterParts.length > 0 ? ["-vf", filterParts.join(",")] : []),
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-crf", "23",
+      ...encoderConfig,
       "-r", "15",
-      "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       "-an",
       "-y",

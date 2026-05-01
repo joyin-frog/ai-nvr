@@ -97,6 +97,8 @@ export interface RuntimeSettings {
     retentionDays: number;
     /** 持续录制分段时长（秒） */
     segmentDuration: number;
+    /** 编码器：auto / libx264 / h264_v4l2m2m / h264_vaapi / h264_nvenc */
+    encoder: string;
     /** 水印配置 */
     watermark: WatermarkConfig;
   };
@@ -134,6 +136,7 @@ export class RuntimeConfig {
         postMotionDuration: 5000,
         retentionDays: 7,
         segmentDuration: 300,
+        encoder: "auto",
         watermark: {
           enabled: true,
           namePosition: "top-left",
@@ -202,6 +205,7 @@ export class RuntimeConfig {
       if (typeof r.postMotionDuration === "number") this.settings.recording.postMotionDuration = r.postMotionDuration;
       if (typeof r.retentionDays === "number") this.settings.recording.retentionDays = r.retentionDays;
       if (typeof r.segmentDuration === "number") this.settings.recording.segmentDuration = r.segmentDuration;
+      if (typeof r.encoder === "string") this.settings.recording.encoder = r.encoder;
       if (r.watermark && typeof r.watermark === "object") {
         const wm = r.watermark as Record<string, unknown>;
         if (typeof wm.enabled === "boolean") this.settings.recording.watermark.enabled = wm.enabled;
