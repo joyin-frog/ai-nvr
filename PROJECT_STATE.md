@@ -7,8 +7,9 @@
 - **后端**: Bun + TypeScript，`Bun.serve()` 提供 HTTP + WebSocket
 - **前端**: Vue 3 + Vite + TypeScript
 - **视频处理**: ffmpeg 子进程提取 MJPEG 帧 + 录像编码
-- **图像处理**: sharp（帧压缩/灰度转换/WebP转换）
-- **AI 检测**: @huggingface/transformers（DETR 目标检测模型）
+- **图像处理**: sharp（标注图合成）
+- **AI 检测**: @huggingface/transformers（RF-DETR 目标检测模型）+ Worker 线程推理
+- **目标追踪**: ByteTrack（IoU 匹配，跨帧稳定 ID）
 - **配置**: YAML（nvr_config.yml）
 - **存储**: bun:sqlite（事件持久化）、文件系统（录像存储）
 - **通信**: EventBus（类型安全事件总线）+ WebSocket（实时推送）
@@ -16,18 +17,23 @@
 ## 核心架构
 
 ```
-RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
-                                           ↓
-                                    ┌──────────────┐
-                                    │              │
-                              MotionDetector   MotionRecorder
-                                    ↓              ↓
-                              EventBus("motion")  MP4 录像文件
-                                    ↓
-                              AiDetector → EventBus("detect")
-                                    ↓
-                              Annotator（标注图片）
-                                           ↓
+RTSP → ffmpeg(-fflags nobuffer) → JpegFrameSplitter → EventBus("frame")
+                                                               ↓
+                                                    ┌──────────┼──────────┐
+                                                    │          │          │
+                                              MJPEG Stream  MotionDetector  AI Worker
+                                              (HTTP推送)    (sharp灰度)     (独立线程)
+                                                    │          ↓          │
+                                              浏览器<img>  EventBus     ONNX推理
+                                                               ↓          ↓
+                                                         MotionRecorder  ObjectTracker
+                                                         (帧输入录像)    (ByteTrack)
+                                                               ↓          ↓
+                                                         MP4 录像文件  EventBus("detect")
+                                                                        ↓
+                                                                  Annotator（标注图）
+                                                                        ↓
+                                                                 HTTP API + WebSocket
                                     HTTP API + WebSocket Server
                                     （帧通过 WS 二进制协议推送）
                                            ↓
