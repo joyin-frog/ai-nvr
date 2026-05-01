@@ -43,6 +43,8 @@ const filterLabel = ref('')
 const filterCamera = ref('')
 /** 仅显示未命名 */
 const filterUnnamed = ref(false)
+/** 主色调筛选 */
+const filterColor = ref('')
 /** 名称/标签搜索 */
 const searchText = ref('')
 /** 展开事件历史的 trackId */
@@ -232,11 +234,19 @@ const allCameras = computed(() => {
   return [...set].sort()
 })
 
+/** 所有出现过的主色调 */
+const allColors = computed(() => {
+  const set = new Set<string>()
+  for (const t of tracks.value) if (t.dominantColor) set.add(t.dominantColor)
+  return [...set].sort()
+})
+
 /** 按标签 + 摄像头 + 搜索 + 未命名筛选后的列表 */
 const filteredTracks = computed(() => {
   let list = tracks.value
   if (filterLabel.value) list = list.filter(t => t.label === filterLabel.value)
   if (filterCamera.value) list = list.filter(t => t.cameraIds.includes(filterCamera.value))
+  if (filterColor.value) list = list.filter(t => t.dominantColor === filterColor.value)
   if (filterUnnamed.value) list = list.filter(t => !t.customName)
   if (searchText.value) {
     const q = searchText.value.toLowerCase()
@@ -291,6 +301,16 @@ onUnmounted(() => {
         <option value="">{{ t('tracks.all') }}</option>
         <option v-for="cam in allCameras" :key="cam" :value="cam">{{ cam }}</option>
       </select>
+      <div v-if="allColors.length > 1" class="color-filter-group">
+        <button
+          v-for="color in allColors" :key="color"
+          class="color-filter-dot"
+          :class="{ active: filterColor === color }"
+          :style="{ background: COLOR_MAP[color] ?? '#666' }"
+          :title="color"
+          @click="filterColor = filterColor === color ? '' : color"
+        ></button>
+      </div>
       <button
         v-if="unnamedCount > 0"
         class="unnamed-filter-btn"
@@ -672,6 +692,32 @@ onUnmounted(() => {
   border-radius: 50%;
   flex-shrink: 0;
   vertical-align: middle;
+}
+
+.color-filter-group {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.color-filter-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+  padding: 0;
+}
+
+.color-filter-dot:hover {
+  transform: scale(1.2);
+}
+
+.color-filter-dot.active {
+  border-color: #fff;
+  transform: scale(1.2);
 }
 .track-count { color: #aaa; }
 .track-time { color: #666; }
