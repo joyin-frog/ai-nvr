@@ -40,3 +40,50 @@ export function getInferMs(cameraId: string): number {
 export function getDetectVersion(cameraId: string): number {
   return versions.get(cameraId) ?? 0
 }
+
+/**
+ * 区域事件通知缓存
+ * 行为事件（进入/离开区域）到达时存入，CameraView overlay 显示浮动通知
+ */
+
+export interface ZoneNotification {
+  /** 事件类型 */
+  type: 'enter' | 'leave' | 'dwell'
+  /** 目标名称（自定义名或标签） */
+  name: string
+  /** 区域名称 */
+  zoneName: string
+  /** 事件时间戳 */
+  timestamp: number
+  /** 停留时长（ms，仅 dwell） */
+  dwellMs?: number
+}
+
+/** 通知显示时长（ms） */
+const NOTIFICATION_TTL = 3000
+
+/** 每个摄像头的通知队列 */
+const zoneNotifications = new Map<string, ZoneNotification[]>()
+
+/** 添加区域通知 */
+export function pushZoneNotification(cameraId: string, notification: ZoneNotification): void {
+  let queue = zoneNotifications.get(cameraId)
+  if (!queue) {
+    queue = []
+    zoneNotifications.set(cameraId, queue)
+  }
+  queue.push(notification)
+  /** 限制队列长度 */
+  if (queue.length > 5) queue.shift()
+}
+
+/** 获取并清理过期的区域通知 */
+export function takeZoneNotifications(cameraId: string): ZoneNotification[] {
+  const queue = zoneNotifications.get(cameraId)
+  if (!queue || queue.length === 0) return []
+  const now = Date.now()
+  /** 过滤掉过期通知 */
+  const active = queue.filter(n => now - n.timestamp < NOTIFICATION_TTL)
+  zoneNotifications.set(cameraId, active)
+  return active
+}

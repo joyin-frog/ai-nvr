@@ -7,7 +7,7 @@ import { useCanvasRenderer } from '../composables/useCanvasRenderer'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
 import { useMjpegStream } from '../composables/useMjpegStream'
 import { takeFrame } from '../services/ws-frame-cache'
-import { takeDetections, getInferMs } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 
@@ -660,6 +660,43 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       }
     }
     ctx.setLineDash([])
+  }
+
+  /** 绘制区域事件浮动通知（渐隐效果） */
+  const notifications = takeZoneNotifications(props.cameraId)
+  if (notifications.length > 0) {
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const now = Date.now()
+    for (let i = 0; i < notifications.length; i++) {
+      const n = notifications[i]!
+      const age = now - n.timestamp
+      const alpha = Math.max(0, 1 - age / 3000)
+      if (alpha <= 0) continue
+      /** 通知从画面上方 1/4 处开始，每个通知偏移 24px */
+      const nx = width / 2
+      const ny = height * 0.25 + i * 24
+      /** 通知文字 */
+      const arrow = n.type === 'enter' ? '→' : n.type === 'leave' ? '←' : '⏳'
+      const dwellText = n.dwellMs ? ` ${(n.dwellMs / 1000).toFixed(0)}s` : ''
+      const text = `${arrow} ${n.name} ${n.zoneName}${dwellText}`
+      /** 背景 */
+      ctx.font = 'bold 12px sans-serif'
+      const tm = ctx.measureText(text)
+      const pad = 6
+      ctx.globalAlpha = alpha * 0.85
+      ctx.fillStyle = n.type === 'enter' ? 'rgba(0, 150, 136, 0.9)' : n.type === 'leave' ? 'rgba(156, 39, 176, 0.9)' : 'rgba(255, 152, 0, 0.9)'
+      ctx.beginPath()
+      ctx.roundRect(nx - tm.width / 2 - pad, ny - 10, tm.width + pad * 2, 20, 4)
+      ctx.fill()
+      /** 文字 */
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = '#fff'
+      ctx.fillText(text, nx, ny)
+      ctx.globalAlpha = 1
+    }
+    ctx.textAlign = 'start'
+    ctx.textBaseline = 'bottom'
   }
 
   ctx.restore()

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame } from './services/ws-frame-cache'
-import { putDetections } from './services/ws-detect-cache'
+import { putDetections, pushZoneNotification } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -697,6 +697,7 @@ function setupEventListeners() {
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:enter-zone', payload.cameraId, `${displayName} → ${payload.zoneName}`)
+    pushZoneNotification(payload.cameraId, { type: 'enter', name: customName || payload.label, zoneName: payload.zoneName, timestamp: payload.timestamp })
   })
 
   client.on('track:leave-zone', (payload) => {
@@ -704,6 +705,7 @@ function setupEventListeners() {
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     const dwellSec = (payload.dwellMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:leave-zone', payload.cameraId, `${displayName} ← ${payload.zoneName} (${dwellSec}s)`)
+    pushZoneNotification(payload.cameraId, { type: 'leave', name: customName || payload.label, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
   })
 
   client.on('track:dwell', (payload) => {
@@ -711,6 +713,7 @@ function setupEventListeners() {
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     const dwellSec = (payload.dwellMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:dwell', payload.cameraId, `${displayName} 在 ${payload.zoneName} 停留 ${dwellSec}s`)
+    pushZoneNotification(payload.cameraId, { type: 'dwell', name: customName || payload.label, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
   })
 
   /** 其他客户端更新了追踪标签 → 实时同步 */
