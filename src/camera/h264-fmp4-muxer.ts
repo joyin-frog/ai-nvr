@@ -70,8 +70,14 @@ class VideoToFmp4Muxer {
   private frameCount = 0;
   private frameCountStart = Date.now();
   private currentFps = 0;
-  /** 帧持续时间（90kHz），默认 30fps = 3000 ticks/frame */
+  /** 帧持续时间（90kHz），动态计算 */
   private frameDuration = 3000;
+  /** 上一帧的 wall-clock 时间（用于动态计算帧间隔） */
+  private lastFrameWallTime = 0;
+  /** 帧间隔平滑窗口（最近 N 帧的平均间隔） */
+  private frameIntervals: number[] = [];
+  /** 平滑窗口大小 */
+  private static readonly FPS_WINDOW = 30;
   /** 当前 segment 中累积的帧 */
   private segmentFrames: Buffer[] = [];
   /** 当前 segment 的起始 DTS */
@@ -119,6 +125,9 @@ class VideoToFmp4Muxer {
     this.frameCount = 0;
     this.frameCountStart = Date.now();
     this.currentFps = 0;
+    this.lastFrameWallTime = 0;
+    this.frameIntervals = [];
+    this.frameDuration = 3000;
   }
 
   /** 提取 NAL 单元（Annex B 起始码搜索，H.264 和 HEVC 通用） */
@@ -323,6 +332,22 @@ class VideoToFmp4Muxer {
       this.segmentStartDts = this.nextDts;
     }
 
+    /** 动态帧持续时间：基于 wall-clock 帧间隔平滑计算 */
+    const now = performance.now();
+    if (this.lastFrameWallTime > 0) {
+      const interval = now - this.lastFrameWallTime;
+      if (interval > 0 && interval < 5000) {
+        this.frameIntervals.push(interval);
+        if (this.frameIntervals.length > VideoToFmp4Muxer.FPS_WINDOW) {
+          this.frameIntervals.shift();
+        }
+        /** 计算平均帧间隔（ms），转为 90kHz ticks */
+        const avgInterval = this.frameIntervals.reduce((a, b) => a + b, 0) / this.frameIntervals.length;
+        this.frameDuration = Math.round(avgInterval * 90);
+      }
+    }
+    this.lastFrameWallTime = now;
+
     this.segmentFrames.push(frameData);
     this.segmentFrameSizes.push(frameSize);
     this.segmentFrameFlags.push(isIdr);
@@ -336,11 +361,11 @@ class VideoToFmp4Muxer {
 
     /** FPS 统计 */
     this.frameCount++;
-    const now = Date.now();
-    if (now - this.frameCountStart >= 5000) {
-      this.currentFps = this.frameCount * 1000 / (now - this.frameCountStart);
+    const fpsNow = Date.now();
+    if (fpsNow - this.frameCountStart >= 5000) {
+      this.currentFps = this.frameCount * 1000 / (fpsNow - this.frameCountStart);
       this.frameCount = 0;
-      this.frameCountStart = now;
+      this.frameCountStart = fpsNow;
     }
 
     this.pendingNals = [];
