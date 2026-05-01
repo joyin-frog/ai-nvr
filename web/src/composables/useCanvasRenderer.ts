@@ -1,5 +1,8 @@
 import { ref, onUnmounted, type Ref } from 'vue'
 
+/** 叠加层绘制回调 */
+export type OverlayDrawFn = (ctx: CanvasRenderingContext2D, width: number, height: number) => void
+
 /**
  * Canvas 帧渲染器
  * 用 createImageBitmap + Canvas 2D 替代 Blob URL + img 标签
@@ -21,6 +24,8 @@ export function useCanvasRenderer() {
   let decoding = false
   /** 解码期间最新到达的帧数据（确保解码完后处理最新帧） */
   let latestBuffer: ArrayBuffer | null = null
+  /** 叠加层绘制回调（检测框、标签等） */
+  let overlayFn: OverlayDrawFn | null = null
 
   /** Canvas 元素引用 */
   const canvasRef: Ref<HTMLCanvasElement | null> = ref(null)
@@ -29,6 +34,11 @@ export function useCanvasRenderer() {
   function setCanvas(el: HTMLCanvasElement | null) {
     canvasRef.value = el
     ctx = el ? el.getContext('2d') : null
+  }
+
+  /** 设置叠加层绘制函数 */
+  function setOverlay(fn: OverlayDrawFn | null) {
+    overlayFn = fn
   }
 
   /** rAF 渲染循环 */
@@ -48,6 +58,11 @@ export function useCanvasRenderer() {
 
       ctx.drawImage(bitmap, 0, 0)
       bitmap.close()
+
+      /** 绘制叠加层（检测框等） */
+      if (overlayFn) {
+        overlayFn(ctx, lastWidth, lastHeight)
+      }
     }
     rafId = requestAnimationFrame(renderLoop)
   }
@@ -128,6 +143,7 @@ export function useCanvasRenderer() {
   return {
     canvasRef,
     setCanvas,
+    setOverlay,
     feedFrame,
     startLoop,
     stopLoop,

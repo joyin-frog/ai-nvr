@@ -51,6 +51,57 @@ const emit = defineEmits<{
 const canvasRenderer = useCanvasRenderer()
 const mjpegStream = useMjpegStream()
 
+/** 检测框颜色映射 */
+const BOX_COLORS: Record<string, string> = {
+  person: '#e74c3c',
+  car: '#3498db',
+  truck: '#2ecc71',
+  bus: '#f39c12',
+  motorcycle: '#9b59b6',
+  bicycle: '#1abc9c',
+  dog: '#e67e22',
+  cat: '#fd79a8',
+}
+const DEFAULT_BOX_COLOR = '#4ECDC4'
+
+/** 检测框叠加层绘制 */
+canvasRenderer.setOverlay((ctx, width, height) => {
+  if (!props.showBoxes || props.detections.length === 0) return
+
+  for (const det of props.detections) {
+    const box = det.box
+    if (!box) continue
+
+    const x = box.xmin * width
+    const y = box.ymin * height
+    const w = (box.xmax - box.xmin) * width
+    const h = (box.ymax - box.ymin) * height
+    const color = BOX_COLORS[det.label] ?? DEFAULT_BOX_COLOR
+
+    /** 检测框 */
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.strokeRect(x, y, w, h)
+
+    /** 标签背景 */
+    const customName = det.trackId && props.trackLabels?.[det.trackId]
+    const label = customName
+      ? `${customName} (${det.label})`
+      : `${det.label} ${(det.score * 100).toFixed(0)}%`
+    ctx.font = 'bold 12px monospace'
+    const textMetrics = ctx.measureText(label)
+    const textH = 16
+    const textW = textMetrics.width + 8
+
+    ctx.fillStyle = color
+    ctx.fillRect(x, y - textH, textW, textH)
+
+    /** 标签文字 */
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, x + 4, y - 4)
+  }
+})
+
 /** 实时时钟 */
 const clockText = ref('')
 let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
