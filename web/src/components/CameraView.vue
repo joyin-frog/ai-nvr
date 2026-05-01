@@ -74,6 +74,22 @@ function canUseMse(): boolean {
 const useMse = ref(canUseMse())
 const mjpegStream = useMjpegStream()
 
+/** MSE 连续失败时自动回退到 Canvas 模式 */
+watch(() => fmp4.failed.value, (failed) => {
+  if (failed && useMse.value) {
+    console.warn('[CameraView] MSE 连接失败，回退到 Canvas 模式')
+    useMse.value = false
+    stopOverlayLoop()
+    fmp4.disconnect()
+    /** 如果摄像头在线，启动 Canvas 渲染 */
+    if (props.online) {
+      startLoop()
+      const url = authUrl(`/api/stream/${props.cameraId}`)
+      mjpegStream.startFetch(url, onFrameDecoded)
+    }
+  }
+})
+
 /** MSE 模式的检测框 overlay canvas */
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
 let overlayRafId: number | null = null

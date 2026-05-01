@@ -29,6 +29,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   /** 当前解码分辨率 */
   const videoWidth = ref(0)
   const videoHeight = ref(0)
+  /** MSE 连接是否彻底失败（连续重连失败），用于回退到 Canvas */
+  const failed = ref(false)
   /** MSE 模式 FPS（从 media segment 到达频率计算） */
   const fps = ref(0)
 
@@ -325,6 +327,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function scheduleReconnect() {
     if (reconnectTimer) return
     retryCount++
+    /** 连续失败 5 次标记为失败，让 CameraView 回退到 Canvas 模式 */
+    if (retryCount >= 5) {
+      console.warn('[fMP4] 连续 5 次连接失败，标记为失败')
+      failed.value = true
+      return
+    }
     const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000)
     console.log(`[fMP4] ${delay / 1000}s 后重连 (第 ${retryCount} 次)`)
     reconnectTimer = setTimeout(() => {
@@ -364,6 +372,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     connected.value = false
     playing.value = false
     fps.value = 0
+    failed.value = false
   }
 
   /** 定期清理缓冲区 + 追赶直播 */
@@ -386,5 +395,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     videoWidth,
     videoHeight,
     fps,
+    failed,
   }
 }
