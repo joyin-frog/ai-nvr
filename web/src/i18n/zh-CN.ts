@@ -270,6 +270,7 @@ export default {
     totalCount: '共 {count} 条',
     filterCamera: '筛选摄像头',
     filterDate: '筛选日期',
+    exportCsv: '导出 CSV',
   },
   settings: {
     title: '设置',

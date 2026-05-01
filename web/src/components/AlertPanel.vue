@@ -268,6 +268,32 @@ function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string;
 /** Tab 切换 */
 const activeView = ref<'rules' | 'history'>('rules')
 
+/** 导出告警历史为 CSV */
+async function exportCsv() {
+  const params = new URLSearchParams({ limit: '10000', offset: '0' })
+  if (filterCamera.value) params.set('cameraId', filterCamera.value)
+  if (filterDate.value) {
+    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+    params.set('since', String(since))
+    params.set('until', String(since + 86_400_000))
+  }
+  const res = await authFetch(`/api/alerts/history?${params}`)
+  if (!res.ok) return
+  const { alerts: rows } = await res.json() as { alerts: AlertRecord[] }
+  const header = 'ID,Rule Name,Camera,Time,Detail'
+  const csvRows = rows.map(a =>
+    `${a.id},"${a.ruleName}","${cameraNameMap.value[a.cameraId] ?? a.cameraId}","${new Date(a.timestamp).toLocaleString(locale.value)}","${(a.detail ?? '').replace(/"/g, '""')}"`
+  )
+  const csv = [header, ...csvRows].join('\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+  const link = document.createElement('a')
+  const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
+  link.href = URL.createObjectURL(blob)
+  link.download = `alerts_${dateStr}.csv`
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
 onMounted(() => {
   loadRules()
   loadAlerts()
@@ -421,6 +447,7 @@ defineExpose({ loadAlerts, addAlert })
       </select>
       <input type="date" v-model="filterDate" @change="loadAlerts()" class="filter-date" :title="t('alert.filterDate')" />
       <span v-if="alertTotal > 0" class="alert-total">{{ t('alert.totalCount', { count: alertTotal }) }}</span>
+      <button v-if="activeView === 'history'" class="csv-btn" @click="exportCsv" :title="t('alert.exportCsv')">CSV</button>
     </div>
     <div v-if="activeView === 'history'" class="alert-list">
       <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
@@ -746,6 +773,19 @@ select.input {
   overflow-y: auto;
   padding: 4px;
 }
+
+.csv-btn {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.csv-btn:hover { background: #3a3a5a; }
 
 .load-more-btn {
   display: block;

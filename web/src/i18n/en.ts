@@ -268,6 +268,7 @@ export default {
     totalCount: '{count} total',
     filterCamera: 'Filter Camera',
     filterDate: 'Filter Date',
+    exportCsv: 'Export CSV',
   },
   settings: {
     title: 'Settings',
