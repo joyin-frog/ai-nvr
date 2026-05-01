@@ -188,6 +188,33 @@ let timer: ReturnType<typeof setInterval> | null = null
 /** 今日统计刷新定时器 */
 let statsTimer: ReturnType<typeof setInterval> | null = null
 
+/** 日志查看 */
+const showLogs = ref(false)
+const logEntries = ref<Array<{ ts: number; level: string; tag: string; msg: string }>>([])
+const logLevel = ref('')
+const logLoading = ref(false)
+
+async function loadLogs() {
+  logLoading.value = true
+  const params = new URLSearchParams()
+  if (logLevel.value) params.set('level', logLevel.value)
+  params.set('limit', '50')
+  const res = await authFetch(`/api/logs?${params}`)
+  if (res.ok) logEntries.value = await res.json()
+  logLoading.value = false
+}
+
+function toggleLogs() {
+  showLogs.value = !showLogs.value
+  if (showLogs.value) loadLogs()
+}
+
+function logLevelColor(level: string): string {
+  if (level === 'error') return '#F44336'
+  if (level === 'warn') return '#FFC107'
+  return '#888'
+}
+
 /** 摄像头 ID → 名称 */
 const nameMap = () => {
   const map: Record<string, string> = {}
@@ -506,6 +533,33 @@ onUnmounted(() => {
           <span class="dir-name">{{ dirNameKeys[dir.name] ? t(dirNameKeys[dir.name]) : dir.name }}</span>
           <span class="dir-size">{{ formatBytes(dir.bytes) }}</span>
           <span class="dir-files">{{ dir.fileCount }} {{ t('status.files') }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系统日志 -->
+    <div class="logs-section">
+      <div class="logs-header" @click="toggleLogs">
+        <span>{{ t('status.logs', '系统日志') }}</span>
+        <span class="logs-toggle">{{ showLogs ? '▲' : '▼' }}</span>
+      </div>
+      <div v-if="showLogs" class="logs-content">
+        <div class="logs-toolbar">
+          <select v-model="logLevel" class="log-level-select" @change="loadLogs">
+            <option value="">{{ t('status.allLevels', '全部') }}</option>
+            <option value="warn">warn+</option>
+            <option value="error">error</option>
+          </select>
+          <button class="log-refresh-btn" @click="loadLogs" :disabled="logLoading">↻</button>
+        </div>
+        <div class="log-list">
+          <div v-for="(log, i) in logEntries" :key="i" class="log-entry" :class="log.level">
+            <span class="log-time">{{ new Date(log.ts).toLocaleTimeString() }}</span>
+            <span class="log-level" :style="{ color: logLevelColor(log.level) }">{{ log.level }}</span>
+            <span v-if="log.tag" class="log-tag">[{{ log.tag }}]</span>
+            <span class="log-msg">{{ log.msg }}</span>
+          </div>
+          <div v-if="logEntries.length === 0" class="log-empty">-</div>
         </div>
       </div>
     </div>
@@ -1071,4 +1125,80 @@ onUnmounted(() => {
 .legend-dot.motion { background: #FFEAA7; }
 .legend-dot.detect { background: #4ECDC4; }
 .legend-dot.alert-dot { background: #F44336; }
+
+.logs-section {
+  border-top: 1px solid #2a2a4a;
+}
+
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  color: #aaa;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.logs-header:hover { color: #e0e0e0; }
+
+.logs-toggle { font-size: 10px; }
+
+.logs-content {
+  padding: 0 8px 8px;
+}
+
+.logs-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.log-level-select {
+  background: #2a2a4a;
+  color: #aaa;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 10px;
+  outline: none;
+}
+
+.log-refresh-btn {
+  background: #2a2a4a;
+  color: #aaa;
+  border: none;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.log-refresh-btn:hover { color: #e0e0e0; }
+.log-refresh-btn:disabled { opacity: 0.5; }
+
+.log-list {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 4px;
+  padding: 1px 0;
+  color: #888;
+  word-break: break-all;
+}
+
+.log-entry.error { color: #F44336; }
+.log-entry.warn { color: #FFC107; }
+
+.log-time { color: #555; flex-shrink: 0; }
+.log-level { flex-shrink: 0; width: 32px; text-transform: uppercase; font-weight: 600; }
+.log-tag { color: #4ECDC4; flex-shrink: 0; }
+.log-msg { flex: 1; }
+.log-empty { color: #555; text-align: center; padding: 8px; }
 </style>

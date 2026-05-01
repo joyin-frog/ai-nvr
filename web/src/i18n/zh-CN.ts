@@ -197,6 +197,8 @@ export default {
     dirRoi: 'ROI 数据库',
     dirAlerts: '告警数据库',
     dirThumbnails: '缩略图缓存',
+    logs: '系统日志',
+    allLevels: '全部',
   },
   manage: {
     title: '摄像头管理',

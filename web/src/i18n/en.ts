@@ -195,6 +195,8 @@ export default {
     dirRoi: 'ROI Database',
     dirAlerts: 'Alert Database',
     dirThumbnails: 'Thumbnails Cache',
+    logs: 'System Logs',
+    allLevels: 'All',
   },
   manage: {
     title: 'Camera Management',
