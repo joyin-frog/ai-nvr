@@ -671,9 +671,21 @@ export function startServer(
       }
 
       /** 获取标注后的图片（按需生成） */
+      /** 标注图：优先使用已保存的快照文件，回退到按需生成 */
       const annotatedMatch = url.pathname.match(/^\/api\/detection\/annotated\/(.+)$/);
       if (annotatedMatch) {
         const cameraId = annotatedMatch[1]!;
+        /** 优先返回最新保存的快照文件（零 CPU 开销） */
+        const latestSnap = snapshotStorage.getLatestSnapshotPath(cameraId);
+        if (latestSnap) {
+          const snapFilePath = snapshotStorage.getSnapshotPath(latestSnap);
+          if (existsSync(snapFilePath)) {
+            return new Response(Bun.file(snapFilePath), {
+              headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-cache" },
+            });
+          }
+        }
+        /** 回退：按需生成标注图 */
         const image = await annotator.generateAnnotated(cameraId);
         if (!image) return new Response("No annotated image", { status: 404 });
         return new Response(image, {

@@ -128,6 +128,18 @@ export class SnapshotStorage {
     return results.sort((a, b) => b.timestamp - a.timestamp);
   }
 
+  /** 获取某摄像头最新的快照相对路径 */
+  getLatestSnapshotPath(cameraId: string): string | null {
+    const dir = join(this.storagePath, cameraId);
+    if (!existsSync(dir)) return null;
+    const files = readdirSync(dir)
+      .filter(f => f.endsWith(".jpg"))
+      .sort()
+      .reverse();
+    if (files.length === 0) return null;
+    return `${cameraId}/${files[0]}`;
+  }
+
   /** 获取快照文件路径 */
   getSnapshotPath(relativePath: string): string {
     return join(this.storagePath, relativePath);
