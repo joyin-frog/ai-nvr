@@ -148,6 +148,8 @@ let resizing = false
 function onResizeStart(e: MouseEvent) {
   e.preventDefault()
   resizing = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
   const startX = e.clientX
   const startWidth = sidebarWidth.value
   function onMove(ev: MouseEvent) {
@@ -157,6 +159,8 @@ function onResizeStart(e: MouseEvent) {
   }
   function onUp() {
     resizing = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
     localStorage.setItem('nvr-sidebar-width', String(sidebarWidth.value))
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
