@@ -144,6 +144,7 @@ const detectionBoxes = computed(() => {
   return sortedDetections.value.map(d => ({
     label: d.label,
     score: d.score,
+    trackId: d.trackId,
     style: {
       left: `${d.box.xmin * 100}%`,
       top: `${d.box.ymin * 100}%`,
@@ -391,7 +392,7 @@ onUnmounted(() => {
             class="detect-box"
             :style="box.style"
           >
-            <span class="detect-label">{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
+            <span class="detect-label">{{ box.trackId ? '#' + box.trackId + ' ' : '' }}{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
           </div>
         </div>
 

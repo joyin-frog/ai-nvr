@@ -1,5 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { ensureModelCached } from "./model-downloader";
+import { ObjectTracker, type TrackedDetection } from "./tracker";
 
 /** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
 const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -66,6 +67,8 @@ export class AiDetector {
   private processingQueue = false;
   /** 上一次检测结果指纹（用于去重通知） */
   private lastDetectFingerprint = new Map<string, string>();
+  /** 每个摄像头的目标追踪器 */
+  private trackers = new Map<string, ObjectTracker>();
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -323,12 +326,20 @@ export class AiDetector {
         box: item.box,
       }));
 
+      /** 目标追踪：跨帧保持同一 ID */
+      let tracker = this.trackers.get(cameraId);
+      if (!tracker) {
+        tracker = new ObjectTracker();
+        this.trackers.set(cameraId, tracker);
+      }
+      const trackedDetections = tracker.update(detections);
+
       const totalMs = performance.now() - t0;
 
-      /** 标注图片 */
+      /** 标注图片（用追踪后的检测结果，显示 trackId） */
       const t3 = performance.now();
-      const annotatedImage = detections.length > 0
-        ? await this.annotator.annotate(jpeg, detections)
+      const annotatedImage = trackedDetections.length > 0
+        ? await this.annotator.annotate(jpeg, trackedDetections)
         : jpeg;
       const annotateMs = performance.now() - t3;
       this.annotator.setLatest(cameraId, annotatedImage);
@@ -341,12 +352,13 @@ export class AiDetector {
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
-        detections,
+        detections: trackedDetections,
         annotatedImage,
         frameImage: jpeg,
         changed,
       });
-      console.log(`[Perf][AI][${cameraId}] ${detections.length} 目标, resize=${result.resizeMs.toFixed(0)}ms, infer=${result.inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
+      const trackIds = trackedDetections.map(d => `${d.label}#${d.trackId}`).join(", ");
+      console.log(`[Perf][AI][${cameraId}] ${trackedDetections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
     }

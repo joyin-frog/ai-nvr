@@ -4,13 +4,15 @@ export interface Detection {
   label: string;
   /** 置信度（0-1） */
   score: number;
-  /** 边界框坐标（像素值） */
+  /** 边界框坐标（归一化 0-1） */
   box: {
     xmin: number;
     ymin: number;
     xmax: number;
     ymax: number;
   };
+  /** 追踪 ID（跨帧保持一致，可选） */
+  trackId?: number;
 }
 
 /** AI 检测事件载荷 */
