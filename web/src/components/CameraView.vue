@@ -125,14 +125,24 @@ function drawOverlayOnce() {
   const video = fmp4.videoRef.value
   if (!canvas || !video) return
 
-  const w = video.videoWidth
-  const h = video.videoHeight
-  if (w === 0 || h === 0) return
+  /** 使用 CSS 像素尺寸，保证字体/线条在不同分辨率下大小一致 */
+  const rect = canvas.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  const cssW = Math.round(rect.width)
+  const cssH = Math.round(rect.height)
+  if (cssW === 0 || cssH === 0) return
 
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w
-    canvas.height = h
+  const canvasW = Math.round(cssW * dpr)
+  const canvasH = Math.round(cssH * dpr)
+  if (canvas.width !== canvasW || canvas.height !== canvasH) {
+    canvas.width = canvasW
+    canvas.height = canvasH
   }
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, cssW, cssH)
 
   const ctx = canvas.getContext('2d')
   if (!ctx) return
@@ -149,9 +159,9 @@ function drawOverlayOnce() {
   }
 
   if (hasFrame.value && props.showBoxes) {
-    drawDetectionOverlay(ctx, w, h)
+    drawDetectionOverlay(ctx, cssW, cssH)
   } else {
-    drawOSD(ctx, w, h)
+    drawOSD(ctx, cssW, cssH)
   }
 }
 
@@ -1453,7 +1463,8 @@ async function takeScreenshot() {
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(video, 0, 0)
     if (overlayCanvas.value) {
-      ctx.drawImage(overlayCanvas.value, 0, 0)
+      /** overlay canvas 使用 CSS 像素 × dpr 分辨率，需要缩放到视频分辨率 */
+      ctx.drawImage(overlayCanvas.value, 0, 0, canvas.width, canvas.height)
     }
     blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
   } else {
