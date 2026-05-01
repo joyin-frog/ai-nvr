@@ -132,6 +132,11 @@ const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
 const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage);
 alertEngine.start();
 
+/** 行为分析器（区域进入/离开/停留语义事件） */
+import { BehaviorAnalyzer } from "@/ai/behavior";
+const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage);
+behaviorAnalyzer.start();
+
 /** 用户偏好设置存储 */
 const preferencesStorage = new PreferencesStorage(join(dataDir, "preferences.db"));
 
@@ -206,6 +211,7 @@ process.on("SIGINT", () => {
   console.log("\n[App] 正在关闭...");
   recorder.stop();
   cameraManager.stop();
+  behaviorAnalyzer.stop();
   cleaner.stop();
   eventStorage.close();
   roiStorage.close();

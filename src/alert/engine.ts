@@ -58,6 +58,15 @@ export class AlertEngine {
       this.eventBus.on("track:disappeared", (payload) => {
         this.onTrackEvent("track:disappeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label);
       }),
+      this.eventBus.on("track:enter-zone", (payload) => {
+        this.onTrackEvent("track:enter-zone", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName);
+      }),
+      this.eventBus.on("track:leave-zone", (payload) => {
+        this.onTrackEvent("track:leave-zone", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs);
+      }),
+      this.eventBus.on("track:dwell", (payload) => {
+        this.onTrackEvent("track:dwell", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs);
+      }),
     );
     console.log("[AlertEngine] 告警引擎已启动");
   }
@@ -94,8 +103,8 @@ export class AlertEngine {
     }
   }
 
-  /** 处理追踪目标事件（track:appeared / track:disappeared） */
-  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number): void {
+  /** 处理追踪目标事件（track:appeared / track:disappeared / track:enter-zone / track:leave-zone / track:dwell） */
+  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number, zoneId?: number, zoneName?: string, dwellMs?: number): void {
     this.refreshRules();
     this.refreshTrackNames(cameraId);
 
@@ -117,12 +126,17 @@ export class AlertEngine {
         if (!trackName || !requiredNames.has(trackName)) continue;
       }
 
-      const nameTag = trackName ? ` (${trackName})` : "";
-      const scoreTag = score ? ` ${(score * 100).toFixed(0)}%` : "";
-      const detail = JSON.stringify({ trackId, label, trackName, eventType: eventType === "track:appeared" ? "出现" : "消失" });
-      void nameTag;
-      void scoreTag;
-      this.checkRule(rule, cameraId, timestamp, detail);
+      /** ROI 区域过滤 */
+      if (rule.roiId && zoneId !== undefined && rule.roiId !== zoneId) continue;
+
+      const detailObj: Record<string, unknown> = { trackId, label, trackName };
+      if (zoneId !== undefined) detailObj.zoneId = zoneId;
+      if (zoneName) detailObj.zoneName = zoneName;
+      if (dwellMs !== undefined) detailObj.dwellMs = dwellMs;
+      if (score !== undefined) detailObj.score = score;
+
+      void score;
+      this.checkRule(rule, cameraId, timestamp, JSON.stringify(detailObj));
     }
   }
 

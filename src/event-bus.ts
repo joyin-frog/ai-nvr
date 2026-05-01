@@ -119,6 +119,49 @@ export interface EventPayloads {
     name: string;
   };
 
+  /** 追踪目标进入 ROI 区域 */
+  "track:enter-zone": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+    trackName?: string;
+    /** ROI 区域 ID */
+    zoneId: number;
+    /** ROI 区域名称 */
+    zoneName: string;
+  };
+
+  /** 追踪目标离开 ROI 区域 */
+  "track:leave-zone": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+    trackName?: string;
+    /** ROI 区域 ID */
+    zoneId: number;
+    /** ROI 区域名称 */
+    zoneName: string;
+    /** 在区域内停留的毫秒数 */
+    dwellMs: number;
+  };
+
+  /** 追踪目标在 ROI 区域内停留（定期触发） */
+  "track:dwell": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+    trackName?: string;
+    /** ROI 区域 ID */
+    zoneId: number;
+    /** ROI 区域名称 */
+    zoneName: string;
+    /** 已停留的毫秒数 */
+    dwellMs: number;
+  };
+
   /** fMP4 初始化段（ftyp + moov） */
   "fmp4:init": {
     cameraId: string;
