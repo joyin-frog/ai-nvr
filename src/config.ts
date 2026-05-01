@@ -170,6 +170,7 @@ export function loadConfig(configPath?: string): AppConfig {
       showBoxes: (aiNode?.show_boxes as boolean) ?? true,
       mode: (aiNode?.mode === "continuous" ? "continuous" : "motion") as DetectMode,
       interval: (aiNode?.interval as number) ?? 1000,
+      importantLabels: Array.isArray(aiNode?.important_labels) ? aiNode.important_labels as string[] : ["person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat"],
     },
     auth: {
       token: (authNode?.token as string) ?? "",

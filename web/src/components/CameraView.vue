@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted, watch } from 'vue'
+import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch, authUrl } from '../services/auth'
@@ -30,11 +30,14 @@ const props = defineProps<{
   recordingStart?: number
   /** 是否显示检测框叠加层 */
   showBoxes?: boolean
+  /** 追踪标签映射：trackId -> 自定义名称 */
+  trackLabels?: Record<number, string>
 }>()
 
 const emit = defineEmits<{
   fullscreen: [cameraId: string]
   jumpToRecording: [cameraId: string, timestamp: number]
+  trackLabelUpdated: []
 }>()
 
 /** 实时时钟 */
@@ -141,19 +144,65 @@ const resolutionText = computed(() => {
 /** 检测框叠加在画面上的样式（用 trackId 做 key 保持稳定） */
 const detectionBoxes = computed(() => {
   if (!sortedDetections.value.length) return []
-  return sortedDetections.value.map(d => ({
-    key: d.trackId ?? `${d.label}-${Math.round(d.box.xmin * 100)}`,
-    label: d.label,
-    score: d.score,
-    trackId: d.trackId,
-    style: {
-      left: `${d.box.xmin * 100}%`,
-      top: `${d.box.ymin * 100}%`,
-      width: `${(d.box.xmax - d.box.xmin) * 100}%`,
-      height: `${(d.box.ymax - d.box.ymin) * 100}%`,
-    },
-  }))
+  return sortedDetections.value.map(d => {
+    const tid = d.trackId
+    const customName = tid ? props.trackLabels?.[tid] : undefined
+    return {
+      key: tid ?? `${d.label}-${Math.round(d.box.xmin * 100)}`,
+      label: d.label,
+      score: d.score,
+      trackId: tid,
+      customName,
+      style: {
+        left: `${d.box.xmin * 100}%`,
+        top: `${d.box.ymin * 100}%`,
+        width: `${(d.box.xmax - d.box.xmin) * 100}%`,
+        height: `${(d.box.ymax - d.box.ymin) * 100}%`,
+      },
+    }
+  })
 })
+
+/** 右键命名功能 */
+const namingBox = ref<{ trackId: number; label: string; x: number; y: number } | null>(null)
+const namingName = ref('')
+const namingInput = ref<HTMLInputElement | null>(null)
+
+const namingPopupStyle = computed(() => {
+  if (!namingBox.value) return {}
+  return {
+    left: `${Math.min(namingBox.value.x, 80)}%`,
+    top: `${Math.min(namingBox.value.y, 80)}%`,
+  }
+})
+
+function onBoxContext(e: MouseEvent, box: { trackId?: number; label: string }) {
+  if (!box.trackId) return
+  const rect = (e.currentTarget as HTMLElement).parentElement?.getBoundingClientRect()
+  const x = rect ? ((e.clientX - rect.left) / rect.width) * 100 : 50
+  const y = rect ? ((e.clientY - rect.top) / rect.height) * 100 : 50
+  const existing = props.trackLabels?.[box.trackId] ?? ''
+  namingBox.value = { trackId: box.trackId, label: box.label, x, y }
+  namingName.value = existing
+  nextTick(() => namingInput.value?.focus())
+}
+
+async function saveNaming() {
+  if (!namingBox.value || !namingName.value.trim()) { cancelNaming(); return }
+  const { trackId, label } = namingBox.value
+  await authFetch('/api/track-labels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cameraId: props.cameraId, trackId, label, name: namingName.value.trim() }),
+  })
+  emit('trackLabelUpdated')
+  cancelNaming()
+}
+
+function cancelNaming() {
+  namingBox.value = null
+  namingName.value = ''
+}
 
 /** 离线时显示"最后在线 x 分钟前" */
 const lastSeenText = computed(() => {
@@ -397,10 +446,30 @@ onUnmounted(() => {
             :key="box.key"
             class="detect-box"
             :style="box.style"
+            @contextmenu.prevent="onBoxContext($event, box)"
           >
-            <span class="detect-label">{{ box.trackId ? '#' + box.trackId + ' ' : '' }}{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
+            <span class="detect-label">
+              {{ box.customName ? box.customName + ' ' : '' }}{{ box.trackId ? '#' + box.trackId + ' ' : '' }}{{ box.label }} {{ (box.score * 100).toFixed(0) }}%
+            </span>
           </div>
         </TransitionGroup>
+
+        <!-- 右键命名弹出框 -->
+        <div v-if="namingBox" class="naming-popup" :style="namingPopupStyle">
+          <div class="naming-title">{{ namingBox.label }} #{{ namingBox.trackId }}</div>
+          <input
+            ref="namingInput"
+            v-model="namingName"
+            class="naming-input"
+            :placeholder="t('roi.name')"
+            @keydown.enter="saveNaming"
+            @keydown.escape="cancelNaming"
+          />
+          <div class="naming-actions">
+            <button class="naming-save" @click="saveNaming">{{ t('manage.save') }}</button>
+            <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
+          </div>
+        </div>
 
         <!-- 摄像头名称叠加 -->
         <div v-if="hasFrame" class="name-overlay">
@@ -805,6 +874,68 @@ onUnmounted(() => {
   padding: 1px 5px;
   border-radius: 2px;
   white-space: nowrap;
+}
+
+/* 右键命名弹窗 */
+.naming-popup {
+  position: absolute;
+  z-index: 100;
+  background: #1a1a2e;
+  border: 1px solid #4ECDC4;
+  border-radius: 6px;
+  padding: 8px;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  pointer-events: auto;
+}
+
+.naming-title {
+  color: #4ECDC4;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.naming-input {
+  width: 100%;
+  background: #2a2a4a;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #e0e0e0;
+  font-size: 12px;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.naming-input:focus {
+  border-color: #4ECDC4;
+}
+
+.naming-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.naming-save, .naming-cancel {
+  flex: 1;
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 3px 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.naming-save:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.naming-cancel:hover {
+  border-color: #888;
+  color: #ddd;
 }
 
 .camera-footer {

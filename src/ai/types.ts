@@ -48,4 +48,6 @@ export interface AiConfig {
   mode: DetectMode;
   /** 连续检测间隔（毫秒，仅 continuous 模式，默认 1000） */
   interval: number;
+  /** 关注的目标标签（只有这些标签才触发通知事件） */
+  importantLabels: string[];
 }
