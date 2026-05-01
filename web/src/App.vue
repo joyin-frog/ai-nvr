@@ -693,6 +693,26 @@ function setupEventListeners() {
     eventPanel.value?.addEvent('track:disappeared', payload.cameraId, `${displayName} ${t('event.trackDisappeared', '消失')}`)
   })
 
+  client.on('track:enter-zone', (payload) => {
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
+    eventPanel.value?.addEvent('track:enter-zone', payload.cameraId, `${displayName} → ${payload.zoneName}`)
+  })
+
+  client.on('track:leave-zone', (payload) => {
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
+    const dwellSec = (payload.dwellMs / 1000).toFixed(0)
+    eventPanel.value?.addEvent('track:leave-zone', payload.cameraId, `${displayName} ← ${payload.zoneName} (${dwellSec}s)`)
+  })
+
+  client.on('track:dwell', (payload) => {
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
+    const dwellSec = (payload.dwellMs / 1000).toFixed(0)
+    eventPanel.value?.addEvent('track:dwell', payload.cameraId, `${displayName} 在 ${payload.zoneName} 停留 ${dwellSec}s`)
+  })
+
   /** 其他客户端更新了追踪标签 → 实时同步 */
   client.on('track:label-updated', (payload) => {
     const map = { ...trackLabelsMap.value }

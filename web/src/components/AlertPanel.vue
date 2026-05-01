@@ -114,13 +114,19 @@ const eventTypes = computed(() => [
   { value: 'camera:lowfps', label: t('alert.eventTypeLowfps') },
   { value: 'track:appeared', label: t('alert.eventTypeTrackAppeared', '目标出现') },
   { value: 'track:disappeared', label: t('alert.eventTypeTrackDisappeared', '目标消失') },
+  { value: 'track:enter-zone', label: t('event.trackEnterZone', '进入区域') },
+  { value: 'track:leave-zone', label: t('event.trackLeaveZone', '离开区域') },
+  { value: 'track:dwell', label: t('event.trackDwell', '停留') },
 ])
 
 /** 是否显示标签/命名过滤字段（detect 和 track 事件类型都适用） */
 const showLabelFields = computed(() =>
   form.value.eventType === 'detect'
   || form.value.eventType === 'track:appeared'
-  || form.value.eventType === 'track:disappeared',
+  || form.value.eventType === 'track:disappeared'
+  || form.value.eventType === 'track:enter-zone'
+  || form.value.eventType === 'track:leave-zone'
+  || form.value.eventType === 'track:dwell',
 )
 
 /** 加载 ROI 列表 */

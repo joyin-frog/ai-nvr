@@ -188,6 +188,9 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   alert: { labelKey: 'event.alert', bg: '#FFD93D', color: '#333' },
   'track:appeared': { labelKey: 'event.trackAppeared', bg: '#81C784', color: '#fff' },
   'track:disappeared': { labelKey: 'event.trackDisappeared', bg: '#E57373', color: '#fff' },
+  'track:enter-zone': { labelKey: 'event.trackEnterZone', bg: '#26A69A', color: '#fff' },
+  'track:leave-zone': { labelKey: 'event.trackLeaveZone', bg: '#7E57C2', color: '#fff' },
+  'track:dwell': { labelKey: 'event.trackDwell', bg: '#FF7043', color: '#fff' },
 }
 
 /** 从 detail 文本中提取变动比例（如 "变动 15.3%" → 15.3） */
@@ -535,6 +538,9 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         <button :class="['type-chip', 'detect', { active: filterType === 'detect' }]" @click="filterType = 'detect'; onFilterChange('type')">{{ t('event.detect') }}</button>
         <button :class="['type-chip', 'offline', { active: filterType === 'camera:offline' }]" @click="filterType = 'camera:offline'; onFilterChange('type')">{{ t('event.offline') }}</button>
         <button :class="['type-chip', 'lowfps', { active: filterType === 'camera:lowfps' }]" @click="filterType = 'camera:lowfps'; onFilterChange('type')">{{ t('event.lowfps') }}</button>
+        <button :class="['type-chip', { active: filterType === 'track:enter-zone' }]" @click="filterType = 'track:enter-zone'; onFilterChange('type')">{{ t('event.trackEnterZone', '进入区域') }}</button>
+        <button :class="['type-chip', { active: filterType === 'track:leave-zone' }]" @click="filterType = 'track:leave-zone'; onFilterChange('type')">{{ t('event.trackLeaveZone', '离开区域') }}</button>
+        <button :class="['type-chip', { active: filterType === 'track:dwell' }]" @click="filterType = 'track:dwell'; onFilterChange('type')">{{ t('event.trackDwell', '停留') }}</button>
       </div>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}
