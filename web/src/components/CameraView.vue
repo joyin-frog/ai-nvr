@@ -86,59 +86,81 @@ watch(() => fmp4.failed.value, (failed) => {
 
 /** MSE 模式的检测框 overlay canvas */
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
+let overlayVfcId: number | null = null
+/** rAF fallback（浏览器不支持 requestVideoFrameCallback 时使用） */
 let overlayRafId: number | null = null
 
-/** MSE overlay 渲染循环（~30fps，匹配视频帧率） */
-let overlayLastDraw = 0
-/** overlay 目标帧间隔（ms） */
-const OVERLAY_FRAME_INTERVAL = 33
-
+/** MSE overlay 渲染：优先使用 requestVideoFrameCallback 与视频帧同步 */
 function startOverlayLoop() {
-  if (overlayRafId) return
-  const draw = () => {
-    overlayRafId = requestAnimationFrame(draw)
-    const now = performance.now()
-    if (now - overlayLastDraw < OVERLAY_FRAME_INTERVAL) return
-    overlayLastDraw = now
-    /** 页面不可见时跳过 overlay 绘制 */
-    if (document.hidden) return
-    const canvas = overlayCanvas.value
-    const video = fmp4.videoRef.value
-    if (!canvas || !video) return
+  stopOverlayLoop()
+  const video = fmp4.videoRef.value
+  if (!video) return
 
-    const w = video.videoWidth
-    const h = video.videoHeight
-    if (w === 0 || h === 0) return
-
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w
-      canvas.height = h
+  /** 浏览器支持 requestVideoFrameCallback：overlay 与视频帧完美同步 */
+  if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+    const onVideoFrame = () => {
+      overlayVfcId = video.requestVideoFrameCallback(onVideoFrame)
+      drawOverlayOnce()
     }
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, w, h)
-
-    /** poll 检测结果 */
-    const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
-    if (detectResult) {
-      consumedDetectVersion = detectResult.version
-      localDetections = detectResult.detections
-      updateSmoothedBoxes(localDetections)
-      invalidateSortedDetections()
-      updateDetectionSummary()
+    overlayVfcId = video.requestVideoFrameCallback(onVideoFrame)
+  } else {
+    /** 降级：rAF 循环，~30fps */
+    let lastDraw = 0
+    const INTERVAL = 33
+    const draw = () => {
+      overlayRafId = requestAnimationFrame(draw)
+      const now = performance.now()
+      if (now - lastDraw < INTERVAL) return
+      lastDraw = now
+      drawOverlayOnce()
     }
-
-    if (hasFrame.value && props.showBoxes) {
-      drawDetectionOverlay(ctx, w, h)
-    } else {
-      drawOSD(ctx, w, h)
-    }
+    draw()
   }
-  draw()
+}
+
+/** 执行一次 overlay 绘制 */
+function drawOverlayOnce() {
+  if (document.hidden) return
+  const canvas = overlayCanvas.value
+  const video = fmp4.videoRef.value
+  if (!canvas || !video) return
+
+  const w = video.videoWidth
+  const h = video.videoHeight
+  if (w === 0 || h === 0) return
+
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w
+    canvas.height = h
+  }
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, w, h)
+
+  /** poll 检测结果 */
+  const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
+  if (detectResult) {
+    consumedDetectVersion = detectResult.version
+    localDetections = detectResult.detections
+    updateSmoothedBoxes(localDetections)
+    invalidateSortedDetections()
+    updateDetectionSummary()
+  }
+
+  if (hasFrame.value && props.showBoxes) {
+    drawDetectionOverlay(ctx, w, h)
+  } else {
+    drawOSD(ctx, w, h)
+  }
 }
 
 function stopOverlayLoop() {
+  if (overlayVfcId != null) {
+    const video = fmp4.videoRef.value
+    video?.cancelVideoFrameCallback?.(overlayVfcId)
+    overlayVfcId = null
+  }
   if (overlayRafId) {
     cancelAnimationFrame(overlayRafId)
     overlayRafId = null
