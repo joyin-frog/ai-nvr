@@ -143,23 +143,45 @@ const resolutionText = computed(() => {
   return ''
 })
 
+/** 标签类别 → 颜色映射 */
+const LABEL_COLORS: Record<string, string> = {
+  person: '#FF6B6B',
+  car: '#4ECDC4',
+  truck: '#45B7D1',
+  bus: '#96CEB4',
+  motorcycle: '#FFEAA7',
+  bicycle: '#DDA0DD',
+  dog: '#F4A460',
+  cat: '#FFB6C1',
+}
+/** 默认颜色 */
+const DEFAULT_COLOR = '#4ECDC4'
+
+/** 根据标签获取颜色 */
+function getColor(label: string): string {
+  return LABEL_COLORS[label] ?? DEFAULT_COLOR
+}
+
 /** 检测框叠加在画面上的样式（用 trackId 做 key 保持稳定） */
 const detectionBoxes = computed(() => {
   if (!sortedDetections.value.length) return []
   return sortedDetections.value.map(d => {
     const tid = d.trackId
     const customName = tid ? props.trackLabels?.[tid] : undefined
+    const color = getColor(d.label)
     return {
       key: tid ?? `${d.label}-${Math.round(d.box.xmin * 100)}`,
       label: d.label,
       score: d.score,
       trackId: tid,
       customName,
+      color,
       style: {
         left: `${d.box.xmin * 100}%`,
         top: `${d.box.ymin * 100}%`,
         width: `${(d.box.xmax - d.box.xmin) * 100}%`,
         height: `${(d.box.ymax - d.box.ymin) * 100}%`,
+        borderColor: color,
       },
     }
   })
@@ -450,7 +472,7 @@ onUnmounted(() => {
             :style="box.style"
             @contextmenu.prevent="onBoxContext($event, box)"
           >
-            <span class="detect-label">
+            <span class="detect-label" :style="{ background: box.color }">
               {{ box.customName ? box.customName + ' ' : '' }}{{ box.trackId ? '#' + box.trackId + ' ' : '' }}{{ box.label }} {{ (box.score * 100).toFixed(0) }}%
             </span>
           </div>
@@ -880,7 +902,7 @@ onUnmounted(() => {
 
 .detect-box {
   position: absolute;
-  border: 2px solid #4ECDC4;
+  border: 2px solid;
   border-radius: 3px;
   transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out;
 }
@@ -889,7 +911,6 @@ onUnmounted(() => {
   position: absolute;
   top: -20px;
   left: -2px;
-  background: #4ECDC4;
   color: #1a1a2e;
   font-size: 10px;
   font-weight: 700;
