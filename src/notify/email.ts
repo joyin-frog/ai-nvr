@@ -11,6 +11,10 @@ const EVENT_LABELS: Record<string, string> = {
   alert: "告警触发",
   "track:appeared": "目标出现",
   "track:disappeared": "目标消失",
+  "track:enter-zone": "进入区域",
+  "track:leave-zone": "离开区域",
+  "track:dwell": "区域停留",
+  "track:speed": "高速移动",
 };
 
 /** 事件类型对应 CSS 颜色 */
@@ -22,10 +26,14 @@ const EVENT_COLORS: Record<string, string> = {
   alert: "#d9534f",
   "track:appeared": "#5cb85c",
   "track:disappeared": "#777",
+  "track:enter-zone": "#26A69A",
+  "track:leave-zone": "#7E57C2",
+  "track:dwell": "#FF7043",
+  "track:speed": "#E91E63",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
 /**
  * 邮件告警通知
@@ -99,6 +107,29 @@ export class EmailNotifier {
       const trackId = payload.trackId as number | undefined;
       const displayName = trackName ?? trackLabel ?? "未知";
       detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"}</td></tr>`;
+    } else if (event === "track:enter-zone" || event === "track:leave-zone") {
+      const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const zoneName = payload.zoneName as string | undefined;
+      const displayName = trackName ?? trackLabel ?? "未知";
+      const arrow = event === "track:enter-zone" ? "→" : "←";
+      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} ${arrow} ${zoneName ?? "?"}</td></tr>`;
+    } else if (event === "track:dwell") {
+      const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const zoneName = payload.zoneName as string | undefined;
+      const dwellMs = payload.dwellMs as number | undefined;
+      const displayName = trackName ?? trackLabel ?? "未知";
+      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} 在 ${zoneName ?? "?"} 停留 ${dwellMs ? `${(dwellMs / 1000).toFixed(0)}s` : "?"}</td></tr>`;
+    } else if (event === "track:speed") {
+      const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const speed = payload.speed as number | undefined;
+      const displayName = trackName ?? trackLabel ?? "未知";
+      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)</td></tr>`;
     }
 
     const subject = `[JK NVR] ${label} - ${cameraId}`;
