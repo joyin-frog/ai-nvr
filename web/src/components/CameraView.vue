@@ -140,7 +140,12 @@ function updateDetectionSummary() {
     }
   }
   detectionSummary.value = parts.join(' · ')
+  /** 同步更新 AI 推理耗时（响应式，用于模板徽标） */
+  localInferMs.value = getInferMs(props.cameraId)
 }
+
+/** AI 推理耗时（响应式，用于模板） */
+const localInferMs = ref(0)
 
 /** 是否有帧数据 */
 const hasFrame = computed(() => props.online)
@@ -718,8 +723,8 @@ onUnmounted(() => {
         {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
       </div>
       <!-- AI 推理耗时 -->
-      <div v-if="online && hasFrame && getInferMs(cameraId) > 0" class="infer-badge">
-        AI {{ getInferMs(cameraId).toFixed(0) }}ms
+      <div v-if="online && hasFrame && localInferMs > 0" class="infer-badge">
+        AI {{ localInferMs.toFixed(0) }}ms
       </div>
       <!-- 实时目标计数 -->
       <div v-if="online && hasFrame && showBoxes && detectCount > 0" class="detect-count-badge">
