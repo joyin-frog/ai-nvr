@@ -23,6 +23,32 @@ import { spawnSync } from "node:child_process";
 /** WebSocket 客户端集合 */
 const wsClients = new Set<import("bun").ServerWebSocket>();
 
+/** WebSocket 心跳检测：每 30 秒 ping，60 秒无 pong 关闭假死连接 */
+const WS_PING_INTERVAL = 30_000;
+const WS_PONG_TIMEOUT = 60_000;
+const wsLastPong = new WeakMap<import("bun").ServerWebSocket, number>();
+let wsHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+function startWsHeartbeat() {
+  if (wsHeartbeatTimer) return;
+  wsHeartbeatTimer = setInterval(() => {
+    const now = Date.now();
+    for (const ws of wsClients) {
+      const lastPong = wsLastPong.get(ws) ?? now;
+      if (now - lastPong > WS_PONG_TIMEOUT) {
+        console.log(`[WS] 心跳超时，关闭连接`);
+        ws.close();
+        wsClients.delete(ws);
+        continue;
+      }
+      try {
+        ws.send(JSON.stringify({ event: "ping" }));
+      } catch {
+        wsClients.delete(ws);
+      }
+    }
+  }, WS_PING_INTERVAL);
+}
+
 /** CORS 响应头 */
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1116,6 +1142,8 @@ export function startServer(
     websocket: {
       open(ws) {
         wsClients.add(ws);
+        wsLastPong.set(ws, Date.now());
+        startWsHeartbeat();
         console.log(`[WS] 客户端连接，当前 ${wsClients.size} 个`);
       },
       close(ws) {
@@ -1123,6 +1151,15 @@ export function startServer(
         console.log(`[WS] 客户端断开，当前 ${wsClients.size} 个`);
       },
       message(ws, raw) {
+        if (typeof raw !== "string") return;
+        /** 心跳 pong 响应 */
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.type === "pong") {
+            wsLastPong.set(ws, Date.now());
+            return;
+          }
+        } catch { /* not JSON, continue */ }
         /** 处理客户端订阅消息：{"type":"subscribe","cameraIds":["cam1","cam2"]} */
         if (typeof raw !== "string") return;
         let msg: { type: string; cameraIds?: string[] };

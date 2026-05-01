@@ -111,6 +111,11 @@ export class EventClient {
     if (typeof data === 'string') {
       try {
         const { event, ...payload } = JSON.parse(data)
+        /** 心跳 ping：自动回复 pong */
+        if (event === 'ping') {
+          this.ws?.send(JSON.stringify({ type: 'pong' }))
+          return
+        }
         this.dispatch(event, payload)
       } catch { /* ignore */ }
       return
