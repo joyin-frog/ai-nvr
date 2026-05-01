@@ -778,6 +778,10 @@ async function loadRecordings() {
       params.set('since', String(since))
       params.set('until', String(until))
     }
+    /** 无日期过滤时限制返回数量，避免大负载 */
+    if (!filterDate.value) {
+      params.set('limit', '500')
+    }
     const res = await authFetch(`/api/recordings?${params}`)
     if (res.ok) {
       recordings.value = await res.json()

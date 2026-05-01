@@ -412,7 +412,9 @@ export function startServer(
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
         const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
         const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
-        return Response.json(recorder.listRecordings(cameraId, since, until));
+        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : undefined;
+        const all = recorder.listRecordings(cameraId, since, until);
+        return Response.json(limit && limit > 0 ? all.slice(0, limit) : all);
       }
 
       /** 录像智能搜索：按 AI 检测标签查找包含特定目标的录像 */
@@ -1018,7 +1020,9 @@ export function startServer(
 
       /** 追踪目标列表 */
       if (url.pathname === "/api/tracks" && req.method === "GET") {
-        return Response.json(trackStorage.listTracks());
+        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 200;
+        const all = trackStorage.listTracks();
+        return Response.json(all.slice(0, limit));
       }
 
       /** 更新追踪目标自定义名称 */
