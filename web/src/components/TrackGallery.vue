@@ -406,7 +406,8 @@ onUnmounted(() => {
     </div>
 
     <div v-else class="track-grid">
-      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card" :class="{ 'new-track': isNewTrack(track) }">
+      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card" :class="{ 'new-track': isNewTrack(track) }"
+            @dblclick="props.cameras?.find(c => c.id === track.cameraIds[0])?.online && emit('viewLive', track.cameraIds[0])">
         <!-- 快照 -->
         <div class="track-snapshot" @click="track.snapshotFile && (previewUrl = snapshotUrl(track.snapshotFile))">
           <img
