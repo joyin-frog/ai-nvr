@@ -197,6 +197,17 @@ const monitor = new SystemMonitor(eventBus);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage);
 
 /** 自动记录事件到 SQLite */
+/** 事件收集缓冲区（同一微任务周期内的事件批量写入） */
+const pendingEvents: Array<{ type: string; cameraId: string; timestamp: number; detail?: string }> = [];
+let eventFlushTimer: ReturnType<typeof setImmediate> | null = null;
+
+function flushPendingEvents() {
+  eventFlushTimer = null;
+  if (pendingEvents.length === 0) return;
+  const batch = pendingEvents.splice(0);
+  eventStorage.insertMany(batch);
+}
+
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
@@ -229,7 +240,11 @@ for (const eventType of RECORDED_EVENTS) {
       if (p.score !== undefined) obj.score = p.score;
       detail = JSON.stringify(obj);
     }
-    eventStorage.insert(eventType, (payload as { cameraId: string }).cameraId, (payload as { timestamp: number }).timestamp ?? Date.now(), detail);
+    pendingEvents.push({ type: eventType, cameraId: (payload as { cameraId: string }).cameraId, timestamp: (payload as { timestamp: number }).timestamp ?? Date.now(), detail });
+    /** 延迟到微任务结束时批量写入 */
+    if (!eventFlushTimer) {
+      eventFlushTimer = setImmediate(flushPendingEvents);
+    }
   });
 }
 

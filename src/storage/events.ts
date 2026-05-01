@@ -43,6 +43,20 @@ export class EventStorage {
     return (result as { id: number }).id;
   }
 
+  /**
+   * 批量插入事件（使用显式事务，减少 fsync 开销）
+   * 适用于同一检测周期内产生多个事件的场景
+   */
+  insertMany(events: Array<{ type: string; cameraId: string; timestamp: number; detail?: string }>): void {
+    if (events.length === 0) return;
+    const stmt = this.db.prepare("INSERT INTO events (type, camera_id, timestamp, detail) VALUES (?, ?, ?, ?)");
+    this.db.transaction(() => {
+      for (const e of events) {
+        stmt.run(e.type, e.cameraId, e.timestamp, e.detail ?? null);
+      }
+    })();
+  }
+
   /** 查询事件列表 */
   query(options: {
     type?: string;
