@@ -287,6 +287,8 @@ export default {
     aiModelNotInit: 'Not initialized',
     aiThreshold: 'Confidence Threshold',
     aiMaxDetections: 'Max Detections',
+    aiInputWidth: 'Inference Width (0=original)',
+    aiShowBoxes: 'Show Detection Boxes',
     recording: 'Recording',
     recordingMode: 'Recording Mode',
     recordingMotion: 'Motion Triggered',

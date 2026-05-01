@@ -177,10 +177,11 @@ export function loadConfig(configPath?: string): AppConfig {
     },
     ai: {
       enabled: (aiNode?.enabled as boolean) ?? true,
-      model: (aiNode?.model as string) ?? "Xenova/detr-resnet-50",
+      model: (aiNode?.model as string) ?? "onnx-community/rfdetr_nano-ONNX",
       threshold: (aiNode?.threshold as number) ?? 0.5,
       maxDetections: (aiNode?.max_detections as number) ?? 20,
       inputWidth: (aiNode?.input_width as number) ?? 0,
+      showBoxes: (aiNode?.show_boxes as boolean) ?? true,
     },
     auth: {
       token: (authNode?.token as string) ?? "",

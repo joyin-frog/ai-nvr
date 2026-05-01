@@ -31,6 +31,8 @@ interface RuntimeSettings {
     model: string
     threshold: number
     maxDetections: number
+    inputWidth: number
+    showBoxes: boolean
   }
   recording: {
     mode: string
@@ -310,6 +312,14 @@ onMounted(() => {
         <label class="field">
           <span class="field-label">{{ t('settings.aiMaxDetections') }}</span>
           <input type="number" v-model.number="settings.ai.maxDetections" step="1" min="1" max="100" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.aiInputWidth') }}</span>
+          <input type="number" v-model.number="settings.ai.inputWidth" step="64" min="0" max="3840" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.aiShowBoxes') }}</span>
+          <input type="checkbox" v-model="settings.ai.showBoxes" class="checkbox" />
         </label>
       </section>
 

@@ -31,6 +31,8 @@ const props = defineProps<{
   recording?: boolean
   /** 录像开始时间戳 */
   recordingStart?: number
+  /** 是否显示检测框叠加层 */
+  showBoxes?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -299,7 +301,7 @@ onUnmounted(() => {
       <span v-if="recording" class="rec-indicator" :title="`REC ${recordingDuration}`">
         <span class="rec-dot" />{{ recordingDuration }}
       </span>
-      <span v-if="online && detections.length > 0" class="detection-count">
+      <span v-if="showBoxes && online && detections.length > 0" class="detection-count">
         {{ detections.length }}
       </span>
       <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
@@ -336,7 +338,7 @@ onUnmounted(() => {
       </div>
 
       <!-- 检测框叠加层 -->
-      <div v-if="hasFrame && detectionBoxes.length > 0" class="detection-overlay">
+      <div v-if="showBoxes && hasFrame && detectionBoxes.length > 0" class="detection-overlay">
         <div
           v-for="(box, i) in detectionBoxes"
           :key="i"
@@ -367,7 +369,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="camera-footer" v-if="sortedDetections.length > 0">
+    <div class="camera-footer" v-if="showBoxes && sortedDetections.length > 0">
       <div
         v-for="(det, i) in sortedDetections"
         :key="i"

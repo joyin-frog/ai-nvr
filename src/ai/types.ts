@@ -37,4 +37,6 @@ export interface AiConfig {
   maxDetections: number;
   /** AI 推理输入宽度（0 = 使用原始帧分辨率） */
   inputWidth: number;
+  /** 是否在画面上显示检测框（默认 true） */
+  showBoxes: boolean;
 }

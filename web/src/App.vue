@@ -153,6 +153,8 @@ const detectVersions = ref<Record<string, number>>({})
 const frameImages = ref<Record<string, ArrayBuffer>>({})
 /** 空帧占位（模板中无法直接 new ArrayBuffer） */
 const EMPTY_FRAME = new ArrayBuffer(0)
+/** 是否显示检测框（从 settings API 获取） */
+const showBoxes = ref(true)
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
 const frameLatency = ref<Record<string, number>>({})
 /** 每个摄像头最近检测事件的帧快照 */
@@ -427,9 +429,19 @@ function onLoginSuccess() {
   startApp()
 }
 
+/** 从 settings API 加载 showBoxes 配置 */
+async function loadShowBoxes() {
+  const res = await authFetch('/api/settings')
+  if (res.ok) {
+    const s = await res.json()
+    if (typeof s.ai?.showBoxes === 'boolean') showBoxes.value = s.ai.showBoxes
+  }
+}
+
 /** 启动应用主逻辑 */
 function startApp() {
   loadCameras()
+  loadShowBoxes()
   setupEventListeners()
   client.connect()
   client.onStateChange((state) => {
@@ -749,6 +761,7 @@ onUnmounted(() => {
                 :latency="frameLatency[cam.id] ?? 0"
                 :recording="cam.recording"
                 :recording-start="cam.recordingStart"
+                :show-boxes="showBoxes"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
               />

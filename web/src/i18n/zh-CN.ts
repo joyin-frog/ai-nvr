@@ -289,6 +289,8 @@ export default {
     aiModelNotInit: '未初始化',
     aiThreshold: '置信度阈值',
     aiMaxDetections: '最大检测数',
+    aiInputWidth: '推理分辨率宽度 (0=原始)',
+    aiShowBoxes: '显示检测框',
     recording: '录像',
     recordingMode: '录像模式',
     recordingMotion: '变动触发',
