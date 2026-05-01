@@ -8,6 +8,7 @@ import { AiDetector } from "@/ai/detector";
 import { Annotator } from "@/ai/annotator";
 import { startServer } from "@/api";
 import { EventStorage } from "@/storage/events";
+import { installLogBuffer } from "@/log-buffer";
 import { MotionRecorder } from "@/storage/recorder";
 import { SystemMonitor } from "@/monitor";
 import { RuntimeConfig } from "@/runtime-config";
@@ -27,6 +28,12 @@ import { TrackLabelStorage } from "@/storage/track-labels";
 import { TrackStorage } from "@/storage/tracks";
 import { PreferencesStorage } from "@/storage/preferences";
 import { StorageFs } from "@/storage/storage-fs";
+
+/**
+ * 安装内存日志缓冲区（拦截 console.log/warn/error）
+ * 必须在其他模块使用 console 之前安装
+ */
+installLogBuffer();
 
 /**
  * 设置 Hugging Face 镜像（国内网络加速模型下载）

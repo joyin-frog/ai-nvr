@@ -18,6 +18,7 @@ import { type PreferencesStorage } from "@/storage/preferences";
 import { type StorageFs } from "@/storage/storage-fs";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
+import { getLogs } from "@/log-buffer";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -352,6 +353,15 @@ export function startServer(
           ...monitor.getMetrics(cameraIds),
           storage: diskUsage.getInfo(),
         });
+      }
+
+      /** 系统日志查询 */
+      if (url.pathname === "/api/logs") {
+        return Response.json(getLogs({
+          level: url.searchParams.get("level") ?? undefined,
+          tag: url.searchParams.get("tag") ?? undefined,
+          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
+        }));
       }
 
       /** 获取运行时设置 */
