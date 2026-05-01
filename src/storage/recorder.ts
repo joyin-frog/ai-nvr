@@ -259,6 +259,12 @@ export class MotionRecorder {
 
     const state = this.getOrCreateState(cameraId);
 
+    /** 防御性清理：如果旧 ffmpeg 进程还在运行，先 kill */
+    if (state.proc) {
+      state.proc.kill("SIGKILL");
+      state.proc = null;
+    }
+
     /** 取消待执行的停止定时器 */
     if (state.stopTimer) {
       clearTimeout(state.stopTimer);
@@ -330,8 +336,11 @@ export class MotionRecorder {
 
     proc.on("exit", (code) => {
       console.log(`[Recorder] ${cameraId} 录像结束, code=${code}`);
+      /** 只清理未被覆盖的 proc 引用 */
+      if (state.proc === proc) {
+        state.proc = null;
+      }
       state.recording = false;
-      state.proc = null;
     });
 
     state.recording = true;
@@ -371,8 +380,9 @@ export class MotionRecorder {
       state.continuousTimer = null;
     }
     if (state.proc) {
-      state.proc.kill("SIGTERM");
+      const oldProc = state.proc;
       state.proc = null;
+      oldProc.kill("SIGTERM");
     }
     state.recording = false;
   }
