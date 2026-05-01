@@ -178,13 +178,18 @@ const monitor = new SystemMonitor(eventBus);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, storageFs);
 
 /** 自动记录事件到 SQLite */
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
     if (eventType === "detect") {
       const p = payload as { detections: unknown[]; changed?: boolean };
       if (p.detections.length === 0 || p.changed === false) return;
+    }
+    /** dwell 事件只在停留超过 30 秒时持久化（减少高频写入） */
+    if (eventType === "track:dwell") {
+      const p = payload as { dwellMs: number };
+      if (p.dwellMs < 30000) return;
     }
     let detail: string | undefined;
     if (eventType === "motion") {
@@ -195,6 +200,15 @@ for (const eventType of RECORDED_EVENTS) {
     } else if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });
+    } else if (eventType.startsWith("track:")) {
+      const p = payload as Record<string, unknown>;
+      const obj: Record<string, unknown> = { trackId: p.trackId, label: p.label };
+      if (p.trackName) obj.trackName = p.trackName;
+      if (p.zoneId !== undefined) obj.zoneId = p.zoneId;
+      if (p.zoneName) obj.zoneName = p.zoneName;
+      if (p.dwellMs !== undefined) obj.dwellMs = p.dwellMs;
+      if (p.score !== undefined) obj.score = p.score;
+      detail = JSON.stringify(obj);
     }
     eventStorage.insert(eventType, (payload as { cameraId: string }).cameraId, (payload as { timestamp: number }).timestamp ?? Date.now(), detail);
   });
