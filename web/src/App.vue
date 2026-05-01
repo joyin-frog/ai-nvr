@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EventClient, type Detection, type ConnectionState } from './services/events'
-import { isAuthEnabled, getToken, authFetch, authWsUrl } from './services/auth'
+import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame } from './services/ws-frame-cache'
 import { putDetections } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
@@ -637,7 +637,10 @@ function setupEventListeners() {
     if (payload.detections.length === 0 || payload.changed === false) return
 
     const labels = payload.detections.map((d) => d.label).join(', ')
-    eventPanel.value?.addEvent('detect', payload.cameraId, labels)
+    const detail = labels
+    /** 关联标注快照 URL（后端 annotator 缓存了最新标注图） */
+    const snapshotUrl = authUrl(`/api/detection/annotated/${payload.cameraId}`)
+    eventPanel.value?.addDetectEvent('detect', payload.cameraId, detail, snapshotUrl, payload.detections)
   })
 
   client.on('camera:online', (payload) => {

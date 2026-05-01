@@ -221,6 +221,38 @@ function addEvent(type: string, cameraId: string, detail: string) {
   }
 }
 
+/** 添加带快照的检测事件 */
+function addDetectEvent(type: string, cameraId: string, detail: string, snapshotUrl: string, detections: Detection[]) {
+  if (filterType.value && filterType.value !== type) return
+  if (filterCamera.value && filterCamera.value !== cameraId) return
+  const now = Date.now()
+
+  /** detect 事件去重：同一摄像头 3 秒内只更新不新增 */
+  const recent = events.value[0]
+  if (recent && recent.type === 'detect' && recent.cameraId === cameraId && (now - recent.timestamp) < 3000) {
+    recent.detail = detail
+    recent.rawDetail = detail
+    recent.time = new Date(now).toLocaleTimeString(locale.value)
+    recent.snapshotUrl = snapshotUrl
+    recent.snapshotDetections = detections
+    return
+  }
+
+  const time = new Date(now).toLocaleTimeString(locale.value)
+  events.value.unshift({
+    id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail,
+    starred: false, isNew: true, snapshotUrl, snapshotDetections: detections,
+  })
+  const eventId = now
+  setTimeout(() => {
+    const ev = events.value.find(e => e.id === eventId)
+    if (ev) ev.isNew = false
+  }, 1000)
+  if (events.value.length > PAGE_SIZE) {
+    events.value = events.value.slice(0, PAGE_SIZE)
+  }
+}
+
 /** 格式化时间戳 */
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleTimeString(locale.value)
@@ -440,7 +472,7 @@ async function toggleStar(id: number) {
   }
 }
 
-defineExpose({ addEvent, loadHistory })
+defineExpose({ addEvent, addDetectEvent, loadHistory })
 </script>
 
 <template>
