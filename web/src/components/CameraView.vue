@@ -7,7 +7,7 @@ import { useCanvasRenderer } from '../composables/useCanvasRenderer'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
 import { useMjpegStream } from '../composables/useMjpegStream'
 import { takeFrame } from '../services/ws-frame-cache'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 
@@ -796,6 +796,12 @@ const namingBox = ref<{ trackId: number; label: string; x: number; y: number } |
 const namingName = ref('')
 const namingInput = ref<HTMLInputElement | null>(null)
 
+/** 当前命名目标的 dHash 匹配建议 */
+const namingSuggestion = computed(() => {
+  if (!namingBox.value) return null
+  return getMatchSuggestionForTrack(props.cameraId, namingBox.value.trackId)
+})
+
 const namingPopupStyle = computed(() => {
   if (!namingBox.value) return {}
   return {
@@ -1116,6 +1122,10 @@ onUnmounted(() => {
         <!-- 右键命名弹出框 -->
         <div v-if="namingBox" class="naming-popup" :style="namingPopupStyle">
           <div class="naming-title">{{ namingBox.label }} #{{ namingBox.trackId }}</div>
+          <!-- dHash 匹配建议：一键应用 -->
+          <button v-if="namingSuggestion && namingName !== namingSuggestion" class="naming-suggest-btn" @click="namingName = namingSuggestion!">
+            ≈ {{ namingSuggestion }}
+          </button>
           <input
             ref="namingInput"
             v-model="namingName"
@@ -1466,6 +1476,23 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 700;
   margin-bottom: 6px;
+}
+
+.naming-suggest-btn {
+  display: block;
+  width: 100%;
+  background: rgba(156, 39, 176, 0.25);
+  border: 1px solid rgba(156, 39, 176, 0.5);
+  border-radius: 3px;
+  color: #CE93D8;
+  font-size: 11px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.naming-suggest-btn:hover {
+  background: rgba(156, 39, 176, 0.4);
 }
 
 .naming-input {

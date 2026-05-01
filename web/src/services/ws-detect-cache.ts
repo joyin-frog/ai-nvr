@@ -131,3 +131,16 @@ export function takeMatchSuggestions(cameraId: string): MatchSuggestion[] {
   matchSuggestions.set(cameraId, active)
   return active
 }
+
+/** 查找指定 trackId 的最佳匹配建议名称（用于命名弹窗一键应用） */
+export function getMatchSuggestionForTrack(cameraId: string, trackId: number): string | null {
+  const queue = matchSuggestions.get(cameraId)
+  if (!queue) return null
+  const now = Date.now()
+  for (const s of queue) {
+    if (s.trackId === trackId && now - s.timestamp < SUGGESTION_TTL && s.matches.length > 0) {
+      return s.matches[0]!.customName
+    }
+  }
+  return null
+}
