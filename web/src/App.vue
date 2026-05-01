@@ -527,6 +527,7 @@ function startApp() {
         firstConnection = false
       } else {
         loadCameras()
+        loadRoiData()
         eventPanel.value?.loadHistory()
         recordingsPanel.value?.loadRecordings()
       }
