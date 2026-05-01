@@ -1271,6 +1271,13 @@ function stopPipLoop() {
   }
 }
 
+/** PiP 滚轮缩放 */
+function onPipWheel(e: WheelEvent) {
+  e.preventDefault()
+  const delta = e.deltaY > 0 ? -20 : 20
+  pipSize.value = Math.max(160, Math.min(480, pipSize.value + delta))
+}
+
 /** PiP 拖拽开始 */
 function onPipDragStart(e: MouseEvent) {
   e.preventDefault()
@@ -1401,7 +1408,7 @@ defineExpose({ loadRecordings, playAtTime })
         </div>
         <!-- PiP 画中画实时预览浮窗（Teleport 到 body，fixed 定位，全屏时也能显示） -->
         <Teleport to="body">
-          <div v-if="showPip && pipCameraId" class="pip-window" :style="{ left: pipX + 'px', top: pipY + 'px', width: pipSize + 'px' }">
+          <div v-if="showPip && pipCameraId" class="pip-window" :style="{ left: pipX + 'px', top: pipY + 'px', width: pipSize + 'px' }" @wheel="onPipWheel">
             <div class="pip-header" @mousedown="onPipDragStart">
               <span class="pip-label">LIVE</span>
               <select v-model="pipCameraId" class="pip-camera-select" @mousedown.stop>
