@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { type EventBus, type EventName } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
 
@@ -110,7 +111,7 @@ export class DingTalkNotifier {
   private signUrl(webhookUrl: string, secret: string): string {
     const timestamp = Date.now();
     const stringToSign = `${timestamp}\n${secret}`;
-    const hmac = Bun.crypto.createHmac("sha256", secret);
+    const hmac = createHmac("sha256", secret);
     hmac.update(stringToSign);
     const sign = encodeURIComponent(hmac.digest("base64"));
     return `${webhookUrl}&timestamp=${timestamp}&sign=${sign}`;

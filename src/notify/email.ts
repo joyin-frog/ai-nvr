@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 import { type EventBus, type EventName } from "@/event-bus";
-import { type RuntimeConfig } from "@/runtime-config";
+import { type RuntimeConfig, type EmailConfig } from "@/runtime-config";
 
 /** 事件类型中文映射 */
 const EVENT_LABELS: Record<string, string> = {
@@ -49,7 +49,7 @@ export class EmailNotifier {
     if (!config?.enabled || !config.smtp) return;
 
     const mail = this.buildMail(event, payload);
-    this.send(config, mail);
+    this.send({ smtp: config.smtp, from: config.from, to: config.to }, mail);
   }
 
   /** 构建邮件内容 */
@@ -100,7 +100,7 @@ export class EmailNotifier {
   }
 
   /** 异步发送邮件（fire-and-forget） */
-  private send(config: { smtp: { host: string; port: number; secure: boolean; user: string; pass: string }; from: string; to: string }, mail: { subject: string; html: string }): void {
+  private send(config: { smtp: NonNullable<EmailConfig["smtp"]>; from: string; to: string }, mail: { subject: string; html: string }): void {
     const transporter = nodemailer.createTransport({
       host: config.smtp.host,
       port: config.smtp.port,
