@@ -1,6 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { ensureModelCached } from "./model-downloader";
-import { ObjectTracker } from "./tracker";
+import { ObjectTracker, initNextTrackId } from "./tracker";
 
 /** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
 const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -93,6 +93,15 @@ export class AiDetector {
     await ensureModelCached(config.model, this.modelCacheDir, hfEndpoint);
 
     await this.loadModel(config.model);
+
+    /** 从持久化存储恢复 trackId 计数器，避免重启后 ID 重叠导致命名失效 */
+    if (this.trackStorage) {
+      const maxId = this.trackStorage.getMaxTrackId();
+      if (maxId > 0) {
+        initNextTrackId(maxId);
+        console.log(`[AiDetector] trackId 计数器已恢复: nextId=${maxId + 1}`);
+      }
+    }
 
     /** 启动检测模式 */
     this.startDetection();

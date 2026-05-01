@@ -195,6 +195,15 @@ export class TrackStorage {
     };
   }
 
+  /** 获取最大的 trackId，用于重启后恢复递增计数器 */
+  getMaxTrackId(): number {
+    let max = 0;
+    for (const id of this.tracks.keys()) {
+      if (id > max) max = id;
+    }
+    return max;
+  }
+
   /** 删除单个追踪目标（包括快照文件） */
   remove(trackId: number): boolean {
     const record = this.tracks.get(trackId);

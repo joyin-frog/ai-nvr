@@ -41,6 +41,13 @@ export interface TrackUpdateResult {
 
 let nextTrackId = 1;
 
+/** 从持久化存储恢复 trackId 计数器，避免重启后 ID 重叠 */
+export function initNextTrackId(maxId: number): void {
+  if (maxId >= nextTrackId) {
+    nextTrackId = maxId + 1;
+  }
+}
+
 /**
  * ByteTrack 风格的目标追踪器
  * 基于 IoU 匹配，将每帧检测结果关联到上一帧的追踪目标
