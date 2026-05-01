@@ -717,6 +717,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
       <div class="preview-modal">
         <button class="preview-close" @click="previewUrl = ''">&times;</button>
         <img :src="previewUrl" class="preview-img" alt="" />
+        <a :href="previewUrl" download class="preview-download" target="_blank">&#x2B07;</a>
       </div>
     </div>
   </div>
@@ -1314,6 +1315,22 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 }
 
 .preview-close:hover {
+  color: #4ECDC4;
+}
+
+.preview-download {
+  position: absolute;
+  top: -30px;
+  right: 36px;
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 20px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.preview-download:hover {
   color: #4ECDC4;
 }
 
