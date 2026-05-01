@@ -77,6 +77,14 @@ function cancelEdit() {
   editingId.value = null
 }
 
+/** 删除追踪目标 */
+const confirmDelete = ref<number | null>(null)
+async function deleteTrack(trackId: number) {
+  await authFetch(`/api/tracks/${trackId}`, { method: 'DELETE' })
+  confirmDelete.value = null
+  await loadTracks()
+}
+
 /** 加载追踪目标的检测事件历史 */
 async function loadTrackEvents(trackId: number) {
   if (expandedTrackId.value === trackId) {
@@ -208,9 +216,16 @@ onUnmounted(() => {
           <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
             ▶ {{ t('tracks.playRecording', '查看录像') }}
           </button>
-          <button class="history-btn" @click="loadTrackEvents(track.trackId)">
-            {{ expandedTrackId === track.trackId ? '▲' : '▼' }} {{ t('tracks.history', '事件历史') }}
-          </button>
+          <div class="action-row">
+            <button class="history-btn" @click="loadTrackEvents(track.trackId)">
+              {{ expandedTrackId === track.trackId ? '▲' : '▼' }} {{ t('tracks.history', '事件历史') }}
+            </button>
+            <button v-if="confirmDelete !== track.trackId" class="delete-btn" @click="confirmDelete = track.trackId" :title="t('tracks.delete', '删除')">✕</button>
+            <template v-else>
+              <button class="delete-confirm-btn" @click="deleteTrack(track.trackId)">{{ t('manage.confirm', '确认') }}</button>
+              <button class="delete-cancel-btn" @click="confirmDelete = null">{{ t('manage.cancel', '取消') }}</button>
+            </template>
+          </div>
           <!-- 事件历史列表 -->
           <div v-if="expandedTrackId === track.trackId && trackEvents[track.trackId]" class="event-list">
             <div v-if="trackEvents[track.trackId].length === 0" class="event-empty">
@@ -427,6 +442,59 @@ onUnmounted(() => {
 }
 
 .history-btn:hover { color: #4ECDC4; }
+
+.action-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.action-row .history-btn {
+  flex: 1;
+  display: block;
+  width: auto;
+  margin-top: 0;
+  background: transparent;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 0;
+  font-size: 10px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.delete-btn {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.delete-btn:hover { color: #e74c3c; }
+
+.delete-confirm-btn {
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.delete-cancel-btn {
+  background: none;
+  border: 1px solid #555;
+  color: #888;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
 
 .event-list {
   margin-top: 6px;

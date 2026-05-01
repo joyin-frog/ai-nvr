@@ -1041,6 +1041,15 @@ export function startServer(
         return Response.json(updated);
       }
 
+      /** 删除追踪目标 */
+      const trackDeleteMatch = url.pathname.match(/^\/api\/tracks\/(\d+)$/);
+      if (trackDeleteMatch && req.method === "DELETE") {
+        const trackId = parseInt(trackDeleteMatch[1]!);
+        const ok = trackStorage.remove(trackId);
+        if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+        return Response.json({ ok: true });
+      }
+
       /** 追踪目标检测事件历史 */
       const trackEventsMatch = url.pathname.match(/^\/api\/tracks\/(\d+)\/events$/);
       if (trackEventsMatch && req.method === "GET") {

@@ -195,6 +195,19 @@ export class TrackStorage {
     };
   }
 
+  /** 删除单个追踪目标（包括快照文件） */
+  remove(trackId: number): boolean {
+    const record = this.tracks.get(trackId);
+    if (!record) return false;
+    if (record.snapshotFile) {
+      const path = join(this.storagePath, record.snapshotFile);
+      if (existsSync(path)) unlinkSync(path);
+    }
+    this.tracks.delete(trackId);
+    this.scheduleSave();
+    return true;
+  }
+
   /** 清理超过 maxAge 天的目标 */
   cleanup(maxAgeDays: number): number {
     const cutoff = Date.now() - maxAgeDays * 86_400_000;
