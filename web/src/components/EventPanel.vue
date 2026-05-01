@@ -446,47 +446,29 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
   return items
 }
 
-/** 导出当前筛选的事件为 CSV */
-async function exportCsv() {
-  loading.value = true
-  try {
-    const params = new URLSearchParams({ limit: '10000' })
-    if (filterType.value) params.set('type', filterType.value)
-    if (filterCamera.value) params.set('cameraId', filterCamera.value)
-    if (filterSearch.value) params.set('search', filterSearch.value)
-    if (filterRange.value) {
-      const now = Date.now()
-      const since = filterRange.value === '1h' ? now - 3600000 : now - 86400000
-      params.set('since', String(since))
-    } else if (filterDate.value) {
-      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
-      const until = since + 86_400_000
-      params.set('since', String(since))
-      params.set('until', String(until))
-    }
-    const res = await authFetch(`/api/events/history?${params}`)
-    if (!res.ok) return
-    const data = await res.json()
-    const rows = (data.events as EventRecord[]).map((e) => {
-      const time = new Date(e.timestamp).toISOString()
-      const detail = (e.detail ?? '').replace(/"/g, '""')
-      return `${e.id},"${time}","${e.type}","${e.camera_id}","${detail}"`
-    })
-    const header = 'id,time,type,camera_id,detail'
-    const csv = [header, ...rows].join('\n')
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
-    link.download = `events_${dateStr}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-  } catch {
-    // ignore
-  } finally {
-    loading.value = false
+/** 导出当前筛选的事件为 CSV（后端直接生成） */
+function exportCsv() {
+  const params = new URLSearchParams()
+  if (filterType.value) params.set('type', filterType.value)
+  if (filterCamera.value) params.set('cameraId', filterCamera.value)
+  if (filterSearch.value) params.set('search', filterSearch.value)
+  if (filterStarred.value) params.set('starred', 'true')
+  if (filterRange.value) {
+    const now = Date.now()
+    const since = filterRange.value === '1h' ? now - 3600000 : now - 86400000
+    params.set('since', String(since))
+  } else if (filterDate.value) {
+    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+    const until = since + 86_400_000
+    params.set('since', String(since))
+    params.set('until', String(until))
   }
+  const qs = params.toString()
+  const link = document.createElement('a')
+  link.href = authUrl(`/api/events/export${qs ? '?' + qs : ''}`)
+  const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
+  link.download = `events_${dateStr}.csv`
+  link.click()
 }
 
 /** 切换快速时间范围 */

@@ -426,6 +426,43 @@ export function startServer(
         return Response.json({ events, total });
       }
 
+      /** 事件历史 CSV 导出 */
+      if (url.pathname === "/api/events/export") {
+        const queryOpts = {
+          type: url.searchParams.get("type") ?? undefined,
+          cameraId: url.searchParams.get("cameraId") ?? undefined,
+          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
+          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          search: url.searchParams.get("search") ?? undefined,
+          starred: url.searchParams.get("starred") === "true" ? true : undefined,
+          limit: 10000,
+          offset: 0,
+        };
+        const rawEvents = eventStorage.query(queryOpts);
+
+        /** CSV 转义 */
+        function csvEscape(val: string): string {
+          if (val.includes(",") || val.includes("\"") || val.includes("\n")) {
+            return `"${val.replace(/"/g, "\"\"")}"`;
+          }
+          return val;
+        }
+
+        const header = "id,type,camera_id,timestamp,detail,starred";
+        const rows = rawEvents.map(ev => {
+          const ts = new Date(ev.timestamp).toISOString();
+          return `${ev.id},${ev.type},${csvEscape(ev.camera_id)},${ts},${csvEscape(ev.detail ?? "")},${ev.starred ? 1 : 0}`;
+        });
+        const csv = [header, ...rows].join("\n");
+
+        return new Response(csv, {
+          headers: {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="events_${new Date().toISOString().slice(0, 10)}.csv"`,
+          },
+        });
+      }
+
       /** 事件统计 */
       if (url.pathname === "/api/events/stats") {
         const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
