@@ -37,14 +37,22 @@ process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 /** 全局事件总线 */
 const eventBus = new EventBus();
 
-/** 启动前清理残留 ffmpeg 进程 */
+/** 启动前清理残留 ffmpeg 进程（包括僵尸进程） */
 try {
+  /** 清理活跃的 ffmpeg 进程 */
   const pids = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8" }).trim();
   if (pids) {
     const list = pids.split("\n").filter(Boolean);
     console.log(`[App] 清理 ${list.length} 个残留 ffmpeg 进程: ${list.join(", ")}`);
-    /** SIGKILL 所有 ffmpeg 进程 */
     execSync(`kill -9 ${list.join(" ")} 2>/dev/null || true`, { timeout: 3000 });
+  }
+  /** 清理 bun --watch 留下的 ffmpeg 僵尸进程（通过 kill 父进程 PID 来回收） */
+  const defunct = execSync("ps aux | grep -c '<defunct>' || echo 0", { encoding: "utf-8" }).trim();
+  const count = parseInt(defunct, 10);
+  if (count > 10) {
+    console.log(`[App] 检测到 ${count} 个僵尸进程，尝试清理`);
+    /** 向 init 进程发送信号回收僵尸（linux 会自动回收） */
+    execSync("kill -CHLD 1 2>/dev/null || true", { timeout: 3000 });
   }
 } catch {
   // ignore
