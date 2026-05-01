@@ -70,12 +70,12 @@ export class CameraManager {
 
   /** 热重载配置：对比新旧摄像头列表，增删改 */
   reloadConfig(newConfig: AppConfig): void {
-    const oldIds = new Set(this.cameraConfigs.map(c => c.id));
-    const newIds = new Set(newConfig.cameras.map(c => c.id));
+    const oldMap = new Map(this.cameraConfigs.map(c => [c.id, c]));
+    const newMap = new Map(newConfig.cameras.map(c => [c.id, c]));
 
     /** 停止已移除的摄像头 */
-    for (const id of oldIds) {
-      if (!newIds.has(id)) {
+    for (const id of oldMap.keys()) {
+      if (!newMap.has(id)) {
         const extractor = this.extractors.get(id);
         if (extractor) {
           extractor.stop();
@@ -87,9 +87,28 @@ export class CameraManager {
       }
     }
 
+    /** 检测配置变更的摄像头（RTSP URL、FPS、分辨率等） */
+    for (const [id, newCam] of newMap) {
+      const oldCam = oldMap.get(id);
+      if (!oldCam) continue;
+      if (this.configChanged(oldCam, newCam)) {
+        console.log(`[CameraManager] 配置变更，重启摄像头: ${id}`);
+        const extractor = this.extractors.get(id);
+        if (extractor) {
+          extractor.stop();
+          this.extractors.delete(id);
+        }
+        this.recorder.unregisterStream(id);
+        this.startCamera(newCam);
+      } else {
+        /** 仅更新名称等不影响 ffmpeg 的配置 */
+        this.recorder.registerCameraName(id, newCam.friendlyName);
+      }
+    }
+
     /** 启动新增的摄像头 */
     for (const cam of newConfig.cameras) {
-      if (!oldIds.has(cam.id)) {
+      if (!oldMap.has(cam.id)) {
         this.startCamera(cam);
         console.log(`[CameraManager] 新增摄像头: ${cam.friendlyName} (${cam.id})`);
       }
@@ -97,6 +116,16 @@ export class CameraManager {
 
     this.cameraConfigs = newConfig.cameras;
     this.config = newConfig;
+  }
+
+  /** 判断摄像头配置是否需要重启 ffmpeg */
+  private configChanged(old: CameraConfig, cur: CameraConfig): boolean {
+    return old.stream.sd !== cur.stream.sd
+      || old.stream.hd !== cur.stream.hd
+      || old.detectFps !== cur.detectFps
+      || old.detectWidth !== cur.detectWidth
+      || old.detectHeight !== cur.detectHeight
+      || old.jpegQuality !== cur.jpegQuality;
   }
 
   /** 启动单个摄像头 */
