@@ -468,26 +468,36 @@ class VideoToFmp4Muxer {
     let off = 0;
 
     data[off++] = 1;                        /** configurationVersion */
+    /**
+     * HEVC SPS layout (after start code):
+     * [0-1] NAL header (2 bytes)
+     * [2]   sps_video_parameter_set_id(4b) + sps_max_sub_layers_minus1(3b) + sps_temporal_id_nesting_flag(1b)
+     * [3-14] profile_tier_level general part (12 bytes)
+     *   [3]    general_profile_space(2b) + general_tier_flag(1b) + general_profile_idc(5b)
+     *   [4-7]  general_profile_compatibility_flags (32b)
+     *   [8-13] general_constraint_indicator_flags (48b)
+     *   [14]   general_level_idc (8b)
+     */
     /** general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5) */
-    data[off++] = rawSps[1]!;
-    /** general_profile_compatibility_flags */
-    data[off++] = rawSps[2]!;
     data[off++] = rawSps[3]!;
+    /** general_profile_compatibility_flags (4 bytes) */
     data[off++] = rawSps[4]!;
     data[off++] = rawSps[5]!;
-    /** general_constraint_indicator_flags (6 bytes from SPS bytes 6-11) */
-    if (rawSps.length > 11) {
-      data[off++] = rawSps[6]!;
-      data[off++] = rawSps[7]!;
+    data[off++] = rawSps[6]!;
+    data[off++] = rawSps[7]!;
+    /** general_constraint_indicator_flags (6 bytes) */
+    if (rawSps.length > 13) {
       data[off++] = rawSps[8]!;
       data[off++] = rawSps[9]!;
       data[off++] = rawSps[10]!;
       data[off++] = rawSps[11]!;
+      data[off++] = rawSps[12]!;
+      data[off++] = rawSps[13]!;
     } else {
       off += 6;
     }
     /** general_level_idc */
-    data[off++] = rawSps.length > 12 ? rawSps[12]! : 0;
+    data[off++] = rawSps.length > 14 ? rawSps[14]! : 0;
     /** min_spatial_segmentation_idc (4 reserved + 12 bits) */
     data.writeUInt16BE(0xF000, off); off += 2;
     /** parallelismType (6 reserved + 2 bits) */
@@ -501,7 +511,9 @@ class VideoToFmp4Muxer {
     /** avgFrameRate */
     data.writeUInt16BE(0, off); off += 2;
     /** constantFrameRate(2) + numTemporalLayers(3) + temporalIdNested(1) + lengthSizeMinusOne(2) */
-    data[off++] = 0x0F; /** lengthSizeMinusOne=3 (4字节) */
+    const maxSubLayers = ((rawSps[2]! >> 1) & 0x07) + 1;
+    const temporalIdNested = rawSps[2]! & 0x01;
+    data[off++] = (0 << 6) | ((maxSubLayers & 0x07) << 3) | (temporalIdNested << 2) | 0x03; /** lengthSizeMinusOne=3 */
     /** numOfArrays */
     data[off++] = 3;    /** VPS + SPS + PPS */
 
@@ -527,10 +539,11 @@ class VideoToFmp4Muxer {
   }
 
   private extractHevcCodec(): string {
-    if (!this.sps || this.sps.length < 13) return "hvc1.1.6.L93.B0";
-    const profileSpace = (this.sps[1]! >> 6) & 3;
-    const profileIdc = this.sps[1]! & 0x1f;
-    const levelIdc = this.sps[12]!;
+    if (!this.sps || this.sps.length < 15) return "hvc1.1.6.L93.B0";
+    /** profile_tier_level 从 SPS byte 3 开始 */
+    const profileSpace = (this.sps[3]! >> 6) & 3;
+    const profileIdc = this.sps[3]! & 0x1f;
+    const levelIdc = this.sps[14]!;
     const spacePrefix = profileSpace === 0 ? "" : String.fromCharCode("A".charCodeAt(0) + profileSpace - 1);
     return `hvc1${spacePrefix}.${profileIdc}.L${levelIdc}.B0`;
   }
