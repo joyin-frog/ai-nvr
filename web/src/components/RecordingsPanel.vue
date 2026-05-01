@@ -1335,9 +1335,6 @@ function onPipDragStart(e: MouseEvent) {
 }
 
 /** 关闭播放器时清理 PiP */
-const _origClosePlayer = closePlayer
-const closePlayerWithPip = closePlayer
-/** 重写 closePlayer 以清理 PiP */
 watch(selectedRecording, (rec) => {
   if (!rec) {
     showPip.value = false

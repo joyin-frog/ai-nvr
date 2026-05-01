@@ -11,6 +11,8 @@ interface Detection {
   score: number
   box: { xmin: number; ymin: number; xmax: number; ymax: number }
   trackId?: number
+  /** 用户自定义名称（如 "张三"） */
+  trackName?: string
 }
 
 const { t, locale } = useI18n()
@@ -291,21 +293,6 @@ function addDetectEvent(type: string, cameraId: string, detail: string, snapshot
 /** 格式化时间戳 */
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleTimeString(locale.value)
-}
-
-/** 解析 detail JSON */
-function parseDetail(type: string, detail: string | null): string {
-  if (!detail) return ''
-  try {
-    const obj = JSON.parse(detail)
-    if (type === 'motion' && obj.ratio) return t('event.motionRatio', { ratio: (obj.ratio * 100).toFixed(1) })
-    if (type === 'detect' && obj.detections) {
-      return obj.detections.map((d: { label: string; score: number }) => d.label).join(', ')
-    }
-    return detail
-  } catch {
-    return detail
-  }
 }
 
 /** 加载历史事件 */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { EventClient, type Detection, type ConnectionState } from './services/events'
+import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame } from './services/ws-frame-cache'
 import { putDetections } from './services/ws-detect-cache'
@@ -21,8 +21,8 @@ import LoginView from './components/LoginView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const { t, locale } = useI18n()
-const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, success: toastSuccess, warning: toastWarning } = useToast()
-const { setPref, getPref } = usePreferences()
+const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, warning: toastWarning } = useToast()
+const { getPref } = usePreferences()
 
 /** 切换语言 */
 function toggleLocale() {
