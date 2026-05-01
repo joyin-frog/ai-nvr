@@ -50,4 +50,6 @@ export interface AiConfig {
   interval: number;
   /** 关注的目标标签（只有这些标签才触发通知事件） */
   importantLabels: string[];
+  /** 自动匹配关联阈值（0-1，低于此值自动关联已命名目标，0 = 禁用自动匹配） */
+  autoMatchThreshold: number;
 }

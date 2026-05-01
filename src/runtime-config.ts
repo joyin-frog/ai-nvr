@@ -199,6 +199,7 @@ export class RuntimeConfig {
       if (typeof a.showBoxes === "boolean") this.settings.ai.showBoxes = a.showBoxes;
       if (a.mode === "motion" || a.mode === "continuous") this.settings.ai.mode = a.mode;
       if (typeof a.interval === "number") this.settings.ai.interval = a.interval;
+      if (typeof a.autoMatchThreshold === "number") this.settings.ai.autoMatchThreshold = a.autoMatchThreshold;
     }
 
     if (obj.recording && typeof obj.recording === "object") {

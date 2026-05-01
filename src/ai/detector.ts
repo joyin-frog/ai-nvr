@@ -396,9 +396,10 @@ export class AiDetector {
                   label: target.label,
                   matches,
                 });
-                /** 高置信度匹配（距离 < 0.25）自动关联名称 */
+                /** 高置信度匹配自动关联名称 */
                 const best = matches[0]!;
-                if (best.distance < 0.25 && this.trackLabelStorage) {
+                const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
+                if (autoThreshold > 0 && best.distance < autoThreshold && this.trackLabelStorage) {
                   this.trackLabelStorage.upsert(cameraId, target.trackId, target.label, best.customName);
                   this.trackStorage!.setCustomName(target.trackId, best.customName);
                   /** 清除缓存强制下次查找刷新 */

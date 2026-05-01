@@ -171,6 +171,7 @@ export function loadConfig(configPath?: string): AppConfig {
       mode: (aiNode?.mode === "continuous" ? "continuous" : "motion") as DetectMode,
       interval: (aiNode?.interval as number) ?? 1000,
       importantLabels: Array.isArray(aiNode?.important_labels) ? aiNode.important_labels as string[] : ["person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat"],
+      autoMatchThreshold: (aiNode?.auto_match_threshold as number) ?? 0.25,
     },
     auth: {
       token: (authNode?.token as string) ?? "",

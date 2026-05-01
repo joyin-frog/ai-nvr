@@ -88,6 +88,7 @@ interface RuntimeSettings {
     showBoxes: boolean
     mode: string
     interval: number
+    autoMatchThreshold: number
   }
   recording: {
     mode: string
@@ -416,6 +417,11 @@ onMounted(() => {
         <label class="field">
           <span class="field-label">{{ t('settings.aiShowBoxes') }}</span>
           <input type="checkbox" v-model="settings.ai.showBoxes" class="checkbox" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.autoMatchThreshold', '自动匹配阈值') }}</span>
+          <input type="number" v-model.number="settings.ai.autoMatchThreshold" step="0.05" min="0" max="0.5" class="input" />
+          <span class="field-hint">0 = 禁用, 0.25 = 默认</span>
         </label>
         <label class="field">
           <span class="field-label">{{ t('settings.aiMode') }}</span>
