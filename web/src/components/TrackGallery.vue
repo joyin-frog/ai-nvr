@@ -286,6 +286,21 @@ async function applyAllSuggestions() {
   await loadTracks()
 }
 
+/** 批量删除确认状态 */
+const batchDeleteConfirm = ref(false)
+
+/** 批量删除所有未命名目标 */
+async function deleteUnnamed() {
+  const promises: Promise<void>[] = []
+  for (const t of tracks.value) {
+    if (t.customName) continue
+    promises.push(authFetch(`/api/tracks/${t.trackId}`, { method: 'DELETE' }).then(() => {}))
+  }
+  await Promise.all(promises)
+  batchDeleteConfirm.value = false
+  await loadTracks()
+}
+
 /** 判断是否为新目标（最近 5 分钟内首次出现且未命名） */
 function isNewTrack(track: TrackInfo): boolean {
   if (track.customName) return false
@@ -352,6 +367,20 @@ onUnmounted(() => {
       >
         ≈ {{ suggestableCount }}
       </button>
+      <template v-if="unnamedCount > 0">
+        <button
+          v-if="!batchDeleteConfirm"
+          class="batch-delete-btn"
+          @click="batchDeleteConfirm = true"
+          :title="t('tracks.deleteUnnamed', '删除所有未命名目标')"
+        >
+          ✕ {{ unnamedCount }}
+        </button>
+        <template v-else>
+          <button class="delete-confirm-btn" @click="deleteUnnamed">{{ t('manage.confirm') }}</button>
+          <button class="delete-cancel-btn" @click="batchDeleteConfirm = false">{{ t('manage.cancel') }}</button>
+        </template>
+      </template>
       <button class="refresh-btn" @click="loadTracks" :disabled="loading">
         {{ loading ? '...' : '↻' }}
       </button>
@@ -583,6 +612,22 @@ onUnmounted(() => {
 }
 .suggest-all-btn:hover {
   background: rgba(156, 39, 176, 0.35);
+}
+
+.batch-delete-btn {
+  background: none;
+  color: #666;
+  border: 1px solid #e74c3c40;
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.batch-delete-btn:hover {
+  color: #e74c3c;
+  border-color: #e74c3c;
+  background: #e74c3c15;
 }
 
 .new-track {
