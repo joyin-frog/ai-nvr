@@ -80,6 +80,10 @@ class VideoToFmp4Muxer {
   private segmentFrameSizes: number[] = [];
   /** 当前 segment 中每帧是否关键帧 */
   private segmentFrameFlags: boolean[] = [];
+  /** 每个 segment 累积的最大帧数，超过则强制刷新 */
+  private static readonly MAX_SEGMENT_FRAMES = 10;
+  /** 是否已经在这个 segment 中遇到过 IDR（避免非起始 IDR 触发重复切分） */
+  private segmentHasIdr = false;
 
   feed(data: Buffer, eventBus: EventBus, cameraId: string): void {
     this.buffer = Buffer.concat([this.buffer, data]);
@@ -109,6 +113,7 @@ class VideoToFmp4Muxer {
     this.segmentFrames = [];
     this.segmentFrameSizes = [];
     this.segmentFrameFlags = [];
+    this.segmentHasIdr = false;
     this.nextDts = 0;
     this.sequenceNumber = 0;
     this.frameCount = 0;
@@ -304,9 +309,14 @@ class VideoToFmp4Muxer {
     const frameData = this.nalsToLengthPrefix(this.pendingNals);
     const frameSize = frameData.length;
 
-    /** IDR 帧触发 segment 发送 */
+    /** IDR 帧：如果有累积帧则先发送当前段，然后开始新段 */
     if (isIdr && this.segmentFrames.length > 0) {
       this.flushSegment(eventBus, cameraId);
+      this.segmentHasIdr = false;
+    }
+    /** 记录此段中是否包含 IDR */
+    if (isIdr) {
+      this.segmentHasIdr = true;
     }
 
     if (this.segmentFrames.length === 0) {
@@ -317,6 +327,12 @@ class VideoToFmp4Muxer {
     this.segmentFrameSizes.push(frameSize);
     this.segmentFrameFlags.push(isIdr);
     this.nextDts += this.frameDuration;
+
+    /** 帧数达到上限时强制发送段（不等待下一个 IDR） */
+    if (this.segmentFrames.length >= VideoToFmp4Muxer.MAX_SEGMENT_FRAMES && this.segmentHasIdr) {
+      this.flushSegment(eventBus, cameraId);
+      this.segmentHasIdr = false;
+    }
 
     /** FPS 统计 */
     this.frameCount++;
@@ -736,6 +752,7 @@ class VideoToFmp4Muxer {
       this.segmentFrames = [];
       this.segmentFrameSizes = [];
       this.segmentFrameFlags = [];
+      this.segmentHasIdr = false;
       return;
     }
 
