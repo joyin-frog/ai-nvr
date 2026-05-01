@@ -100,19 +100,47 @@ export function startServer(
   /** fMP4 流连接管理 */
   const fmp4Unsubs = new WeakMap<WsClient, (() => void)[]>();
 
+  /**
+   * fMP4 二进制协议：
+   * Init segment: [0x01][2B codec长度 LE uint16][codec ASCII][fMP4 data]
+   * Media segment: [0x02][fMP4 data]
+   */
+  const FMP4_TYPE_INIT = 0x01;
+  const FMP4_TYPE_MEDIA = 0x02;
+
+  /** 封装 fMP4 init segment 为带协议头的二进制消息 */
+  function encodeFmp4Init(codec: string, data: Buffer): Buffer {
+    const codecBuf = Buffer.from(codec, "ascii");
+    /** 1字节类型 + 2字节codec长度 + codec + fMP4 data */
+    const msg = Buffer.alloc(1 + 2 + codecBuf.length + data.length);
+    msg[0] = FMP4_TYPE_INIT;
+    msg.writeUInt16LE(codecBuf.length, 1);
+    codecBuf.copy(msg, 3);
+    data.copy(msg, 3 + codecBuf.length);
+    return msg;
+  }
+
+  /** 封装 fMP4 media segment */
+  function encodeFmp4Media(data: Buffer): Buffer {
+    const msg = Buffer.alloc(1 + data.length);
+    msg[0] = FMP4_TYPE_MEDIA;
+    data.copy(msg, 1);
+    return msg;
+  }
+
   function handleFmp4Connection(ws: WsClient, cameraId: string, camMgr: CameraManager, bus: EventBus) {
     const extractor = camMgr.getFmp4Extractor(cameraId);
     const unsubs: (() => void)[] = [];
 
-    /** 发送缓存的 init segment */
+    /** 发送缓存的 init segment（带协议头） */
     if (extractor?.initSegment) {
-      ws.send(extractor.initSegment.data);
+      ws.send(encodeFmp4Init(extractor.initSegment.codec, extractor.initSegment.data));
     }
 
     /** 监听新的 init segment */
     const unsubInit = bus.on("fmp4:init", (payload) => {
       if (payload.cameraId === cameraId) {
-        ws.send(payload.segment.data);
+        ws.send(encodeFmp4Init(payload.segment.codec, payload.segment.data));
       }
     });
     unsubs.push(unsubInit);
@@ -120,7 +148,7 @@ export function startServer(
     /** 监听 media segment */
     const unsubSeg = bus.on("fmp4:segment", (payload) => {
       if (payload.cameraId === cameraId) {
-        ws.send(payload.data);
+        ws.send(encodeFmp4Media(payload.data));
       }
     });
     unsubs.push(unsubSeg);

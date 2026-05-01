@@ -5,7 +5,14 @@ import { authWsUrl } from '../services/auth'
  * fMP4/MSE 流播放器
  * 通过 WebSocket 接收 fMP4 段，用 MediaSource + <video> 硬件解码
  * 零 CPU 解码开销，GPU 原生渲染
+ *
+ * WS 二进制协议：
+ * Init segment: [0x01][2B codec长度 LE uint16][codec ASCII][fMP4 data]
+ * Media segment: [0x02][fMP4 data]
  */
+const FMP4_TYPE_INIT = 0x01
+const FMP4_TYPE_MEDIA = 0x02
+
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
   const videoRef = ref<HTMLVideoElement | null>(null)
@@ -20,8 +27,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let mediaSource: MediaSource | null = null
   let sourceBuffer: SourceBuffer | null = null
   let ws: WebSocket | null = null
-  /** init segment 是否已接收 */
-  let initReceived = false
   /** 待 append 的段队列 */
   let pendingQueue: ArrayBuffer[] = []
   /** 是否正在 append */
@@ -32,6 +37,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let retryCount = 0
   /** 清理缓冲区定时器 */
   let pruneTimer: ReturnType<typeof setInterval> | null = null
+  /** 当前使用的 codec */
+  let currentCodec = ''
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
@@ -41,9 +48,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   /** 连接 fMP4 流 */
   function connect() {
     disconnect()
-    initReceived = false
     pendingQueue = []
     appending = false
+    currentCodec = ''
 
     mediaSource = new MediaSource()
     if (videoRef.value) {
@@ -71,17 +78,28 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
 
     ws.onmessage = (event) => {
-      const data = event.data as ArrayBuffer
+      const raw = new Uint8Array(event.data as ArrayBuffer)
+      if (raw.length === 0) return
 
-      if (!initReceived) {
-        /** 第一条消息是 init segment (ftyp + moov) */
-        initReceived = true
-        initSourceBuffer(data)
-        /** append init segment */
-        doAppend(data)
-      } else {
-        /** media segment */
-        queueAppend(data)
+      const type = raw[0]
+
+      if (type === FMP4_TYPE_INIT) {
+        /** 解析 codec + fMP4 data */
+        if (raw.length < 3) return
+        const codecLen = (raw[2]! << 8) | raw[1]!
+        if (raw.length < 3 + codecLen) return
+        const codec = new TextDecoder().decode(raw.subarray(3, 3 + codecLen))
+        const fmp4Data = raw.subarray(3 + codecLen).buffer
+
+        /** codec 变化时需要重建 SourceBuffer */
+        if (currentCodec !== codec) {
+          currentCodec = codec
+          ensureSourceBuffer(codec)
+        }
+        doAppend(fmp4Data)
+      } else if (type === FMP4_TYPE_MEDIA) {
+        const fmp4Data = raw.subarray(1).buffer
+        queueAppend(fmp4Data)
       }
     }
 
@@ -95,25 +113,31 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
-  /** 从 init segment 创建 SourceBuffer */
-  function initSourceBuffer(_initData: ArrayBuffer) {
+  /** 创建或重建 SourceBuffer */
+  function ensureSourceBuffer(codec: string) {
     if (!mediaSource || mediaSource.readyState !== 'open') return
 
-    /** 尝试常见 H.264 codec */
-    const codecs = [
-      'avc1.640029',  // High 4.1
-      'avc1.64001F',  // High 3.1
-      'avc1.4D401F',  // Main 3.1
-      'avc1.42C01E',  // Baseline 3.0
-    ]
+    /** 移除旧的 SourceBuffer */
+    if (sourceBuffer) {
+      sourceBuffer.removeEventListener('updateend', onUpdateEnd)
+      if (!sourceBuffer.updating) {
+        mediaSource.removeSourceBuffer(sourceBuffer)
+      }
+      sourceBuffer = null
+    }
 
-    for (const codec of codecs) {
+    /** 优先使用服务器提供的 codec，失败则回退 */
+    const codecs = [codec, 'avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
+    /** 去重 */
+    const unique = [...new Set(codecs)]
+
+    for (const c of unique) {
       try {
-        sourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${codec}"`)
+        sourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${c}"`)
         sourceBuffer.addEventListener('updateend', onUpdateEnd)
         sourceBuffer.addEventListener('error', () => { /* ignore */ })
         sourceBuffer.mode = 'segments'
-        console.log(`[fMP4] SourceBuffer created: ${codec}`)
+        console.log(`[fMP4] SourceBuffer created: ${c}`)
         return
       } catch {
         /** codec 不支持，尝试下一个 */
@@ -230,7 +254,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       }
     }
     mediaSource = null
-    initReceived = false
+    currentCodec = ''
     pendingQueue = []
     appending = false
     connected.value = false
