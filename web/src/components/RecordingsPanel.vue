@@ -8,6 +8,18 @@ import { confirmDialog } from '../composables/useConfirm'
 
 const { t, locale } = useI18n()
 
+/** 检测目标标签 → 颜色 */
+const LABEL_COLORS: Record<string, string> = {
+  person: '#FF6B6B', car: '#4ECDC4', truck: '#45B7D1', bus: '#96CEB4',
+  motorcycle: '#FFEAA7', bicycle: '#DDA0DD', dog: '#F4A460', cat: '#FFB6C1',
+}
+
+/** 事件标记颜色：优先 person，否则取第一个 label 的颜色 */
+function eventMarkerColor(labels: string[]): string {
+  if (labels.includes('person')) return LABEL_COLORS.person!
+  return LABEL_COLORS[labels[0] ?? ''] ?? '#5bc0de'
+}
+
 /** 录像信息 */
 interface Recording {
   filename: string
@@ -284,6 +296,7 @@ const progressEventMarkers = computed(() => {
     key: i,
     position: ((e.timestamp - rec.startTime) / duration) * 100,
     count: e.detections.length,
+    labels: [...new Set(e.detections.map(d => d.label))],
   })).filter(m => m.position >= 0 && m.position <= 100)
 })
 
@@ -1210,9 +1223,9 @@ defineExpose({ loadRecordings, playAtTime })
           <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" title="设B点 (])">B</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
             <div v-if="loopStart >= 0 && loopEnd > loopStart && playerRef" class="loop-region" :style="{ left: (loopStart / playerRef.duration * 100) + '%', width: ((loopEnd - loopStart) / playerRef.duration * 100) + '%' }" />
-            <!-- 检测事件标记 -->
+            <!-- 检测事件标记（按目标类别着色） -->
             <template v-for="m in progressEventMarkers" :key="m.key">
-              <div class="progress-event-marker" :style="{ left: m.position + '%' }" :title="m.count + ' detections'" />
+              <div class="progress-event-marker" :style="{ left: m.position + '%', background: eventMarkerColor(m.labels) }" :title="m.labels.join(', ') + ' (' + m.count + ')'" />
             </template>
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
@@ -2190,7 +2203,6 @@ defineExpose({ loadRecordings, playAtTime })
   top: -2px;
   width: 3px;
   height: 10px;
-  background: #5bc0de;
   border-radius: 1px;
   transform: translateX(-50%);
   pointer-events: none;
