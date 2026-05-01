@@ -136,6 +136,8 @@ const sortedEvents = computed(() => {
 const props = defineProps<{
   /** 摄像头列表（用于筛选） */
   cameras?: Array<{ id: string; name: string }>
+  /** 追踪标签映射：cameraId -> trackId -> 自定义名称 */
+  trackLabels?: Record<string, Record<number, string>>
 }>()
 
 const emit = defineEmits<{
@@ -324,6 +326,18 @@ function toggleExpand(id: number) {
   expandedId.value = expandedId.value === id ? null : id
 }
 
+/** 获取检测框标签文本（含自定义名称） */
+function getDetectionLabel(cameraId: string, d: Detection): string {
+  const camLabels = props.trackLabels?.[cameraId]
+  const customName = d.trackId && camLabels?.[d.trackId]
+  const parts: string[] = []
+  if (customName) parts.push(customName)
+  if (d.trackId) parts.push(`#${d.trackId}`)
+  parts.push(d.label)
+  parts.push(`${(d.score * 100).toFixed(0)}%`)
+  return parts.join(' ')
+}
+
 /** 解析 rawDetail 为结构化信息 */
 function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string }> {
   if (!e.rawDetail) return []
@@ -334,9 +348,11 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       items.push({ label: t('event.ratio'), value: `${(obj.ratio * 100).toFixed(1)}%` })
     }
     if (e.type === 'detect' && Array.isArray(obj.detections)) {
+      const camLabels = props.trackLabels?.[e.cameraId]
       for (const d of obj.detections as Array<{ label: string; score: number; trackId?: number }>) {
-        const name = d.trackId ? `#${d.trackId} ` : ''
-        items.push({ label: d.label, value: `${name}${(d.score * 100).toFixed(0)}%` })
+        const customName = d.trackId && camLabels?.[d.trackId]
+        const name = customName ? `${customName} (#${d.trackId})` : d.trackId ? `#${d.trackId}` : ''
+        items.push({ label: d.label, value: `${name}${name ? ' ' : ''}${(d.score * 100).toFixed(0)}%` })
       }
     }
     if (e.type === 'alert') {
@@ -539,7 +555,7 @@ defineExpose({ addEvent, loadHistory })
                 class="expand-box-item"
                 :style="{ left: d.box.xmin * 100 + '%', top: d.box.ymin * 100 + '%', width: (d.box.xmax - d.box.xmin) * 100 + '%', height: (d.box.ymax - d.box.ymin) * 100 + '%' }"
               >
-                <span class="box-label">{{ d.trackId ? '#' + d.trackId + ' ' : '' }}{{ d.label }} {{ (d.score * 100).toFixed(0) }}%</span>
+                <span class="box-label">{{ getDetectionLabel(e.cameraId, d) }}</span>
               </div>
             </div>
           </div>

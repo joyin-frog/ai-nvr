@@ -804,11 +804,12 @@ onUnmounted(() => {
           >⚙ {{ t('tab.settings') }}</button>
         </div>
         <div class="sidebar-content">
-          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" @play-recording="onPlayRecording" />
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"
             :cameras="cameras"
+            :track-labels="trackLabelsMap"
           />
           <CameraStatusPanel
             v-if="activeTab === 'status'"
@@ -857,6 +858,7 @@ onUnmounted(() => {
           v-show="activeTab === 'recordings'"
           ref="recordingsPanel"
           :cameras="cameras"
+          :track-labels="trackLabelsMap"
         />
         <CameraStatusPanel
           v-if="activeTab === 'status'"

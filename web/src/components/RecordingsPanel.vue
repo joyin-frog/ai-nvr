@@ -19,6 +19,8 @@ interface Recording {
 
 const props = defineProps<{
   cameras: Array<{ id: string; name: string }>
+  /** 追踪标签映射：cameraId -> trackId -> 自定义名称 */
+  trackLabels?: Record<string, Record<number, string>>
 }>()
 
 const recordings = ref<Recording[]>([])
@@ -222,6 +224,18 @@ function updatePlaybackDetections() {
   } else {
     playbackDetections.value = []
   }
+}
+
+/** 获取回放检测框标签（含自定义名称） */
+function getPlaybackDetectLabel(cameraId: string, d: PlaybackDetection): string {
+  const camLabels = props.trackLabels?.[cameraId]
+  const customName = d.trackId && camLabels?.[d.trackId]
+  const parts: string[] = []
+  if (customName) parts.push(customName)
+  if (d.trackId) parts.push(`#${d.trackId}`)
+  parts.push(d.label)
+  parts.push(`${(d.score * 100).toFixed(0)}%`)
+  return parts.join(' ')
 }
 
 /** 设置循环起点/终点 */
@@ -1120,7 +1134,7 @@ defineExpose({ loadRecordings, playAtTime })
               }"
             >
               <span class="playback-detect-label">
-                {{ d.trackId ? '#' + d.trackId + ' ' : '' }}{{ d.label }} {{ (d.score * 100).toFixed(0) }}%
+                {{ getPlaybackDetectLabel(selectedRecording!.cameraId, d) }}
               </span>
             </div>
           </div>
