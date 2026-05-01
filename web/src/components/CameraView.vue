@@ -58,8 +58,20 @@ const { canvasRef: _canvasRef, setCanvas, setOverlay, setFramePollFn, feedFrame,
 const fmp4CameraId = computed(() => props.cameraId)
 const fmp4 = useFmp4Stream(fmp4CameraId)
 
-/** 当前渲染模式：MSE 优先，Canvas fallback */
-const useMse = ref(typeof MediaSource !== 'undefined')
+/**
+ * 当前渲染模式：MSE 优先，Canvas fallback
+ * 检测 MediaSource + H.264 codec 支持
+ */
+function canUseMse(): boolean {
+  if (typeof MediaSource === 'undefined') return false
+  /** 检测常见 H.264 codec 是否支持 */
+  const codecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
+  for (const codec of codecs) {
+    if (MediaSource.isTypeSupported(`video/mp4; codecs="${codec}"`)) return true
+  }
+  return false
+}
+const useMse = ref(canUseMse())
 const mjpegStream = useMjpegStream()
 
 /** MSE 模式的检测框 overlay canvas */
