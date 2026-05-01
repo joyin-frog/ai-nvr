@@ -331,7 +331,7 @@ function onEventMarkerClick(cameraId: string, timestamp: number) {
           />
           <!-- 事件标记 -->
           <template v-for="(m, mi) in eventMarkersByCamera.get(cam.id) ?? []" :key="'e'+mi">
-            <div class="mtl-event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'" @click.stop="onEventMarkerClick(cam.id, m.timestamp)">
+            <div class="mtl-event-marker" :style="{ left: m.position + '%' }" :title="m.labels || t('event.event')" @click.stop="onEventMarkerClick(cam.id, m.timestamp)">
               <div class="mtl-event-dot" :style="{ background: m.color }"></div>
             </div>
           </template>

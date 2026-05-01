@@ -51,6 +51,7 @@ export default {
   },
   event: {
     title: '事件日志',
+    event: '事件',
     allTypes: '全部',
     allTypesLabel: '全部类型',
     motion: '变动',

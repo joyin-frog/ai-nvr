@@ -51,6 +51,7 @@ export default {
   },
   event: {
     title: 'Event Log',
+    event: 'Event',
     allTypes: 'All',
     allTypesLabel: 'All Types',
     motion: 'Motion',

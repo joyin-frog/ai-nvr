@@ -371,7 +371,7 @@ function onEventMarkerClick(timestamp: number) {
       </div>
 
       <!-- 事件标记 -->
-      <div v-for="(m, i) in eventMarkers" :key="'e'+i" class="event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'" @click.stop="onEventMarkerClick(m.timestamp)">
+      <div v-for="(m, i) in eventMarkers" :key="'e'+i" class="event-marker" :style="{ left: m.position + '%' }" :title="m.labels || t('event.event')" @click.stop="onEventMarkerClick(m.timestamp)">
         <div class="event-dot" :style="{ background: m.color }"></div>
         <span v-if="m.count > 1" class="event-count">{{ m.count }}</span>
       </div>
