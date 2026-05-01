@@ -685,6 +685,11 @@ function setupEventListeners() {
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:appeared', payload.cameraId, `${displayName} ${t('event.trackAppeared', '出现')}`)
+    /** 已命名目标出现时发送浏览器通知 */
+    if (customName) {
+      const cam = cameras.value.find(c => c.id === payload.cameraId)
+      notify(displayName, `${t('event.trackAppeared', '出现')} · ${cam?.name ?? payload.cameraId}`, payload.cameraId)
+    }
   })
 
   client.on('track:disappeared', (payload) => {
