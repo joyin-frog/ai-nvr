@@ -52,31 +52,18 @@ const emit = defineEmits<{
 }>()
 
 /** Canvas 渲染器（Canvas fallback 模式） */
-const { canvasRef: _canvasRef, setCanvas, setOverlay, setFramePollFn, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize } = useCanvasRenderer()
+const { canvasRef: _canvasRef, setCanvas, setOverlay, setFramePollFn, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize, getRenderFps } = useCanvasRenderer()
 
 /** fMP4/MSE 渲染器（高性能模式，GPU 硬件解码） */
 const fmp4CameraId = computed(() => props.cameraId)
 const fmp4 = useFmp4Stream(fmp4CameraId)
 
 /**
- * 当前渲染模式：默认 Canvas（MJPEG），MSE 作为可选增强
- * MSE 需要用户通过偏好设置手动开启
+ * 渲染模式：MSE/fMP4（GPU 硬件解码）为唯一首选模式
+ * Canvas/MJPEG 仅在 MSE 彻底失败后自动降级
  */
-const useMse = ref(false)
+const useMse = ref(typeof MediaSource !== 'undefined')
 const mjpegStream = useMjpegStream()
-
-/** 从后端偏好恢复 MSE 设置 */
-getPref<boolean>('nvr-use-mse').then(v => {
-  if (v && typeof MediaSource !== 'undefined') {
-    const codecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
-    for (const codec of codecs) {
-      if (MediaSource.isTypeSupported(`video/mp4; codecs="${codec}"`)) {
-        useMse.value = true
-        return
-      }
-    }
-  }
-})
 
 /** MSE 连续失败时自动回退到 Canvas 模式 */
 watch(() => fmp4.failed.value, (failed) => {
