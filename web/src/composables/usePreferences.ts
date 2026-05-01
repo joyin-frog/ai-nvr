@@ -3,6 +3,8 @@ import { authFetch } from '../services/auth'
 
 /** 模块级单例状态 */
 const cache = ref<Record<string, unknown>>({})
+/** 响应式初始化标志（组件可 watch） */
+const initializedRef = ref(false)
 let initialized = false
 let loading: Promise<void> | null = null
 
@@ -21,10 +23,12 @@ async function ensureLoaded(): Promise<void> {
       .then((data: Record<string, unknown>) => {
         cache.value = data
         initialized = true
+        initializedRef.value = true
       })
       .catch(() => {
         /** 网络失败静默降级为内存级存储 */
         initialized = true
+        initializedRef.value = true
       })
   }
   await loading
@@ -89,8 +93,8 @@ export function usePreferences() {
   return {
     /** 响应式缓存（首次加载前为空对象） */
     cache,
-    /** 是否已初始化 */
-    initialized: ref(initialized),
+    /** 是否已初始化（响应式） */
+    initialized: initializedRef,
     /** 获取偏好值 */
     getPref,
     /** 设置偏好值 */
