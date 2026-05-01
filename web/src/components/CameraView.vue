@@ -574,6 +574,10 @@ onUnmounted(() => {
       <div v-if="online && hasFrame && (inferMs ?? 0) > 0" class="infer-badge">
         AI {{ inferMs!.toFixed(0) }}ms
       </div>
+      <!-- 实时目标计数 -->
+      <div v-if="online && hasFrame && showBoxes && sortedDetections.length > 0" class="detect-count-badge">
+        {{ detectionSummary }}
+      </div>
     </div>
 
     <div class="camera-footer" v-if="showBoxes && sortedDetections.length > 0">
@@ -911,6 +915,23 @@ onUnmounted(() => {
   pointer-events: none;
   color: #fff;
   background: rgba(156, 39, 176, 0.65);
+}
+
+.detect-count-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  color: #fff;
+  background: rgba(78, 205, 196, 0.8);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 数字时钟叠加 */
