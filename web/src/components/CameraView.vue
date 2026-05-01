@@ -1723,6 +1723,7 @@ onUnmounted(() => {
   mjpegStream.stopFetch()
   stopLoop()
   if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
+  if (frozenTimer) clearInterval(frozenTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)
   if (heatmapTimer) clearInterval(heatmapTimer)
