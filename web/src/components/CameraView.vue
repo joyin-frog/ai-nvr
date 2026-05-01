@@ -196,11 +196,30 @@ watch(() => props.recording, (on) => {
   else { recordingDuration.value = '' }
 }, { immediate: true })
 
-/** 截图下载当前画面（优先标注图，否则 Canvas 截图） */
+/** 截图下载当前画面（优先 HD 主码流截图，回退到标注图/Canvas） */
 async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
   const link = document.createElement('a')
+  link.download = `${props.name}_HD_${ts}.jpg`
+
+  /** 尝试从主码流抓取高清截图 */
+  let hdOk = false
+  try {
+    const res = await authFetch(`/api/snapshot/${props.cameraId}?quality=hd`)
+    if (res.ok) {
+      const blob = await res.blob()
+      if (blob.size > 100) {
+        const url = URL.createObjectURL(blob)
+        link.href = url
+        link.click()
+        URL.revokeObjectURL(url)
+        hdOk = true
+      }
+    }
+  } catch { /* HD 截图失败，回退 */ }
+  if (hdOk) return
+
   link.download = `${props.name}_${ts}.jpg`
 
   if (annotatedUrl.value) {

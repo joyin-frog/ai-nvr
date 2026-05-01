@@ -268,6 +268,29 @@ export function startServer(
       const snapshotMatch = url.pathname.match(/^\/api\/snapshot\/(.+)$/);
       if (snapshotMatch) {
         const cameraId = snapshotMatch[1]!;
+        const isHd = url.searchParams.get("quality") === "hd";
+        if (isHd) {
+          /** 从主码流拉取高清帧 */
+          const cam = loadConfig().cameras.find(c => c.id === cameraId);
+          if (!cam) return new Response("Camera not found", { status: 404 });
+          const ffmpegPath = loadConfig().ffmpegPath;
+          const result = spawnSync(ffmpegPath, [
+            "-rtsp_transport", "tcp",
+            "-i", cam.stream.hd,
+            "-frames:v", "1",
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "-q:v", "2",
+            "-an",
+            "pipe:1",
+          ], { timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+          if (result.error || !result.stdout || result.stdout.length < 100) {
+            return new Response("HD capture failed", { status: 504 });
+          }
+          return new Response(result.stdout, {
+            headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-cache" },
+          });
+        }
         const frame = cameraManager.getLatestFrame(cameraId);
         if (!frame) return new Response("No frame", { status: 404 });
         return new Response(frame, {
