@@ -302,12 +302,18 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
     ctx.fillText(clockText.value, 4 + pad, y - 4)
   }
 
-  /** 右下角：FPS + 延迟 + AI耗时 + 分辨率 指标栏 */
+  /** 右下角：渲染FPS + 源FPS + 延迟 + AI耗时 + 分辨率 指标栏 */
   const stats: Array<{ text: string; color: string }> = []
-  const fps = props.fps ?? 0
-  if (fps > 0) {
-    const fpsColor = fps >= 10 ? '#4CAF50' : fps >= 5 ? '#FFC107' : '#F44336'
-    stats.push({ text: `${fps.toFixed(0)}fps`, color: fpsColor })
+  const renderFps = getRenderFps()
+  const srcFps = props.fps ?? 0
+  if (renderFps > 0 || srcFps > 0) {
+    /** 显示渲染帧率（实际到达屏幕的帧率），如果和源帧率不同则同时显示 */
+    const displayFps = renderFps > 0 ? renderFps : srcFps
+    const fpsColor = displayFps >= 15 ? '#4CAF50' : displayFps >= 10 ? '#FFC107' : '#F44336'
+    const label = srcFps > 0 && renderFps > 0 && Math.abs(renderFps - srcFps) > 2
+      ? `${renderFps.toFixed(0)}/${srcFps.toFixed(0)}fps`
+      : `${displayFps.toFixed(0)}fps`
+    stats.push({ text: label, color: fpsColor })
   }
   const latency = props.latency ?? 0
   if (latency > 0) {

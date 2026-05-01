@@ -28,6 +28,11 @@ export function useCanvasRenderer() {
   let overlayFn: OverlayDrawFn | null = null
   /** rAF 帧前回调（用于 poll 帧缓存，替代 Vue watcher） */
   let framePollFn: (() => void) | null = null
+  /** 实际渲染帧计数（1秒滑动窗口） */
+  let renderCount = 0
+  let renderFpsStart = 0
+  /** 最近一秒的实际渲染帧率 */
+  let renderFps = 0
 
   /** Canvas 元素引用 */
   const canvasRef: Ref<HTMLCanvasElement | null> = ref(null)
@@ -67,6 +72,15 @@ export function useCanvasRenderer() {
 
       ctx.drawImage(bitmap, 0, 0)
       bitmap.close()
+
+      /** 渲染帧率统计 */
+      renderCount++
+      const now = performance.now()
+      if (now - renderFpsStart >= 1000) {
+        renderFps = renderCount * 1000 / (now - renderFpsStart)
+        renderCount = 0
+        renderFpsStart = now
+      }
 
       /** 绘制叠加层（检测框等） */
       if (overlayFn) {
@@ -145,6 +159,11 @@ export function useCanvasRenderer() {
     return { width: lastWidth, height: lastHeight }
   }
 
+  /** 获取实际渲染帧率（每秒实际渲染的帧数） */
+  function getRenderFps(): number {
+    return renderFps
+  }
+
   onUnmounted(() => {
     stopLoop()
   })
@@ -159,5 +178,6 @@ export function useCanvasRenderer() {
     stopLoop,
     captureJpeg,
     getFrameSize,
+    getRenderFps,
   }
 }
