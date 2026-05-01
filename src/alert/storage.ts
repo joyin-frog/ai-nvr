@@ -25,6 +25,8 @@ export interface AlertRule {
   silentStart: string;
   /** 静默时段结束（HH:MM 格式，如 "06:00"） */
   silentEnd: string;
+  /** 单次检测中匹配标签的最少目标数量（0=不限制） */
+  minCount: number;
 }
 
 /** 告警记录 */
@@ -65,9 +67,16 @@ export class AlertStorage {
         cooldown_seconds INTEGER NOT NULL DEFAULT 300,
         enabled INTEGER NOT NULL DEFAULT 1,
         silent_start TEXT NOT NULL DEFAULT '',
-        silent_end TEXT NOT NULL DEFAULT ''
+        silent_end TEXT NOT NULL DEFAULT '',
+        min_count INTEGER NOT NULL DEFAULT 0
       )
     `);
+
+    /** 迁移：为已有表添加 min_count 列 */
+    const cols = this.db.query("PRAGMA table_info(alert_rules)").all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === "min_count")) {
+      this.db.run("ALTER TABLE alert_rules ADD COLUMN min_count INTEGER NOT NULL DEFAULT 0");
+    }
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS alert_records (
@@ -89,27 +98,27 @@ export class AlertStorage {
   /** 获取所有规则 */
   listRules(): AlertRule[] {
     return this.db.query(
-      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd FROM alert_rules ORDER BY id"
+      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, min_count as minCount FROM alert_rules ORDER BY id"
     ).all() as AlertRule[];
   }
 
   /** 获取启用的规则 */
   getEnabledRules(): AlertRule[] {
     return this.db.query(
-      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd FROM alert_rules WHERE enabled = 1"
+      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, min_count as minCount FROM alert_rules WHERE enabled = 1"
     ).all() as AlertRule[];
   }
 
   /** 添加规则 */
   addRule(rule: Omit<AlertRule, "id" | "enabled">): number {
     const result = this.db.query(
-      "INSERT INTO alert_rules (name, event_type, camera_id, labels, window_seconds, threshold, cooldown_seconds, enabled, silent_start, silent_end) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?) RETURNING id"
-    ).get(rule.name, rule.eventType, rule.cameraId, rule.labels, rule.windowSeconds, rule.threshold, rule.cooldownSeconds, rule.silentStart ?? "", rule.silentEnd ?? "");
+      "INSERT INTO alert_rules (name, event_type, camera_id, labels, window_seconds, threshold, cooldown_seconds, enabled, silent_start, silent_end, min_count) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) RETURNING id"
+    ).get(rule.name, rule.eventType, rule.cameraId, rule.labels, rule.windowSeconds, rule.threshold, rule.cooldownSeconds, rule.silentStart ?? "", rule.silentEnd ?? "", rule.minCount ?? 0);
     return (result as { id: number }).id;
   }
 
   /** 更新规则 */
-  updateRule(id: number, updates: Partial<Pick<AlertRule, "name" | "eventType" | "cameraId" | "labels" | "windowSeconds" | "threshold" | "cooldownSeconds" | "enabled" | "silentStart" | "silentEnd">>): boolean {
+  updateRule(id: number, updates: Partial<Pick<AlertRule, "name" | "eventType" | "cameraId" | "labels" | "windowSeconds" | "threshold" | "cooldownSeconds" | "enabled" | "silentStart" | "silentEnd" | "minCount">>): boolean {
     const sets: string[] = [];
     const params: (string | number)[] = [];
 
@@ -123,6 +132,7 @@ export class AlertStorage {
     if (updates.enabled !== undefined) { sets.push("enabled = ?"); params.push(updates.enabled ? 1 : 0); }
     if (updates.silentStart !== undefined) { sets.push("silent_start = ?"); params.push(updates.silentStart); }
     if (updates.silentEnd !== undefined) { sets.push("silent_end = ?"); params.push(updates.silentEnd); }
+    if (updates.minCount !== undefined) { sets.push("min_count = ?"); params.push(updates.minCount); }
 
     if (sets.length === 0) return false;
     params.push(id);

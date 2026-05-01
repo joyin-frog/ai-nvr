@@ -245,6 +245,7 @@ export default {
     labelsPlaceholder: 'person, car (comma separated)',
     labelsPlaceholderShort: 'person, car',
     triggerCount: 'Trigger Count',
+    minCount: 'Min Object Count (0=any)',
     silentStartLabel: 'Silent Start',
     silentEndLabel: 'Silent End',
     confirmAdd: 'Confirm',

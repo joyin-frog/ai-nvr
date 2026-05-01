@@ -16,6 +16,7 @@ interface AlertRule {
   enabled: boolean
   silentStart: string
   silentEnd: string
+  minCount: number
 }
 
 /** 告警记录 */
@@ -80,12 +81,13 @@ const form = ref({
   cooldownSeconds: 300,
   silentStart: '',
   silentEnd: '',
+  minCount: 0,
 })
 
 const emptyForm = {
   name: '', eventType: 'detect', cameraId: '', labels: '',
   windowSeconds: 60, threshold: 3, cooldownSeconds: 300,
-  silentStart: '', silentEnd: '',
+  silentStart: '', silentEnd: '', minCount: 0,
 }
 
 /** 事件类型选项 */
@@ -176,6 +178,7 @@ function startEdit(rule: AlertRule) {
     cooldownSeconds: rule.cooldownSeconds,
     silentStart: rule.silentStart,
     silentEnd: rule.silentEnd,
+    minCount: rule.minCount ?? 0,
   }
 }
 
@@ -340,9 +343,15 @@ defineExpose({ loadAlerts, addAlert })
           <input v-model.number="form.threshold" type="number" class="input" />
         </div>
       </div>
-      <div class="form-field">
-        <label>{{ t('alert.cooldown') }}</label>
-        <input v-model.number="form.cooldownSeconds" type="number" class="input" />
+      <div class="form-row">
+        <div class="form-field half">
+          <label>{{ t('alert.cooldown') }}</label>
+          <input v-model.number="form.cooldownSeconds" type="number" class="input" />
+        </div>
+        <div class="form-field half">
+          <label>{{ t('alert.minCount') }}</label>
+          <input v-model.number="form.minCount" type="number" min="0" class="input" />
+        </div>
       </div>
       <div class="form-row">
         <div class="form-field half">
@@ -398,9 +407,15 @@ defineExpose({ loadAlerts, addAlert })
                 <input v-model.number="form.threshold" type="number" class="input" />
               </div>
             </div>
-            <div class="form-field">
-              <label>{{ t('alert.cooldown') }}</label>
-              <input v-model.number="form.cooldownSeconds" type="number" class="input" />
+            <div class="form-row">
+              <div class="form-field half">
+                <label>{{ t('alert.cooldown') }}</label>
+                <input v-model.number="form.cooldownSeconds" type="number" class="input" />
+              </div>
+              <div class="form-field half">
+                <label>{{ t('alert.minCount') }}</label>
+                <input v-model.number="form.minCount" type="number" min="0" class="input" />
+              </div>
             </div>
             <div class="form-row">
               <div class="form-field half">
@@ -432,6 +447,7 @@ defineExpose({ loadAlerts, addAlert })
             <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
             <span v-if="rule.cameraId" class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
             <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
+            <span v-if="rule.minCount > 0" class="meta-tag count">≥{{ rule.minCount }}</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
           </div>
@@ -723,6 +739,7 @@ select.input {
 .meta-tag.cam { color: #4ECDC4; }
 .meta-tag.label { color: #FFD93D; }
 .meta-tag.silent { color: #e74c3c; }
+.meta-tag.count { color: #FF9800; }
 
 .meta-info {
   font-size: 11px;

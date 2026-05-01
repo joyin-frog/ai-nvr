@@ -79,7 +79,7 @@ export class AlertEngine {
     }
   }
 
-  /** 处理 detect 事件（需要标签过滤） */
+  /** 处理 detect 事件（需要标签过滤 + 数量条件） */
   private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number }>): void {
     this.refreshRules();
 
@@ -87,15 +87,22 @@ export class AlertEngine {
       if (rule.eventType !== "detect") continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
 
-      /** 标签过滤 */
+      /** 标签过滤 + 数量统计 */
+      let matchedDetections = detections;
       if (rule.labels) {
         const requiredLabels = new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()));
-        const matched = detections.some(d => requiredLabels.has(d.label.toLowerCase()));
-        if (!matched) continue;
+        matchedDetections = detections.filter(d => requiredLabels.has(d.label.toLowerCase()));
+        if (matchedDetections.length === 0) continue;
       }
 
-      const labels = detections.map(d => `${d.label}(${(d.score * 100).toFixed(0)}%)`).join(", ");
-      this.checkRule(rule, cameraId, timestamp, JSON.stringify({ detections: labels }));
+      /** 数量条件：匹配标签的目标数必须 >= minCount */
+      if (rule.minCount > 0 && matchedDetections.length < rule.minCount) continue;
+
+      const labels = matchedDetections.map(d => `${d.label}(${(d.score * 100).toFixed(0)}%)`).join(", ");
+      const detail = rule.minCount > 0
+        ? JSON.stringify({ detections: labels, count: matchedDetections.length })
+        : JSON.stringify({ detections: labels });
+      this.checkRule(rule, cameraId, timestamp, detail);
     }
   }
 

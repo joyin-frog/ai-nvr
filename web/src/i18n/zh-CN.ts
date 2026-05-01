@@ -247,6 +247,7 @@ export default {
     labelsPlaceholder: 'person, car（逗号分隔）',
     labelsPlaceholderShort: 'person, car',
     triggerCount: '触发次数',
+    minCount: '最少目标数 (0=不限)',
     silentStartLabel: '静默开始',
     silentEndLabel: '静默结束',
     confirmAdd: '确认添加',
