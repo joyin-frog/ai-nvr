@@ -617,8 +617,12 @@ function setupEventListeners() {
     /** 计算帧延迟（ms）：当前时间 - 服务端帧时间戳 */
     if (payload.timestamp) {
       const latency = Math.max(0, Date.now() - payload.timestamp)
-      frameLatency.value[payload.cameraId] = latency
-      frameLatency.value = { ...frameLatency.value }
+      /** 只在延迟变化超过 50ms 时触发响应式更新，减少 GC 压力 */
+      if (Math.abs((frameLatency.value[payload.cameraId] ?? 0) - latency) > 50) {
+        frameLatency.value = { ...frameLatency.value, [payload.cameraId]: latency }
+      } else {
+        frameLatency.value[payload.cameraId] = latency
+      }
     }
     /** 缓存 WS 帧数据供 CameraView rAF poll 消费（跳过 Vue 响应式） */
     if (payload.jpegData) {
