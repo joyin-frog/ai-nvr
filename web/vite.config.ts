@@ -5,6 +5,9 @@ import { pilot } from 'vite-plugin-pilot'
 import VueDevTools from 'vite-plugin-vue-devtools'
 
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_BACKEND_URL': JSON.stringify('http://localhost:3100'),
+  },
   plugins: [
     vue(),
     VueDevTools(),
@@ -42,11 +45,5 @@ export default defineConfig({
   ],
   server: {
     port: 3200,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3100',
-        ws: true,
-      },
-    },
   },
 })
