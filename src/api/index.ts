@@ -275,7 +275,7 @@ export function startServer(
         const boundary = "--nvrboundary";
         /** 流节流：每个客户端独立节流 */
         let lastSent = 0;
-        const throttleMs = 100;
+        const throttleMs = 40;
 
         const stream = new ReadableStream({
           start(controller) {
