@@ -8,8 +8,10 @@ import { useMjpegStream } from '../composables/useMjpegStream'
 import { takeFrame } from '../services/ws-frame-cache'
 import { takeDetections, getInferMs } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
+import { usePreferences } from '../composables/usePreferences'
 
 const { t } = useI18n()
+const { setPref, getPref } = usePreferences()
 const props = defineProps<{
   cameraId: string
   name: string
@@ -632,28 +634,33 @@ async function takeScreenshot() {
 /** 画面调节面板 */
 const showAdjust = ref(false)
 
-/** 画面调节参数（按摄像头 ID 持久化到 localStorage） */
+/** 画面调节参数（按摄像头 ID 持久化到后端） */
 const ADJUST_KEY = `nvr-adjust-${props.cameraId}`
 function loadAdjust(): { brightness: number; contrast: number; saturation: number } {
-  try {
-    const saved = localStorage.getItem(ADJUST_KEY)
-    if (saved) return JSON.parse(saved)
-  } catch { /* ignore */ }
   return { brightness: 100, contrast: 100, saturation: 100 }
 }
 
 function saveAdjust() {
-  localStorage.setItem(ADJUST_KEY, JSON.stringify({
+  setPref(ADJUST_KEY, {
     brightness: brightness.value,
     contrast: contrast.value,
     saturation: saturation.value,
-  }))
+  })
 }
 
 const initAdjust = loadAdjust()
 const brightness = ref(initAdjust.brightness)
 const contrast = ref(initAdjust.contrast)
 const saturation = ref(initAdjust.saturation)
+
+/** 从后端恢复画面调节参数 */
+getPref<{ brightness: number; contrast: number; saturation: number }>(ADJUST_KEY).then(v => {
+  if (v) {
+    brightness.value = v.brightness
+    contrast.value = v.contrast
+    saturation.value = v.saturation
+  }
+})
 
 /** 画面参数变化时自动保存 */
 watch([brightness, contrast, saturation], saveAdjust)

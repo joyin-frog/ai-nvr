@@ -6,8 +6,20 @@ import { takeFrame } from '../services/ws-frame-cache'
 import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
 import { confirmDialog } from '../composables/useConfirm'
+import { usePreferences } from '../composables/usePreferences'
 
 const { t, locale } = useI18n()
+
+const { cache, setPref, getPref } = usePreferences()
+
+/** 从后端偏好缓存恢复初始值 */
+getPref<string>('nvr-rec-filter-camera', '').then(v => { filterCamera.value = v })
+getPref<string[]>('nvr-starred-recordings', []).then(v => { starredFiles.value = new Set(v) })
+getPref<string>('nvr-timeline-mode', 'auto').then(v => { timelineMode.value = v as 'auto' | 'multi' | 'single' })
+getPref<number>('nvr-playback-speed', 1).then(v => { playbackSpeed.value = v })
+getPref<boolean>('nvr-auto-play-next', true).then(v => { autoPlayNext.value = v })
+getPref<number>('nvr-volume', 1).then(v => { volume.value = Math.round(v * 100) })
+getPref<string>('nvr-rec-sort', 'newest').then(v => { sortMode.value = v as SortMode })
 
 /** 检测目标标签 → 颜色 */
 const LABEL_COLORS: Record<string, string> = {
@@ -38,7 +50,7 @@ const props = defineProps<{
 
 const recordings = ref<Recording[]>([])
 const selectedRecording = ref<Recording | null>(null)
-const filterCamera = ref(localStorage.getItem('nvr-rec-filter-camera') ?? '')
+const filterCamera = ref('')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
 const loading = ref(false)
@@ -58,13 +70,10 @@ const mergeFilename = ref('')
 const zipping = ref(false)
 const zipFilename = ref('')
 
-/** 收藏录像集合（localStorage 持久化） */
-const STORAGE_KEY = 'nvr-starred-recordings'
-const starredFiles = ref<Set<string>>(new Set(
-  JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
-))
+/** 收藏录像集合 */
+const starredFiles = ref<Set<string>>(new Set())
 /** 时间轴视图模式：auto 自动 / multi 多路 / single 单路 */
-const timelineMode = ref<'auto' | 'multi' | 'single'>(localStorage.getItem('nvr-timeline-mode') as 'auto' | 'multi' | 'single' ?? 'auto')
+const timelineMode = ref<'auto' | 'multi' | 'single'>('auto')
 
 /** 实际使用的时间轴视图 */
 const effectiveTimeline = computed(() => {
@@ -75,7 +84,7 @@ const effectiveTimeline = computed(() => {
 
 function setTimelineMode(mode: 'auto' | 'multi' | 'single') {
   timelineMode.value = mode
-  localStorage.setItem('nvr-timeline-mode', mode)
+  setPref('nvr-timeline-mode', mode)
 }
 
 /** 仅看收藏 */
@@ -85,7 +94,7 @@ function toggleRecStar(filename: string) {
   if (s.has(filename)) s.delete(filename)
   else s.add(filename)
   starredFiles.value = s
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...s]))
+  setPref('nvr-starred-recordings', [...s])
 }
 
 /** 缩略图 URL 缓存（filename → URL） */
@@ -99,8 +108,8 @@ const exporting = ref(false)
 /** 导出结果下载文件名 */
 const exportFilename = ref('')
 
-/** 当前播放速度（localStorage 持久化） */
-const playbackSpeed = ref(Number(localStorage.getItem('nvr-playback-speed')) || 1)
+/** 当前播放速度 */
+const playbackSpeed = ref(1)
 
 /** video 元素引用 */
 const playerRef = ref<HTMLVideoElement | null>(null)
@@ -109,16 +118,16 @@ const playerRef = ref<HTMLVideoElement | null>(null)
 const seekOffset = ref(-1)
 
 /** 自动连续播放开关 */
-const autoPlayNext = ref(localStorage.getItem('nvr-auto-play-next') !== 'false')
+const autoPlayNext = ref(true)
 function toggleAutoPlay() {
   autoPlayNext.value = !autoPlayNext.value
-  localStorage.setItem('nvr-auto-play-next', String(autoPlayNext.value))
+  setPref('nvr-auto-play-next', autoPlayNext.value)
 }
 
 /** 倍速变更时同步到 video 元素 */
 function changeSpeed(speed: number) {
   playbackSpeed.value = speed
-  localStorage.setItem('nvr-playback-speed', String(speed))
+  setPref('nvr-playback-speed', speed)
   if (playerRef.value) playerRef.value.playbackRate = speed
 }
 
@@ -393,12 +402,12 @@ function onPlay() { isPlaying.value = true }
 function onPause() { isPlaying.value = false }
 
 /** 音量控制 */
-const volume = ref(Number(localStorage.getItem('nvr-volume') ?? 1) * 100)
+const volume = ref(100)
 const isMuted = ref(false)
 watch(volume, (v) => {
   if (playerRef.value) {
     playerRef.value.volume = v / 100
-    localStorage.setItem('nvr-volume', String(v / 100))
+    setPref('nvr-volume', v / 100)
   }
 })
 function toggleMute() {
@@ -409,7 +418,7 @@ function toggleMute() {
 /** 初始化音量 */
 function initVolume() {
   if (!playerRef.value) return
-  const v = Number(localStorage.getItem('nvr-volume') ?? 1)
+  const v = Number(cache.value['nvr-volume'] ?? 1)
   playerRef.value.volume = v
   volume.value = Math.round(v * 100)
 }
@@ -579,11 +588,11 @@ const cameraNameMap = computed(() => {
 
 /** 排序模式 */
 type SortMode = 'newest' | 'oldest' | 'largest'
-const sortMode = ref<SortMode>(localStorage.getItem('nvr-rec-sort') as SortMode ?? 'newest')
+const sortMode = ref<SortMode>('newest')
 
 function setSortMode(mode: SortMode) {
   sortMode.value = mode
-  localStorage.setItem('nvr-rec-sort', mode)
+  setPref('nvr-rec-sort', mode)
 }
 
 /** 按日期和收藏过滤后的录像列表 */
@@ -718,7 +727,7 @@ function formatSec(sec: number): string {
 
 /** 摄像头筛选变更 */
 function onCameraFilterChange() {
-  localStorage.setItem('nvr-rec-filter-camera', filterCamera.value)
+  setPref('nvr-rec-filter-camera', filterCamera.value)
   loadRecordings()
 }
 
@@ -986,7 +995,7 @@ function batchStar() {
     else s.add(filename)
   }
   starredFiles.value = s
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...s]))
+  setPref('nvr-starred-recordings', [...s])
 }
 
 /** 打开导出面板 */

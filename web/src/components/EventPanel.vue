@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch, authUrl } from '../services/auth'
+import { usePreferences } from '../composables/usePreferences'
 
 /** 检测结果 */
 interface Detection {
@@ -13,6 +14,12 @@ interface Detection {
 }
 
 const { t, locale } = useI18n()
+
+const { setPref, getPref } = usePreferences()
+
+/** 从后端偏好缓存恢复筛选条件 */
+getPref<string>('nvr-event-filter-type', '').then(v => { filterType.value = v })
+getPref<string>('nvr-event-filter-camera', '').then(v => { filterCamera.value = v })
 
 /** 事件记录 */
 interface EventRecord {
@@ -48,9 +55,9 @@ const events = ref<EventItem[]>([])
 const PAGE_SIZE = 50
 const loading = ref(false)
 const hasMore = ref(false)
-const filterType = ref(localStorage.getItem('nvr-event-filter-type') ?? '')
+const filterType = ref('')
 /** 摄像头筛选 */
-const filterCamera = ref(localStorage.getItem('nvr-event-filter-camera') ?? '')
+const filterCamera = ref('')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
 /** 搜索关键词 */
@@ -70,8 +77,8 @@ const showDetectionBoxes = ref(true)
 
 /** 筛选条件变更：持久化 + 重新加载 */
 function onFilterChange(field: 'type' | 'camera') {
-  if (field === 'type') localStorage.setItem('nvr-event-filter-type', filterType.value)
-  if (field === 'camera') localStorage.setItem('nvr-event-filter-camera', filterCamera.value)
+  if (field === 'type') setPref('nvr-event-filter-type', filterType.value)
+  if (field === 'camera') setPref('nvr-event-filter-camera', filterCamera.value)
   loadHistory()
 }
 

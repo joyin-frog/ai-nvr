@@ -7,6 +7,7 @@ import { putFrame } from './services/ws-frame-cache'
 import { putDetections } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
+import { usePreferences } from './composables/usePreferences'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
@@ -21,6 +22,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const { t, locale } = useI18n()
 const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, success: toastSuccess, warning: toastWarning } = useToast()
+const { setPref, getPref } = usePreferences()
 
 /** 切换语言 */
 function toggleLocale() {
@@ -562,11 +564,13 @@ function startApp() {
 }
 
 /** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
-/** 声音提醒配置（localStorage 持久化） */
-const SOUND_KEY = 'nvr-sound-alert'
-const SOUND_VOLUME_KEY = 'nvr-sound-volume'
-const soundEnabled = ref(localStorage.getItem(SOUND_KEY) !== 'false')
-const soundVolume = ref(Number(localStorage.getItem(SOUND_VOLUME_KEY) ?? 80) / 100)
+/** 声音提醒配置 */
+const soundEnabled = ref(true)
+const soundVolume = ref(0.8)
+
+/** 从后端恢复声音配置 */
+getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
+getPref<number>('nvr-sound-volume', 80).then(v => { soundVolume.value = v / 100 })
 
 /** Web Audio API 播放提示音 */
 let audioCtx: AudioContext | null = null

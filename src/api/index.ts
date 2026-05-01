@@ -14,6 +14,7 @@ import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
 import { type AiDetector } from "@/ai/detector";
 import { type PtzController } from "@/ptz";
+import { type PreferencesStorage } from "@/storage/preferences";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
 import { existsSync, statSync, realpathSync, unlinkSync } from "node:fs";
@@ -91,6 +92,7 @@ export function startServer(
   ptzController: PtzController,
   trackLabelStorage: import("@/storage/track-labels").TrackLabelStorage,
   trackStorage: import("@/storage/tracks").TrackStorage,
+  preferencesStorage: PreferencesStorage,
 ): void {
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
   async function handleRequest(req: Request): Promise<Response | undefined> {
@@ -1009,6 +1011,27 @@ export function startServer(
         return ptzController.gotoHomePosition(cameraId)
           .then(() => Response.json({ ok: true }))
           .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 用户偏好设置 API */
+      if (url.pathname === "/api/preferences" && req.method === "GET") {
+        return Response.json(preferencesStorage.getAllAsRecord());
+      }
+
+      if (url.pathname === "/api/preferences" && req.method === "PATCH") {
+        const body = await req.json() as Record<string, unknown>;
+        /** 只接受 nvr- 前缀的键 */
+        const filtered: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(body)) {
+          if (key.startsWith("nvr-")) {
+            filtered[key] = value;
+          }
+        }
+        if (Object.keys(filtered).length === 0) {
+          return Response.json({ error: "no valid keys (must start with nvr-)" }, { status: 400 });
+        }
+        preferencesStorage.setMany(filtered);
+        return Response.json({ ok: true });
       }
 
       /** 追踪标签 API */

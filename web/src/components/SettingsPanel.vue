@@ -7,8 +7,10 @@ const emit = defineEmits<{
   saved: []
 }>()
 import { authFetch } from '../services/auth'
+import { usePreferences } from '../composables/usePreferences'
 
 const { t } = useI18n()
+const { setPref, getPref } = usePreferences()
 
 /** 后端地址 */
 const backendUrlInput = ref(getBackendUrl())
@@ -29,17 +31,18 @@ const PRESET_MODELS = [
   { id: 'Xenova/detr-resnet-50', name: 'DETR-R50', desc: '经典DETR模型' },
 ]
 
-/** 声音提醒设置（localStorage 持久化，纯前端） */
-const SOUND_KEY = 'nvr-sound-alert'
-const SOUND_VOLUME_KEY = 'nvr-sound-volume'
-const soundEnabled = ref(localStorage.getItem(SOUND_KEY) !== 'false')
-const soundVolume = ref(Number(localStorage.getItem(SOUND_VOLUME_KEY) ?? 80))
+/** 声音提醒设置 */
+const soundEnabled = ref(true)
+const soundVolume = ref(80)
+
+getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
+getPref<number>('nvr-sound-volume', 80).then(v => { soundVolume.value = v })
 
 function onSoundToggle() {
-  localStorage.setItem(SOUND_KEY, String(soundEnabled.value))
+  setPref('nvr-sound-alert', soundEnabled.value)
 }
 function onVolumeChange() {
-  localStorage.setItem(SOUND_VOLUME_KEY, String(soundVolume.value))
+  setPref('nvr-sound-volume', soundVolume.value)
 }
 
 /** 运行时设置 */

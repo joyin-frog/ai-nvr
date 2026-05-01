@@ -25,6 +25,7 @@ import { RecordingExporter } from "@/storage/export";
 import { PtzController } from "@/ptz";
 import { TrackLabelStorage } from "@/storage/track-labels";
 import { TrackStorage } from "@/storage/tracks";
+import { PreferencesStorage } from "@/storage/preferences";
 
 /**
  * 设置 Hugging Face 镜像（国内网络加速模型下载）
@@ -115,6 +116,9 @@ const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db")
 const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage);
 alertEngine.start();
 
+/** 用户偏好设置存储 */
+const preferencesStorage = new PreferencesStorage(join(dataDir, "preferences.db"));
+
 /** 录像缩略图生成器 */
 const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), config.ffmpegPath);
 
@@ -151,7 +155,7 @@ for (const cam of config.cameras) {
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;
@@ -191,6 +195,7 @@ process.on("SIGINT", () => {
   eventStorage.close();
   roiStorage.close();
   alertStorage.close();
+  preferencesStorage.close();
   eventBus.clear();
   process.exit(0);
 });
