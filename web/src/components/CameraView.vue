@@ -78,9 +78,15 @@ watch(canvasEl, (el) => {
   else renderer.stopLoop()
 })
 
-/** 帧到达时喂入 Canvas 渲染器 */
+/** 帧到达时喂入 Canvas 渲染器并更新帧尺寸 */
 watch(() => props.frameImage, (buf: ArrayBuffer) => {
-  if (buf) renderer.feedFrame(buf)
+  if (buf) {
+    renderer.feedFrame(buf)
+    const size = renderer.getFrameSize()
+    if (size.width > 0 && size.height > 0 && (size.width !== frameSize.value.width || size.height !== frameSize.value.height)) {
+      frameSize.value = size
+    }
+  }
 })
 
 /** 检测框列表（按置信度排序） */
@@ -120,10 +126,13 @@ watch(() => props.online, (on) => {
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
 onUnmounted(() => { if (frozenTimer) clearInterval(frozenTimer) })
 
-/** 画面比例：根据视频分辨率计算，默认 16:9 */
+/** 画面比例：优先用帧实际尺寸，回退到 props */
+const frameSize = ref({ width: 0, height: 0 })
 const cameraBodyStyle = computed(() => {
-  if (props.videoWidth && props.videoHeight && props.videoWidth > 0 && props.videoHeight > 0) {
-    return { 'aspect-ratio': `${props.videoWidth} / ${props.videoHeight}` }
+  const fw = frameSize.value.width || props.videoWidth || 0
+  const fh = frameSize.value.height || props.videoHeight || 0
+  if (fw > 0 && fh > 0) {
+    return { 'aspect-ratio': `${fw} / ${fh}` }
   }
   return { 'aspect-ratio': '16 / 9' }
 })

@@ -815,7 +815,7 @@ onUnmounted(() => {
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-          <SettingsPanel v-if="activeTab === 'settings'" />
+          <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
     </main>

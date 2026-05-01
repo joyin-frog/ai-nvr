@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+
+const emit = defineEmits<{
+  saved: []
+}>()
 import { authFetch } from '../services/auth'
 
 const { t } = useI18n()
@@ -159,6 +163,7 @@ async function saveSettings() {
     if (res.ok) {
       settings.value = await res.json()
       success.value = true
+      emit('saved')
       setTimeout(() => { success.value = false }, 2000)
     }
   } catch {
