@@ -578,16 +578,6 @@ function setupEventListeners() {
     flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 
-  /** 追踪语义事件 */
-  client.on('track:appeared', (payload) => {
-    const desc = `${payload.label}#${payload.trackId} ${(payload.score * 100).toFixed(0)}%`
-    eventPanel.value?.addEvent('track:appeared', payload.cameraId, desc)
-  })
-
-  client.on('track:disappeared', (payload) => {
-    const desc = `${payload.label}#${payload.trackId}`
-    eventPanel.value?.addEvent('track:disappeared', payload.cameraId, desc)
-  })
 }
 
 onMounted(async () => {

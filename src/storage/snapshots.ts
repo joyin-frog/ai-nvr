@@ -30,18 +30,18 @@ export class SnapshotStorage {
     mkdirSync(storagePath, { recursive: true });
   }
 
-  /** 启动：监听 detect 事件保存标注图和元数据 */
+  /** 启动：监听 detect 事件保存原始帧和元数据 */
   start(): void {
-    this.eventBus.on("detect", ({ cameraId, timestamp, annotatedImage, detections }) => {
+    this.eventBus.on("detect", ({ cameraId, timestamp, frameImage, detections }) => {
       /** 0 目标不保存快照 */
       if (!detections || detections.length === 0) return;
-      this.saveSnapshot(cameraId, timestamp, annotatedImage, detections);
+      this.saveSnapshot(cameraId, timestamp, frameImage, detections);
     });
     console.log("[Snapshot] 快照存储已启动");
   }
 
-  /** 保存快照（标注图 + 检测结果 JSON） */
-  saveSnapshot(cameraId: string, timestamp: number, imageData: Buffer, detections?: Detection[]): string {
+  /** 保存快照（原始帧 + 检测结果 JSON） */
+  saveSnapshot(cameraId: string, timestamp: number, frameImage: Buffer, detections?: Detection[]): string {
     const dir = join(this.storagePath, cameraId);
     mkdirSync(dir, { recursive: true });
 
@@ -52,7 +52,7 @@ export class SnapshotStorage {
     const filename = `${dateStr}_${timeStr}_${ms}.jpg`;
 
     const filePath = join(dir, filename);
-    writeFileSync(filePath, imageData);
+    writeFileSync(filePath, frameImage);
 
     /** 保存检测结果元数据（JSON 侧文件） */
     if (detections && detections.length > 0) {
@@ -64,7 +64,7 @@ export class SnapshotStorage {
       }));
     }
 
-    console.log(`[Snapshot] 已保存: ${cameraId}/${filename} (${imageData.length} bytes)`);
+    console.log(`[Snapshot] 已保存: ${cameraId}/${filename} (${frameImage.length} bytes)`);
     return `${cameraId}/${filename}`;
   }
 

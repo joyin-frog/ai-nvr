@@ -1,6 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { ensureModelCached } from "./model-downloader";
-import { ObjectTracker, type TrackedDetection } from "./tracker";
+import { ObjectTracker } from "./tracker";
 
 /** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
 const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -355,27 +355,6 @@ export class AiDetector {
         annotatedImage = this.annotator.getLatest(cameraId) ?? jpeg;
       }
       const annotateMs = performance.now() - t3;
-
-      /** 语义事件：新目标出现 */
-      for (const obj of trackResult.appeared) {
-        this.eventBus.emit("track:appeared", {
-          cameraId,
-          timestamp,
-          trackId: obj.trackId,
-          label: obj.label,
-          score: obj.score,
-        });
-      }
-
-      /** 语义事件：目标消失 */
-      for (const obj of trackResult.disappeared) {
-        this.eventBus.emit("track:disappeared", {
-          cameraId,
-          timestamp,
-          trackId: obj.trackId,
-          label: obj.label,
-        });
-      }
 
       this.eventBus.emit("detect", {
         cameraId,

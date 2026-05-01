@@ -14,6 +14,8 @@ export interface TrackedObject {
   age: number;
   /** 上次匹配到的帧 */
   lastMatched: number;
+  /** 标签投票计数 */
+  labelVotes: Map<string, number>;
 }
 
 /** 追踪结果（带 trackId 的检测结果） */
@@ -60,8 +62,8 @@ export class ObjectTracker {
     iouThreshold?: number;
     newTrackThreshold?: number;
   }) {
-    this.maxLost = options?.maxLost ?? 5;
-    this.iouThreshold = options?.iouThreshold ?? 0.3;
+    this.maxLost = options?.maxLost ?? 15;
+    this.iouThreshold = options?.iouThreshold ?? 0.2;
     this.newTrackThreshold = options?.newTrackThreshold ?? 0.5;
   }
 
@@ -87,6 +89,8 @@ export class ObjectTracker {
     /** 第一帧：全部创建新追踪 */
     if (this.tracks.length === 0) {
       for (const det of highDets) {
+        const votes = new Map<string, number>();
+        votes.set(det.label, 1);
         const track: TrackedObject = {
           trackId: nextTrackId++,
           label: det.label,
@@ -94,10 +98,10 @@ export class ObjectTracker {
           box: { ...det.box },
           age: 1,
           lastMatched: this.frameIndex,
+          labelVotes: votes,
         };
         this.tracks.push(track);
         results.push({ ...det, trackId: track.trackId });
-        appeared.push({ trackId: track.trackId, label: track.label, score: track.score, box: track.box });
       }
       return { detections: results, appeared, disappeared };
     }
@@ -106,7 +110,7 @@ export class ObjectTracker {
     const costMatrix = this.buildCostMatrix(this.tracks, highDets);
 
     /** 匈牙利匹配（贪心近似，足够快） */
-    const { matchedTracks, unmatchedTracks, unmatchedDets } = this.greedyMatch(
+    const { matchedTracks, unmatchedDets } = this.greedyMatch(
       costMatrix,
       this.tracks.length,
       highDets.length,
@@ -128,7 +132,17 @@ export class ObjectTracker {
         ymax: prev.ymax + smoothAlpha * (curr.ymax - prev.ymax),
       };
       track.score = det.score;
-      track.label = det.label;
+      /** 标签投票：只有新标签累计超过旧标签时才切换 */
+      track.labelVotes.set(det.label, (track.labelVotes.get(det.label) ?? 0) + 1);
+      let bestLabel = track.label;
+      let bestCount = track.labelVotes.get(track.label) ?? 0;
+      for (const [lbl, count] of track.labelVotes) {
+        if (count > bestCount) {
+          bestLabel = lbl;
+          bestCount = count;
+        }
+      }
+      track.label = bestLabel;
       track.age++;
       track.lastMatched = this.frameIndex;
       results.push({ label: track.label, score: track.score, box: { ...track.box }, trackId: track.trackId });
@@ -137,6 +151,8 @@ export class ObjectTracker {
     /** 未匹配的检测 → 新建追踪 */
     for (const di of unmatchedDets) {
       const det = highDets[di]!;
+      const votes = new Map<string, number>();
+      votes.set(det.label, 1);
       const track: TrackedObject = {
         trackId: nextTrackId++,
         label: det.label,
@@ -144,6 +160,7 @@ export class ObjectTracker {
         box: { ...det.box },
         age: 1,
         lastMatched: this.frameIndex,
+        labelVotes: votes,
       };
       this.tracks.push(track);
       results.push({ ...det, trackId: track.trackId });
@@ -184,12 +201,9 @@ export class ObjectTracker {
       matrix[i] = [];
       for (let j = 0; j < dets.length; j++) {
         const iou = this.computeIou(tracks[i]!.box, dets[j]!.box);
-        /** 只匹配同标签 */
-        if (tracks[i]!.label !== dets[j]!.label) {
-          matrix[i]![j] = 1;
-        } else {
-          matrix[i]![j] = 1 - iou;
-        }
+        /** 同标签优先匹配，不同标签加惩罚 */
+        const labelPenalty = tracks[i]!.label !== dets[j]!.label ? 0.3 : 0;
+        matrix[i]![j] = 1 - iou + labelPenalty;
       }
     }
     return matrix;
@@ -202,7 +216,6 @@ export class ObjectTracker {
     numDets: number,
   ): {
     matchedTracks: Array<[number, number]>;
-    unmatchedTracks: number[];
     unmatchedDets: number[];
   } {
     const matchedTracks: Array<[number, number]> = [];
@@ -222,19 +235,17 @@ export class ObjectTracker {
     candidates.sort((a, b) => a.cost - b.cost);
 
     /** 贪心选取 */
-    for (const { cost, ti, di } of candidates) {
+    for (const { ti, di } of candidates) {
       if (usedTracks.has(ti) || usedDets.has(di)) continue;
       matchedTracks.push([ti, di]);
       usedTracks.add(ti);
       usedDets.add(di);
     }
 
-    const unmatchedTracks = Array.from({ length: numTracks }, (_, i) => i)
-      .filter(i => !usedTracks.has(i));
     const unmatchedDets = Array.from({ length: numDets }, (_, i) => i)
       .filter(i => !usedDets.has(i));
 
-    return { matchedTracks, unmatchedTracks, unmatchedDets };
+    return { matchedTracks, unmatchedDets };
   }
 
   /** 计算两个 bbox 的 IoU */

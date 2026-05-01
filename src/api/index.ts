@@ -39,7 +39,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -990,18 +990,9 @@ export function startServer(
   const headerLenBuf = new Uint8Array(4);
   const headerLenView = new DataView(headerLenBuf.buffer);
 
-  /** 关注的目标标签（track 事件只推送关注的目标） */
-  const wsImportantLabels = new Set(runtimeConfig.get().ai.importantLabels);
-
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
-      /** track 事件只推送关注的目标 */
-      if (event === "track:appeared" || event === "track:disappeared") {
-        const p = payload as { label: string };
-        if (!wsImportantLabels.has(p.label)) return;
-      }
-
       let frameData: Buffer | null = null;
 
       /** 构建 JSON 头（只保留事件类型和元数据，不含二进制） */

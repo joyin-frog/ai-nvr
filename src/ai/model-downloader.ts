@@ -97,6 +97,8 @@ function downloadWithResume(url: string, tmpPath: string, finalPath: string, max
           return;
         }
 
+        /** 确保临时文件目录存在 */
+        mkdirSync(dirname(tmpPath), { recursive: true });
         const flags = startByte > 0 ? "a" : "w";
         const ws = createWriteStream(tmpPath, { flags });
         let downloaded = startByte;
