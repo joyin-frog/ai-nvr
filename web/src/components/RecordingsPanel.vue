@@ -837,7 +837,7 @@ async function loadRecordings() {
     }
     /** 无日期过滤时限制返回数量，避免大负载 */
     if (!filterDate.value) {
-      params.set('limit', '500')
+      params.set('limit', '100')
     }
     const res = await authFetch(`/api/recordings?${params}`)
     if (res.ok) {

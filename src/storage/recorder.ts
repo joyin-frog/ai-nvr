@@ -195,7 +195,7 @@ export class MotionRecorder {
 
   /** 录像列表缓存（TTL 5 秒，避免频繁 stat 文件系统） */
   private listCache = new Map<string, { data: RecordingInfo[]; expiry: number }>();
-  private static readonly LIST_CACHE_TTL = 5000;
+  private static readonly LIST_CACHE_TTL = 30_000;
 
   /** 列出录像文件 */
   listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
