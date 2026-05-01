@@ -66,6 +66,8 @@ export class AiDetector {
   private detectQueue: string[] = [];
   /** 队列处理中 */
   private processingQueue = false;
+  /** 每个摄像头最近一次完成推理的时间（用于跳过过密请求） */
+  private lastDetectTime = new Map<string, number>();
   /** 上一次检测结果指纹（用于去重通知） */
   private lastDetectFingerprint = new Map<string, string>();
   /** 每个摄像头的目标追踪器 */
@@ -220,8 +222,9 @@ export class AiDetector {
   private startContinuousLoop(interval: number): void {
     if (this.continuousTimer) clearInterval(this.continuousTimer);
     this.continuousTimer = setInterval(() => {
+      const now = Date.now();
       for (const [cameraId, frame] of this.latestFrames) {
-        if (Date.now() - frame.timestamp > interval * 3) continue;
+        if (now - frame.timestamp > interval * 3) continue;
         if (!this.detectQueue.includes(cameraId)) {
           this.detectQueue.push(cameraId);
         }
@@ -230,16 +233,23 @@ export class AiDetector {
     }, interval);
   }
 
-  /** 依次处理检测队列 */
+  /** 依次处理检测队列（每次取摄像头最新帧） */
   private async processQueue(interval: number): Promise<void> {
     if (this.processingQueue) return;
     this.processingQueue = true;
+    const now = Date.now();
     while (this.detectQueue.length > 0) {
       const cameraId = this.detectQueue.shift()!;
+      /** 始终使用该摄像头的最新帧（跳过中间帧） */
       const frame = this.latestFrames.get(cameraId);
       if (!frame) continue;
-      if (Date.now() - frame.timestamp > interval * 3) continue;
+      /** 帧太旧 → 跳过 */
+      if (now - frame.timestamp > interval * 3) continue;
+      /** 推理间隔保护：避免同一摄像头过于频繁推理 */
+      const lastTime = this.lastDetectTime.get(cameraId) ?? 0;
+      if (now - lastTime < interval * 0.8) continue;
       await this.detect(cameraId, frame.data, frame.timestamp);
+      this.lastDetectTime.set(cameraId, Date.now());
     }
     this.processingQueue = false;
   }
@@ -257,6 +267,7 @@ export class AiDetector {
     this.latestFrames.clear();
     this.detectQueue = [];
     this.processingQueue = false;
+    this.lastDetectTime.clear();
   }
 
   /** 运行时切换模型 */

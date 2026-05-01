@@ -48,6 +48,14 @@ const init = workerData as WorkerInit;
 
 transformersEnv.cacheDir = init.cacheDir;
 
+/** 当前正在推理的请求 ID（推理锁） */
+let currentRequestId = 0;
+
+/** 最新待处理的请求（新请求覆盖旧的，实现自动跳帧） */
+let pendingReq: DetectRequest | null = null;
+/** 推理进行中 */
+let busy = false;
+
 /** 加载模型 */
 async function loadModel(): Promise<void> {
   console.log(`[AI Worker] 加载模型: ${init.model}`);
@@ -61,6 +69,8 @@ async function loadModel(): Promise<void> {
 /** 执行推理 */
 async function detect(req: DetectRequest): Promise<void> {
   if (!detector) return;
+
+  currentRequestId = req.id;
 
   const result: DetectResult = {
     id: req.id,
@@ -119,13 +129,32 @@ async function detect(req: DetectRequest): Promise<void> {
     result.error = err instanceof Error ? err.message : String(err);
   }
 
-  parentPort?.postMessage({ type: "result", data: result });
+  /** 只有当前请求才返回结果（跳过被覆盖的旧请求） */
+  if (currentRequestId === req.id) {
+    parentPort?.postMessage({ type: "result", data: result });
+  }
+}
+
+/** 处理下一个待处理请求 */
+async function drainPending(): Promise<void> {
+  while (pendingReq) {
+    const req = pendingReq;
+    pendingReq = null;
+    await detect(req);
+  }
+  busy = false;
 }
 
 /** 监听主线程消息 */
 parentPort?.on("message", (msg: { type: string; data?: DetectRequest }) => {
   if (msg.type === "detect" && msg.data) {
-    detect(msg.data);
+    if (busy) {
+      /** 推理进行中 → 覆盖旧待处理请求（自动跳帧） */
+      pendingReq = msg.data;
+    } else {
+      busy = true;
+      detect(msg.data).then(() => drainPending());
+    }
   }
 });
 
