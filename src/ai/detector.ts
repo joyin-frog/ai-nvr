@@ -396,6 +396,20 @@ export class AiDetector {
                   label: target.label,
                   matches,
                 });
+                /** 高置信度匹配（距离 < 0.25）自动关联名称 */
+                const best = matches[0]!;
+                if (best.distance < 0.25 && this.trackLabelStorage) {
+                  this.trackLabelStorage.upsert(cameraId, target.trackId, target.label, best.customName);
+                  this.trackStorage!.setCustomName(target.trackId, best.customName);
+                  /** 清除缓存强制下次查找刷新 */
+                  this.trackNameCache.delete(`${cameraId}:${target.trackId}`);
+                  this.eventBus.emit("track:label-updated", {
+                    cameraId,
+                    trackId: target.trackId,
+                    name: best.customName,
+                  });
+                  console.log(`[AiDetector] 自动关联: track#${target.trackId} → ${best.customName} (${(best.distance * 100).toFixed(0)}%)`);
+                }
               }
             }
           }).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
