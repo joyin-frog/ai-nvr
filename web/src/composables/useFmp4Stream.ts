@@ -19,6 +19,9 @@ const BUFFER_RETAIN_SECONDS = 4
 /** 播放延迟超过此值（秒）时自动 seek 到最新位置 */
 const LIVE_CATCHUP_THRESHOLD = 0.8
 
+/** pending 队列最大段数，超过则丢弃最旧的段 */
+const MAX_PENDING_SEGMENTS = 8
+
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
   const videoRef = ref<HTMLVideoElement | null>(null)
@@ -313,6 +316,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function queueAppend(data: ArrayBuffer) {
     if (appending) {
       pendingQueue.push(data)
+      /** 队列溢出保护：丢弃最旧的段，防止内存无限增长 */
+      if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
+        pendingQueue.shift()
+      }
       return
     }
     doAppend(data)
@@ -321,6 +328,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function doAppend(data: ArrayBuffer) {
     if (!sourceBuffer || sourceBuffer.updating) {
       pendingQueue.push(data)
+      if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
+        pendingQueue.shift()
+      }
       return
     }
     appending = true
