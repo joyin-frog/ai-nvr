@@ -1546,8 +1546,16 @@ export function startServer(
       const trackDeleteMatch = url.pathname.match(/^\/api\/tracks\/(\d+)$/);
       if (trackDeleteMatch && req.method === "DELETE") {
         const trackId = parseInt(trackDeleteMatch[1]!);
+        const track = trackStorage.getTrack(trackId);
         const ok = trackStorage.remove(trackId);
         if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+        /** 清理关联数据 */
+        if (track) {
+          for (const camId of track.cameraIds) {
+            trackLabelStorage.removeByTrack(camId, trackId);
+          }
+          if (trajectoryStorage) trajectoryStorage.deleteByTrackId(trackId);
+        }
         return Response.json({ ok: true });
       }
 
