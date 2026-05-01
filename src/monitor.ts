@@ -18,6 +18,8 @@ export interface CameraMetrics {
   detectCount: number;
   /** 平均变动比例 */
   avgMotionRatio: number;
+  /** 平均帧大小（KB） */
+  avgFrameSizeKb: number;
 }
 
 /** 系统整体指标 */
@@ -64,6 +66,8 @@ export class SystemMonitor {
   private detectCounts = new Map<string, number>();
   private cameraOnline = new Map<string, boolean>();
   private cameraLastFrame = new Map<string, number>();
+  /** 每路摄像头的帧大小统计（滑动平均） */
+  private frameSizeStats = new Map<string, { sum: number; count: number }>();
   /** FPS 统计窗口（秒） */
   private fpsWindow = 5;
   /** 低帧率检测：每个摄像头连续低 FPS 的检查周期数 */
@@ -82,9 +86,20 @@ export class SystemMonitor {
   ) {
     void this.lowFpsTimer;
     /** 帧事件 → 更新 FPS 和在线状态 */
-    eventBus.on("frame", ({ cameraId, timestamp }) => {
+    eventBus.on("frame", ({ cameraId, timestamp, data }) => {
       this.cameraOnline.set(cameraId, true);
       this.cameraLastFrame.set(cameraId, timestamp);
+
+      /** 记录帧大小（指数移动平均，最近约 60 帧权重） */
+      let sizeStats = this.frameSizeStats.get(cameraId);
+      if (!sizeStats) {
+        sizeStats = { sum: data.length / 1024, count: 1 };
+        this.frameSizeStats.set(cameraId, sizeStats);
+      } else {
+        const alpha = 1 / 60;
+        sizeStats.sum = sizeStats.sum * (1 - alpha) + (data.length / 1024) * alpha;
+        sizeStats.count++;
+      }
 
       let counter = this.fpsCounters.get(cameraId);
       if (!counter) {
@@ -176,6 +191,7 @@ export class SystemMonitor {
     const mem = process.memoryUsage();
     const cameras: CameraMetrics[] = cameraIds.map(id => {
       const motionStats = this.motionRatios.get(id);
+      const sizeStats = this.frameSizeStats.get(id);
       return {
         cameraId: id,
         online: this.cameraOnline.get(id) ?? false,
@@ -185,6 +201,7 @@ export class SystemMonitor {
         motionCount: this.motionCounts.get(id) ?? 0,
         detectCount: this.detectCounts.get(id) ?? 0,
         avgMotionRatio: motionStats ? motionStats.sum / motionStats.count : 0,
+        avgFrameSizeKb: sizeStats ? Math.round(sizeStats.sum / sizeStats.count * 10) / 10 : 0,
       };
     });
 

@@ -14,6 +14,7 @@ interface CameraMetric {
   motionCount: number
   detectCount: number
   avgMotionRatio: number
+  avgFrameSizeKb: number
 }
 
 /** 系统指标 */
@@ -550,6 +551,10 @@ onUnmounted(() => {
             <div v-if="todayStats" class="metric">
               <span class="metric-val">{{ todayStats.byCamera.find(c => c.cameraId === cam.cameraId)?.count ?? 0 }}</span>
               <span class="metric-unit">{{ t('status.todayEvents') }}</span>
+            </div>
+            <div v-if="cam.avgFrameSizeKb > 0" class="metric">
+              <span class="metric-val">{{ cam.avgFrameSizeKb.toFixed(0) }}<span class="metric-unit">KB</span></span>
+              <span class="metric-unit">~{{ (cam.avgFrameSizeKb * cam.fps / 1024).toFixed(1) }} MB/s</span>
             </div>
           </div>
         </div>

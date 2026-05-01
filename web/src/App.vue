@@ -58,6 +58,8 @@ const activeTab = ref<SidebarTab>(savedTab ?? 'events')
 
 /** 摄像头 FPS 映射（从 health API 更新） */
 const cameraFpsMap = ref<Record<string, number>>({})
+/** 摄像头帧大小映射（KB，从 health API 更新） */
+const cameraFrameSizeMap = ref<Record<string, number>>({})
 
 /** 摄像头 ID → 索引映射（避免每帧 Array.find 的 O(n) 查找） */
 const cameraIndexMap = computed(() => {
@@ -230,6 +232,12 @@ async function checkDiskSpace() {
         fpsMap[cam.cameraId] = cam.fps
       }
       cameraFpsMap.value = fpsMap
+      /** 更新摄像头帧大小 */
+      const sizeMap: Record<string, number> = {}
+      for (const cam of data.cameras as Array<{ cameraId: string; avgFrameSizeKb: number }>) {
+        sizeMap[cam.cameraId] = cam.avgFrameSizeKb
+      }
+      cameraFrameSizeMap.value = sizeMap
     }
     const storage = data.storage as { diskTotalBytes: number; diskFreeBytes: number } | undefined
     if (!storage || storage.diskTotalBytes === 0) return
