@@ -66,6 +66,10 @@ export class MotionDetector {
       return;
     }
 
+    /** 在异步操作前立即标记 processing，防止并发 */
+    state.processing = true;
+    state.lastProcessTime = timestamp;
+
     /** 从 RuntimeConfig 获取该摄像头的有效配置（考虑覆盖） */
     const config = this.runtimeConfig.getMotionConfig(cameraId);
 
@@ -78,6 +82,7 @@ export class MotionDetector {
         .raw()
         .toBuffer({ resolveWithObject: true });
     } catch {
+      state.processing = false;
       return;
     }
 
@@ -87,9 +92,6 @@ export class MotionDetector {
     const totalPixels = width * height;
 
     const pixels = new Uint8Array(data.buffer);
-
-    state.processing = true;
-    state.lastProcessTime = timestamp;
 
     try {
     /** 构建 ROI mask（每60秒刷新一次） */
