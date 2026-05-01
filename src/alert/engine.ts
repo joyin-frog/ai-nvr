@@ -80,7 +80,7 @@ export class AlertEngine {
   }
 
   /** 处理 detect 事件（需要标签过滤 + 数量条件） */
-  private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number }>): void {
+  private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number; trackId?: number }>): void {
     this.refreshRules();
 
     for (const rule of this.rules) {
@@ -98,7 +98,7 @@ export class AlertEngine {
       /** 数量条件：匹配标签的目标数必须 >= minCount */
       if (rule.minCount > 0 && matchedDetections.length < rule.minCount) continue;
 
-      const labels = matchedDetections.map(d => `${d.label}(${(d.score * 100).toFixed(0)}%)`).join(", ");
+      const labels = matchedDetections.map(d => `${d.label}#${d.trackId ?? "?"}(${(d.score * 100).toFixed(0)}%)`).join(", ");
       const detail = rule.minCount > 0
         ? JSON.stringify({ detections: labels, count: matchedDetections.length })
         : JSON.stringify({ detections: labels });
