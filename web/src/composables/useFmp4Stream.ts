@@ -49,9 +49,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let pruneTimer: ReturnType<typeof setInterval> | null = null
   /** 当前使用的 codec */
   let currentCodec = ''
-  /** FPS 统计 */
-  let fpsSegmentCount = 0
+  /** FPS 统计（使用 requestVideoFrameCallback 精确测量实际视频帧率） */
+  let fpsFrameCount = 0
   let fpsStartTime = 0
+  let videoFrameCallbackId: number | null = null
   /** video 元素事件处理器引用（用于清理） */
   let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
   /** 解码检测定时器：连接后一段时间内 videoWidth=0 则判定为解码失败 */
@@ -59,6 +60,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
+    /** 清理旧的 video frame callback */
+    if (videoFrameCallbackId != null && videoRef.value) {
+      videoRef.value.cancelVideoFrameCallback?.(videoFrameCallbackId)
+      videoFrameCallbackId = null
+    }
     /** 清理旧事件 */
     if (videoRef.value) {
       for (const { event, handler } of videoEventHandlers) {
@@ -77,6 +83,22 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl)
         currentBlobUrl = URL.createObjectURL(mediaSource)
         el.src = currentBlobUrl
+      }
+      /** 使用 requestVideoFrameCallback 精确测量实际视频帧率 */
+      if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+        fpsStartTime = performance.now()
+        fpsFrameCount = 0
+        const measureFps = (_now: number, _metadata: unknown) => {
+          fpsFrameCount++
+          const elapsed = performance.now() - fpsStartTime
+          if (elapsed >= 2000) {
+            fps.value = Math.round(fpsFrameCount * 1000 / elapsed)
+            fpsFrameCount = 0
+            fpsStartTime = performance.now()
+          }
+          videoFrameCallbackId = el.requestVideoFrameCallback(measureFps)
+        }
+        videoFrameCallbackId = el.requestVideoFrameCallback(measureFps)
       }
     }
   }
@@ -227,16 +249,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         /** slice 创建独立 ArrayBuffer，避免将 type 标记字节传入 MSE */
         const fmp4Data = raw.slice(1).buffer
         queueAppend(fmp4Data)
-
-        /** FPS 统计 */
-        fpsSegmentCount++
-        const now = performance.now()
-        const elapsed = now - fpsStartTime
-        if (elapsed >= 2000) {
-          fps.value = Math.round(fpsSegmentCount * 1000 / elapsed)
-          fpsSegmentCount = 0
-          fpsStartTime = now
-        }
       }
     }
 
@@ -395,6 +407,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
+    }
+    /** 清理 video frame callback */
+    if (videoFrameCallbackId != null && videoRef.value) {
+      try { videoRef.value.cancelVideoFrameCallback?.(videoFrameCallbackId) } catch { /* */ }
+      videoFrameCallbackId = null
     }
     if (decodeCheckTimer) {
       clearTimeout(decodeCheckTimer)
