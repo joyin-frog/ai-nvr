@@ -86,10 +86,10 @@ watch(() => fmp4.failed.value, (failed) => {
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
 let overlayRafId: number | null = null
 
-/** MSE overlay 渲染循环（降频至 ~15fps，减少 GPU 开销） */
+/** MSE overlay 渲染循环（~30fps，匹配视频帧率） */
 let overlayLastDraw = 0
 /** overlay 目标帧间隔（ms） */
-const OVERLAY_FRAME_INTERVAL = 66
+const OVERLAY_FRAME_INTERVAL = 33
 
 function startOverlayLoop() {
   if (overlayRafId) return
