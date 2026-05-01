@@ -147,6 +147,8 @@ export default {
     helpFullscreen: '全屏',
     helpSpeed: '倍速加减',
     helpPip: '画中画切换',
+    helpNextEvent: '跳到下一个事件',
+    helpPrevEvent: '跳到上一个事件',
     pip: '画中画',
     matchCountTip: '匹配 {count} 次',
   },

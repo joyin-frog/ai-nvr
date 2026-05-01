@@ -424,6 +424,24 @@ function seekToPlaybackEvent(timestamp: number) {
   const offsetSec = (timestamp - selectedRecording.value.startTime) / 1000
   playerRef.value.currentTime = Math.max(0, offsetSec)
 }
+
+/** 跳转到下一个/上一个检测事件 */
+function seekNextEvent(direction: 1 | -1) {
+  if (!playerRef.value || !selectedRecording.value || playbackEvents.value.length === 0) return
+  const absTime = currentAbsTime.value
+  const events = direction > 0 ? playbackEvents.value : [...playbackEvents.value].reverse()
+  for (const e of events) {
+    const ts = e.timestamp
+    if (direction > 0 && ts > absTime + 500) {
+      seekToPlaybackEvent(ts)
+      return
+    }
+    if (direction < 0 && ts < absTime - 500) {
+      seekToPlaybackEvent(ts)
+      return
+    }
+  }
+}
 const progressEl = ref<HTMLDivElement | null>(null)
 function onProgressClick(e: MouseEvent) {
   if (!playerRef.value || !progressEl.value) return
@@ -645,6 +663,16 @@ function onPlayerKeydown(e: KeyboardEvent) {
     case 'P':
       e.preventDefault()
       togglePip()
+      break
+    case 'n':
+    case 'N':
+      e.preventDefault()
+      seekNextEvent(1)
+      break
+    case 'b':
+    case 'B':
+      e.preventDefault()
+      seekNextEvent(-1)
       break
   }
 }
@@ -1533,6 +1561,8 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="help-row"><kbd>F</kbd> {{ t('recording.helpFullscreen') }}</div>
             <div class="help-row"><kbd>+</kbd><kbd>-</kbd> {{ t('recording.helpSpeed', '倍速') }}</div>
             <div class="help-row"><kbd>P</kbd> {{ t('recording.helpPip', '画中画') }}</div>
+            <div class="help-row"><kbd>N</kbd> {{ t('recording.helpNextEvent', '下一个事件') }}</div>
+            <div class="help-row"><kbd>B</kbd> {{ t('recording.helpPrevEvent', '上一个事件') }}</div>
           </div>
         </div>
         <div class="player-video-wrapper">
@@ -1603,6 +1633,8 @@ defineExpose({ loadRecordings, playAtTime })
           </button>
           <button class="ctrl-btn frame-btn" @click="stepFrame(-1)" title="◀ 1帧 (,)">◂</button>
           <button class="ctrl-btn frame-btn" @click="stepFrame(1)" title="1帧 ▸ (.)">▸</button>
+          <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(-1)" title="上一个事件">⏮</button>
+          <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(1)" title="下一个事件">⏭</button>
           <button :class="['ctrl-btn', 'loop-btn', { active: loopStart >= 0 }]" @click="loopStart >= 0 ? clearLoop() : setLoopPoint('a')" :title="loopStart >= 0 ? '清除循环 (\\)' : '设A点 ([)'">A</button>
           <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" title="设B点 (])">B</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">

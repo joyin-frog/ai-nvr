@@ -147,6 +147,8 @@ export default {
     helpFullscreen: 'Fullscreen',
     helpSpeed: 'Speed up/down',
     helpPip: 'Toggle PiP',
+    helpNextEvent: 'Jump to next event',
+    helpPrevEvent: 'Jump to previous event',
     pip: 'PiP',
     matchCountTip: '{count} matches',
   },
