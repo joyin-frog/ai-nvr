@@ -1114,7 +1114,7 @@ defineExpose({ loadRecordings, playAtTime })
         </div>
         <div class="rec-info">
           <div class="rec-cam">{{ cameraNameMap[rec.cameraId] ?? rec.cameraId }}</div>
-          <div class="rec-time">{{ formatTime(rec.startTime) }}</div>
+          <div class="rec-time">{{ formatAbsTime(rec.startTime) }} - {{ formatAbsTime(rec.endTime) }}</div>
         </div>
         <div class="rec-meta">
           <span v-if="rec.endTime > rec.startTime" class="rec-duration">
