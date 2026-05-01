@@ -9,6 +9,8 @@ const EVENT_LABELS: Record<string, string> = {
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
+  "track:appeared": "目标出现",
+  "track:disappeared": "目标消失",
 };
 
 /** 事件类型对应 CSS 颜色 */
@@ -18,10 +20,12 @@ const EVENT_COLORS: Record<string, string> = {
   "camera:online": "#5cb85c",
   "camera:offline": "#d9534f",
   alert: "#d9534f",
+  "track:appeared": "#5cb85c",
+  "track:disappeared": "#777",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared"];
 
 /**
  * 邮件告警通知
@@ -82,6 +86,15 @@ export class EmailNotifier {
       if (detail) detailHtml += `<tr><td>详情</td><td>${detail}</td></tr>`;
     } else if (event === "camera:offline") {
       detailHtml = `<tr><td>状态</td><td style="color:#d9534f">已断开连接</td></tr>`;
+    } else if (event === "track:appeared") {
+      const trackLabel = payload.label as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const score = payload.score as number | undefined;
+      detailHtml = `<tr><td>目标</td><td><strong>${trackLabel ?? "未知"} #${trackId ?? "?"}</strong>${score ? ` (${(score * 100).toFixed(0)}%)` : ""}</td></tr>`;
+    } else if (event === "track:disappeared") {
+      const trackLabel = payload.label as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      detailHtml = `<tr><td>目标</td><td>${trackLabel ?? "未知"} #${trackId ?? "?"}</td></tr>`;
     }
 
     const subject = `[JK NVR] ${label} - ${cameraId}`;

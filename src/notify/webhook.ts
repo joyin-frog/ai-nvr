@@ -19,7 +19,7 @@ interface WebhookPayload {
  */
 export class WebhookNotifier {
   /** 要推送的事件类型 */
-  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "alert"];
+  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared"];
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -68,6 +68,13 @@ export class WebhookNotifier {
     } else if (event === "alert") {
       detail.ruleId = payload.ruleId;
       detail.ruleName = payload.ruleName;
+    } else if (event === "track:appeared") {
+      detail.label = payload.label;
+      detail.trackId = payload.trackId;
+      detail.score = payload.score;
+    } else if (event === "track:disappeared") {
+      detail.label = payload.label;
+      detail.trackId = payload.trackId;
     }
 
     return { event, cameraId, timestamp, detail };

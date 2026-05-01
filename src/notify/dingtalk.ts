@@ -21,10 +21,12 @@ const EVENT_LABELS: Record<string, string> = {
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
+  "track:appeared": "目标出现",
+  "track:disappeared": "目标消失",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared"];
 
 /**
  * 钉钉机器人通知推送
@@ -82,6 +84,15 @@ export class DingTalkNotifier {
       if (detail) body += `\n${detail}`;
     } else if (event === "camera:offline") {
       body = "摄像头已断开连接";
+    } else if (event === "track:appeared") {
+      const trackLabel = payload.label as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const score = payload.score as number | undefined;
+      body = `${trackLabel ?? "目标"} #${trackId ?? "?"}${score ? ` (${(score * 100).toFixed(0)}%)` : ""}`;
+    } else if (event === "track:disappeared") {
+      const trackLabel = payload.label as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      body = `${trackLabel ?? "目标"} #${trackId ?? "?"}`;
     }
 
     const title = `JK NVR - ${label}`;
