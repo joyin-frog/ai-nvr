@@ -1038,6 +1038,7 @@ export function startServer(
             silentEnd: (obj.silentEnd as string) ?? "",
             minCount: (obj.minCount as number) ?? 0,
             roiId: (obj.roiId as number) ?? 0,
+            minSpeed: (obj.minSpeed as number) ?? 0,
           });
           return Response.json({ id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
@@ -1050,7 +1051,7 @@ export function startServer(
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "eventType", "cameraId", "labels", "trackNames", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "minCount", "roiId"]) {
+          for (const key of ["name", "eventType", "cameraId", "labels", "trackNames", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "minCount", "roiId", "minSpeed"]) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
           alertStorage.updateRule(ruleId, updates as never);

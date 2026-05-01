@@ -144,6 +144,9 @@ export class AlertEngine {
       /** ROI 区域过滤 */
       if (rule.roiId && zoneId !== undefined && rule.roiId !== zoneId) continue;
 
+      /** 最小速度过滤（仅 track:speed 事件） */
+      if (rule.minSpeed > 0 && speed !== undefined && speed < rule.minSpeed) continue;
+
       const detailObj: Record<string, unknown> = { trackId, label, trackName };
       if (zoneId !== undefined) detailObj.zoneId = zoneId;
       if (zoneName) detailObj.zoneName = zoneName;

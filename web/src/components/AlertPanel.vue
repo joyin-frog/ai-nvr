@@ -28,6 +28,7 @@ interface AlertRule {
   silentEnd: string
   minCount: number
   roiId: number
+  minSpeed: number
 }
 
 /** 告警记录 */
@@ -98,12 +99,13 @@ const form = ref({
   silentEnd: '',
   minCount: 0,
   roiId: 0,
+  minSpeed: 0,
 })
 
 const emptyForm = {
   name: '', eventType: 'detect', cameraId: '', labels: '', trackNames: '',
   windowSeconds: 60, threshold: 3, cooldownSeconds: 300,
-  silentStart: '', silentEnd: '', minCount: 0, roiId: 0,
+  silentStart: '', silentEnd: '', minCount: 0, roiId: 0, minSpeed: 0,
 }
 
 /** 事件类型选项 */
@@ -230,6 +232,7 @@ function startEdit(rule: AlertRule) {
     silentEnd: rule.silentEnd,
     minCount: rule.minCount ?? 0,
     roiId: rule.roiId ?? 0,
+    minSpeed: rule.minSpeed ?? 0,
   }
 }
 
@@ -442,6 +445,10 @@ defineExpose({ loadAlerts, addAlert })
           <input v-model="form.silentEnd" type="time" class="input" />
         </div>
       </div>
+      <div class="form-field" v-if="form.eventType === 'track:speed'">
+        <label>{{ t('alert.minSpeed', '最小速度 (m/s)') }}</label>
+        <input v-model.number="form.minSpeed" type="number" min="0" step="0.1" class="input" />
+      </div>
       <button class="submit-btn" @click="addRule">{{ t('alert.confirmAdd') }}</button>
     </div>
 
@@ -517,6 +524,10 @@ defineExpose({ loadAlerts, addAlert })
                 <input v-model="form.silentEnd" type="time" class="input" />
               </div>
             </div>
+            <div class="form-field" v-if="form.eventType === 'track:speed'">
+              <label>{{ t('alert.minSpeed', '最小速度 (m/s)') }}</label>
+              <input v-model.number="form.minSpeed" type="number" min="0" step="0.1" class="input" />
+            </div>
             <div class="edit-actions">
               <button class="save-btn" @click="saveEdit">{{ t('alert.save') }}</button>
               <button class="cancel-btn" @click="cancelEdit">{{ t('alert.cancel') }}</button>
@@ -540,6 +551,7 @@ defineExpose({ loadAlerts, addAlert })
             <span v-if="rule.trackNames" class="meta-tag track-name">{{ rule.trackNames }}</span>
             <span v-if="rule.minCount > 0" class="meta-tag count">≥{{ rule.minCount }}</span>
             <span v-if="rule.roiId > 0" class="meta-tag roi">ROI #{{ rule.roiId }}</span>
+            <span v-if="rule.minSpeed > 0" class="meta-tag speed">≥{{ rule.minSpeed }} m/s</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
           </div>
