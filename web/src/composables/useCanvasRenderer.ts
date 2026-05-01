@@ -26,6 +26,8 @@ export function useCanvasRenderer() {
   let latestBuffer: ArrayBuffer | null = null
   /** 叠加层绘制回调（检测框、标签等） */
   let overlayFn: OverlayDrawFn | null = null
+  /** rAF 帧前回调（用于 poll 帧缓存，替代 Vue watcher） */
+  let framePollFn: (() => void) | null = null
 
   /** Canvas 元素引用 */
   const canvasRef: Ref<HTMLCanvasElement | null> = ref(null)
@@ -41,9 +43,16 @@ export function useCanvasRenderer() {
     overlayFn = fn
   }
 
+  /** 设置帧 poll 回调（在每次 rAF 前调用，用于从帧缓存取帧） */
+  function setFramePollFn(fn: (() => void) | null) {
+    framePollFn = fn
+  }
+
   /** rAF 渲染循环 */
   function renderLoop() {
     if (!loopActive) return
+    /** 在渲染前调用帧 poll 回调（消费 ws-frame-cache） */
+    if (framePollFn) framePollFn()
     if (pendingBitmap && ctx && canvasRef.value) {
       const bitmap = pendingBitmap
       pendingBitmap = null
@@ -144,6 +153,7 @@ export function useCanvasRenderer() {
     canvasRef,
     setCanvas,
     setOverlay,
+    setFramePollFn,
     feedFrame,
     startLoop,
     stopLoop,

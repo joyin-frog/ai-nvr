@@ -37,8 +37,6 @@ const props = defineProps<{
   trackLabels?: Record<number, string>
   /** AI 推理耗时（ms） */
   inferMs?: number
-  /** WS 帧版本号（每次收到新帧自增） */
-  wsFrameVersion?: number
   /** 是否双流模式 */
   dualStream?: boolean
   /** 检测流帧率 */
@@ -54,7 +52,7 @@ const emit = defineEmits<{
 }>()
 
 /** Canvas 渲染器（替代 <img> Blob URL） */
-const { canvasRef: _canvasRef, setCanvas, setOverlay, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize } = useCanvasRenderer()
+const { canvasRef: _canvasRef, setCanvas, setOverlay, setFramePollFn, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize } = useCanvasRenderer()
 const mjpegStream = useMjpegStream()
 
 /** 实时时钟 */
@@ -174,11 +172,11 @@ watch(() => props.online, (on) => {
   }
 }, { immediate: true })
 
-/** 监听 WS 帧版本变化，优先使用 WS 帧 */
+/** WS 帧消费：通过 rAF poll 替代 Vue watcher，减少响应式开销 */
 let mjpegSuppressed = false
 let mjpegRestoreTimer: ReturnType<typeof setTimeout> | null = null
 
-watch(() => props.wsFrameVersion, () => {
+setFramePollFn(() => {
   if (!props.online) return
   const result = takeFrame(props.cameraId, consumedWsVersion)
   if (result) {
