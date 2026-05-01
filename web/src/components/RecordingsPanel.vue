@@ -615,20 +615,30 @@ const filteredRecordings = computed(() => {
   return sorted
 })
 
-/** 每个录像的检测事件数量 */
-const recordingEventCounts = computed(() => {
-  if (timelineEvents.value.length === 0) return new Map<string, number>()
-  const counts = new Map<string, number>()
+/** 每个录像的检测事件统计（数量 + 标签类型） */
+interface RecEventStats {
+  /** 检测事件数量 */
+  count: number
+  /** 检测到的目标标签（去重，最多显示 3 个） */
+  labels: string[]
+}
+const recordingEventStats = computed(() => {
+  if (timelineEvents.value.length === 0) return new Map<string, RecEventStats>()
+  const stats = new Map<string, RecEventStats>()
   for (const rec of filteredRecordings.value) {
     let count = 0
+    const labelSet = new Set<string>()
     for (const evt of timelineEvents.value) {
       if (evt.timestamp >= rec.startTime && evt.timestamp <= rec.endTime && (!evt.cameraId || evt.cameraId === rec.cameraId)) {
         count++
+        if (evt.label) {
+          for (const l of evt.label.split(', ')) labelSet.add(l)
+        }
       }
     }
-    if (count > 0) counts.set(rec.filename, count)
+    if (count > 0) stats.set(rec.filename, { count, labels: [...labelSet].slice(0, 3) })
   }
-  return counts
+  return stats
 })
 
 /** 筛选后录像总大小 */
@@ -1580,8 +1590,9 @@ defineExpose({ loadRecordings, playAtTime })
           <span v-if="rec.endTime > rec.startTime" class="rec-duration">
             {{ duration(rec.startTime, rec.endTime) }}
           </span>
-          <span v-if="recordingEventCounts.get(rec.filename)" class="rec-event-count" :title="recordingEventCounts.get(rec.filename) + ' detections'">
-            AI {{ recordingEventCounts.get(rec.filename) }}
+          <span v-if="recordingEventStats.get(rec.filename)" class="rec-event-count" :title="recordingEventStats.get(rec.filename)!.labels.join(', ')">
+            AI {{ recordingEventStats.get(rec.filename)!.count }}
+            <span v-if="recordingEventStats.get(rec.filename)!.labels.length" class="rec-event-labels">{{ recordingEventStats.get(rec.filename)!.labels.join(' ') }}</span>
           </span>
           <span v-if="(rec as any).matchCount" class="rec-match-count" :title="'匹配 ' + (rec as any).matchCount + ' 次'">
             ⚡{{ (rec as any).matchCount }}
@@ -1960,13 +1971,19 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .rec-event-count {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 10px;
   color: #5bc0de;
   background: #5bc0de20;
   padding: 0 4px;
   border-radius: 3px;
   margin-top: 2px;
+}
+.rec-event-labels {
+  color: #88ccdd;
+  font-size: 9px;
 }
 
 .rec-match-count {
