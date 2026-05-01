@@ -1467,8 +1467,16 @@ export function startServer(
   /** 每路摄像头上次推送时间（用于节流） */
   const lastPushTimeByCamera = new Map<string, number>();
 
-  /** 帧推送节流间隔（ms），~30fps 上限 */
-  const FRAME_THROTTLE_MS = 33;
+  /**
+   * 根据活跃摄像头数量动态计算帧推送节流间隔
+   * 1-2 路: 30fps (33ms)，3-4 路: 20fps (50ms)，5+ 路: 15fps (67ms)
+   */
+  function getThrottleMs(): number {
+    const camCount = latestFrameByCamera.size;
+    if (camCount <= 2) return 33;
+    if (camCount <= 4) return 50;
+    return 67;
+  }
 
   /** 是否有待推送的帧（pending push flag） */
   let pushScheduled = false;
@@ -1482,7 +1490,7 @@ export function startServer(
     for (const [cameraId, frame] of latestFrameByCamera) {
       /** 节流：每路摄像头不超过 30fps */
       const lastPush = lastPushTimeByCamera.get(cameraId) ?? 0;
-      if (now - lastPush < FRAME_THROTTLE_MS) continue;
+      if (now - lastPush < getThrottleMs()) continue;
 
       latestFrameByCamera.delete(cameraId);
       lastPushTimeByCamera.set(cameraId, now);
@@ -1511,7 +1519,7 @@ export function startServer(
     /** 如果还有被节流的帧，安排下次 flush */
     if (latestFrameByCamera.size > 0 && !pushScheduled) {
       pushScheduled = true;
-      setTimeout(flushFrames, FRAME_THROTTLE_MS);
+      setTimeout(flushFrames, getThrottleMs());
     }
   }
 
