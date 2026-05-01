@@ -71,6 +71,12 @@ export interface ServerConfig {
   port: number;
 }
 
+/** 存储配置 */
+export interface StorageConfig {
+  /** 数据存储根目录 */
+  dataDir: string;
+}
+
 /** 应用总配置 */
 export interface AppConfig {
   /** ffmpeg 可执行文件路径 */
@@ -85,6 +91,8 @@ export interface AppConfig {
   auth: AuthConfig;
   /** 服务配置 */
   server: ServerConfig;
+  /** 存储配置 */
+  storage: StorageConfig;
 }
 
 /** 解析摄像头 PTZ 配置 */
@@ -175,6 +183,10 @@ export function loadConfig(configPath?: string): AppConfig {
     },
     server: {
       port: 3100,
+    },
+    storage: {
+      dataDir: (doc.storage as Record<string, unknown>)?.data_dir as string
+        ?? resolve(import.meta.dir, "../data"),
     },
   };
 }

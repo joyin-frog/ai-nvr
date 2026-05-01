@@ -38,11 +38,14 @@ const eventBus = new EventBus();
 const config = loadConfig();
 console.log(`[Config] 已加载配置，${config.cameras.length} 个摄像头`);
 
+/** 数据存储根目录 */
+const dataDir = config.storage.dataDir;
+
 /** 运行时配置（支持 API 热修改，检测器实时读取） */
 const runtimeConfig = new RuntimeConfig(config);
 
 /** 录像器（需先于 CameraManager 创建，因为 CameraManager 会注册主码流 URL） */
-const recorder = new MotionRecorder(join(import.meta.dir, "../data/recordings"), config.ffmpegPath, eventBus, runtimeConfig);
+const recorder = new MotionRecorder(join(dataDir, "recordings"), config.ffmpegPath, eventBus, runtimeConfig);
 /** 注册摄像头友好名称（用于录像水印） */
 for (const cam of config.cameras) {
   recorder.registerCameraName(cam.id, cam.friendlyName);
@@ -53,7 +56,7 @@ recorder.start();
 const cameraManager = new CameraManager(config, eventBus, recorder);
 
 /** ROI 检测区域存储（MotionDetector 需要） */
-const roiStorage = new RoiStorage(join(import.meta.dir, "../data/roi.db"));
+const roiStorage = new RoiStorage(join(dataDir, "roi.db"));
 
 /** 变动检测器（使用 RuntimeConfig + ROI 区域过滤） */
 const motionDetector = new MotionDetector(runtimeConfig, eventBus, roiStorage);
@@ -88,29 +91,29 @@ const emailNotifier = new EmailNotifier(runtimeConfig, eventBus);
 emailNotifier.start();
 
 /** 检测快照存储（保存标注图到磁盘） */
-const snapshotStorage = new SnapshotStorage(join(import.meta.dir, "../data/detection-snapshots"), eventBus);
+const snapshotStorage = new SnapshotStorage(join(dataDir, "detection-snapshots"), eventBus);
 snapshotStorage.start();
 
 /** 告警存储与引擎 */
-const alertStorage = new AlertStorage(join(import.meta.dir, "../data/alerts.db"));
+const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
 const alertEngine = new AlertEngine(eventBus, alertStorage);
 alertEngine.start();
 
 /** 录像缩略图生成器 */
-const thumbnailGenerator = new ThumbnailGenerator(join(import.meta.dir, "../data/thumbnails"), config.ffmpegPath);
+const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), config.ffmpegPath);
 
 /** 事件存储（cleaner 和 server 都需要） */
-const eventStorage = new EventStorage(join(import.meta.dir, "../data/nvr.db"));
+const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 
 /** 录像导出器 */
-const exporter = new RecordingExporter(join(import.meta.dir, "../data/exports"), config.ffmpegPath);
+const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath);
 
 /** 统一存储清理管理器 */
 const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter);
 cleaner.start();
 
 /** 磁盘用量统计 */
-const diskUsage = new DiskUsage(join(import.meta.dir, "../data"));
+const diskUsage = new DiskUsage(dataDir);
 
 /** PTZ 云台控制器 */
 const ptzController = new PtzController();
@@ -203,7 +206,7 @@ eventBus.on("alert", ({ ruleName, cameraId, timestamp, detail }) => {
 });
 
 /** 启动后保存前几帧截图到 data/snapshots 供验证 */
-const SNAP_DIR = join(import.meta.dir, "../data/snapshots");
+const SNAP_DIR = join(dataDir, "snapshots");
 mkdirSync(SNAP_DIR, { recursive: true });
 const snapCounts = new Map<string, number>();
 const MAX_SNAPS = 3;
