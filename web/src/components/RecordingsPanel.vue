@@ -196,6 +196,8 @@ const playbackEvents = ref<Array<{ timestamp: number; detections: PlaybackDetect
 const playbackDetections = ref<PlaybackDetection[]>([])
 /** 是否显示回放检测框 */
 const showPlaybackBoxes = ref(true)
+/** 显示播放器事件列表 */
+const showPlaybackEventList = ref(false)
 
 /** 播放录像时加载检测事件 */
 async function loadPlaybackDetections(rec: Recording) {
@@ -300,7 +302,24 @@ const progressEventMarkers = computed(() => {
   })).filter(m => m.position >= 0 && m.position <= 100)
 })
 
-/** 进度条拖拽 seek */
+/** 当前播放位置对应的事件索引（用于事件列表高亮） */
+const activePlaybackEventIdx = computed(() => {
+  if (!selectedRecording.value || playbackEvents.value.length === 0) return -1
+  const absTime = currentAbsTime.value
+  if (!absTime) return -1
+  let best = -1
+  for (let i = 0; i < playbackEvents.value.length; i++) {
+    if (playbackEvents.value[i]!.timestamp <= absTime) best = i
+  }
+  return best
+})
+
+/** 跳转到指定检测事件时间点 */
+function seekToPlaybackEvent(timestamp: number) {
+  if (!playerRef.value || !selectedRecording.value) return
+  const offsetSec = (timestamp - selectedRecording.value.startTime) / 1000
+  playerRef.value.currentTime = Math.max(0, offsetSec)
+}
 const progressEl = ref<HTMLDivElement | null>(null)
 function onProgressClick(e: MouseEvent) {
   if (!playerRef.value || !progressEl.value) return
@@ -1176,6 +1195,7 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
           <button :class="['detect-toggle-btn', { active: showPlaybackBoxes }]" @click="showPlaybackBoxes = !showPlaybackBoxes" :title="t('recording.toggleDetect')">&#x1F50D;</button>
+          <button v-if="playbackEvents.length > 0" :class="['event-list-btn', { active: showPlaybackEventList }]" @click="showPlaybackEventList = !showPlaybackEventList" :title="t('recording.toggleDetect')">&#x2630; {{ playbackEvents.length }}</button>
           <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
           <button class="player-help-btn" @click="showPlayerHelp = !showPlayerHelp" :title="t('header.help')">?</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
@@ -1257,6 +1277,23 @@ defineExpose({ loadRecordings, playAtTime })
               {{ isMuted || volume === 0 ? '&#128264;' : volume < 50 ? '&#128265;' : '&#128266;' }}
             </button>
             <input type="range" v-model.number="volume" min="0" max="100" class="volume-slider" />
+          </div>
+        </div>
+        <!-- 检测事件列表 -->
+        <div v-if="showPlaybackEventList && playbackEvents.length > 0 && selectedRecording" class="playback-event-list">
+          <div class="playback-event-header">{{ playbackEvents.length }} {{ t('event.detect', '检测事件') }}</div>
+          <div class="playback-event-items">
+            <div
+              v-for="(ev, idx) in playbackEvents"
+              :key="idx"
+              class="playback-event-item"
+              :class="{ active: playbackEvents[activePlaybackEventIdx]?.timestamp === ev.timestamp }"
+              @click="seekToPlaybackEvent(ev.timestamp)"
+            >
+              <span class="pev-time">{{ formatAbsTime(ev.timestamp) }}</span>
+              <span class="pev-labels">{{ [...new Set(ev.detections.map(d => d.label))].join(', ') }}</span>
+              <span class="pev-count">{{ ev.detections.length }}</span>
+            </div>
           </div>
         </div>
         <!-- 导出面板 -->
@@ -2376,6 +2413,65 @@ defineExpose({ loadRecordings, playAtTime })
   background: #4ECDC4;
   color: #1a1a2e;
 }
+
+/* 播放器检测事件列表 */
+.event-list-btn {
+  background: transparent;
+  border: 1px solid #3a3a5a;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.event-list-btn.active {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+  background: #4ECDC415;
+}
+
+.event-list-btn:hover { color: #4ECDC4; }
+
+.playback-event-list {
+  max-height: 200px;
+  border-top: 1px solid #2a2a4a;
+  background: #0a0a1a;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.playback-event-header {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: #888;
+  border-bottom: 1px solid #1a1a3a;
+  flex-shrink: 0;
+}
+
+.playback-event-items {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.playback-event-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.playback-event-item:hover { background: #1a1a3a; }
+.playback-event-item.active { background: #4ECDC420; border-left: 2px solid #4ECDC4; }
+
+.pev-time { color: #aaa; flex-shrink: 0; min-width: 70px; }
+.pev-labels { color: #e0e0e0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pev-count { color: #4ECDC4; font-size: 10px; }
 
 .export-panel {
   padding: 12px 16px;
