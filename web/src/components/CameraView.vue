@@ -367,6 +367,7 @@ setFramePollFn(() => {
   if (detectResult) {
     consumedDetectVersion = detectResult.version
     localDetections = detectResult.detections
+    updateSmoothedBoxes(localDetections)
     invalidateSortedDetections()
     updateDetectionSummary()
   }

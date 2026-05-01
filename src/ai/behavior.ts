@@ -89,8 +89,6 @@ export class BehaviorAnalyzer {
     }>,
   ): void {
     const zones = this.getZones(cameraId);
-    if (zones.length === 0) return;
-
     const cameraStates = this.getOrCreateCameraStates(cameraId);
     /** 当前帧活跃的 trackId 集合 */
     const activeTrackIds = new Set<number>();
@@ -106,6 +104,9 @@ export class BehaviorAnalyzer {
       const trackState = this.getOrCreateTrackState(cameraStates, det.trackId, det.label);
       /** 同步最新的 trackName */
       if (det.trackName) trackState.trackName = det.trackName;
+
+      /** 区域检测（仅在有 ROI 区域时执行） */
+      if (zones.length === 0) continue;
       const currentZoneIds = new Set(trackState.zones.keys());
 
       /** 检查目标在哪些区域 */
