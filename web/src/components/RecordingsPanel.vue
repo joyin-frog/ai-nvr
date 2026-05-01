@@ -40,6 +40,8 @@ interface Recording {
   startTime: number
   endTime: number
   size: number
+  /** 标签搜索时返回的匹配事件数 */
+  matchCount?: number
 }
 
 const props = defineProps<{
@@ -1629,8 +1631,8 @@ defineExpose({ loadRecordings, playAtTime })
             AI {{ recordingEventStats.get(rec.filename)!.count }}
             <span v-if="recordingEventStats.get(rec.filename)!.labels.length" class="rec-event-labels">{{ recordingEventStats.get(rec.filename)!.labels.join(' ') }}</span>
           </span>
-          <span v-if="(rec as any).matchCount" class="rec-match-count" :title="'匹配 ' + (rec as any).matchCount + ' 次'">
-            ⚡{{ (rec as any).matchCount }}
+          <span v-if="rec.matchCount" class="rec-match-count" :title="'匹配 ' + rec.matchCount + ' 次'">
+            ⚡{{ rec.matchCount }}
           </span>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
           <button :class="['rec-star', { starred: starredFiles.has(rec.filename) }]" @click.stop="toggleRecStar(rec.filename)" :title="t('recording.toggleStar')">
