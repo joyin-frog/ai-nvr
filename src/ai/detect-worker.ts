@@ -3,7 +3,7 @@
  * 在独立线程中运行 ONNX 模型推理，避免阻塞主线程 HTTP 服务
  */
 import { parentPort, workerData } from "node:worker_threads";
-import { pipeline, env as transformersEnv, type ObjectDetectionPipeline } from "@huggingface/transformers";
+import { pipeline, env as transformersEnv, type ObjectDetectionPipeline, RawImage } from "@huggingface/transformers";
 import sharp from "sharp";
 
 /** 设置模型下载源 */
@@ -83,16 +83,16 @@ async function detect(req: DetectRequest): Promise<void> {
   };
 
   try {
-    /** 缩放 */
-    let inferenceInput: Blob;
+    /** 缩放 + 转为 RawImage（跳过 JPEG 重编码，直接输出 RGB 像素） */
+    let inferenceInput: RawImage | Blob;
     const t1 = performance.now();
     if (req.inputWidth > 0) {
-      const resized = await sharp(req.jpeg)
+      const { data, info } = await sharp(req.jpeg)
         .resize(req.inputWidth)
-        .jpeg({ quality: 85 })
-        .toBuffer();
+        .raw()
+        .toBuffer({ resolveWithObject: true });
       result.resizeMs = performance.now() - t1;
-      inferenceInput = new Blob([resized]);
+      inferenceInput = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
     } else {
       result.resizeMs = performance.now() - t1;
       inferenceInput = new Blob([req.jpeg]);
