@@ -649,14 +649,14 @@ class VideoToFmp4Muxer {
   }
 
   private buildTkhd(w: number, h: number): Buffer {
-    const data = Buffer.alloc(80);
-    data.writeUInt32BE(1, 0);
-    data.writeUInt32BE(1, 12);
-    data.writeUInt32BE(0x00010000, 36);
-    data.writeUInt32BE(0x00010000, 52);
-    data.writeUInt32BE(0x40000000, 68);
-    data.writeUInt32BE(w << 16, 76);
-    data.writeUInt32BE(h << 16, 80);
+    const data = Buffer.alloc(84);
+    data.writeUInt32BE(1, 0);           /** flags=1 (track enabled) */
+    data.writeUInt32BE(1, 12);          /** track_id=1 */
+    data.writeUInt32BE(0x00010000, 36); /** matrix[0] */
+    data.writeUInt32BE(0x00010000, 52); /** matrix[4] */
+    data.writeUInt32BE(0x40000000, 68); /** matrix[8] */
+    data.writeUInt32BE(w << 16, 76);    /** width 16.16 */
+    data.writeUInt32BE(h << 16, 80);    /** height 16.16 */
     return this.box("tkhd", data);
   }
 
@@ -838,9 +838,8 @@ class VideoToFmp4Muxer {
 
   private fullBox(type: string, flags: number, data: Buffer, version: number = 0): Buffer {
     const vf = Buffer.alloc(4);
-    vf[0] = version;
-    vf.writeUInt32BE(flags, 1);
-    vf[0] = version;
+    /** version(1 byte) + flags(3 bytes) = 4 bytes */
+    vf.writeUInt32BE((version << 24) | (flags & 0x00FFFFFF), 0);
     return this.box(type, vf, data);
   }
 

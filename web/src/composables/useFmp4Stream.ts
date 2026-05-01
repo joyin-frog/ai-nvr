@@ -230,7 +230,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
 
     /** 优先使用服务器提供的 codec，失败则回退 */
-    const codecs = [codec, 'avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
+    const hevcCodecs = ['hvc1.1.6.L93.B0', 'hev1.1.6.L93.B0']
+    const avcCodecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
+    /** HEVC codec 优先使用服务端提供的，否则用通用 HEVC */
+    const codecs = codec.startsWith('hvc1') || codec.startsWith('hev1')
+      ? [codec, ...hevcCodecs, ...avcCodecs]
+      : [codec, ...avcCodecs, ...hevcCodecs]
     /** 去重 */
     const unique = [...new Set(codecs)]
 
