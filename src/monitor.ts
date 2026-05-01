@@ -6,8 +6,10 @@ export interface CameraMetrics {
   cameraId: string;
   /** 是否在线 */
   online: boolean;
-  /** 最近 5 秒帧率 */
+  /** 显示帧率（frame 事件） */
   fps: number;
+  /** 检测帧率（detect:frame 事件） */
+  detectFps: number;
   /** 最后帧时间 */
   lastFrameAt: number;
   /** 变动检测总次数 */
@@ -55,6 +57,8 @@ interface FpsCounter {
 export class SystemMonitor {
   private startedAt = Date.now();
   private fpsCounters = new Map<string, FpsCounter>();
+  /** 检测帧率计数器（detect:frame 事件） */
+  private detectFpsCounters = new Map<string, FpsCounter>();
   private motionCounts = new Map<string, number>();
   private motionRatios = new Map<string, { sum: number; count: number }>();
   private detectCounts = new Map<string, number>();
@@ -90,6 +94,21 @@ export class SystemMonitor {
       counter.frames++;
 
       /** 每 fpsWindow 毫秒刷新一次 FPS */
+      if (timestamp - counter.windowStart >= this.fpsWindow * 1000) {
+        counter.fps = Math.round(counter.frames / ((timestamp - counter.windowStart) / 1000) * 10) / 10;
+        counter.frames = 0;
+        counter.windowStart = timestamp;
+      }
+    });
+
+    /** 检测帧事件 → 更新检测帧率 */
+    eventBus.on("detect:frame", ({ cameraId, timestamp }) => {
+      let counter = this.detectFpsCounters.get(cameraId);
+      if (!counter) {
+        counter = { frames: 0, windowStart: timestamp, fps: 0 };
+        this.detectFpsCounters.set(cameraId, counter);
+      }
+      counter.frames++;
       if (timestamp - counter.windowStart >= this.fpsWindow * 1000) {
         counter.fps = Math.round(counter.frames / ((timestamp - counter.windowStart) / 1000) * 10) / 10;
         counter.frames = 0;
@@ -161,6 +180,7 @@ export class SystemMonitor {
         cameraId: id,
         online: this.cameraOnline.get(id) ?? false,
         fps: this.fpsCounters.get(id)?.fps ?? 0,
+        detectFps: this.detectFpsCounters.get(id)?.fps ?? 0,
         lastFrameAt: this.cameraLastFrame.get(id) ?? 0,
         motionCount: this.motionCounts.get(id) ?? 0,
         detectCount: this.detectCounts.get(id) ?? 0,
