@@ -79,6 +79,7 @@ interface RuntimeSettings {
     motionThreshold?: number
     motionCooldown?: number
     detectFps?: number
+    inputWidth?: number
   }>
   webhook: {
     urls: string[]
@@ -332,6 +333,10 @@ onMounted(() => {
             <label class="field compact">
               <span class="field-label small">{{ t('settings.detectFps') }}</span>
               <input type="number" :value="settings.cameraOverrides[cam.id]?.detectFps ?? ''" @input="setCameraOverride(cam.id, 'detectFps', ($event.target as HTMLInputElement).value)" step="1" min="1" max="30" class="input small" />
+            </label>
+            <label class="field compact">
+              <span class="field-label small">{{ t('settings.inputWidth') }}</span>
+              <input type="number" :value="settings.cameraOverrides[cam.id]?.inputWidth ?? ''" @input="setCameraOverride(cam.id, 'inputWidth', ($event.target as HTMLInputElement).value)" step="64" min="0" max="3840" class="input small" :placeholder="String(settings.ai.inputWidth)" />
             </label>
           </div>
         </div>

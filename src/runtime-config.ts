@@ -9,6 +9,8 @@ export interface CameraOverride {
   motionCooldown?: number;
   /** 检测帧率覆盖 */
   detectFps?: number;
+  /** AI 推理分辨率覆盖（0=使用全局配置） */
+  inputWidth?: number;
 }
 
 /** Webhook 通知配置 */
@@ -306,6 +308,13 @@ export class RuntimeConfig {
       ...(override.motionThreshold !== undefined && { threshold: override.motionThreshold }),
       ...(override.motionCooldown !== undefined && { cooldown: override.motionCooldown }),
     };
+  }
+
+  /** 获取某个摄像头的有效 AI 推理分辨率（考虑覆盖） */
+  getAiInputWidth(cameraId: string): number {
+    const override = this.settings.cameraOverrides[cameraId];
+    if (override?.inputWidth) return override.inputWidth;
+    return this.settings.ai.inputWidth;
   }
 
   /** 重置某个摄像头的覆盖 */
