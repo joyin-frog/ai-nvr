@@ -10,6 +10,8 @@ export interface Detection {
   trackName?: string
   /** 运动速度向量（归一化坐标/帧） */
   velocity?: { dx: number; dy: number }
+  /** 主色调名称（如 "red", "blue"） */
+  dominantColor?: string
 }
 
 /** 事件载荷类型 */

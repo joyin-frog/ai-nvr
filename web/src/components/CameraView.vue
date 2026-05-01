@@ -701,6 +701,28 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.fillStyle = '#fff'
     ctx.fillText(text, x + 5, labelY - 4)
 
+    /** 绘制主色调圆点 */
+    if (d.dominantColor) {
+      const colorMap: Record<string, string> = {
+        red: '#e74c3c', orange: '#e67e22', yellow: '#f1c40f', lime: '#2ecc71',
+        green: '#27ae60', cyan: '#1abc9c', blue: '#3498db', purple: '#9b59b6',
+        pink: '#e91e63', gray: '#95a5a6',
+      }
+      const dotColor = colorMap[d.dominantColor]
+      if (dotColor) {
+        const dotR = 4
+        const dotX = x + labelW + dotR + 2
+        const dotY = labelY - labelH / 2
+        ctx.beginPath()
+        ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2)
+        ctx.fillStyle = dotColor
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)'
+        ctx.lineWidth = 1
+        ctx.stroke()
+      }
+    }
+
     /** 绘制匹配建议提示（未命名目标有匹配时） */
     if (tid && !isNamed) {
       const suggest = suggestMap.get(tid)

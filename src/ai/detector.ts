@@ -13,7 +13,7 @@ import { type Detection, type DetectMode } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
-import { type TrackStorage } from "@/storage/tracks";
+import { TrackStorage } from "@/storage/tracks";
 import { type TrackLabelStorage } from "@/storage/track-labels";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +75,8 @@ export class AiDetector {
   private trackers = new Map<string, ObjectTracker>();
   /** trackName 缓存：cameraId:trackId -> name，定期刷新 */
   private trackNameCache = new Map<string, string>();
+  /** dominantColor 缓存：trackId -> color，随 trackNameCache 同步刷新 */
+  private trackColorCache = new Map<number, string>();
   /** 缓存刷新定时器 */
   private trackNameCacheTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -112,9 +114,12 @@ export class AiDetector {
     /** 启动检测模式 */
     this.startDetection();
 
-    /** 定期刷新 trackName 缓存（30秒） */
+    /** 定期刷新 trackName 和 trackColor 缓存（30秒） */
     if (this.trackLabelStorage) {
-      this.trackNameCacheTimer = setInterval(() => this.trackNameCache.clear(), 30000);
+      this.trackNameCacheTimer = setInterval(() => {
+        this.trackNameCache.clear();
+        this.trackColorCache.clear();
+      }, 30000);
     }
   }
 
@@ -445,11 +450,12 @@ export class AiDetector {
         });
       }
 
-      /** 为检测结果附带用户自定义名称 */
+      /** 为检测结果附带用户自定义名称和主色调 */
       const enricheddetections = this.trackLabelStorage
         ? trackResult.detections.map(d => {
           const trackName = d.trackId ? this.lookupTrackName(cameraId, d.trackId) : undefined;
-          return { ...d, trackName: trackName || undefined };
+          const dominantColor = d.trackId ? this.lookupDominantColor(d.trackId) : undefined;
+          return { ...d, trackName: trackName || undefined, dominantColor };
         })
         : trackResult.detections;
 
@@ -491,5 +497,16 @@ export class AiDetector {
     const name = this.trackLabelStorage.findByTrack(cameraId, trackId)?.name ?? "";
     this.trackNameCache.set(key, name);
     return name || undefined;
+  }
+
+  /** 查找 dominantColor（带内存缓存，30 秒刷新） */
+  private lookupDominantColor(trackId: number): string | undefined {
+    if (!this.trackStorage) return undefined;
+    const cached = this.trackColorCache.get(trackId);
+    if (cached !== undefined) return cached || undefined;
+    const record = this.trackStorage.getRecord(trackId);
+    const color = record?.colorHist ? TrackStorage.extractDominantColor(record.colorHist) : "";
+    this.trackColorCache.set(trackId, color);
+    return color || undefined;
   }
 }
