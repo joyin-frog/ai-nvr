@@ -9,6 +9,7 @@ interface Detection {
   label: string
   score: number
   box: { xmin: number; ymin: number; xmax: number; ymax: number }
+  trackId?: number
 }
 
 const { t, locale } = useI18n()
@@ -333,8 +334,9 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       items.push({ label: t('event.ratio'), value: `${(obj.ratio * 100).toFixed(1)}%` })
     }
     if (e.type === 'detect' && Array.isArray(obj.detections)) {
-      for (const d of obj.detections as Array<{ label: string; score: number }>) {
-        items.push({ label: d.label, value: `${(d.score * 100).toFixed(0)}%` })
+      for (const d of obj.detections as Array<{ label: string; score: number; trackId?: number }>) {
+        const name = d.trackId ? `#${d.trackId} ` : ''
+        items.push({ label: d.label, value: `${name}${(d.score * 100).toFixed(0)}%` })
       }
     }
     if (e.type === 'alert') {
@@ -537,7 +539,7 @@ defineExpose({ addEvent, loadHistory })
                 class="expand-box-item"
                 :style="{ left: d.box.xmin * 100 + '%', top: d.box.ymin * 100 + '%', width: (d.box.xmax - d.box.xmin) * 100 + '%', height: (d.box.ymax - d.box.ymin) * 100 + '%' }"
               >
-                <span class="box-label">{{ d.label }} {{ (d.score * 100).toFixed(0) }}%</span>
+                <span class="box-label">{{ d.trackId ? '#' + d.trackId + ' ' : '' }}{{ d.label }} {{ (d.score * 100).toFixed(0) }}%</span>
               </div>
             </div>
           </div>
