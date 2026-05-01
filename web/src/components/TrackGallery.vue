@@ -65,6 +65,8 @@ const trackEvents = ref<Record<number, Array<{ id: number; type: string; camera_
 const loadingEvents = ref(false)
 /** trackId → 轨迹点（归一化坐标） */
 const trackTrajectories = ref<Record<number, Array<{ x: number; y: number }>>>({})
+/** trackId → 活跃时段分布（24 小时） */
+const trackActivity = ref<Record<number, Array<{ hour: number; count: number }>>>({})
 
 /** 事件类型标签样式 */
 const EVENT_TYPE_STYLE: Record<string, { label: string; bg: string; color: string }> = {
@@ -240,6 +242,16 @@ async function loadTrackEvents(trackId: number) {
         .catch(() => {})
     )
   }
+  if (!trackActivity.value[trackId]) {
+    promises.push(
+      authFetch(`/api/tracks/activity/${trackId}`)
+        .then(res => res.ok ? res.json() : { hours: [] })
+        .then((data: { hours: Array<{ hour: number; count: number }> }) => {
+          trackActivity.value = { ...trackActivity.value, [trackId]: data.hours }
+        })
+        .catch(() => {})
+    )
+  }
   await Promise.all(promises)
 }
 
@@ -270,6 +282,14 @@ function trailSvgPoints(trackId: number): string {
   const svgW = 200
   const svgH = 100
   return pts.map(p => `${(p.x * svgW).toFixed(1)},${(p.y * svgH).toFixed(1)}`).join(' ')
+}
+
+/** 活跃时段条形图高度（百分比） */
+function activityHeight(trackId: number, count: number): number {
+  const hours = trackActivity.value[trackId]
+  if (!hours) return 0
+  const max = Math.max(1, ...hours.map(h => h.count))
+  return (count / max) * 100
 }
 
 /** 所有出现过的标签 */
@@ -558,6 +578,17 @@ onUnmounted(() => {
               <polyline :points="trailSvgPoints(track.trackId)" fill="none" :stroke="COLOR_MAP[track.dominantColor ?? ''] ?? '#4ECDC4'" stroke-width="1.5" stroke-linejoin="round" />
               <circle v-if="trackTrajectories[track.trackId]?.length" :cx="(trackTrajectories[track.trackId].at(-1)!.x * 200).toFixed(1)" :cy="(trackTrajectories[track.trackId].at(-1)!.y * 100).toFixed(1)" r="3" fill="#fff" />
             </svg>
+          </div>
+          <!-- 活跃时段分布（24小时条形图） -->
+          <div v-if="expandedTrackId === track.trackId && trackActivity[track.trackId]" class="activity-section">
+            <div class="activity-chart">
+              <div v-for="h in trackActivity[track.trackId]" :key="h.hour" class="activity-bar-wrap" :title="`${h.hour}:00 — ${h.count} 次`">
+                <div class="activity-bar">
+                  <div class="activity-fill" :style="{ height: activityHeight(track.trackId, h.count) + '%' }" />
+                </div>
+                <span v-if="h.hour % 4 === 0" class="activity-label">{{ h.hour }}</span>
+              </div>
+            </div>
           </div>
           <!-- 事件历史列表 -->
           <div v-if="expandedTrackId === track.trackId && trackEvents[track.trackId]" class="event-list">
@@ -1064,6 +1095,49 @@ onUnmounted(() => {
   height: 80px;
   display: block;
   border-radius: 4px;
+}
+
+/* 活跃时段分布图 */
+.activity-section {
+  margin-top: 6px;
+}
+
+.activity-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 40px;
+  padding: 2px 0;
+}
+
+.activity-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.activity-bar {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+}
+
+.activity-fill {
+  width: 100%;
+  background: #4ECDC4;
+  border-radius: 1px;
+  min-height: 1px;
+  transition: height 0.3s;
+}
+
+.activity-label {
+  font-size: 7px;
+  color: #555;
+  line-height: 1;
+  margin-top: 2px;
 }
 
 .event-list {

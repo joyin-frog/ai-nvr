@@ -1503,6 +1503,24 @@ export function startServer(
         }
       }
 
+      /** 查询追踪目标活跃时段分布（24小时按小时统计） */
+      if (url.pathname.startsWith("/api/tracks/activity/")) {
+        const parts = url.pathname.split("/");
+        if (parts.length === 5 && req.method === "GET") {
+          const trackId = parseInt(parts[4]!);
+          if (!trackId || !trajectoryStorage) return Response.json({ hours: [] });
+          /** 查询最近 7 天的轨迹点 */
+          const points = trajectoryStorage.getTrajectory(trackId, Date.now() - 7 * 86_400_000, 10000);
+          /** 按小时统计 */
+          const hourCounts = new Array(24).fill(0);
+          for (const p of points) {
+            const h = new Date(p.ts).getHours();
+            hourCounts[h]!++;
+          }
+          return Response.json({ hours: hourCounts.map((count, hour) => ({ hour, count })), total: points.length });
+        }
+      }
+
       /** 合并追踪目标 */
       if (url.pathname === "/api/tracks/merge" && req.method === "POST") {
         const body = await req.json() as { sourceId?: number; targetId?: number };
