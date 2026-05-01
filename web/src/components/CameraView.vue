@@ -874,19 +874,20 @@ onUnmounted(() => {
       <div class="camera-content" :style="{ transform: zoomTransform }">
         <!-- MSE 模式：video 硬件解码 -->
         <template v-if="useMse && online">
-          <video
-            :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
-            class="camera-video"
-            :style="{ filter: imageFilter }"
-            autoplay muted playsinline
-            @contextmenu.prevent="onCanvasContext"
-          />
-          <!-- 检测框 overlay canvas -->
-          <canvas
-            ref="overlayCanvas"
-            class="camera-overlay"
-            @contextmenu.prevent="onCanvasContext"
-          />
+          <div class="mse-wrapper">
+            <video
+              :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
+              class="camera-video"
+              :style="{ filter: imageFilter }"
+              autoplay muted playsinline
+              @contextmenu.prevent="onCanvasContext"
+            />
+            <canvas
+              ref="overlayCanvas"
+              class="camera-overlay"
+              @contextmenu.prevent="onCanvasContext"
+            />
+          </div>
         </template>
         <!-- Canvas fallback 模式 -->
         <canvas
@@ -1135,11 +1136,18 @@ onUnmounted(() => {
   image-rendering: auto;
 }
 
+.mse-wrapper {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+}
+
 .camera-video {
   max-width: 100%;
   max-height: 100%;
   display: block;
-  margin: auto;
 }
 
 .camera-overlay {
