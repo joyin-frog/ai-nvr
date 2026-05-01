@@ -13,6 +13,8 @@ export interface Detection {
   };
   /** 追踪 ID（跨帧保持一致，可选） */
   trackId?: number;
+  /** 运动速度向量（归一化坐标/帧，可选） */
+  velocity?: { dx: number; dy: number };
 }
 
 /** AI 检测事件载荷 */

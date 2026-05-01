@@ -594,6 +594,38 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.fillText(text, x + 5, labelY - 4)
+
+    /** 绘制速度方向箭头（速度较大时显示） */
+    if (d.velocity && (Math.abs(d.velocity.dx) > 0.005 || Math.abs(d.velocity.dy) > 0.005)) {
+      const cx = x + w / 2
+      const cy = y + h / 2
+      /** 放大速度向量用于可视化 */
+      const scale = Math.min(w, h) * 2
+      const vLen = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
+      const arrowLen = Math.min(vLen * scale, Math.min(w, h) * 0.8)
+      if (arrowLen > 5) {
+        const nx = d.velocity.dx / vLen
+        const ny = d.velocity.dy / vLen
+        const ex = cx + nx * arrowLen
+        const ey = cy + ny * arrowLen
+        ctx.beginPath()
+        ctx.moveTo(cx, cy)
+        ctx.lineTo(ex, ey)
+        ctx.strokeStyle = stroke
+        ctx.lineWidth = 2
+        ctx.setLineDash([])
+        ctx.stroke()
+        /** 箭头头部 */
+        const headLen = Math.min(8, arrowLen * 0.3)
+        const angle = Math.atan2(ny, nx)
+        ctx.beginPath()
+        ctx.moveTo(ex, ey)
+        ctx.lineTo(ex - headLen * Math.cos(angle - 0.5), ey - headLen * Math.sin(angle - 0.5))
+        ctx.moveTo(ex, ey)
+        ctx.lineTo(ex - headLen * Math.cos(angle + 0.5), ey - headLen * Math.sin(angle + 0.5))
+        ctx.stroke()
+      }
+    }
   }
 
   /** 绘制追踪轨迹线（贝塞尔平滑曲线） */

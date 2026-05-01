@@ -8,6 +8,8 @@ export interface Detection {
   trackId?: number
   /** 用户自定义名称（如 "张三"） */
   trackName?: string
+  /** 运动速度向量（归一化坐标/帧） */
+  velocity?: { dx: number; dy: number }
 }
 
 /** 事件载荷类型 */

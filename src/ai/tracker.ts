@@ -192,7 +192,13 @@ export class ObjectTracker {
       track.label = bestLabel;
       track.age++;
       track.lastMatched = this.frameIndex;
-      results.push({ label: track.label, score: track.score, box: { ...track.box }, trackId: track.trackId });
+      results.push({
+        label: track.label,
+        score: track.score,
+        box: { ...track.box },
+        trackId: track.trackId,
+        velocity: { dx: track.velocity.dx, dy: track.velocity.dy },
+      });
     }
 
     /** 未匹配的检测 → 新建追踪 */
