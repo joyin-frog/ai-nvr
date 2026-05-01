@@ -403,6 +403,11 @@ function enterFullscreen(cameraId: string) {
   document.documentElement.requestFullscreen?.().catch(() => { /* ignore */ })
 }
 
+/** 从追踪目标跳转到实时画面 */
+function onViewLive(cameraId: string) {
+  enterFullscreen(cameraId)
+}
+
 /** 退出全屏回到网格 */
 function exitFullscreen() {
   fullscreenCamera.value = null
@@ -1056,7 +1061,7 @@ onUnmounted(() => {
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-          <TrackGallery v-if="activeTab === 'tracks'" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          <TrackGallery v-if="activeTab === 'tracks'" :cameras="cameras" @jump-to-recording="onPlayRecording" @view-live="onViewLive" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>

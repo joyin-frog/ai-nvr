@@ -65,6 +65,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const emit = defineEmits<{
   jumpToRecording: [cameraId: string, timestamp: number]
+  viewLive: [cameraId: string]
 }>()
 
 /** 加载追踪目标列表 */
@@ -468,9 +469,18 @@ onUnmounted(() => {
               :class="{ 'cam-online': props.cameras?.find(c => c.id === camId)?.online }"
             >{{ camId }}{{ idx < track.cameraIds.length - 1 ? ',' : '' }}</span>
           </div>
-          <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
-            ▶ {{ t('tracks.playRecording') }}
-          </button>
+          <div class="action-btns">
+            <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
+              ▶ {{ t('tracks.playRecording') }}
+            </button>
+            <button
+              v-if="props.cameras?.find(c => c.id === track.cameraIds[0])?.online"
+              class="live-btn"
+              @click="emit('viewLive', track.cameraIds[0])"
+            >
+              ◎ {{ t('tracks.viewLive', '实时') }}
+            </button>
+          </div>
           <div class="action-row">
             <button class="history-btn" @click="loadTrackEvents(track.trackId)">
               {{ expandedTrackId === track.trackId ? '▲' : '▼' }} {{ t('tracks.history') }}
@@ -850,10 +860,14 @@ onUnmounted(() => {
   color: #4CAF50;
 }
 
-.play-btn {
-  display: block;
-  width: 100%;
+.action-btns {
+  display: flex;
+  gap: 4px;
   margin-top: 6px;
+}
+
+.play-btn {
+  flex: 1;
   background: #2a2a4a;
   color: #4ECDC4;
   border: 1px solid #4ECDC4;
@@ -866,6 +880,22 @@ onUnmounted(() => {
 
 .play-btn:hover {
   background: #4ECDC420;
+}
+
+.live-btn {
+  flex: 0;
+  background: #2a2a4a;
+  color: #4CAF50;
+  border: 1px solid #4CAF5060;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+}
+.live-btn:hover {
+  background: #4CAF5020;
+  border-color: #4CAF50;
 }
 
 .history-btn {
