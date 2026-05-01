@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { execSync } from "node:child_process";
 import sharp from "sharp";
 import { join } from "node:path";
 import { loadConfig, watchConfig } from "@/config";
@@ -33,6 +34,20 @@ process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 
 /** 全局事件总线 */
 const eventBus = new EventBus();
+
+/** 启动前清理残留的 ffmpeg 孤儿/僵尸进程（bun --watch 重启后残留） */
+try {
+  const result = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8" }).trim();
+  if (result) {
+    const pids = result.split("\n").filter(Boolean);
+    if (pids.length > 0) {
+      console.log(`[App] 清理 ${pids.length} 个残留 ffmpeg 进程: ${pids.join(", ")}`);
+      execSync(`kill -9 ${pids.join(" ")} 2>/dev/null || true`);
+    }
+  }
+} catch {
+  // ignore
+}
 
 /** 加载配置 */
 const config = loadConfig();
