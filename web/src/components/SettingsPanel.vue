@@ -45,6 +45,8 @@ interface RuntimeSettings {
     maxDetections: number
     inputWidth: number
     showBoxes: boolean
+    mode: string
+    interval: number
   }
   recording: {
     mode: string
@@ -345,6 +347,17 @@ onMounted(() => {
         <label class="field">
           <span class="field-label">{{ t('settings.aiShowBoxes') }}</span>
           <input type="checkbox" v-model="settings.ai.showBoxes" class="checkbox" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.aiMode') }}</span>
+          <select v-model="settings.ai.mode" class="input">
+            <option value="motion">{{ t('settings.aiModeMotion') }}</option>
+            <option value="continuous">{{ t('settings.aiModeContinuous') }}</option>
+          </select>
+        </label>
+        <label v-if="settings.ai.mode === 'continuous'" class="field">
+          <span class="field-label">{{ t('settings.aiInterval') }}</span>
+          <input type="number" v-model.number="settings.ai.interval" step="100" min="200" max="60000" class="input" />
         </label>
       </section>
 
