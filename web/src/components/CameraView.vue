@@ -76,9 +76,6 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
   clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
 }
 
-/** 标注图片 URL（仅用于截图下载） */
-const annotatedUrl = ref<string>('')
-
 /**
  * 追踪目标轨迹缓存
  * 记录每个 trackId 最近的中心点坐标（归一化），用于在 overlay 上绘制轨迹线
@@ -528,38 +525,12 @@ watch(() => props.recording, (on) => {
   else { recordingDuration.value = '' }
 }, { immediate: true })
 
-/** 截图下载当前画面（优先 HD 主码流截图，回退到标注图/Canvas） */
+/** 截图下载当前画面（直接从 Canvas 导出，包含检测框+轨迹+ROI+OSD） */
 async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
   const link = document.createElement('a')
-  link.download = `${props.name}_HD_${ts}.jpg`
-
-  /** 尝试从主码流抓取高清截图 */
-  let hdOk = false
-  try {
-    const res = await authFetch(`/api/snapshot/${props.cameraId}?quality=hd`)
-    if (res.ok) {
-      const blob = await res.blob()
-      if (blob.size > 100) {
-        const url = URL.createObjectURL(blob)
-        link.href = url
-        link.click()
-        URL.revokeObjectURL(url)
-        hdOk = true
-      }
-    }
-  } catch { /* HD 截图失败，回退 */ }
-  if (hdOk) return
-
   link.download = `${props.name}_${ts}.jpg`
-
-  if (annotatedUrl.value) {
-    link.href = annotatedUrl.value
-    link.click()
-    return
-  }
-  /** 从 Canvas 截图 */
   const blob = await captureJpeg()
   if (blob) {
     const url = URL.createObjectURL(blob)
@@ -652,7 +623,6 @@ onUnmounted(() => {
   mjpegStream.stopFetch()
   stopLoop()
   if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
-  if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)
 })
