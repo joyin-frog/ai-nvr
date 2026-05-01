@@ -539,8 +539,8 @@ function setupEventListeners() {
       detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([payload.annotatedData], { type: 'image/jpeg' }))
       detectSnapshots.value = { ...detectSnapshots.value }
     }
-    /** 0 目标时只更新 UI 状态，不记录事件/通知 */
-    if (payload.detections.length === 0) return
+    /** 0 目标或重复检测时只更新 UI 状态，不记录事件/通知 */
+    if (payload.detections.length === 0 || payload.changed === false) return
 
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)

@@ -34,6 +34,10 @@ export interface EventPayloads {
     detections: Detection[];
     /** 标注后的图片（JPEG Buffer） */
     annotatedImage: Buffer;
+    /** 原始帧图片（JPEG Buffer，无标注） */
+    frameImage: Buffer;
+    /** 是否为有意义的检测结果变化（用于事件记录/通知去重） */
+    changed?: boolean;
   };
 
   /** 摄像头上线 */

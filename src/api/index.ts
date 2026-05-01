@@ -232,7 +232,7 @@ export function startServer(
           search: url.searchParams.get("search") ?? undefined,
           starred: url.searchParams.get("starred") === "true" ? true : undefined,
         };
-        const events = eventStorage.query(queryOpts);
+        const rawEvents = eventStorage.query(queryOpts);
         const total = eventStorage.count({
           type: queryOpts.type,
           cameraId: queryOpts.cameraId,
@@ -240,6 +240,18 @@ export function startServer(
           until: queryOpts.until,
           search: queryOpts.search,
           starred: queryOpts.starred,
+        });
+        /** 给 detect 事件关联快照 URL 和检测结果 */
+        const events = rawEvents.map(ev => {
+          if (ev.type !== "detect") return ev;
+          const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+          if (!snapPath) return ev;
+          const meta = snapshotStorage.getSnapshotMeta(snapPath);
+          return {
+            ...ev,
+            snapshotUrl: `/api/snapshots/${snapPath}`,
+            snapshotDetections: meta?.detections ?? null,
+          };
         });
         return Response.json({ events, total });
       }
@@ -973,9 +985,9 @@ export function startServer(
         if (now - lastSent < FRAME_THROTTLE_MS) return;
         lastFrameSent.set(cameraId, now);
       } else if (event === "detect") {
-        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer };
+        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer; changed?: boolean };
         frameData = detectPayload.annotatedImage ?? null;
-        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections };
+        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections, changed: detectPayload.changed };
       } else {
         header = { event, ...payload };
       }

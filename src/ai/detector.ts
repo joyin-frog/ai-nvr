@@ -40,6 +40,8 @@ export class AiDetector {
   private detectQueue: string[] = [];
   /** 队列处理中 */
   private processingQueue = false;
+  /** 上一次检测结果指纹（用于去重通知） */
+  private lastDetectFingerprint = new Map<string, string>();
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -279,12 +281,20 @@ export class AiDetector {
       const annotateMs = performance.now() - t3;
       this.annotator.setLatest(cameraId, annotatedImage);
 
-      /** 始终 emit detect 事件，让前端能清空旧检测框 */
+      /** 去重：位置变化不大时不重复触发通知 */
+      const fp = detectionsFingerprint(detections);
+      const prevFp = this.lastDetectFingerprint.get(cameraId);
+      const changed = fp !== prevFp;
+      this.lastDetectFingerprint.set(cameraId, fp);
+
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
         detections,
         annotatedImage,
+        frameImage: jpeg,
+        /** 是否为有意义的检测结果变化（用于事件记录/通知去重） */
+        changed,
       });
       console.log(`[Perf][AI][${cameraId}] ${detections.length} 目标, resize=${resizeMs.toFixed(0)}ms, infer=${inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
@@ -301,4 +311,13 @@ export class AiDetector {
     }
     this.initialized = false;
   }
+}
+
+/** 计算检测结果的指纹：标签 + 位置（量化到 5% 精度） */
+function detectionsFingerprint(detections: Detection[]): string {
+  if (detections.length === 0) return "";
+  return detections
+    .map(d => `${d.label}:${Math.round(d.box.xmin * 20)},${Math.round(d.box.ymin * 20)},${Math.round(d.box.xmax * 20)},${Math.round(d.box.ymax * 20)}`)
+    .sort()
+    .join("|");
 }

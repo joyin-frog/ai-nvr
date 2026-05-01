@@ -153,10 +153,10 @@ startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
-    /** 0 目标检测不记录事件 */
+    /** 0 目标或重复检测结果不记录事件 */
     if (eventType === "detect") {
-      const p = payload as { detections: unknown[] };
-      if (p.detections.length === 0) return;
+      const p = payload as { detections: unknown[]; changed?: boolean };
+      if (p.detections.length === 0 || p.changed === false) return;
     }
     let detail: string | undefined;
     if (eventType === "motion") {
