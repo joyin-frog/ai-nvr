@@ -245,14 +245,6 @@ const cameraBodyStyle = computed(() => {
   return { 'aspect-ratio': '16 / 9' }
 })
 
-/** 分辨率文本 */
-const resolutionText = computed(() => {
-  const w = frameSize.value.width
-  const h = frameSize.value.height
-  if (w > 0 && h > 0) return `${w}x${h}`
-  return ''
-})
-
 /**
  * 基于 trackId 生成稳定唯一颜色
  * 使用黄金角（~137.5°）分布色相，确保相邻 ID 差异最大化
@@ -582,22 +574,6 @@ const lastSeenText = computed(() => {
   return t('camera.lastSeenDays', { count: Math.floor(diffSec / 86400) })
 })
 
-/** FPS 质量等级 */
-const fpsQuality = computed(() => {
-  const fps = props.fps ?? 0
-  if (fps >= 10) return 'good'
-  if (fps >= 5) return 'fair'
-  return 'poor'
-})
-
-/** 帧延迟质量等级 */
-const latencyQuality = computed(() => {
-  const ms = props.latency ?? 0
-  if (ms <= 200) return 'good'
-  if (ms <= 500) return 'fair'
-  return 'poor'
-})
-
 /** 录像已录时长（每秒更新） */
 const recordingDuration = ref('')
 function updateRecDuration() {
@@ -785,22 +761,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- FPS 质量指示 -->
-      <div v-if="online && hasFrame && ((fps ?? 0) > 0 || resolutionText)" :class="['fps-badge', (fps ?? 0) > 0 ? fpsQuality : 'good']">
-        <template v-if="(fps ?? 0) > 0">{{ (fps ?? 0).toFixed(0) }} fps</template>
-        <template v-if="resolutionText"><template v-if="(fps ?? 0) > 0"> · </template>{{ resolutionText }}</template>
-      </div>
       <!-- 双流模式标记 -->
       <div v-if="online && hasFrame && dualStream" class="dual-stream-badge" :title="`HD显示 + SD检测(${(detectFps ?? 0).toFixed(0)}fps)`">
         HD+SD
-      </div>
-      <!-- 帧延迟指示 -->
-      <div v-if="online && hasFrame && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
-        {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
-      </div>
-      <!-- AI 推理耗时 -->
-      <div v-if="online && hasFrame && localInferMs > 0" class="infer-badge">
-        AI {{ localInferMs.toFixed(0) }}ms
       </div>
       <!-- 实时目标计数 -->
       <div v-if="online && hasFrame && showBoxes && detectCount > 0" class="detect-count-badge">
@@ -1049,20 +1012,6 @@ onUnmounted(() => {
 }
 
 /* 检测框叠加层 */
-/* FPS 质量徽标 */
-.fps-badge {
-  position: absolute;
-  bottom: 6px;
-  right: 6px;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  font-family: 'Courier New', Courier, monospace;
-  pointer-events: none;
-  color: #fff;
-}
-
 .dual-stream-badge {
   position: absolute;
   bottom: 6px;
@@ -1075,61 +1024,6 @@ onUnmounted(() => {
   font-family: 'Courier New', Courier, monospace;
   color: #fff;
   pointer-events: none;
-}
-
-.fps-badge.good {
-  background: rgba(76, 175, 80, 0.75);
-}
-
-.fps-badge.fair {
-  background: rgba(255, 193, 7, 0.8);
-  color: #1a1a2e;
-}
-
-.fps-badge.poor {
-  background: rgba(244, 67, 54, 0.8);
-}
-
-/* 帧延迟徽标 */
-.latency-badge {
-  position: absolute;
-  bottom: 6px;
-  right: 64px;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  font-family: 'Courier New', Courier, monospace;
-  pointer-events: none;
-  color: #fff;
-}
-
-.latency-badge.good {
-  background: rgba(76, 175, 80, 0.6);
-}
-
-.latency-badge.fair {
-  background: rgba(255, 193, 7, 0.7);
-  color: #1a1a2e;
-}
-
-.latency-badge.poor {
-  background: rgba(244, 67, 54, 0.7);
-}
-
-/* AI 推理耗时 */
-.infer-badge {
-  position: absolute;
-  bottom: 6px;
-  right: 130px;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  font-family: 'Courier New', Courier, monospace;
-  pointer-events: none;
-  color: #fff;
-  background: rgba(156, 39, 176, 0.65);
 }
 
 .detect-count-badge {
