@@ -1100,8 +1100,14 @@ export function startServer(
         if (now - lastSent < FRAME_THROTTLE_MS) return;
         lastFrameSent.set(cameraId, now);
       } else if (event === "detect") {
-        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; changed?: boolean; inferMs?: number };
-        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections, changed: detectPayload.changed, inferMs: detectPayload.inferMs };
+        const detectPayload = payload as { cameraId: string; timestamp: number; detections: Array<{ label: string; score: number; box: unknown; trackId?: number }>; changed?: boolean; inferMs?: number };
+        /** 只推送 importantLabels 中的检测结果给前端，减少 WS 带宽 */
+        const importantLabels = runtimeConfig.get().ai.importantLabels;
+        const importantSet = importantLabels.length > 0 ? new Set(importantLabels.map(l => l.toLowerCase())) : null;
+        const filteredDetections = importantSet
+          ? detectPayload.detections.filter(d => importantSet.has((d.label as string).toLowerCase()))
+          : detectPayload.detections;
+        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: filteredDetections, changed: detectPayload.changed, inferMs: detectPayload.inferMs };
       } else {
         header = { event, ...payload };
       }
