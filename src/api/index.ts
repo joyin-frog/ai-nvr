@@ -270,18 +270,40 @@ export function startServer(
       if (mjpegMatch) {
         const cameraId = mjpegMatch[1]!;
         const frame = cameraManager.getLatestFrame(cameraId);
-        if (!frame) return new Response("No frame", { status: 404 });
+        /** 即使没有帧也启动流，等帧到达后推送（避免上线瞬间 404） */
 
         const boundary = "--nvrboundary";
+        /** 空闲超时：30 秒无帧则关闭流，让客户端重连 */
+        const IDLE_TIMEOUT = 30_000;
 
         let unsubscribe: (() => void) | null = null;
+        let offlineUnsub: (() => void) | null = null;
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
         const stream = new ReadableStream({
           start(controller) {
             let streamFrames = 0;
             let lastStreamLog = Date.now();
+
+            /** 重置空闲计时器 */
+            function resetIdle() {
+              if (idleTimer) clearTimeout(idleTimer);
+              idleTimer = setTimeout(() => {
+                console.log(`[MJPEG][${cameraId}] 空闲超时，关闭流`);
+                cleanup();
+                try { controller.close(); } catch { /* */ }
+              }, IDLE_TIMEOUT);
+            }
+
+            function cleanup() {
+              if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+              if (offlineUnsub) { offlineUnsub(); offlineUnsub = null; }
+              if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+            }
+
             unsubscribe = eventBus.on("frame", (payload) => {
               if (payload.cameraId !== cameraId) return;
-              const now = Date.now();
+              resetIdle();
               streamFrames++;
 
               try {
@@ -289,25 +311,37 @@ export function startServer(
                 controller.enqueue(new TextEncoder().encode(header));
                 controller.enqueue(payload.data);
                 controller.enqueue(new TextEncoder().encode("\r\n"));
-                /** 每 10 秒输出流性能日志 */
-                if (now - lastStreamLog >= 10000) {
-                  console.log(`[Perf][MJPEG][${cameraId}] ${streamFrames}帧/10s 推送给客户端`);
+                if (Date.now() - lastStreamLog >= 10000) {
+                  console.log(`[Perf][MJPEG][${cameraId}] ${streamFrames}帧/10s`);
                   streamFrames = 0;
-                  lastStreamLog = now;
+                  lastStreamLog = Date.now();
                 }
               } catch {
-                if (unsubscribe) unsubscribe();
+                cleanup();
               }
             });
 
-            /** 立即发送当前帧 */
-            const initHeader = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
-            controller.enqueue(new TextEncoder().encode(initHeader));
-            controller.enqueue(frame);
-            controller.enqueue(new TextEncoder().encode("\r\n"));
+            /** 摄像头离线时立即关闭流 */
+            offlineUnsub = eventBus.on("camera:offline", (payload) => {
+              if (payload.cameraId !== cameraId) return;
+              console.log(`[MJPEG][${cameraId}] 摄像头离线，关闭流`);
+              cleanup();
+              try { controller.close(); } catch { /* */ }
+            });
+
+            /** 立即发送当前帧（如果有） */
+            if (frame) {
+              const initHeader = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
+              controller.enqueue(new TextEncoder().encode(initHeader));
+              controller.enqueue(frame);
+              controller.enqueue(new TextEncoder().encode("\r\n"));
+            }
+            resetIdle();
           },
           cancel() {
-            if (unsubscribe) unsubscribe();
+            if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+            if (offlineUnsub) { offlineUnsub(); offlineUnsub = null; }
+            if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
           },
         });
 
