@@ -33,6 +33,27 @@ const saving = ref(false)
 /** ROI 编辑中的摄像头 ID */
 const roiCameraId = ref<string | null>(null)
 
+/** 连接测试 */
+const testing = ref(false)
+const testResult = ref<{ ok: boolean; videoInfo?: string; error?: string } | null>(null)
+
+/** 测试 RTSP 连接 */
+async function testConnection() {
+  const url = addForm.value.hdUrl
+  if (!url) return
+  testing.value = true
+  testResult.value = null
+  const res = await authFetch('/api/cameras/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  testing.value = false
+  if (res.ok) {
+    testResult.value = await res.json()
+  }
+}
+
 /** 加载摄像头列表 */
 async function loadCameras() {
   loading.value = true
@@ -157,6 +178,15 @@ defineExpose({ loadCameras })
       <div class="form-field">
         <label>{{ t('manage.group') }}</label>
         <input v-model="addForm.group" :placeholder="t('manage.placeholderGroup')" class="input" />
+      </div>
+      <div class="test-row">
+        <button class="test-btn" @click="testConnection" :disabled="testing || !addForm.hdUrl">
+          {{ testing ? t('manage.testing') : t('manage.testConnection') }}
+        </button>
+        <span v-if="testResult" class="test-result" :class="{ ok: testResult.ok, fail: !testResult.ok }">
+          {{ testResult.ok ? t('manage.testOk') : t('manage.testFail') }}
+          <span v-if="testResult.videoInfo" class="test-video-info">{{ testResult.videoInfo }}</span>
+        </span>
       </div>
       <button class="submit-btn" @click="addCamera" :disabled="adding">
         {{ adding ? t('manage.adding') : t('manage.confirmAdd') }}
@@ -487,6 +517,43 @@ defineExpose({ loadCameras })
   border-top: 1px solid #2a2a4a;
   background: #16213e;
   border-radius: 4px;
+}
+
+.test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.test-btn {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.test-btn:hover:not(:disabled) { background: #3a3a5a; }
+.test-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.test-result {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.test-result.ok { color: #4CAF50; }
+.test-result.fail { color: #e74c3c; }
+
+.test-video-info {
+  display: block;
+  color: #888;
+  font-weight: 400;
+  font-size: 10px;
+  margin-top: 2px;
 }
 
 /* 移动端适配 */

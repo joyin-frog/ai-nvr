@@ -197,6 +197,11 @@ export default {
     placeholderGroup: 'Optional group',
     placeholderKeepEmpty: 'Leave empty',
     placeholderClearGroup: 'Leave empty to clear',
+    testConnection: 'Test Connection',
+    testing: 'Testing...',
+    testOk: 'Connected',
+    testFail: 'Failed',
+    testVideoInfo: 'Video: {info}',
   },
   alert: {
     title: 'Alerts',

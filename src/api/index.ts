@@ -18,6 +18,7 @@ import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadCo
 import { checkAuth } from "@/auth";
 import { existsSync, statSync, realpathSync, unlinkSync } from "node:fs";
 import { resolve, extname } from "node:path";
+import { spawnSync } from "node:child_process";
 
 /** WebSocket 客户端集合 */
 const wsClients = new Set<import("bun").ServerWebSocket>();
@@ -133,6 +134,28 @@ export function startServer(
           const newConfig = loadConfig();
           cameraManager.reloadConfig(newConfig);
           return Response.json({ ok: true, cameraId: id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 测试 RTSP 连接 */
+      if (url.pathname === "/api/cameras/test" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const rtspUrl = obj.url as string | undefined;
+          if (!rtspUrl) return new Response("Missing url", { status: 400 });
+          const ffmpegPath = loadConfig().ffmpegPath;
+          const result = spawnSync(ffmpegPath, [
+            "-rtsp_transport", "tcp",
+            "-i", rtspUrl,
+            "-frames:v", "1",
+            "-f", "null",
+            "-",
+          ], { timeout: 8000, stdio: "pipe" });
+          const ok = result.status === 0;
+          const stderr = result.stderr?.toString() ?? "";
+          const match = stderr.match(/Video: ([^\n]+)/);
+          const videoInfo = match ? match[1] : undefined;
+          return Response.json({ ok, videoInfo, error: ok ? undefined : stderr.slice(-200) });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 

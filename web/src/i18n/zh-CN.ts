@@ -199,6 +199,11 @@ export default {
     placeholderGroup: '可选分组名称',
     placeholderKeepEmpty: '留空不修改',
     placeholderClearGroup: '留空清除分组',
+    testConnection: '测试连接',
+    testing: '测试中...',
+    testOk: '连接成功',
+    testFail: '连接失败',
+    testVideoInfo: '视频: {info}',
   },
   alert: {
     title: '告警',
