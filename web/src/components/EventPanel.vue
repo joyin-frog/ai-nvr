@@ -70,6 +70,7 @@ interface SnapshotInfo {
   cameraId: string
   timestamp: number
   size: number
+  detectionLabels?: string
 }
 const snapshotList = ref<SnapshotInfo[]>([])
 const snapshotLoading = ref(false)
@@ -546,6 +547,7 @@ defineExpose({ addEvent, loadHistory })
           <div class="gallery-meta">
             <span class="gallery-cam">{{ cameras?.find(c => c.id === snap.cameraId)?.name ?? snap.cameraId }}</span>
             <span class="gallery-time">{{ new Date(snap.timestamp).toLocaleString(locale, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</span>
+            <span v-if="snap.detectionLabels" class="gallery-labels">{{ snap.detectionLabels }}</span>
           </div>
         </div>
       </div>
@@ -1021,6 +1023,15 @@ defineExpose({ addEvent, loadHistory })
 .gallery-time {
   font-size: 10px;
   color: #888;
+}
+
+.gallery-labels {
+  display: block;
+  font-size: 10px;
+  color: #4ECDC4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 快照大图预览 */

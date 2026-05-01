@@ -13,6 +13,8 @@ export interface SnapshotInfo {
   timestamp: number;
   /** 文件大小 */
   size: number;
+  /** 检测到的目标标签摘要（如 "person, car"） */
+  detectionLabels?: string;
 }
 
 /**
@@ -97,11 +99,26 @@ export class SnapshotStorage {
         const filePath = join(dir, file);
         const stat = statSync(filePath);
         const timestamp = this.parseTimestamp(file);
+
+        /** 尝试读取检测结果标签 */
+        let detectionLabels: string | undefined;
+        const jsonFile = file.replace(/\.jpg$/, ".json");
+        if (files.includes(jsonFile)) {
+          try {
+            const meta = JSON.parse(readFileSync(join(dir, jsonFile), "utf-8")) as {
+              detections: Array<{ label: string }>;
+            };
+            const labels = [...new Set(meta.detections.map(d => d.label))];
+            if (labels.length > 0) detectionLabels = labels.join(", ");
+          } catch { /* ignore */ }
+        }
+
         results.push({
           filename: `${camId}/${file}`,
           cameraId: camId,
           timestamp,
           size: stat.size,
+          detectionLabels,
         });
       }
     }
