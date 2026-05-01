@@ -216,18 +216,41 @@ let sortedDetectionsCache: Detection[] = []
 let sortedDetectionsDirty = true
 
 /**
- * 检测框 EMA 平滑
+ * 检测框 EMA 平滑 + 速度插值
  * 维护每个 trackId 的当前显示位置，新检测到达时按 EMA 系数平滑过渡
+ * 在两次推理之间根据速度向量预测位置，使检测框以视频帧率平滑移动
  */
 const SMOOTH_ALPHA = 0.35
 const smoothedBoxes = new Map<number, { xmin: number; ymin: number; xmax: number; ymax: number }>()
+/** 每个 trackId 的速度向量（归一化坐标/帧） */
+const trackVelocities = new Map<number, { dx: number; dy: number }>()
+/** 上次推理时间（用于插值时间差计算） */
+let lastInferTime = 0
+/** 上次推理的平均间隔（用于插值外推） */
+let inferInterval = 100
 
 /** 更新平滑框：新检测到达时调用 */
 function updateSmoothedBoxes(detections: Detection[]) {
+  const now = performance.now()
+  /** 更新推理间隔估计 */
+  if (lastInferTime > 0) {
+    const delta = now - lastInferTime
+    if (delta > 10 && delta < 5000) {
+      inferInterval = inferInterval * 0.8 + delta * 0.2
+    }
+  }
+  lastInferTime = now
+
   const activeIds = new Set<number>()
   for (const d of detections) {
     if (d.trackId == null) continue
     activeIds.add(d.trackId)
+    /** 记录速度向量 */
+    if (d.velocity) {
+      trackVelocities.set(d.trackId, d.velocity)
+    } else {
+      trackVelocities.delete(d.trackId)
+    }
     const prev = smoothedBoxes.get(d.trackId)
     if (prev) {
       prev.xmin = prev.xmin + SMOOTH_ALPHA * (d.box.xmin - prev.xmin)
@@ -240,15 +263,35 @@ function updateSmoothedBoxes(detections: Detection[]) {
   }
   /** 清除已消失的目标 */
   for (const id of smoothedBoxes.keys()) {
-    if (!activeIds.has(id)) smoothedBoxes.delete(id)
+    if (!activeIds.has(id)) {
+      smoothedBoxes.delete(id)
+      trackVelocities.delete(id)
+    }
   }
 }
 
-/** 获取平滑后的检测框（如果 trackId 有缓存） */
+/** 获取插值后的检测框（EMA 平滑 + 速度预测） */
 function getSmoothedBox(d: Detection): { xmin: number; ymin: number; xmax: number; ymax: number } {
   if (d.trackId == null) return d.box
   const smoothed = smoothedBoxes.get(d.trackId)
-  return smoothed ?? d.box
+  if (!smoothed) return d.box
+
+  /** 速度插值：预测自上次推理以来的位移 */
+  const vel = trackVelocities.get(d.trackId)
+  if (!vel || lastInferTime === 0) return smoothed
+
+  const elapsed = performance.now() - lastInferTime
+  /** 外推比例：不超过 1 个推理间隔（避免过度外推） */
+  const ratio = Math.min(elapsed / inferInterval, 1)
+  const shiftX = vel.dx * ratio
+  const shiftY = vel.dy * ratio
+
+  return {
+    xmin: smoothed.xmin + shiftX,
+    ymin: smoothed.ymin + shiftY,
+    xmax: smoothed.xmax + shiftX,
+    ymax: smoothed.ymax + shiftY,
+  }
 }
 
 /** 标记检测结果已更新，需要重新排序 */
