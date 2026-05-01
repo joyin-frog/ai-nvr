@@ -522,17 +522,28 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   const sorted = getSortedDetections()
   if (sorted.length === 0) return
 
+  /** 动画脉冲因子（用于未命名目标边框闪烁） */
+  const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 500)
+
   ctx.save()
   ctx.font = 'bold 12px monospace'
   ctx.textBaseline = 'bottom'
 
   for (const d of sorted) {
+    const tid = d.trackId
+    const customName = tid ? props.trackLabels?.[tid] : undefined
+    const isNamed = !!customName
     const { stroke, fill } = getColor(d.label, d.trackId)
     const box = getSmoothedBox(d)
     const x = box.xmin * width
     const y = box.ymin * height
     const w = (box.xmax - box.xmin) * width
     const h = (box.ymax - box.ymin) * height
+
+    /** 已命名目标：粗边框 + 实线；未命名目标：细边框 + 虚线 + 脉冲透明度 */
+    ctx.setLineDash(isNamed ? [] : [8, 4])
+    ctx.lineWidth = isNamed ? 2.5 : 1.5
+    ctx.globalAlpha = isNamed ? 1 : (0.5 + 0.5 * pulse)
 
     /** 绘制圆角矩形框 + 半透明填充 */
     const r = Math.min(4, w / 4, h / 4)
@@ -551,13 +562,13 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.fillStyle = fill
     ctx.fill()
     ctx.strokeStyle = stroke
-    ctx.lineWidth = 2
     ctx.stroke()
 
+    ctx.setLineDash([])
+    ctx.globalAlpha = 1
+
     /** 绘制标签背景和文字 */
-    const tid = d.trackId
-    const customName = tid ? props.trackLabels?.[tid] : undefined
-    /** 有自定义名称时简化显示（名称 + 置信度），无名称时显示完整信息 */
+    /** 有自定义名称时简化显示（名称 + 置信度），无名称时显示完整信息 + 右键提示 */
     const text = customName
       ? `${customName} ${(d.score * 100).toFixed(0)}%`
       : `${tid ? `#${tid} ` : ''}${d.label} ${(d.score * 100).toFixed(0)}%`
