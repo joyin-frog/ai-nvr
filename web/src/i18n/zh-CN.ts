@@ -103,6 +103,8 @@ export default {
     exportRange: '导出范围',
     gifExport: 'GIF 导出',
     filterDate: '筛选日期',
+    prevDay: '前一天',
+    nextDay: '后一天',
     autoPlayNext: '连续播放',
     delete: '删除',
     confirmDelete: '确认删除此录像文件？此操作不可恢复。',

@@ -483,6 +483,17 @@ function onCameraFilterChange() {
   loadRecordings()
 }
 
+/** 日期前后导航 */
+function shiftDate(delta: number) {
+  if (!filterDate.value) {
+    filterDate.value = new Date().toISOString().slice(0, 10)
+  }
+  const d = new Date(`${filterDate.value}T00:00:00`)
+  d.setDate(d.getDate() + delta)
+  filterDate.value = d.toISOString().slice(0, 10)
+  loadRecordings()
+}
+
 /** 时间搜索 */
 const searchTimeInput = ref('')
 /** 高亮的录像文件名 */
@@ -977,6 +988,8 @@ defineExpose({ loadRecordings, playAtTime })
     <div class="panel-header">
       <span>{{ t('recording.title') }} <span v-if="filteredRecordings.length > 0" class="rec-summary">{{ filteredRecordings.length }} · {{ formatSize(totalSize) }} · {{ formatDuration(totalRecDurationSec) }}</span></span>
       <input type="date" v-model="filterDate" class="filter-date" :title="t('recording.filterDate')" />
+      <button class="date-nav-btn" @click="shiftDate(-1)" :title="t('recording.prevDay')" :disabled="!filterDate">◀</button>
+      <button class="date-nav-btn" @click="shiftDate(1)" :title="t('recording.nextDay')" :disabled="!filterDate">▶</button>
       <select v-model="filterCamera" @change="onCameraFilterChange" class="filter-select">
         <option value="">{{ t("recording.allCameras") }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
@@ -1163,6 +1176,27 @@ defineExpose({ loadRecordings, playAtTime })
 
 .filter-date::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
+}
+
+.date-nav-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.date-nav-btn:hover:not(:disabled) {
+  color: #4ECDC4;
+  background: #3a3a5a;
+}
+
+.date-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .time-search {

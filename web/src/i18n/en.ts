@@ -103,6 +103,8 @@ export default {
     exportRange: 'Export Range',
     gifExport: 'GIF Export',
     filterDate: 'Filter by date',
+    prevDay: 'Previous day',
+    nextDay: 'Next day',
     autoPlayNext: 'Auto play next',
     delete: 'Delete',
     confirmDelete: 'Delete this recording? This cannot be undone.',
