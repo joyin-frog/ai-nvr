@@ -324,39 +324,41 @@ onUnmounted(() => {
       @mouseup="onPanEnd"
       @mouseleave="onPanEnd"
     >
-      <canvas
-        v-if="hasFrame"
-        ref="canvasEl"
-        class="camera-image"
-        :style="{ filter: imageFilter, transform: zoomTransform }"
-      />
-      <div v-else class="camera-placeholder">
-        <div v-if="online" class="placeholder-icon">&#9679;</div>
-        <div v-else class="placeholder-icon offline-icon">&#10005;</div>
-        <span>{{ online ? t('camera.waiting') : t('camera.cameraOffline') }}</span>
-        <span v-if="!online && lastSeenText" class="last-seen">{{ lastSeenText }}</span>
-      </div>
-
-      <!-- 检测框叠加层 -->
-      <div v-if="showBoxes && hasFrame && detectionBoxes.length > 0" class="detection-overlay">
-        <div
-          v-for="(box, i) in detectionBoxes"
-          :key="i"
-          class="detect-box"
-          :style="box.style"
-        >
-          <span class="detect-label">{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
+      <div class="camera-content" :style="{ transform: zoomTransform }">
+        <canvas
+          v-if="hasFrame"
+          ref="canvasEl"
+          class="camera-image"
+          :style="{ filter: imageFilter }"
+        />
+        <div v-else class="camera-placeholder">
+          <div v-if="online" class="placeholder-icon">&#9679;</div>
+          <div v-else class="placeholder-icon offline-icon">&#10005;</div>
+          <span>{{ online ? t('camera.waiting') : t('camera.cameraOffline') }}</span>
+          <span v-if="!online && lastSeenText" class="last-seen">{{ lastSeenText }}</span>
         </div>
-      </div>
 
-      <!-- 摄像头名称叠加 -->
-      <div v-if="hasFrame" class="name-overlay">
-        <span class="name-text">{{ name }}</span>
-      </div>
+        <!-- 检测框叠加层 -->
+        <div v-if="showBoxes && hasFrame && detectionBoxes.length > 0" class="detection-overlay">
+          <div
+            v-for="(box, i) in detectionBoxes"
+            :key="i"
+            class="detect-box"
+            :style="box.style"
+          >
+            <span class="detect-label">{{ box.label }} {{ (box.score * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
 
-      <!-- 数字时钟叠加 -->
-      <div v-if="online && hasFrame" class="clock-overlay">
-        <span class="clock-text">{{ clockText }}</span>
+        <!-- 摄像头名称叠加 -->
+        <div v-if="hasFrame" class="name-overlay">
+          <span class="name-text">{{ name }}</span>
+        </div>
+
+        <!-- 数字时钟叠加 -->
+        <div v-if="online && hasFrame" class="clock-overlay">
+          <span class="clock-text">{{ clockText }}</span>
+        </div>
       </div>
 
       <!-- FPS 质量指示 -->
@@ -558,13 +560,19 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+.camera-content {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+}
+
 .camera-image {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: contain;
-  transform-origin: center center;
-  transition: transform 0.15s ease-out;
 }
 
 .zoom-badge {
