@@ -32,6 +32,8 @@ interface TrackRecord {
   hitCount: number;
   cameraIds: string[];
   snapshotFile?: string;
+  /** 当前快照的质量分数（score × box面积） */
+  bestSnapshotScore: number;
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -54,8 +56,8 @@ export class TrackStorage {
 
   /**
    * 更新追踪目标
-   * 当目标出现时调用，更新 lastSeen/hitCount/cameraIds
-   * 首次出现时保存裁剪快照
+   * 新目标：裁剪快照并保存
+   * 已有目标：当质量分数更高时自动更新快照
    */
   async upsert(
     trackId: number,
@@ -64,13 +66,24 @@ export class TrackStorage {
     timestamp: number,
     frameImage: Buffer,
     box: Detection["box"],
+    score?: number,
   ): Promise<void> {
+    const snapshotScore = this.calcSnapshotScore(box, score ?? 0.5);
+
     let record = this.tracks.get(trackId);
     if (record) {
       record.lastSeen = timestamp;
       record.hitCount++;
       if (!record.cameraIds.includes(cameraId)) {
         record.cameraIds.push(cameraId);
+      }
+      /** 质量分数超过当前最佳 20% 时更新快照 */
+      if (box && snapshotScore > record.bestSnapshotScore * 1.2) {
+        const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
+        if (snapshotFile) {
+          record.snapshotFile = snapshotFile;
+          record.bestSnapshotScore = snapshotScore;
+        }
       }
       this.scheduleSave();
       return;
@@ -87,6 +100,7 @@ export class TrackStorage {
       hitCount: 1,
       cameraIds: [cameraId],
       snapshotFile,
+      bestSnapshotScore: snapshotScore,
     };
     this.tracks.set(trackId, record);
     this.scheduleSave();
@@ -112,6 +126,30 @@ export class TrackStorage {
       changed = true;
     }
     if (changed) this.scheduleSave();
+  }
+
+  /**
+   * 尝试为已有目标更新快照
+   * 当检测质量高于当前快照时才重新裁剪
+   */
+  async tryUpdateSnapshot(
+    trackId: number,
+    cameraId: string,
+    frameImage: Buffer,
+    box: Detection["box"],
+    score: number,
+  ): Promise<void> {
+    const record = this.tracks.get(trackId);
+    if (!record || !box) return;
+    const snapshotScore = this.calcSnapshotScore(box, score);
+    /** 质量分数超过当前最佳 20% 时更新快照 */
+    if (snapshotScore <= record.bestSnapshotScore * 1.2) return;
+    const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
+    if (snapshotFile) {
+      record.snapshotFile = snapshotFile;
+      record.bestSnapshotScore = snapshotScore;
+      this.scheduleSave();
+    }
   }
 
   /** 设置自定义名称 */
@@ -202,11 +240,18 @@ export class TrackStorage {
 
     await image
       .extract({ left, top, width, height })
-      .resize(160, 160, { fit: "cover" })
-      .jpeg({ quality: 85 })
+      .resize(224, 224, { fit: "cover" })
+      .jpeg({ quality: 90 })
       .toFile(filePath);
 
     return filename;
+  }
+
+  /** 计算快照质量分数：score × box面积占比（越大越清晰） */
+  private calcSnapshotScore(box: Detection["box"], score: number): number {
+    if (!box) return 0;
+    const area = (box.xmax - box.xmin) * (box.ymax - box.ymin);
+    return score * area;
   }
 
   /** 延迟保存（合并多次写入） */
@@ -234,6 +279,8 @@ export class TrackStorage {
     if (!existsSync(metaPath)) return;
     const raw = JSON.parse(readFileSync(metaPath, "utf-8")) as TrackRecord[];
     for (const r of raw) {
+      /** 兼容旧数据：没有 bestSnapshotScore 时设为 0（下次高质量帧会自动更新） */
+      if (r.bestSnapshotScore === undefined) r.bestSnapshotScore = 0;
       this.tracks.set(r.trackId, r);
     }
   }

@@ -346,6 +346,7 @@ export class AiDetector {
             timestamp,
             jpeg,
             target.box,
+            target.score,
           ).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
         }
       }
@@ -353,10 +354,15 @@ export class AiDetector {
       if (this.trackStorage && trackResult.detections.length > 0) {
         const appearedIds = new Set(trackResult.appeared.map(a => a.trackId));
         const existing = trackResult.detections
-          .filter(d => d.trackId != null && !appearedIds.has(d.trackId))
-          .map(d => ({ trackId: d.trackId!, cameraId }));
+          .filter(d => d.trackId != null && !appearedIds.has(d.trackId));
         if (existing.length > 0) {
-          this.trackStorage.touchSeen(existing, timestamp);
+          this.trackStorage.touchSeen(existing.map(d => ({ trackId: d.trackId!, cameraId })), timestamp);
+          /** 对置信度最高的已有目标尝试更新快照（每帧最多更新 1 个，避免性能开销） */
+          const best = existing.reduce((a, b) => (a.score > b.score ? a : b));
+          if (best.box) {
+            this.trackStorage.tryUpdateSnapshot(best.trackId!, cameraId, jpeg, best.box, best.score)
+              .catch(() => { /* 快照更新失败不影响主流程 */ });
+          }
         }
       }
 
