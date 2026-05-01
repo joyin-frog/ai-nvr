@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 
@@ -22,6 +22,8 @@ const loading = ref(false)
 /** 正在编辑名称的 trackId */
 const editingId = ref<number | null>(null)
 const editName = ref('')
+/** 标签筛选 */
+const filterLabel = ref('')
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const emit = defineEmits<{
@@ -81,6 +83,19 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86400000)}天前`
 }
 
+/** 所有出现过的标签 */
+const allLabels = computed(() => {
+  const set = new Set<string>()
+  for (const t of tracks.value) set.add(t.label)
+  return [...set].sort()
+})
+
+/** 按标签筛选后的列表 */
+const filteredTracks = computed(() => {
+  if (!filterLabel.value) return tracks.value
+  return tracks.value.filter(t => t.label === filterLabel.value)
+})
+
 onMounted(() => {
   loadTracks()
   /** 每 30 秒刷新 */
@@ -95,7 +110,11 @@ onUnmounted(() => {
 <template>
   <div class="track-gallery">
     <div class="gallery-header">
-      <h3>{{ t('tracks.title', '追踪目标') }}</h3>
+      <h3>{{ t('tracks.title', '追踪目标') }} <span class="track-total">{{ filteredTracks.length }}</span></h3>
+      <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
+        <option value="">{{ t('tracks.all', '全部') }}</option>
+        <option v-for="label in allLabels" :key="label" :value="label">{{ label }}</option>
+      </select>
       <button class="refresh-btn" @click="loadTracks" :disabled="loading">
         {{ loading ? '...' : '↻' }}
       </button>
@@ -106,7 +125,7 @@ onUnmounted(() => {
     </div>
 
     <div v-else class="track-grid">
-      <div v-for="track in tracks" :key="track.trackId" class="track-card">
+      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card">
         <!-- 快照 -->
         <div class="track-snapshot">
           <img
@@ -166,7 +185,7 @@ onUnmounted(() => {
 .gallery-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
@@ -174,7 +193,26 @@ onUnmounted(() => {
   color: #e0e0e0;
   font-size: 14px;
   margin: 0;
+  flex-shrink: 0;
 }
+
+.track-total {
+  color: #4ECDC4;
+  font-size: 12px;
+}
+
+.label-filter {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.label-filter:focus { border-color: #4ECDC4; }
 
 .refresh-btn {
   background: #2a2a4a;
