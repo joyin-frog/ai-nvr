@@ -20,6 +20,8 @@ export interface CameraMetrics {
   avgMotionRatio: number;
   /** 平均帧大小（KB） */
   avgFrameSizeKb: number;
+  /** AI 推理平均延迟（ms） */
+  avgInferMs: number;
 }
 
 /** 系统整体指标 */
@@ -68,6 +70,8 @@ export class SystemMonitor {
   private cameraLastFrame = new Map<string, number>();
   /** 每路摄像头的帧大小统计（滑动平均） */
   private frameSizeStats = new Map<string, { sum: number; count: number }>();
+  /** AI 推理延迟统计（滑动平均 ms） */
+  private inferMsStats = new Map<string, { avg: number; count: number }>();
   /** FPS 统计窗口（秒） */
   private fpsWindow = 5;
   /** 低帧率检测：每个摄像头连续低 FPS 的检查周期数 */
@@ -143,9 +147,20 @@ export class SystemMonitor {
       stats.count++;
     });
 
-    /** 检测事件 → 计数 */
-    eventBus.on("detect", ({ cameraId }) => {
+    /** 检测事件 → 计数 + 推理延迟 */
+    eventBus.on("detect", ({ cameraId, inferMs }) => {
       this.detectCounts.set(cameraId, (this.detectCounts.get(cameraId) ?? 0) + 1);
+      if (inferMs != null) {
+        let stats = this.inferMsStats.get(cameraId);
+        if (!stats) {
+          stats = { avg: inferMs, count: 1 };
+          this.inferMsStats.set(cameraId, stats);
+        } else {
+          /** 指数移动平均 */
+          stats.avg = stats.avg * 0.9 + inferMs * 0.1;
+          stats.count++;
+        }
+      }
     });
 
     /** 在线/离线事件 */
@@ -202,6 +217,7 @@ export class SystemMonitor {
         detectCount: this.detectCounts.get(id) ?? 0,
         avgMotionRatio: motionStats ? motionStats.sum / motionStats.count : 0,
         avgFrameSizeKb: sizeStats ? Math.round(sizeStats.sum / sizeStats.count * 10) / 10 : 0,
+        avgInferMs: Math.round(this.inferMsStats.get(id)?.avg ?? 0),
       };
     });
 
