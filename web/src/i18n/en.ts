@@ -33,6 +33,7 @@ export default {
     noFrame: 'No Frame',
     waiting: 'Waiting...',
     cameraOffline: 'Camera Offline',
+    frozen: 'Frozen',
     detections: '{count} detected',
     lastSeenJustNow: 'Just went offline',
     lastSeenMinutes: 'Last seen {count}m ago',

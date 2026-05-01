@@ -87,6 +87,20 @@ watch(() => props.detectVersion, async (v: number) => {
 /** 始终显示实时帧，检测框通过叠加层渲染 */
 const displayUrl = computed(() => props.frameImage)
 
+/** 帧冻结检测：在线但超过 10 秒无新帧 */
+const frozen = ref(false)
+let frozenTimer: ReturnType<typeof setInterval> | null = null
+function checkFrozen() {
+  if (!props.online) { frozen.value = false; return }
+  frozen.value = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
+}
+watch(() => props.online, (on) => {
+  if (on) { frozenTimer = setInterval(checkFrozen, 3000); checkFrozen() }
+  else { frozen.value = false; if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null } }
+}, { immediate: true })
+watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
+onUnmounted(() => { if (frozenTimer) clearInterval(frozenTimer) })
+
 /** 画面比例：根据视频分辨率计算，默认 16:9 */
 const cameraBodyStyle = computed(() => {
   if (props.videoWidth && props.videoHeight && props.videoWidth > 0 && props.videoHeight > 0) {
@@ -265,6 +279,7 @@ onUnmounted(() => {
       </span>
       <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
+      <span v-if="frozen" class="frozen-badge">{{ t('camera.frozen') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
       <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
@@ -447,6 +462,21 @@ onUnmounted(() => {
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.frozen-badge {
+  background: #FF9800;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  animation: frozen-blink 1.5s ease-in-out infinite;
+}
+
+@keyframes frozen-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .fullscreen-btn {

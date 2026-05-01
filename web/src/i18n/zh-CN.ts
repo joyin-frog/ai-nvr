@@ -33,6 +33,7 @@ export default {
     noFrame: '无画面',
     waiting: '等待视频...',
     cameraOffline: '摄像头离线',
+    frozen: '画面冻结',
     detections: '{count} 个检测',
     lastSeenJustNow: '刚刚离线',
     lastSeenMinutes: '{count} 分钟前在线',
