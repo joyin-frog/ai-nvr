@@ -35,12 +35,14 @@ export interface CameraConfig {
   enabled: boolean;
   /** RTSP 流地址 */
   stream: StreamSource;
-  /** 检测分辨率宽度 */
+  /** 帧提取分辨率宽度（0 = 原始分辨率） */
   detectWidth: number;
-  /** 检测分辨率高度 */
+  /** 帧提取分辨率高度（0 = 原始） */
   detectHeight: number;
-  /** 检测帧率（fps） */
+  /** 帧提取帧率（fps） */
   detectFps: number;
+  /** JPEG 编码质量（1-31，越小质量越高，默认 5） */
+  jpegQuality: number;
   /** 所属分组（可选，用于前端筛选） */
   group: string;
   /** PTZ 配置（可选，仅支持云台的摄像头） */
@@ -152,6 +154,7 @@ export function loadConfig(configPath?: string): AppConfig {
       detectWidth: ((cam.detect as Record<string, unknown>)?.width as number) || 640,
       detectHeight: ((cam.detect as Record<string, unknown>)?.height as number) || 360,
       detectFps: (cam.detect as Record<string, unknown>)?.fps as number ?? 5,
+      jpegQuality: ((cam.detect as Record<string, unknown>)?.jpeg_quality as number) || 5,
       group: (cam.group as string) ?? "",
       ptz: parsePtzConfig(cam),
     });

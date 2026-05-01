@@ -147,7 +147,7 @@ export class FrameExtractor {
 
   /** 启动 ffmpeg 子进程 */
   private spawnFfmpeg(): void {
-    const { detectFps, detectWidth, stream } = this.config;
+    const { detectFps, detectWidth, jpegQuality, stream } = this.config;
 
     /** fps 滤镜控制帧率；scale 仅在配置了低于原始的宽度时才缩放 */
     const vfParts = [`fps=${detectFps}`];
@@ -162,7 +162,7 @@ export class FrameExtractor {
       "-vf", vf,
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
-      "-q:v", "2",
+      "-q:v", String(jpegQuality),
       "-an",
       "pipe:1",
     ];
