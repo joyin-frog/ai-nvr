@@ -60,6 +60,7 @@ export class AlertStorage {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath, { create: true });
     this.db.run("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA wal_autocheckpoint = 1000");
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS alert_rules (
