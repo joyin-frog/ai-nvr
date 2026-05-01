@@ -136,58 +136,48 @@ class VideoToFmp4Muxer {
 
   /** 提取 NAL 单元（Annex B 起始码搜索，H.264 和 HEVC 通用） */
   private extractNals(eventBus: EventBus, cameraId: string): void {
-    while (this.buffer.length >= 4) {
-      /** 搜索起始码 00 00 00 01 或 00 00 01 */
-      let startCodeLen = 0;
-      let nalStart = -1;
+    const buf = this.buffer;
+    const len = buf.length;
+    if (len < 4) return;
 
-      for (let i = 0; i <= this.buffer.length - 4; i++) {
-        if (this.buffer[i] === 0 && this.buffer[i + 1] === 0) {
-          if (this.buffer[i + 2] === 1) {
-            startCodeLen = 3;
-            nalStart = i;
-            break;
-          } else if (this.buffer[i + 2] === 0 && this.buffer[i + 3] === 1) {
-            startCodeLen = 4;
-            nalStart = i;
-            break;
-          }
+    /** 扫描所有起始码位置（3字节 00 00 01 和 4字节 00 00 00 01） */
+    const starts: number[] = [];
+    let i = 0;
+    while (i <= len - 3) {
+      if (buf[i] === 0 && buf[i + 1] === 0) {
+        if (buf[i + 2] === 1) {
+          starts.push(i);
+          i += 3;
+          continue;
+        }
+        if (buf[i + 2] === 0 && i + 3 < len && buf[i + 3] === 1) {
+          starts.push(i);
+          i += 4;
+          continue;
         }
       }
+      i++;
+    }
 
-      if (nalStart === -1) {
-        if (this.buffer.length > 3) {
-          this.buffer = this.buffer.subarray(this.buffer.length - 3);
-        }
-        return;
-      }
+    if (starts.length === 0) {
+      if (len > 3) this.buffer = buf.subarray(len - 3);
+      return;
+    }
 
-      /** 找下一个起始码 */
-      let nextStart = -1;
-      for (let i = nalStart + startCodeLen; i <= this.buffer.length - 3; i++) {
-        if (this.buffer[i] === 0 && this.buffer[i + 1] === 0) {
-          if (this.buffer[i + 2] === 1) {
-            nextStart = i;
-            break;
-          } else if (this.buffer[i + 2] === 0 && i + 3 < this.buffer.length && this.buffer[i + 3] === 1) {
-            nextStart = i;
-            break;
-          }
-        }
-      }
+    /** 提取每个 NAL 单元 */
+    for (let s = 0; s < starts.length; s++) {
+      const start = starts[s]!;
+      const codeLen = (start + 3 < len && buf[start + 2] === 0 && buf[start + 3] === 1) ? 4 : 3;
+      const nalStart = start + codeLen;
+      const nalEnd = s + 1 < starts.length ? starts[s + 1]! : len;
 
-      if (nextStart === -1) {
-        if (nalStart > 0) {
-          this.buffer = this.buffer.subarray(nalStart);
-        }
-        return;
-      }
-
-      const nalData = Buffer.from(this.buffer.subarray(nalStart + startCodeLen, nextStart));
-      this.buffer = this.buffer.subarray(nextStart);
-
+      if (nalEnd <= nalStart) continue;
+      const nalData = Buffer.from(buf.subarray(nalStart, nalEnd));
       this.processNal(nalData, eventBus, cameraId);
     }
+
+    /** 保留尾部不完整数据 */
+    this.buffer = buf.subarray(starts[starts.length - 1]!);
   }
 
   /** 处理单个 NAL 单元 */
