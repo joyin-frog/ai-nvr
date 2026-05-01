@@ -13,6 +13,12 @@ import { authWsUrl } from '../services/auth'
 const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
+/** 保留当前播放位置前多少秒缓冲区 */
+const BUFFER_RETAIN_SECONDS = 5
+
+/** 播放延迟超过此值（秒）时自动 seek 到最新位置 */
+const LIVE_CATCHUP_THRESHOLD = 3
+
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
   const videoRef = ref<HTMLVideoElement | null>(null)
@@ -23,6 +29,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   /** 当前解码分辨率 */
   const videoWidth = ref(0)
   const videoHeight = ref(0)
+  /** MSE 模式 FPS（从 media segment 到达频率计算） */
+  const fps = ref(0)
 
   let mediaSource: MediaSource | null = null
   let sourceBuffer: SourceBuffer | null = null
@@ -39,10 +47,87 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let pruneTimer: ReturnType<typeof setInterval> | null = null
   /** 当前使用的 codec */
   let currentCodec = ''
+  /** FPS 统计 */
+  let fpsSegmentCount = 0
+  let fpsStartTime = 0
+  /** video 元素事件处理器引用（用于清理） */
+  let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
+    /** 清理旧事件 */
+    if (videoRef.value) {
+      for (const { event, handler } of videoEventHandlers) {
+        videoRef.value.removeEventListener(event, handler)
+      }
+      videoEventHandlers = []
+    }
+
     videoRef.value = el
+
+    /** 绑定 video 元素事件 */
+    if (el) {
+      bindVideoEvents(el)
+    }
+  }
+
+  /** 绑定 video 元素的关键事件 */
+  function bindVideoEvents(el: HTMLVideoElement) {
+    /** 播放卡住时 seek 到最新位置（追赶直播） */
+    const onWaiting = () => {
+      requestAnimationFrame(() => {
+        if (!videoRef.value || !sourceBuffer) return
+        catchUpToLive()
+      })
+    }
+
+    /** 解码错误时重连 */
+    const onError = () => {
+      const err = el.error
+      if (err) {
+        console.warn(`[fMP4] video error: code=${err.code} ${err.message}`)
+        /** MEDIA_ERR_DECODE (3) 或 MEDIA_ERR_SRC_NOT_SUPPORTED (4) → 重连 */
+        if (err.code >= 3) {
+          connect()
+        }
+      }
+    }
+
+    const onPlaying = () => {
+      playing.value = true
+    }
+
+    const onPause = () => {
+      playing.value = false
+    }
+
+    el.addEventListener('waiting', onWaiting)
+    el.addEventListener('error', onError)
+    el.addEventListener('playing', onPlaying)
+    el.addEventListener('pause', onPause)
+
+    videoEventHandlers = [
+      { event: 'waiting', handler: onWaiting },
+      { event: 'error', handler: onError },
+      { event: 'playing', handler: onPlaying },
+      { event: 'pause', handler: onPause },
+    ]
+  }
+
+  /** 追赶直播：如果播放延迟超过阈值，seek 到缓冲区末尾 */
+  function catchUpToLive() {
+    const video = videoRef.value
+    if (!video || !sourceBuffer) return
+    const buffered = sourceBuffer.buffered
+    if (buffered.length === 0) return
+
+    const end = buffered.end(buffered.length - 1)
+    const delay = end - video.currentTime
+
+    if (delay > LIVE_CATCHUP_THRESHOLD) {
+      console.log(`[fMP4] 延迟 ${delay.toFixed(1)}s，seek 到最新位置`)
+      video.currentTime = end - 0.1
+    }
   }
 
   /** 连接 fMP4 流 */
@@ -51,6 +136,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     pendingQueue = []
     appending = false
     currentCodec = ''
+    fpsSegmentCount = 0
+    fpsStartTime = performance.now()
 
     mediaSource = new MediaSource()
     if (videoRef.value) {
@@ -100,6 +187,16 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       } else if (type === FMP4_TYPE_MEDIA) {
         const fmp4Data = raw.subarray(1).buffer
         queueAppend(fmp4Data)
+
+        /** FPS 统计 */
+        fpsSegmentCount++
+        const now = performance.now()
+        const elapsed = now - fpsStartTime
+        if (elapsed >= 2000) {
+          fps.value = Math.round(fpsSegmentCount * 1000 / elapsed)
+          fpsSegmentCount = 0
+          fpsStartTime = now
+        }
       }
     }
 
@@ -199,6 +296,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       videoWidth.value = videoRef.value.videoWidth
       videoHeight.value = videoRef.value.videoHeight
     }
+
+    /** 追赶直播 */
+    catchUpToLive()
   }
 
   /** 清除已播放的缓冲区，防止内存增长 */
@@ -208,10 +308,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (buffered.length > 0) {
       const currentTime = videoRef.value.currentTime
       const start = buffered.start(0)
-      /** 保留当前播放位置前 2 秒 */
-      if (currentTime - start > 2) {
+      /** 保留当前播放位置前 BUFFER_RETAIN_SECONDS 秒 */
+      if (currentTime - start > BUFFER_RETAIN_SECONDS) {
         try {
-          sourceBuffer.remove(start, currentTime - 2)
+          sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
         } catch { /* ignore */ }
       }
     }
@@ -259,10 +359,14 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     appending = false
     connected.value = false
     playing.value = false
+    fps.value = 0
   }
 
-  /** 定期清理缓冲区 */
-  pruneTimer = setInterval(pruneBuffer, 5000)
+  /** 定期清理缓冲区 + 追赶直播 */
+  pruneTimer = setInterval(() => {
+    pruneBuffer()
+    catchUpToLive()
+  }, 5000)
 
   onUnmounted(() => {
     disconnect()
@@ -277,5 +381,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     playing,
     videoWidth,
     videoHeight,
+    fps,
   }
 }

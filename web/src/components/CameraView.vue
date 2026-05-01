@@ -387,7 +387,8 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
 
   /** 右下角：渲染FPS + 源FPS + 延迟 + AI耗时 + 分辨率 指标栏 */
   const stats: Array<{ text: string; color: string }> = []
-  const renderFps = getRenderFps()
+  /** MSE 模式使用 fMP4 segment FPS，Canvas 模式使用渲染帧率 */
+  const renderFps = useMse.value ? fmp4.fps.value : getRenderFps()
   const srcFps = props.fps ?? 0
   if (renderFps > 0 || srcFps > 0) {
     /** 显示渲染帧率（实际到达屏幕的帧率），如果和源帧率不同则同时显示 */
@@ -407,8 +408,9 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
   if (localInferMs.value > 0) {
     stats.push({ text: `AI ${localInferMs.value.toFixed(0)}ms`, color: '#9C27B0' })
   }
-  const w = frameSize.value.width
-  const h = frameSize.value.height
+  /** MSE 模式用 fmp4 分辨率，Canvas 模式用帧尺寸 */
+  const w = useMse.value ? (fmp4.videoWidth.value || 0) : frameSize.value.width
+  const h = useMse.value ? (fmp4.videoHeight.value || 0) : frameSize.value.height
   if (w > 0 && h > 0) {
     stats.push({ text: `${w}x${h}`, color: '#888' })
   }
