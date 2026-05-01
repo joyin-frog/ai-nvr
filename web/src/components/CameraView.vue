@@ -693,8 +693,9 @@ function onCanvasContext(e: MouseEvent) {
   let best: { trackId?: number; label: string; box: Detection['box'] } | null = null
   let bestArea = Infinity
   for (const d of sorted) {
-    if (nx >= d.box.xmin && nx <= d.box.xmax && ny >= d.box.ymin && ny <= d.box.ymax) {
-      const area = (d.box.xmax - d.box.xmin) * (d.box.ymax - d.box.ymin)
+    const box = getSmoothedBox(d)
+    if (nx >= box.xmin && nx <= box.xmax && ny >= box.ymin && ny <= box.ymax) {
+      const area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
       if (area < bestArea) {
         best = d
         bestArea = area
