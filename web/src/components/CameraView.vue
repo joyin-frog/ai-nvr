@@ -500,6 +500,7 @@ onUnmounted(() => {
             :key="box.key"
             class="detect-box"
             :style="box.style"
+            :title="box.customName ? `${box.customName} (#${box.trackId}) ${box.label} ${(box.score * 100).toFixed(0)}%` : box.trackId ? `#${box.trackId} ${box.label} ${(box.score * 100).toFixed(0)}%` : `${box.label} ${(box.score * 100).toFixed(0)}%`"
             @contextmenu.prevent="onBoxContext($event, box)"
           >
             <span class="detect-label" :style="{ background: box.color }">
