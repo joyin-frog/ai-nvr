@@ -893,6 +893,43 @@ function onCameraFilterChange() {
 const focusedIndex = ref(-1)
 const recListEl = ref<HTMLDivElement | null>(null)
 
+/** 虚拟滚动：固定 item 高度 */
+const ITEM_HEIGHT = 52
+const BUFFER_ITEMS = 5
+const virtualStart = ref(0)
+const virtualEnd = ref(50)
+
+/** 虚拟滚动可见 items */
+const visibleRecordings = computed(() => {
+  return filteredRecordings.value.slice(virtualStart.value, virtualEnd.value)
+})
+
+/** 虚拟滚动总高度 + padding */
+const virtualPaddingTop = computed(() => virtualStart.value * ITEM_HEIGHT)
+const virtualPaddingBottom = computed(() => {
+  const total = filteredRecordings.value.length
+  return Math.max(0, (total - virtualEnd.value) * ITEM_HEIGHT)
+})
+
+/** 滚动事件：计算可见范围 */
+function onRecListScroll() {
+  const el = recListEl.value
+  if (!el) return
+  const scrollTop = el.scrollTop
+  const viewHeight = el.clientHeight
+  const start = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - BUFFER_ITEMS)
+  const end = Math.min(filteredRecordings.value.length, Math.ceil((scrollTop + viewHeight) / ITEM_HEIGHT) + BUFFER_ITEMS)
+  virtualStart.value = start
+  virtualEnd.value = end
+}
+
+/** 列表数据变化时重置虚拟滚动 */
+watch(() => filteredRecordings.value.length, () => {
+  virtualStart.value = 0
+  virtualEnd.value = Math.min(50, filteredRecordings.value.length)
+  nextTick(() => onRecListScroll())
+})
+
 function onRecListKeydown(e: KeyboardEvent) {
   if (filteredRecordings.value.length === 0) return
   if (e.key === 'ArrowDown') {
@@ -918,9 +955,15 @@ function onRecListKeydown(e: KeyboardEvent) {
 }
 
 function scrollToFocused() {
+  /** 确保 focused item 在虚拟范围内 */
+  const idx = focusedIndex.value
+  if (idx < virtualStart.value || idx >= virtualEnd.value) {
+    const el = recListEl.value
+    if (el) el.scrollTop = Math.max(0, (idx - BUFFER_ITEMS) * ITEM_HEIGHT)
+  }
   nextTick(() => {
-    const items = recListEl.value?.querySelectorAll('.recording-item')
-    items?.[focusedIndex.value]?.scrollIntoView({ block: 'nearest' })
+    const el = recListEl.value
+    el?.querySelector(`.recording-item.focused`)?.scrollIntoView({ block: 'nearest' })
   })
 }
 
@@ -1827,18 +1870,20 @@ defineExpose({ loadRecordings, playAtTime })
       @play="play"
     />
 
-    <div ref="recListEl" class="recordings-list" tabindex="0" @keydown="onRecListKeydown">
+    <div ref="recListEl" class="recordings-list" tabindex="0" @keydown="onRecListKeydown" @scroll="onRecListScroll">
       <div v-if="filteredRecordings.length === 0" class="empty">
         {{ loading ? t('app.loading') : t('recording.noRecordings') }}
       </div>
-      <div
-        v-for="(rec, idx) in filteredRecordings"
-        :key="rec.filename"
-        :data-rec="rec.filename"
-        :class="['recording-item', { selected: selectedFiles.has(rec.filename), highlighted: highlightFilename === rec.filename, focused: idx === focusedIndex }]"
-        @click="multiSelectMode ? toggleFileSelect(rec.filename) : play(rec)"
-        @mouseenter="onRecordingHover(rec)"
-      >
+      <template v-else>
+        <div :style="{ height: virtualPaddingTop + 'px' }" />
+        <div
+          v-for="(rec, vidx) in visibleRecordings"
+          :key="rec.filename"
+          :data-rec="rec.filename"
+          :class="['recording-item', { selected: selectedFiles.has(rec.filename), highlighted: highlightFilename === rec.filename, focused: virtualStart + vidx === focusedIndex }]"
+          @click="multiSelectMode ? toggleFileSelect(rec.filename) : play(rec)"
+          @mouseenter="onRecordingHover(rec)"
+        >
         <input
           v-if="multiSelectMode"
           type="checkbox"
@@ -1882,6 +1927,8 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="rec-delete" @click.stop="deleteRecording(rec)" :title="t('recording.delete')">&#10005;</button>
         </div>
       </div>
+      <div :style="{ height: virtualPaddingBottom + 'px' }" />
+      </template>
     </div>
 
     <!-- 多选合并操作栏 -->
@@ -2155,6 +2202,8 @@ defineExpose({ loadRecordings, playAtTime })
   align-items: center;
   gap: 10px;
   padding: 8px;
+  height: 52px;
+  box-sizing: border-box;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
