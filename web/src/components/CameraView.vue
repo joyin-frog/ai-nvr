@@ -748,6 +748,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       lines.push(`${d.label} #${tid}`)
       if (customName) lines.push(`名称: ${customName}`)
       lines.push(`置信度: ${(d.score * 100).toFixed(0)}%`)
+      if (d.dominantColor) lines.push(`\0color:${d.dominantColor}`)
       if (d.velocity) {
         const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
         if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
@@ -758,7 +759,10 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       const lineH = 15
       let maxLineW = 0
       for (const line of lines) {
-        const lw = ctx.measureText(line).width
+        /** 颜色行：圆点 14px + 颜色名文字宽度 */
+        const lw = line.startsWith('\0color:')
+          ? 14 + ctx.measureText(line.slice(7)).width
+          : ctx.measureText(line).width
         if (lw > maxLineW) maxLineW = lw
       }
       const tipW = maxLineW + tipPad * 2
@@ -778,7 +782,29 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       ctx.fillStyle = '#fff'
       ctx.textBaseline = 'top'
       for (let li = 0; li < lines.length; li++) {
-        ctx.fillText(lines[li], finalX + tipPad, finalY + tipPad + li * lineH)
+        const line = lines[li]!
+        /** 特殊行：主色调圆点 */
+        if (line.startsWith('\0color:')) {
+          const colorName = line.slice(7)
+          const colorMap: Record<string, string> = {
+            red: '#e74c3c', orange: '#e67e22', yellow: '#f1c40f', lime: '#2ecc71',
+            green: '#27ae60', cyan: '#1abc9c', blue: '#3498db', purple: '#9b59b6',
+            pink: '#e91e63', gray: '#95a5a6',
+          }
+          const dotColor = colorMap[colorName] ?? '#666'
+          const dotY = finalY + tipPad + li * lineH + 7
+          ctx.beginPath()
+          ctx.arc(finalX + tipPad + 5, dotY, 5, 0, Math.PI * 2)
+          ctx.fillStyle = dotColor
+          ctx.fill()
+          ctx.strokeStyle = 'rgba(255,255,255,0.6)'
+          ctx.lineWidth = 1
+          ctx.stroke()
+          ctx.fillStyle = '#fff'
+          ctx.fillText(colorName, finalX + tipPad + 14, finalY + tipPad + li * lineH)
+        } else {
+          ctx.fillText(line, finalX + tipPad, finalY + tipPad + li * lineH)
+        }
       }
       ctx.textBaseline = 'bottom'
       ctx.font = 'bold 12px monospace'
