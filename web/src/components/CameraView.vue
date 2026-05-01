@@ -593,6 +593,124 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
   ctx.restore()
 }
 
+/** 静态元素（ROI + 越线）离屏缓存 */
+let staticCacheCanvas: OffscreenCanvas | null = null
+let staticCacheW = 0
+let staticCacheH = 0
+let staticCacheKey = ''
+
+/** 计算静态元素的缓存 key（props 变化时 key 改变触发重绘） */
+function computeStaticCacheKey(): string {
+  const roiKey = (props.roiRegions ?? []).map(r => `${r.id}:${r.name}:${r.points.map(p => `${p.x},${p.y}`).join('|')}`).join(';')
+  const lineKey = (props.crossLines ?? []).map(l => `${l.id}:${l.name}:${l.start.x},${l.start.y}-${l.end.x},${l.end.y}`).join(';')
+  return `${roiKey}|${lineKey}`
+}
+
+/** 绘制静态元素到离屏 Canvas */
+function drawStaticCache(width: number, height: number): OffscreenCanvas {
+  const key = computeStaticCacheKey()
+  if (staticCacheCanvas && staticCacheW === width && staticCacheH === height && staticCacheKey === key) {
+    return staticCacheCanvas
+  }
+  const oc = new OffscreenCanvas(width, height)
+  const sctx = oc.getContext('2d')!
+  /** 绘制 ROI 区域 */
+  if (props.roiRegions && props.roiRegions.length > 0) {
+    sctx.lineWidth = 1.5
+    sctx.setLineDash([6, 4])
+    for (const roi of props.roiRegions) {
+      if (roi.points.length < 3) continue
+      sctx.strokeStyle = 'rgba(156, 39, 176, 0.7)'
+      sctx.fillStyle = 'rgba(156, 39, 176, 0.08)'
+      sctx.beginPath()
+      sctx.moveTo(roi.points[0]!.x * width, roi.points[0]!.y * height)
+      for (let i = 1; i < roi.points.length; i++) {
+        sctx.lineTo(roi.points[i]!.x * width, roi.points[i]!.y * height)
+      }
+      sctx.closePath()
+      sctx.fill()
+      sctx.stroke()
+      if (roi.name) {
+        const cx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * width
+        const cy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * height
+        sctx.setLineDash([])
+        sctx.font = 'bold 10px sans-serif'
+        sctx.fillStyle = 'rgba(156, 39, 176, 0.9)'
+        sctx.textAlign = 'center'
+        sctx.fillText(roi.name, cx, cy)
+        sctx.textAlign = 'start'
+        sctx.setLineDash([6, 4])
+      }
+    }
+    sctx.setLineDash([])
+  }
+  /** 绘制越线检测线段 */
+  if (props.crossLines && props.crossLines.length > 0) {
+    sctx.lineWidth = 2
+    sctx.setLineDash([4, 3])
+    for (const line of props.crossLines) {
+      const sx = line.start.x * width
+      const sy = line.start.y * height
+      const ex = line.end.x * width
+      const ey = line.end.y * height
+      sctx.strokeStyle = 'rgba(255, 111, 0, 0.7)'
+      sctx.beginPath()
+      sctx.moveTo(sx, sy)
+      sctx.lineTo(ex, ey)
+      sctx.stroke()
+      sctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
+      sctx.beginPath()
+      sctx.arc(sx, sy, 3, 0, Math.PI * 2)
+      sctx.fill()
+      sctx.beginPath()
+      sctx.arc(ex, ey, 3, 0, Math.PI * 2)
+      sctx.fill()
+      const dx = ex - sx
+      const dy = ey - sy
+      const len = Math.sqrt(dx * dx + dy * dy)
+      if (len > 0) {
+        const mx = (sx + ex) / 2
+        const my = (sy + ey) / 2
+        const nx = dx / len
+        const ny = dy / len
+        const arrowSize = 6
+        const tx = mx + nx * arrowSize
+        const ty = my + ny * arrowSize
+        const lx = mx - nx * arrowSize * 0.5 - ny * arrowSize * 0.4
+        const ly = my - ny * arrowSize * 0.5 + nx * arrowSize * 0.4
+        const rx = mx - nx * arrowSize * 0.5 + ny * arrowSize * 0.4
+        const ry = my - ny * arrowSize * 0.5 - nx * arrowSize * 0.4
+        sctx.setLineDash([])
+        sctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
+        sctx.beginPath()
+        sctx.moveTo(lx, ly)
+        sctx.lineTo(tx, ty)
+        sctx.lineTo(rx, ry)
+        sctx.closePath()
+        sctx.fill()
+        sctx.setLineDash([4, 3])
+      }
+      if (line.name) {
+        sctx.setLineDash([])
+        sctx.font = 'bold 9px sans-serif'
+        sctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
+        sctx.textAlign = 'center'
+        const labelY = Math.min(sy, ey) - 6
+        const labelX = (sx + ex) / 2
+        sctx.fillText(line.name, labelX, labelY)
+        sctx.textAlign = 'start'
+        sctx.setLineDash([4, 3])
+      }
+    }
+    sctx.setLineDash([])
+  }
+  staticCacheCanvas = oc
+  staticCacheW = width
+  staticCacheH = height
+  staticCacheKey = key
+  return oc
+}
+
 /** Canvas overlay 绘制检测框 + OSD */
 function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
   if (!hasFrame.value) {
@@ -921,102 +1039,9 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     }
   }
 
-  /** 绘制 ROI 区域 */
-  if (props.roiRegions && props.roiRegions.length > 0) {
-    ctx.lineWidth = 1.5
-    ctx.setLineDash([6, 4])
-    for (const roi of props.roiRegions) {
-      if (roi.points.length < 3) continue
-      ctx.strokeStyle = 'rgba(156, 39, 176, 0.7)'
-      ctx.fillStyle = 'rgba(156, 39, 176, 0.08)'
-      ctx.beginPath()
-      ctx.moveTo(roi.points[0]!.x * width, roi.points[0]!.y * height)
-      for (let i = 1; i < roi.points.length; i++) {
-        ctx.lineTo(roi.points[i]!.x * width, roi.points[i]!.y * height)
-      }
-      ctx.closePath()
-      ctx.fill()
-      ctx.stroke()
-      /** ROI 名称 */
-      if (roi.name) {
-        const cx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * width
-        const cy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * height
-        ctx.setLineDash([])
-        ctx.font = 'bold 10px sans-serif'
-        ctx.fillStyle = 'rgba(156, 39, 176, 0.9)'
-        ctx.textAlign = 'center'
-        ctx.fillText(roi.name, cx, cy)
-        ctx.textAlign = 'start'
-        ctx.setLineDash([6, 4])
-      }
-    }
-    ctx.setLineDash([])
-  }
-
-  /** 绘制越线检测线段 */
-  if (props.crossLines && props.crossLines.length > 0) {
-    ctx.lineWidth = 2
-    ctx.setLineDash([4, 3])
-    for (const line of props.crossLines) {
-      const sx = line.start.x * width
-      const sy = line.start.y * height
-      const ex = line.end.x * width
-      const ey = line.end.y * height
-      /** 线段 */
-      ctx.strokeStyle = 'rgba(255, 111, 0, 0.7)'
-      ctx.beginPath()
-      ctx.moveTo(sx, sy)
-      ctx.lineTo(ex, ey)
-      ctx.stroke()
-      /** 端点圆点 */
-      ctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
-      ctx.beginPath()
-      ctx.arc(sx, sy, 3, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(ex, ey, 3, 0, Math.PI * 2)
-      ctx.fill()
-      /** 方向箭头（线段中点） */
-      const dx = ex - sx
-      const dy = ey - sy
-      const len = Math.sqrt(dx * dx + dy * dy)
-      if (len > 0) {
-        const mx = (sx + ex) / 2
-        const my = (sy + ey) / 2
-        const nx = dx / len
-        const ny = dy / len
-        const arrowSize = 6
-        const tx = mx + nx * arrowSize
-        const ty = my + ny * arrowSize
-        const lx = mx - nx * arrowSize * 0.5 - ny * arrowSize * 0.4
-        const ly = my - ny * arrowSize * 0.5 + nx * arrowSize * 0.4
-        const rx = mx - nx * arrowSize * 0.5 + ny * arrowSize * 0.4
-        const ry = my - ny * arrowSize * 0.5 - nx * arrowSize * 0.4
-        ctx.setLineDash([])
-        ctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
-        ctx.beginPath()
-        ctx.moveTo(lx, ly)
-        ctx.lineTo(tx, ty)
-        ctx.lineTo(rx, ry)
-        ctx.closePath()
-        ctx.fill()
-        ctx.setLineDash([4, 3])
-      }
-      /** 线段名称 */
-      if (line.name) {
-        ctx.setLineDash([])
-        ctx.font = 'bold 9px sans-serif'
-        ctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
-        ctx.textAlign = 'center'
-        const labelY = Math.min(sy, ey) - 6
-        const labelX = (sx + ex) / 2
-        ctx.fillText(line.name, labelX, labelY)
-        ctx.textAlign = 'start'
-        ctx.setLineDash([4, 3])
-      }
-    }
-    ctx.setLineDash([])
-  }
+  /** 绘制静态元素（ROI + 越线，使用离屏缓存避免每帧重绘） */
+  const staticCache = drawStaticCache(width, height)
+  ctx.drawImage(staticCache, 0, 0)
 
   /** 绘制区域事件浮动通知（渐隐效果） */
   const notifications = takeZoneNotifications(props.cameraId)
