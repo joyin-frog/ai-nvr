@@ -149,10 +149,6 @@ const cameras = ref<CameraStatus[]>([])
 const cameraOrder = ref<string[]>(JSON.parse(localStorage.getItem('nvr-camera-order') ?? '[]'))
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
-/** 每个摄像头的最新帧 JPEG ArrayBuffer（Canvas 渲染用） */
-const frameImages = ref<Record<string, ArrayBuffer>>({})
-/** 空帧占位（模板中无法直接 new ArrayBuffer） */
-const EMPTY_FRAME = new ArrayBuffer(0)
 /** 是否显示检测框（从 settings API 获取） */
 const showBoxes = ref(true)
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
@@ -212,9 +208,7 @@ async function checkDiskSpace() {
 }
 
 /** 创建带认证的 WebSocket 客户端 */
-const client = new EventClient(authWsUrl(
-  `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/events`
-))
+const client = new EventClient(authWsUrl('/api/events'))
 
 /** 动态标题：闪烁后自动恢复 */
 let titleTimer: ReturnType<typeof setTimeout> | null = null
@@ -522,10 +516,6 @@ function setupEventListeners() {
   })
 
   client.on('frame', (payload) => {
-    /** 页面不可见时跳过帧渲染 */
-    if (!pageVisible.value) return
-    frameImages.value[payload.cameraId] = payload.jpegData
-    frameImages.value = { ...frameImages.value }
     /** 更新摄像头最后帧时间（防止"画面冻结"误判） */
     const cam = cameras.value.find(c => c.id === payload.cameraId)
     if (cam) cam.lastFrameAt = payload.timestamp ?? Date.now()
@@ -542,12 +532,11 @@ function setupEventListeners() {
     detectionsMap.value = { ...detectionsMap.value }
     detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
     detectVersions.value = { ...detectVersions.value }
-    /** 优先使用 WS 推送的标注图，回退到实时帧 */
-    const annotatedOrFrame = payload.annotatedData ?? frameImages.value[payload.cameraId]
-    if (annotatedOrFrame) {
+    /** 标注图快照 */
+    if (payload.annotatedData) {
       const oldSnap = detectSnapshots.value[payload.cameraId]
       if (oldSnap) URL.revokeObjectURL(oldSnap)
-      detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([annotatedOrFrame], { type: 'image/jpeg' }))
+      detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([payload.annotatedData], { type: 'image/jpeg' }))
       detectSnapshots.value = { ...detectSnapshots.value }
     }
     const labels = payload.detections.map((d) => d.label).join(', ')
@@ -639,18 +628,20 @@ onMounted(async () => {
   }})
   registerShortcut({ key: '?', description: t('shortcuts.help'), handler: () => { showShortcuts.value = !showShortcuts.value }})
   registerShortcut({ key: 'p', description: t('shortcuts.patrol'), handler: () => { togglePatrol() }})
-  registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: () => {
+  registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: async () => {
     const targetCam = fullscreenCamera.value ?? visibleCameras.value[0]?.id
     if (!targetCam) return
-    const frameData = frameImages.value[targetCam]
-    if (!frameData) return
-    const blob = new Blob([frameData], { type: 'image/jpeg' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `screenshot_${targetCam}_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`
-    link.click()
-    URL.revokeObjectURL(url)
+    try {
+      const res = await authFetch(`/api/snapshot/${targetCam}?quality=hd`)
+      if (!res.ok) return
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `screenshot_${targetCam}_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch { /* ignore */ }
   }})
 })
 
@@ -755,7 +746,6 @@ onUnmounted(() => {
                 :last-frame-at="cam.lastFrameAt"
                 :detections="detectionsMap[cam.id] ?? []"
                 :detect-version="detectVersions[cam.id] ?? 0"
-                :frame-image="frameImages[cam.id] ?? EMPTY_FRAME"
                 :ptz="cam.ptz"
                 :video-width="cam.width"
                 :video-height="cam.height"

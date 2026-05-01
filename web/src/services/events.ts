@@ -1,3 +1,5 @@
+import { backendWsUrl } from './backend'
+
 /** 检测结果类型 */
 export interface Detection {
   label: string
@@ -44,8 +46,7 @@ export class EventClient {
     if (url) {
       this.url = url
     } else {
-      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-      this.url = `${protocol}//${location.host}/api/events`
+      this.url = backendWsUrl('/api/events')
     }
   }
 

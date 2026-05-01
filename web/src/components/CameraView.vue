@@ -2,8 +2,7 @@
 import { ref, computed, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
-import { authFetch } from '../services/auth'
-import { useCanvasRenderer } from '../composables/useCanvasRenderer'
+import { authFetch, authUrl } from '../services/auth'
 import PtzControl from './PtzControl.vue'
 
 const { t } = useI18n()
@@ -15,8 +14,6 @@ const props = defineProps<{
   lastFrameAt: number
   detections: Detection[]
   detectVersion: number
-  /** WebSocket 推送的实时帧 JPEG ArrayBuffer */
-  frameImage: ArrayBuffer
   /** 是否支持 PTZ 云台控制 */
   ptz?: boolean
   /** 视频宽度（用于计算画面比例） */
@@ -67,27 +64,10 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
 /** 标注图片 URL（仅用于截图下载） */
 const annotatedUrl = ref<string>('')
 
-/** Canvas 渲染器（替代 img + Blob URL） */
-const renderer = useCanvasRenderer()
-const canvasEl = ref<HTMLCanvasElement | null>(null)
-
-/** Canvas 元素变化时绑定到渲染器 */
-watch(canvasEl, (el) => {
-  renderer.setCanvas(el)
-  if (el) renderer.startLoop()
-  else renderer.stopLoop()
-})
-
-/** 帧到达时喂入 Canvas 渲染器并更新帧尺寸 */
-watch(() => props.frameImage, (buf: ArrayBuffer) => {
-  if (buf) {
-    renderer.feedFrame(buf)
-    const size = renderer.getFrameSize()
-    if (size.width > 0 && size.height > 0 && (size.width !== frameSize.value.width || size.height !== frameSize.value.height)) {
-      frameSize.value = size
-    }
-  }
-})
+/** MJPEG 流地址 */
+const streamUrl = computed(() => authUrl(`/api/stream/${props.cameraId}`))
+/** img 元素引用 */
+const imgEl = ref<HTMLImageElement | null>(null)
 
 /** 检测框列表（按置信度排序） */
 const sortedDetections = computed(() =>
@@ -109,8 +89,8 @@ watch(() => props.detectVersion, async (v: number) => {
   }
 })
 
-/** 是否有帧数据（用于控制叠加层显示） */
-const hasFrame = computed(() => props.frameImage && props.frameImage.byteLength > 0)
+/** 是否有帧数据 */
+const hasFrame = computed(() => props.online)
 
 /** 帧冻结检测：在线但超过 10 秒无新帧 */
 const frozen = ref(false)
@@ -227,12 +207,24 @@ async function takeScreenshot() {
     link.click()
     return
   }
-  const blob = await renderer.captureJpeg()
-  if (!blob) return
-  const url = URL.createObjectURL(blob)
-  link.href = url
-  link.click()
-  URL.revokeObjectURL(url)
+  /** 从 img 元素截图 */
+  const img = imgEl.value
+  if (img) {
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth || img.width
+    canvas.height = img.naturalHeight || img.height
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.drawImage(img, 0, 0)
+      canvas.toBlob((blob) => {
+        if (!blob) return
+        const url = URL.createObjectURL(blob)
+        link.href = url
+        link.click()
+        URL.revokeObjectURL(url)
+      }, 'image/jpeg', 0.92)
+    }
+  }
 }
 
 /** 画面调节面板 */
@@ -353,9 +345,10 @@ onUnmounted(() => {
       @mouseleave="onPanEnd"
     >
       <div class="camera-content" :style="{ transform: zoomTransform }">
-        <canvas
-          v-if="hasFrame"
-          ref="canvasEl"
+        <img
+          v-if="online"
+          ref="imgEl"
+          :src="streamUrl"
           class="camera-image"
           :style="{ filter: imageFilter }"
         />

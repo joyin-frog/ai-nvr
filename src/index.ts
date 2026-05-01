@@ -37,14 +37,8 @@ const eventBus = new EventBus();
 
 /** 启动前清理残留的 ffmpeg 孤儿/僵尸进程（bun --watch 重启后残留） */
 try {
-  const result = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8" }).trim();
-  if (result) {
-    const pids = result.split("\n").filter(Boolean);
-    if (pids.length > 0) {
-      console.log(`[App] 清理 ${pids.length} 个残留 ffmpeg 进程: ${pids.join(", ")}`);
-      execSync(`kill -9 ${pids.join(" ")} 2>/dev/null || true`);
-    }
-  }
+  /** kill -9 + wait 回收僵尸 */
+  execSync("pkill -9 -f ffmpeg 2>/dev/null; sleep 0.1; wait $(pgrep -f ffmpeg 2>/dev/null) 2>/dev/null; true", { encoding: "utf-8", timeout: 3000 });
 } catch {
   // ignore
 }

@@ -1,3 +1,5 @@
+import { backendUrl, backendWsUrl } from './backend'
+
 /** Token 存储键 */
 const TOKEN_KEY = "nvr_token"
 
@@ -22,7 +24,7 @@ export function clearToken(): void {
 
 /** 检查是否启用了认证 */
 export async function isAuthEnabled(): Promise<boolean> {
-  const res = await fetch("/api/auth/check")
+  const res = await fetch(backendUrl("/api/auth/check"))
   if (!res.ok) return false
   const data = await res.json()
   return data.enabled === true
@@ -30,7 +32,7 @@ export async function isAuthEnabled(): Promise<boolean> {
 
 /** 登录验证 */
 export async function login(token: string): Promise<boolean> {
-  const res = await fetch("/api/auth/login", {
+  const res = await fetch(backendUrl("/api/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -49,7 +51,9 @@ export async function authFetch(input: string | URL, init?: RequestInit): Promis
   if (token) {
     headers.set("Authorization", `Bearer ${token}`)
   }
-  const res = await fetch(input, { ...init, headers })
+  /** 相对路径转为后端完整 URL */
+  const url = typeof input === 'string' && input.startsWith('/') ? backendUrl(input) : input
+  const res = await fetch(url, { ...init, headers })
   if (res.status === 401) {
     clearToken()
     location.reload()
@@ -58,17 +62,19 @@ export async function authFetch(input: string | URL, init?: RequestInit): Promis
 }
 
 /** 带 Token 的 WebSocket URL */
-export function authWsUrl(baseUrl: string): string {
+export function authWsUrl(path: string): string {
+  const url = backendWsUrl(path)
   const token = getToken()
-  if (!token) return baseUrl
-  const sep = baseUrl.includes("?") ? "&" : "?"
-  return `${baseUrl}${sep}token=${encodeURIComponent(token)}`
+  if (!token) return url
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}token=${encodeURIComponent(token)}`
 }
 
 /** 给 URL 附加 token 参数（用于 video src / 下载链接等非 fetch 场景） */
 export function authUrl(path: string): string {
+  const url = backendUrl(path)
   const token = getToken()
-  if (!token) return path
-  const sep = path.includes("?") ? "&" : "?"
-  return `${path}${sep}token=${encodeURIComponent(token)}`
+  if (!token) return url
+  const sep = url.includes("?") ? "&" : "?"
+  return `${url}${sep}token=${encodeURIComponent(token)}`
 }

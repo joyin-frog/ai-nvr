@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { getBackendUrl, setBackendUrl } from '../services/backend'
 import { useI18n } from 'vue-i18n'
 
 const emit = defineEmits<{
@@ -8,6 +9,13 @@ const emit = defineEmits<{
 import { authFetch } from '../services/auth'
 
 const { t } = useI18n()
+
+/** 后端地址 */
+const backendUrlInput = ref(getBackendUrl())
+function saveBackendUrl() {
+  setBackendUrl(backendUrlInput.value)
+  location.reload()
+}
 
 /** 声音提醒设置（localStorage 持久化，纯前端） */
 const SOUND_KEY = 'nvr-sound-alert'
@@ -248,6 +256,18 @@ onMounted(() => {
     </div>
 
     <div v-if="settings" class="settings-form">
+      <!-- 连接 -->
+      <section class="section">
+        <h3>{{ t('settings.connection') }}</h3>
+        <label class="field">
+          <span class="field-label">{{ t('settings.backendUrl') }}</span>
+          <div class="model-row">
+            <input type="url" v-model="backendUrlInput" placeholder="http://localhost:3100" class="input-model" />
+            <button class="reload-btn" @click="saveBackendUrl">{{ t('settings.save') }}</button>
+          </div>
+        </label>
+      </section>
+
       <!-- 变动检测 -->
       <section class="section">
         <h3>{{ t('settings.motion') }}</h3>

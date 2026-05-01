@@ -90,7 +90,7 @@ export function startServer(
       }
 
       /** REST API */
-      if (url.pathname === "/" || url.pathname === "/api") {
+      if (url.pathname === "/api") {
         return Response.json({
           name: "JK NVR",
           status: "running",
@@ -263,6 +263,58 @@ export function startServer(
         const id = Number(eventStarMatch[1]);
         const starred = eventStorage.toggleStar(id);
         return Response.json({ id, starred });
+      }
+
+      /** MJPEG 实时视频流：multipart/x-mixed-replace，浏览器 <img> 直接消费 */
+      const mjpegMatch = url.pathname.match(/^\/api\/stream\/(.+)$/);
+      if (mjpegMatch) {
+        const cameraId = mjpegMatch[1]!;
+        const frame = cameraManager.getLatestFrame(cameraId);
+        if (!frame) return new Response("No frame", { status: 404 });
+
+        const boundary = "--nvrboundary";
+        /** 流节流：每个客户端独立节流 */
+        let lastSent = 0;
+        const throttleMs = 100;
+
+        const stream = new ReadableStream({
+          start(controller) {
+            const unsubscribe = eventBus.on("frame", (payload) => {
+              if (payload.cameraId !== cameraId) return;
+              const now = Date.now();
+              if (now - lastSent < throttleMs) return;
+              lastSent = now;
+
+              try {
+                const header = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${payload.data.length}\r\n\r\n`;
+                controller.enqueue(new TextEncoder().encode(header));
+                controller.enqueue(payload.data);
+                controller.enqueue(new TextEncoder().encode("\r\n"));
+              } catch {
+                unsubscribe();
+              }
+            });
+
+            /** 立即发送当前帧 */
+            const initHeader = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
+            controller.enqueue(new TextEncoder().encode(initHeader));
+            controller.enqueue(frame);
+            controller.enqueue(new TextEncoder().encode("\r\n"));
+            lastSent = Date.now();
+          },
+          cancel() {
+            /** 客户端断开时清理 */
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            "Content-Type": `multipart/x-mixed-replace; boundary=${boundary}`,
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "keep-alive",
+            ...CORS_HEADERS,
+          },
+        });
       }
 
       /** 获取摄像头最新帧（实时视频用，已预压缩） */
@@ -860,6 +912,10 @@ export function startServer(
   const lastFrameSent = new Map<string, number>();
   const FRAME_THROTTLE_MS = 150;
 
+  /** 预分配 header 长度 buffer（4 字节复用） */
+  const headerLenBuf = new Uint8Array(4);
+  const headerLenView = new DataView(headerLenBuf.buffer);
+
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
@@ -879,7 +935,6 @@ export function startServer(
         if (now - lastSent < FRAME_THROTTLE_MS) return;
         lastFrameSent.set(cameraId, now);
       } else if (event === "detect") {
-        /** 检测事件：将标注图作为二进制帧推送，头中只保留 detections */
         const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer };
         frameData = detectPayload.annotatedImage ?? null;
         header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections };
@@ -887,17 +942,19 @@ export function startServer(
         header = { event, ...payload };
       }
 
-      /** 二进制协议：[4字节头长度 LE uint32][JSON头][可选二进制帧] */
-      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
-      const headerLen = Buffer.alloc(4);
-      headerLen.writeUInt32LE(headerBuf.length, 0);
-
       if (wsClients.size === 0) return;
 
-      /** 预构建完整消息，避免每个 WS 客户端重复 Buffer.concat */
-      const message = frameData
-        ? Buffer.concat([headerLen, headerBuf, frameData])
-        : Buffer.concat([headerLen, headerBuf]);
+      /** 二进制协议：[4字节头长度 LE uint32][JSON头][可选二进制帧] */
+      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
+      headerLenView.setUint32(0, headerBuf.length, true);
+
+      /** 使用 Uint8Array.set 避免 Buffer.concat 的大内存拷贝 */
+      const message = new Uint8Array(4 + headerBuf.length + (frameData?.length ?? 0));
+      message.set(headerLenBuf, 0);
+      message.set(headerBuf, 4);
+      if (frameData) {
+        message.set(frameData, 4 + headerBuf.length);
+      }
 
       for (const ws of wsClients) {
         ws.send(message);

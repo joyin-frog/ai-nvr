@@ -7,84 +7,74 @@ const JPEG_START = 0xff;
 const JPEG_SOI = 0xd8;
 const JPEG_EOI = 0xd9;
 
+/** JPEG SOI 标记字节序列 */
+const SOI = Buffer.from([JPEG_START, JPEG_SOI]);
+/** JPEG EOI 标记字节序列 */
+const EOI = Buffer.from([JPEG_START, JPEG_EOI]);
+
 /**
  * 从 ffmpeg stdout 的 MJPEG 字节流中分割出独立的 JPEG 帧
- *
- * JPEG 格式：FF D8 ... (帧数据) ... FF D9
- * 帧数据中 0xFF 如果后面跟着 0x00 则是填充（stuffing byte），
- * 不是标记。其他标记（D0-D7 是 RST、00 是填充）都直接包含在帧数据中。
- *
- * 策略：扫描 FF D8 作为帧起始，扫描 FF D9 作为帧结束，
- * 对于帧数据中的 FF，如果不是 SOI/EOI 标记，原样保留。
+ * 使用 indexOf 快速搜索标记，避免逐字节扫描
  */
 class JpegFrameSplitter {
-  /** 当前正在拼接的帧 chunks */
-  private chunks: Buffer[] = [];
-  /** 当前帧已收集的字节数 */
+  /** 当前帧数据（从 SOI 到当前位置） */
+  private frameChunks: Buffer[] = [];
+  /** 当前帧总字节数 */
   private frameSize = 0;
-  /** 是否在帧内 */
+  /** 是否在帧内（已遇到 SOI） */
   private inFrame = false;
 
   /** 处理一块数据，返回完整帧列表 */
   feed(data: Buffer): Buffer[] {
     const frames: Buffer[] = [];
-    let i = 0;
 
-    while (i < data.length) {
-      /** 扫描 0xFF */
-      if (data[i] === JPEG_START && i + 1 < data.length) {
-        const marker = data[i + 1]!;
+    if (!this.inFrame) {
+      /** 帧外：搜索 SOI (FF D8) */
+      const soiPos = data.indexOf(SOI);
+      if (soiPos === -1) return frames;
 
-        if (marker === JPEG_SOI) {
-          /** 帧开始 FF D8 */
-          this.inFrame = true;
-          this.chunks = [];
-          this.frameSize = 0;
-          this.pushBytes(data, i, 2);
-          i += 2;
-          continue;
-        }
+      this.inFrame = true;
+      this.frameChunks = [];
+      this.frameSize = 0;
 
-        if (marker === JPEG_EOI && this.inFrame) {
-          /** 帧结束 FF D9 */
-          this.pushBytes(data, i, 2);
-          const frame = Buffer.concat(this.chunks, this.frameSize);
-          frames.push(frame);
-          this.inFrame = false;
-          this.chunks = [];
-          this.frameSize = 0;
-          i += 2;
-          continue;
-        }
-
-        /**
-         * 其他情况：FF 后跟 D0-D7（RST 标记）、00（填充）、
-         * 或其他标记字节（如 C0 量化表、DA 扫描头等），
-         * 这些都是合法的帧内数据，直接追加。
-         * 注意：FF 后面可能还是 FF（连续 FF），
-         * 只追加当前 FF 和下一个字节，让下一轮继续扫描。
-         */
-        if (this.inFrame) {
-          this.pushBytes(data, i, 2);
-        }
-        i += 2;
-        continue;
-      }
-
-      /** 普通字节（非 FF） */
-      if (this.inFrame) {
-        this.pushBytes(data, i, 1);
-      }
-      i += 1;
+      /** SOI 开始的数据 */
+      const rest = data.subarray(soiPos);
+      return this.scanForEoi(rest, frames);
     }
 
-    return frames;
+    /** 帧内：搜索 EOI (FF D9) */
+    return this.scanForEoi(data, frames);
   }
 
-  /** 追加一段数据到当前帧 */
-  private pushBytes(data: Buffer, start: number, length: number): void {
-    this.chunks.push(Buffer.from(data.subarray(start, start + length)));
-    this.frameSize += length;
+  /** 在数据中搜索 EOI，提取完整帧 */
+  private scanForEoi(data: Buffer, frames: Buffer[]): Buffer[] {
+    const eoiPos = data.indexOf(EOI);
+    if (eoiPos === -1) {
+      /** 没有 EOI，整块数据属于当前帧 */
+      this.frameChunks.push(data);
+      this.frameSize += data.length;
+      return frames;
+    }
+
+    /** 找到 EOI：当前帧从开始到 EOI + 2 */
+    const frameEnd = eoiPos + 2;
+    this.frameChunks.push(data.subarray(0, frameEnd));
+    this.frameSize += frameEnd;
+
+    const frame = Buffer.concat(this.frameChunks, this.frameSize);
+    frames.push(frame);
+
+    /** 重置帧状态 */
+    this.frameChunks = [];
+    this.frameSize = 0;
+    this.inFrame = false;
+
+    /** 处理 EOI 之后的数据 */
+    const rest = data.subarray(frameEnd);
+    if (rest.length > 0) {
+      return this.feed(rest);
+    }
+    return frames;
   }
 }
 
@@ -178,6 +168,8 @@ export class FrameExtractor {
 
     this.proc = spawn(this.ffmpegPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
+      /** 新进程组，避免 bun --watch 重启时残留僵尸 */
+      detached: false,
     });
 
     const stdout = this.proc.stdout;
