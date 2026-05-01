@@ -192,6 +192,7 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'track:leave-zone': { labelKey: 'event.trackLeaveZone', bg: '#7E57C2', color: '#fff' },
   'track:dwell': { labelKey: 'event.trackDwell', bg: '#FF7043', color: '#fff' },
   'track:speed': { labelKey: 'event.trackSpeed', bg: '#E91E63', color: '#fff' },
+  'track:match-suggest': { labelKey: 'event.trackMatchSuggest', bg: '#9C27B0', color: '#fff' },
 }
 
 /** 从 detail 文本中提取变动比例（如 "变动 15.3%" → 15.3） */
