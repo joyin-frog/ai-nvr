@@ -560,6 +560,16 @@ export function startServer(
         });
       }
 
+      /** 快照检测结果元数据 */
+      const snapMetaMatch = url.pathname.match(/^\/api\/snapshots\/([^/]+)\/(.+\.json)$/);
+      if (snapMetaMatch) {
+        const camId = snapMetaMatch[1]!;
+        const filename = snapMetaMatch[2]!;
+        const meta = snapshotStorage.getSnapshotMeta(`${camId}/${filename}`);
+        if (!meta) return new Response("Not Found", { status: 404 });
+        return Response.json(meta);
+      }
+
       /** ROI 列表 */
       const roiListMatch = url.pathname.match(/^\/api\/roi\/([^/]+)$/);
       if (roiListMatch && req.method === "GET") {
@@ -624,6 +634,7 @@ export function startServer(
             cooldownSeconds: (obj.cooldownSeconds as number) ?? 300,
             silentStart: (obj.silentStart as string) ?? "",
             silentEnd: (obj.silentEnd as string) ?? "",
+            minCount: (obj.minCount as number) ?? 0,
           });
           return Response.json({ id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));

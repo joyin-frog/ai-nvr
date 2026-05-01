@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, statSync, unlinkSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
+import { type Detection } from "@/ai/types";
 
 /** 快照元信息 */
 export interface SnapshotInfo {
@@ -27,16 +28,16 @@ export class SnapshotStorage {
     mkdirSync(storagePath, { recursive: true });
   }
 
-  /** 启动：监听 detect 事件保存标注图 */
+  /** 启动：监听 detect 事件保存标注图和元数据 */
   start(): void {
-    this.eventBus.on("detect", ({ cameraId, timestamp, annotatedImage }) => {
-      this.saveSnapshot(cameraId, timestamp, annotatedImage);
+    this.eventBus.on("detect", ({ cameraId, timestamp, annotatedImage, detections }) => {
+      this.saveSnapshot(cameraId, timestamp, annotatedImage, detections);
     });
     console.log("[Snapshot] 快照存储已启动");
   }
 
-  /** 保存快照 */
-  saveSnapshot(cameraId: string, timestamp: number, imageData: Buffer): string {
+  /** 保存快照（标注图 + 检测结果 JSON） */
+  saveSnapshot(cameraId: string, timestamp: number, imageData: Buffer, detections?: Detection[]): string {
     const dir = join(this.storagePath, cameraId);
     mkdirSync(dir, { recursive: true });
 
@@ -48,6 +49,16 @@ export class SnapshotStorage {
 
     const filePath = join(dir, filename);
     writeFileSync(filePath, imageData);
+
+    /** 保存检测结果元数据（JSON 侧文件） */
+    if (detections && detections.length > 0) {
+      const metaPath = join(dir, `${dateStr}_${timeStr}_${ms}.json`);
+      writeFileSync(metaPath, JSON.stringify({
+        cameraId,
+        timestamp,
+        detections,
+      }));
+    }
 
     console.log(`[Snapshot] 已保存: ${cameraId}/${filename} (${imageData.length} bytes)`);
     return `${cameraId}/${filename}`;
@@ -103,6 +114,17 @@ export class SnapshotStorage {
     return join(this.storagePath, relativePath);
   }
 
+  /** 获取快照的检测结果元数据 */
+  getSnapshotMeta(relativePath: string): { cameraId: string; timestamp: number; detections: Detection[] } | null {
+    const jsonPath = join(this.storagePath, relativePath.replace(/\.jpg$/, ".json"));
+    if (!existsSync(jsonPath)) return null;
+    try {
+      return JSON.parse(readFileSync(jsonPath, "utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
   /** 清理过期快照（公开，返回清理数量） */
   purge(retentionDays: number): number {
     const cutoff = Date.now() - retentionDays * 86_400_000;
@@ -116,12 +138,12 @@ export class SnapshotStorage {
 
         const files = readdirSync(camPath);
         for (const file of files) {
-          if (!file.endsWith(".jpg")) continue;
+          if (!file.endsWith(".jpg") && !file.endsWith(".json")) continue;
           const filePath = join(camPath, file);
           const stat = statSync(filePath);
           if (stat.mtimeMs < cutoff) {
             unlinkSync(filePath);
-            count++;
+            if (file.endsWith(".jpg")) count++;
           }
         }
       }
