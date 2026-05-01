@@ -124,7 +124,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ]
   }
 
-  /** 追赶直播：如果播放延迟超过阈值，seek 到缓冲区末尾 */
+  /** 追赶直播：延迟较小时加速播放，延迟较大时直接 seek */
   function catchUpToLive() {
     const video = videoRef.value
     if (!video || !sourceBuffer) return
@@ -134,9 +134,15 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     const end = buffered.end(buffered.length - 1)
     const delay = end - video.currentTime
 
-    if (delay > LIVE_CATCHUP_THRESHOLD) {
-      console.log(`[fMP4] 延迟 ${delay.toFixed(1)}s，seek 到最新位置`)
+    if (delay > LIVE_CATCHUP_THRESHOLD * 3) {
+      /** 延迟过大（>2.4s）直接 seek 到最新 */
       video.currentTime = end - 0.1
+    } else if (delay > LIVE_CATCHUP_THRESHOLD) {
+      /** 中等延迟（0.8-2.4s）加速播放渐进追赶 */
+      video.playbackRate = 1.5
+    } else if (delay < 0.3 && video.playbackRate !== 1) {
+      /** 追上后恢复正常速度 */
+      video.playbackRate = 1
     }
   }
 
