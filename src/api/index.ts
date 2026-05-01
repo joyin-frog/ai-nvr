@@ -1529,6 +1529,8 @@ export function startServer(
         }
         const ok = trackStorage.merge(body.sourceId, body.targetId);
         if (!ok) return Response.json({ error: "merge failed" }, { status: 400 });
+        /** 清理源目标的轨迹数据 */
+        if (trajectoryStorage) trajectoryStorage.deleteByTrackId(body.sourceId);
         /** 广播更新 */
         const updated = trackStorage.getTrack(body.targetId);
         if (updated?.customName) {
