@@ -191,7 +191,7 @@ export class Fmp4Extractor {
       "-an",
       "-f", "mp4",
       "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
-      "-frag_duration", "0.5",
+      "-frag_duration", "0.3",
       "pipe:1",
     ];
 

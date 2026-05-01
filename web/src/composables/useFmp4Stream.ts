@@ -14,10 +14,10 @@ const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
 /** 保留当前播放位置前多少秒缓冲区 */
-const BUFFER_RETAIN_SECONDS = 5
+const BUFFER_RETAIN_SECONDS = 3
 
 /** 播放延迟超过此值（秒）时自动 seek 到最新位置 */
-const LIVE_CATCHUP_THRESHOLD = 3
+const LIVE_CATCHUP_THRESHOLD = 1.5
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
