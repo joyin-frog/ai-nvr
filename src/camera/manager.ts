@@ -12,6 +12,9 @@ import { Fmp4Extractor } from "./fmp4-stream";
  *   - HD 流（display）：高帧率、原始分辨率 → 用于前端显示和录像
  *   - SD 流（detect）：低帧率、可缩放 → 用于 AI 检测和变动检测
  * 单流模式：只有一个码流时，显示和检测共用同一流
+ *
+ * fMP4 零转码流（可选）：使用 HD 码流，前端 MSE GPU 解码
+ * 注意：受限于摄像头 RTSP 连接数，fMP4 可能无法连接
  */
 export class CameraManager {
   /** 摄像头 ID → 显示流提取器 */
@@ -143,12 +146,8 @@ export class CameraManager {
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
     const hasDual = !!(cam.stream.hd && cam.stream.sd);
-    /**
-     * fMP4 零转码流使用的 RTSP URL
-     * 双流模式：用 SD 码流（避免和 display FrameExtractor 争抢 HD 码流的 RTSP 连接）
-     * 单流模式：用唯一可用的码流
-     */
-    const fmp4Url = hasDual ? (cam.stream.sd || cam.stream.hd) : (cam.stream.hd || cam.stream.sd);
+    /** fMP4 零转码流使用 HD 码流 */
+    const fmp4Url = cam.stream.hd || cam.stream.sd;
 
     if (hasDual) {
       /** 双流模式：HD 显示 + SD 检测 */
