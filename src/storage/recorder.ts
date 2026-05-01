@@ -18,20 +18,6 @@ export interface RecordingInfo {
   size: number;
 }
 
-/** 录像器配置 */
-interface RecorderConfig {
-  /** 存储目录 */
-  storagePath: string;
-  /** ffmpeg 路径 */
-  ffmpegPath: string;
-  /** 无运动后继续录制的时长（ms） */
-  postMotionDuration: number;
-  /** 单个片段最大时长（秒） */
-  maxSegmentDuration: number;
-  /** 自动清理天数 */
-  retentionDays: number;
-}
-
 /** 每个摄像头的录像状态 */
 interface RecordingState {
   /** 当前正在运行的 ffmpeg 录像进程 */
@@ -46,47 +32,39 @@ interface RecordingState {
   stopTimer: ReturnType<typeof setTimeout> | null;
   /** 持续录制定时器（用于自动分段） */
   continuousTimer: ReturnType<typeof setTimeout> | null;
+  /** ffmpeg stdin 写锁（避免并发 write） */
+  writing: boolean;
 }
 
-/**
- * 录像器
- * 支持两种模式：变动触发录像（motion）和持续录制（continuous）
- * 直接从主码流 RTSP 拉流录像（高质量），与预览/检测解耦
- */
 /** drawtext 水印默认字体路径 */
 const DEFAULT_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
 
+/**
+ * 录像器
+ * 通过 EventBus 接收帧数据，用 ffmpeg pipe 输入编码为 MP4
+ * 不单独拉 RTSP 流，复用帧提取器的唯一连接
+ */
 export class MotionRecorder {
-  private config: RecorderConfig;
   private states = new Map<string, RecordingState>();
-  /** 摄像头 ID → 主码流 RTSP URL */
-  private hdStreams = new Map<string, string>();
   /** 摄像头 ID → 友好名称（水印用） */
   private cameraNames = new Map<string, string>();
+  /** 存储目录 */
+  private storagePath: string;
+  /** ffmpeg 路径 */
+  private ffmpegPath: string;
+  /** 运行时配置 */
   private runtimeConfig: RuntimeConfig;
+  /** 帧事件取消订阅函数 */
+  private unsubFrame: (() => void) | null = null;
 
   constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig) {
-    this.config = {
-      storagePath,
-      ffmpegPath,
-      postMotionDuration: 5000,
-      maxSegmentDuration: 300,
-      retentionDays: 7,
-    };
+    this.storagePath = storagePath;
+    this.ffmpegPath = ffmpegPath;
     this.runtimeConfig = runtimeConfig;
     mkdirSync(storagePath, { recursive: true });
   }
 
-  /** 注册摄像头的主码流 RTSP 地址 */
-  registerStream(cameraId: string, hdUrl: string): void {
-    this.hdStreams.set(cameraId, hdUrl);
-    /** 如果是持续录制模式且已在运行，立即开始录制 */
-    if (this.runtimeConfig.get().recording.mode === "continuous") {
-      this.startContinuous(cameraId);
-    }
-  }
-
-  /** 注册摄像头友好名称（水印用） */
+  /** 注册摄像头名称（水印用） */
   registerCameraName(cameraId: string, name: string): void {
     this.cameraNames.set(cameraId, name);
   }
@@ -94,37 +72,23 @@ export class MotionRecorder {
   /** 移除摄像头 */
   unregisterStream(cameraId: string): void {
     this.forceStop(cameraId);
-    this.hdStreams.delete(cameraId);
   }
 
-  /** 持续录制：启动一段录制，到时后自动开始下一段 */
-  startContinuous(cameraId: string): void {
-    const state = this.getOrCreateState(cameraId);
-    if (state.recording) return;
-
-    const segmentSec = this.runtimeConfig.get().recording.segmentDuration;
-    const now = Date.now();
-
-    this.startRecordingInternal(cameraId, now, segmentSec);
-
-    /** 设置分段定时器，到达分段时长后重启下一段 */
-    state.continuousTimer = setTimeout(() => {
-      this.forceStop(cameraId);
-      /** 立即开始下一段 */
-      this.startContinuous(cameraId);
-    }, segmentSec * 1000);
-  }
-
-  /** 启动：根据模式初始化录制 */
+  /** 启动：订阅帧事件 + 根据模式初始化录制 */
   start(): void {
-    const mode = this.runtimeConfig.get().recording.mode;
+    /** 订阅帧事件，写入正在录像的 ffmpeg 进程 */
+    this.unsubFrame = this.eventBus.on("frame", ({ cameraId, data }) => {
+      this.writeFrame(cameraId, data);
+    });
 
+    const mode = this.runtimeConfig.get().recording.mode;
     if (mode === "continuous") {
-      /** 持续录制模式：为所有已注册的摄像头开始录制 */
-      for (const [cameraId] of this.hdStreams) {
-        this.startContinuous(cameraId);
-      }
-      /** 监听新注册的摄像头（通过 motion 事件间接触发） */
+      /** 持续录制模式延迟启动（等帧提取器连接成功后再开始） */
+      setTimeout(() => {
+        for (const [cameraId] of this.cameraNames) {
+          this.startContinuous(cameraId);
+        }
+      }, 3000);
     } else {
       /** 变动触发模式 */
       this.eventBus.on("motion", ({ cameraId, timestamp }) => {
@@ -145,18 +109,21 @@ export class MotionRecorder {
 
   /** 停止所有录像 */
   stop(): void {
+    if (this.unsubFrame) {
+      this.unsubFrame();
+      this.unsubFrame = null;
+    }
     for (const [cameraId] of this.states) {
       this.forceStop(cameraId);
     }
   }
 
-  /** 运行时切换录制模式（API 修改设置后调用） */
+  /** 运行时切换录制模式 */
   reloadMode(): void {
     const mode = this.runtimeConfig.get().recording.mode;
     console.log(`[Recorder] 模式切换: ${mode}`);
 
     if (mode === "continuous") {
-      /** 停止所有 motion 定时器，启动持续录制 */
       for (const [cameraId] of this.states) {
         const state = this.states.get(cameraId);
         if (state?.stopTimer) {
@@ -164,11 +131,10 @@ export class MotionRecorder {
           state.stopTimer = null;
         }
       }
-      for (const [cameraId] of this.hdStreams) {
+      for (const [cameraId] of this.cameraNames) {
         this.startContinuous(cameraId);
       }
     } else {
-      /** 停止所有持续录制定时器，当前段自然结束后不再重启 */
       for (const [cameraId] of this.states) {
         const state = this.states.get(cameraId);
         if (state?.continuousTimer) {
@@ -179,20 +145,31 @@ export class MotionRecorder {
     }
   }
 
+  /** 将帧数据写入录像进程 */
+  private writeFrame(cameraId: string, jpegData: Buffer): void {
+    const state = this.states.get(cameraId);
+    if (!state?.recording || !state.proc?.stdin?.writable || state.writing) return;
+
+    state.writing = true;
+    state.proc.stdin.write(jpegData, () => {
+      state.writing = false;
+    });
+  }
+
   /** 列出录像文件 */
   listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
     const results: RecordingInfo[] = [];
 
-    const scanDir = cameraId ? join(this.config.storagePath, cameraId) : this.config.storagePath;
+    const scanDir = cameraId ? join(this.storagePath, cameraId) : this.storagePath;
     let dirs: string[];
 
     try {
       if (cameraId) {
         dirs = [scanDir];
       } else {
-        dirs = readdirSync(this.config.storagePath)
-          .filter(f => statSync(join(this.config.storagePath, f)).isDirectory())
-          .map(f => join(this.config.storagePath, f));
+        dirs = readdirSync(this.storagePath)
+          .filter(f => statSync(join(this.storagePath, f)).isDirectory())
+          .map(f => join(this.storagePath, f));
       }
     } catch {
       return results;
@@ -211,7 +188,6 @@ export class MotionRecorder {
         if (!file.endsWith(".mp4")) continue;
         const filePath = join(dir, file);
         const stat = statSync(filePath);
-        /** 文件名格式：2026-05-01_14-30-00.mp4 */
         const parsed = this.parseFilename(file);
         const rec: RecordingInfo = {
           filename: `${camId}/${file}`,
@@ -220,7 +196,6 @@ export class MotionRecorder {
           endTime: parsed.endTime ?? stat.mtimeMs,
           size: stat.size,
         };
-        /** 时间范围过滤：录像时间段与查询范围有交集 */
         if (since && rec.endTime < since) continue;
         if (until && rec.startTime > until) continue;
         results.push(rec);
@@ -232,7 +207,7 @@ export class MotionRecorder {
 
   /** 获取录像文件路径 */
   getRecordingPath(relativePath: string): string {
-    return join(this.config.storagePath, relativePath);
+    return join(this.storagePath, relativePath);
   }
 
   /** 获取所有摄像头的当前录像状态 */
@@ -244,19 +219,31 @@ export class MotionRecorder {
     return result;
   }
 
-  /** 开始录像（变动触发模式，使用 maxSegmentDuration 上限） */
-  private startRecording(cameraId: string, timestamp: number): void {
-    this.startRecordingInternal(cameraId, timestamp, this.config.maxSegmentDuration);
+  /** 持续录制：启动一段录制，到时后自动开始下一段 */
+  private startContinuous(cameraId: string): void {
+    const state = this.getOrCreateState(cameraId);
+    if (state.recording) return;
+
+    const segmentSec = this.runtimeConfig.get().recording.segmentDuration;
+    const now = Date.now();
+
+    this.startRecordingInternal(cameraId, now);
+
+    /** 设置分段定时器，到达分段时长后重启下一段 */
+    state.continuousTimer = setTimeout(() => {
+      this.forceStop(cameraId);
+      /** 立即开始下一段 */
+      this.startContinuous(cameraId);
+    }, segmentSec * 1000);
   }
 
-  /** 开始录像：直接从主码流 RTSP 拉流 */
-  private startRecordingInternal(cameraId: string, timestamp: number, durationSec: number): void {
-    const hdUrl = this.hdStreams.get(cameraId);
-    if (!hdUrl) {
-      console.warn(`[Recorder] ${cameraId} 无主码流地址，跳过录像`);
-      return;
-    }
+  /** 开始录像（变动触发模式） */
+  private startRecording(cameraId: string, timestamp: number): void {
+    this.startRecordingInternal(cameraId, timestamp);
+  }
 
+  /** 启动录像：通过 ffmpeg pipe 接收 JPEG 帧并编码为 MP4 */
+  private startRecordingInternal(cameraId: string, timestamp: number): void {
     const state = this.getOrCreateState(cameraId);
 
     /** 防御性清理：如果旧 ffmpeg 进程还在运行，先 kill */
@@ -276,7 +263,7 @@ export class MotionRecorder {
     const dateStr = date.toISOString().slice(0, 10);
     const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
     const filename = `${dateStr}_${timeStr}.mp4`;
-    const dir = join(this.config.storagePath, cameraId);
+    const dir = join(this.storagePath, cameraId);
     mkdirSync(dir, { recursive: true });
     const outputPath = join(dir, filename);
 
@@ -285,7 +272,6 @@ export class MotionRecorder {
     const filterParts: string[] = [];
     if (wm.enabled) {
       const camName = this.cameraNames.get(cameraId);
-      /** 根据位置计算 drawtext x/y 坐标 */
       const posCoords = (pos: string) => {
         switch (pos) {
           case "top-right": return { x: "w-tw-10", y: "10" };
@@ -308,9 +294,11 @@ export class MotionRecorder {
       );
     }
 
+    /** ffmpeg 从 stdin 读取 JPEG 帧，编码为 MP4 */
     const args = [
-      "-rtsp_transport", "tcp",
-      "-i", hdUrl,
+      "-f", "image2pipe",
+      "-vcodec", "mjpeg",
+      "-i", "pipe:0",
       ...(filterParts.length > 0 ? ["-vf", filterParts.join(",")] : []),
       "-c:v", "libx264",
       "-preset", "ultrafast",
@@ -318,14 +306,13 @@ export class MotionRecorder {
       "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       "-an",
-      "-t", String(durationSec),
       "-y",
       outputPath,
     ];
 
-    console.log(`[Recorder] ${cameraId} 开始录像 (主码流): ${filename}`);
-    const proc = spawn(this.config.ffmpegPath, args, {
-      stdio: ["ignore", "pipe", "pipe"],
+    console.log(`[Recorder] ${cameraId} 开始录像 (帧输入): ${filename}`);
+    const proc = spawn(this.ffmpegPath, args, {
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     proc.stderr?.on("data", (chunk: Buffer) => {
@@ -335,9 +322,12 @@ export class MotionRecorder {
       }
     });
 
+    proc.stdin?.on("error", () => {
+      /** stdin 写入失败（进程已退出等），忽略 */
+    });
+
     proc.on("exit", (code) => {
       console.log(`[Recorder] ${cameraId} 录像结束, code=${code}`);
-      /** 只清理未被覆盖的 proc 引用 */
       if (state.proc === proc) {
         proc.unref();
         state.proc = null;
@@ -359,15 +349,15 @@ export class MotionRecorder {
       clearTimeout(state.stopTimer);
     }
 
+    const postDuration = this.runtimeConfig.get().recording.postMotionDuration;
     state.stopTimer = setTimeout(() => {
-      /** SIGTERM 让 ffmpeg 优雅退出（写入 MP4 文件尾） */
       if (state.proc) {
-        state.proc.kill("SIGTERM");
-        state.proc.unref();
+        /** 关闭 stdin 让 ffmpeg 自然结束（写入 MP4 文件尾） */
+        state.proc.stdin?.end();
       }
       state.stopTimer = null;
       console.log(`[Recorder] ${cameraId} 停止录像（无运动超时）`);
-    }, this.config.postMotionDuration);
+    }, postDuration);
   }
 
   /** 立即强制停止录像 */
@@ -385,7 +375,8 @@ export class MotionRecorder {
     if (state.proc) {
       const oldProc = state.proc;
       state.proc = null;
-      oldProc.kill("SIGTERM");
+      /** 关闭 stdin 让 ffmpeg 优雅退出 */
+      oldProc.stdin?.end();
       oldProc.unref();
     }
     state.recording = false;
@@ -393,12 +384,13 @@ export class MotionRecorder {
 
   /** 清理过期录像 */
   private purgeOldRecordings(): void {
-    const cutoff = Date.now() - this.config.retentionDays * 86400_000;
+    const retentionDays = this.runtimeConfig.get().recording.retentionDays;
+    const cutoff = Date.now() - retentionDays * 86400_000;
 
     try {
-      const camDirs = readdirSync(this.config.storagePath);
+      const camDirs = readdirSync(this.storagePath);
       for (const camDir of camDirs) {
-        const camPath = join(this.config.storagePath, camDir);
+        const camPath = join(this.storagePath, camDir);
         if (!statSync(camPath).isDirectory()) continue;
 
         const files = readdirSync(camPath);
@@ -419,7 +411,6 @@ export class MotionRecorder {
 
   /** 解析录像文件名获取时间信息 */
   private parseFilename(filename: string): { startTime: number; endTime: number | null } {
-    /** 格式：2026-05-01_14-30-00.mp4 */
     const match = filename.match(/^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/);
     if (!match) return { startTime: 0, endTime: null };
 
@@ -435,7 +426,7 @@ export class MotionRecorder {
     const existing = this.states.get(cameraId);
     if (existing) return existing;
 
-    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null };
+    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false };
     this.states.set(cameraId, state);
     return state;
   }

@@ -130,14 +130,11 @@ export class CameraManager {
 
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
-    /** 主码流用于预览/检测（最高清画面） */
     const extractor = new FrameExtractor(cam, this.config.ffmpegPath, this.eventBus);
     this.extractors.set(cam.id, extractor);
     extractor.start();
 
-    /** 主码流注册给录像器 */
-    this.recorder.registerStream(cam.id, cam.stream.hd);
-    /** 注册摄像头名称（用于录像水印） */
+    /** 注册摄像头名称（录像器通过 EventBus 共享帧，不再单独拉流） */
     this.recorder.registerCameraName(cam.id, cam.friendlyName);
 
     console.log(`[CameraManager] 启动摄像头: ${cam.friendlyName} (${cam.id})`);

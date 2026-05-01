@@ -56,7 +56,7 @@ const dataDir = config.storage.dataDir;
 /** 运行时配置（支持 API 热修改，检测器实时读取） */
 const runtimeConfig = new RuntimeConfig(config);
 
-/** 录像器（需先于 CameraManager 创建，因为 CameraManager 会注册主码流 URL） */
+/** 录像器（通过 EventBus 接收帧，不单独拉 RTSP 流） */
 const recorder = new MotionRecorder(join(dataDir, "recordings"), config.ffmpegPath, eventBus, runtimeConfig);
 /** 注册摄像头友好名称（用于录像水印） */
 for (const cam of config.cameras) {
