@@ -26,6 +26,10 @@ const props = defineProps<{
   fps?: number
   /** 帧延迟（ms） */
   latency?: number
+  /** 是否正在录像 */
+  recording?: boolean
+  /** 录像开始时间戳 */
+  recordingStart?: number
 }>()
 
 const emit = defineEmits<{
@@ -132,6 +136,24 @@ const latencyQuality = computed(() => {
   return 'poor'
 })
 
+/** 录像已录时长（每秒更新） */
+const recordingDuration = ref('')
+function updateRecDuration() {
+  if (!props.recording || !props.recordingStart) { recordingDuration.value = ''; return }
+  const sec = Math.floor((Date.now() - props.recordingStart) / 1000)
+  if (sec < 60) { recordingDuration.value = `${sec}s`; return }
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  recordingDuration.value = `${m}:${String(s).padStart(2, '0')}`
+}
+
+let recDurationTimer: ReturnType<typeof setInterval> | null = null
+watch(() => props.recording, (on) => {
+  if (recDurationTimer) { clearInterval(recDurationTimer); recDurationTimer = null }
+  if (on) { updateRecDuration(); recDurationTimer = setInterval(updateRecDuration, 1000) }
+  else { recordingDuration.value = '' }
+}, { immediate: true })
+
 /** 截图下载当前画面（优先标注图） */
 function takeScreenshot() {
   const src = annotatedUrl.value || displayUrl.value
@@ -226,6 +248,7 @@ function resetZoom() {
 onUnmounted(() => {
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
+  if (recDurationTimer) clearInterval(recDurationTimer)
 })
 </script>
 
@@ -234,6 +257,9 @@ onUnmounted(() => {
     <div class="camera-header">
       <span class="status-dot" :class="{ online, offline: !online }" />
       <span class="camera-name">{{ name }}</span>
+      <span v-if="recording" class="rec-indicator" :title="`REC ${recordingDuration}`">
+        <span class="rec-dot" />{{ recordingDuration }}
+      </span>
       <span v-if="online && detections.length > 0" class="detection-count">
         {{ detections.length }}
       </span>
@@ -379,6 +405,30 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 录像指示器 */
+.rec-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #e74c3c;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.rec-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e74c3c;
+  animation: rec-blink 1s infinite;
+}
+
+@keyframes rec-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .detection-count {

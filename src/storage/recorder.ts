@@ -235,6 +235,15 @@ export class MotionRecorder {
     return join(this.config.storagePath, relativePath);
   }
 
+  /** 获取所有摄像头的当前录像状态 */
+  getRecordingStates(): Array<{ cameraId: string; recording: boolean; startTime: number }> {
+    const result: Array<{ cameraId: string; recording: boolean; startTime: number }> = [];
+    for (const [cameraId, state] of this.states) {
+      result.push({ cameraId, recording: state.recording, startTime: state.startTime });
+    }
+    return result;
+  }
+
   /** 开始录像（变动触发模式，使用 maxSegmentDuration 上限） */
   private startRecording(cameraId: string, timestamp: number): void {
     this.startRecordingInternal(cameraId, timestamp, this.config.maxSegmentDuration);

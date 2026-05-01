@@ -34,6 +34,10 @@ interface CameraStatus {
   ptz: boolean
   width: number
   height: number
+  /** 是否正在录像 */
+  recording: boolean
+  /** 录像开始时间戳 */
+  recordingStart: number
 }
 
 /** 侧边栏激活的标签 */
@@ -268,6 +272,8 @@ async function loadCameras() {
       ptz: c.ptz ?? false,
       width: c.width ?? 0,
       height: c.height ?? 0,
+      recording: c.recording ?? false,
+      recordingStart: c.recordingStart ?? 0,
     }))
     updateTitle()
   } catch {
@@ -730,6 +736,8 @@ onUnmounted(() => {
                 :video-height="cam.height"
                 :fps="cameraFpsMap[cam.id] ?? 0"
                 :latency="frameLatency[cam.id] ?? 0"
+                :recording="cam.recording"
+                :recording-start="cam.recordingStart"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
               />

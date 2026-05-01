@@ -106,7 +106,15 @@ export function startServer(
       }
 
       if (url.pathname === "/api/cameras" && req.method === "GET") {
-        return Response.json(cameraManager.getStatus());
+        const cameras = cameraManager.getStatus();
+        /** 添加录像状态 */
+        const recStates = recorder.getRecordingStates();
+        const recMap = new Map(recStates.map(r => [r.cameraId, r]));
+        const enriched = cameras.map((c: Record<string, unknown>) => {
+          const rs = recMap.get(c.id as string);
+          return { ...c, recording: rs?.recording ?? false, recordingStart: rs?.startTime ?? 0 };
+        });
+        return Response.json(enriched);
       }
 
       /** 添加摄像头 */
