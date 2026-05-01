@@ -631,9 +631,32 @@ async function takeScreenshot() {
 
 /** 画面调节面板 */
 const showAdjust = ref(false)
-const brightness = ref(100)
-const contrast = ref(100)
-const saturation = ref(100)
+
+/** 画面调节参数（按摄像头 ID 持久化到 localStorage） */
+const ADJUST_KEY = `nvr-adjust-${props.cameraId}`
+function loadAdjust(): { brightness: number; contrast: number; saturation: number } {
+  try {
+    const saved = localStorage.getItem(ADJUST_KEY)
+    if (saved) return JSON.parse(saved)
+  } catch { /* ignore */ }
+  return { brightness: 100, contrast: 100, saturation: 100 }
+}
+
+function saveAdjust() {
+  localStorage.setItem(ADJUST_KEY, JSON.stringify({
+    brightness: brightness.value,
+    contrast: contrast.value,
+    saturation: saturation.value,
+  }))
+}
+
+const initAdjust = loadAdjust()
+const brightness = ref(initAdjust.brightness)
+const contrast = ref(initAdjust.contrast)
+const saturation = ref(initAdjust.saturation)
+
+/** 画面参数变化时自动保存 */
+watch([brightness, contrast, saturation], saveAdjust)
 
 /** CSS filter 字符串 */
 const imageFilter = computed(() => {
@@ -652,6 +675,7 @@ function resetAdjust() {
   brightness.value = 100
   contrast.value = 100
   saturation.value = 100
+  /** watch 会自动触发 saveAdjust */
 }
 
 /** 画面缩放（滚轮缩放，可拖拽平移） */
