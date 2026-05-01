@@ -24,6 +24,8 @@ const props = defineProps<{
   videoHeight?: number
   /** 实时帧率（从 health API 获取） */
   fps?: number
+  /** 帧延迟（ms） */
+  latency?: number
 }>()
 
 const emit = defineEmits<{
@@ -119,6 +121,14 @@ const fpsQuality = computed(() => {
   const fps = props.fps ?? 0
   if (fps >= 10) return 'good'
   if (fps >= 5) return 'fair'
+  return 'poor'
+})
+
+/** 帧延迟质量等级 */
+const latencyQuality = computed(() => {
+  const ms = props.latency ?? 0
+  if (ms <= 200) return 'good'
+  if (ms <= 500) return 'fair'
   return 'poor'
 })
 
@@ -285,6 +295,10 @@ onUnmounted(() => {
       <!-- FPS 质量指示 -->
       <div v-if="online && displayUrl && (fps ?? 0) > 0" :class="['fps-badge', fpsQuality]">
         {{ (fps ?? 0).toFixed(0) }} fps
+      </div>
+      <!-- 帧延迟指示 -->
+      <div v-if="online && displayUrl && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
+        {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
       </div>
     </div>
 
@@ -520,6 +534,33 @@ onUnmounted(() => {
 
 .fps-badge.poor {
   background: rgba(244, 67, 54, 0.8);
+}
+
+/* 帧延迟徽标 */
+.latency-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 64px;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+  pointer-events: none;
+  color: #fff;
+}
+
+.latency-badge.good {
+  background: rgba(76, 175, 80, 0.6);
+}
+
+.latency-badge.fair {
+  background: rgba(255, 193, 7, 0.7);
+  color: #1a1a2e;
+}
+
+.latency-badge.poor {
+  background: rgba(244, 67, 54, 0.7);
 }
 
 /* 数字时钟叠加 */

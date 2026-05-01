@@ -147,6 +147,8 @@ const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
 /** 每个摄像头的最新帧 data URL */
 const frameImages = ref<Record<string, string>>({})
+/** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
+const frameLatency = ref<Record<string, number>>({})
 /** 每个摄像头最近检测事件的帧快照 */
 const detectSnapshots = ref<Record<string, string>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
@@ -498,6 +500,12 @@ function setupEventListeners() {
     if (old) URL.revokeObjectURL(old)
     frameImages.value[payload.cameraId] = payload.image
     frameImages.value = { ...frameImages.value }
+    /** 计算帧延迟（ms）：当前时间 - 服务端帧时间戳 */
+    if (payload.timestamp) {
+      const latency = Math.max(0, Date.now() - payload.timestamp)
+      frameLatency.value[payload.cameraId] = latency
+      frameLatency.value = { ...frameLatency.value }
+    }
   })
 
   client.on('detect', (payload) => {
@@ -721,6 +729,7 @@ onUnmounted(() => {
                 :video-width="cam.width"
                 :video-height="cam.height"
                 :fps="cameraFpsMap[cam.id] ?? 0"
+                :latency="frameLatency[cam.id] ?? 0"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
               />
