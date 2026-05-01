@@ -985,7 +985,7 @@ export function startServer(
 
       /** 追踪标签 API */
       if (url.pathname === "/api/track-labels" && req.method === "GET") {
-        const cameraId = url.searchParams.get("camera_id") ?? "";
+        const cameraId = url.searchParams.get("camera_id") ?? url.searchParams.get("cameraId") ?? "";
         if (!cameraId) return Response.json({ error: "camera_id required" }, { status: 400 });
         return Response.json(trackLabelStorage.listByCamera(cameraId));
       }
