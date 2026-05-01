@@ -115,6 +115,7 @@ function startOverlayLoop() {
     if (detectResult) {
       consumedDetectVersion = detectResult.version
       localDetections = detectResult.detections
+      updateSmoothedBoxes(localDetections)
       invalidateSortedDetections()
       updateDetectionSummary()
     }
@@ -194,6 +195,42 @@ function cleanupTrails() {
 /** 缓存的排序后检测结果（避免每次绘制重复排序） */
 let sortedDetectionsCache: Detection[] = []
 let sortedDetectionsDirty = true
+
+/**
+ * 检测框 EMA 平滑
+ * 维护每个 trackId 的当前显示位置，新检测到达时按 EMA 系数平滑过渡
+ */
+const SMOOTH_ALPHA = 0.35
+const smoothedBoxes = new Map<number, { xmin: number; ymin: number; xmax: number; ymax: number }>()
+
+/** 更新平滑框：新检测到达时调用 */
+function updateSmoothedBoxes(detections: Detection[]) {
+  const activeIds = new Set<number>()
+  for (const d of detections) {
+    if (d.trackId == null) continue
+    activeIds.add(d.trackId)
+    const prev = smoothedBoxes.get(d.trackId)
+    if (prev) {
+      prev.xmin = prev.xmin + SMOOTH_ALPHA * (d.box.xmin - prev.xmin)
+      prev.ymin = prev.ymin + SMOOTH_ALPHA * (d.box.ymin - prev.ymin)
+      prev.xmax = prev.xmax + SMOOTH_ALPHA * (d.box.xmax - prev.xmax)
+      prev.ymax = prev.ymax + SMOOTH_ALPHA * (d.box.ymax - prev.ymax)
+    } else {
+      smoothedBoxes.set(d.trackId, { ...d.box })
+    }
+  }
+  /** 清除已消失的目标 */
+  for (const id of smoothedBoxes.keys()) {
+    if (!activeIds.has(id)) smoothedBoxes.delete(id)
+  }
+}
+
+/** 获取平滑后的检测框（如果 trackId 有缓存） */
+function getSmoothedBox(d: Detection): { xmin: number; ymin: number; xmax: number; ymax: number } {
+  if (d.trackId == null) return d.box
+  const smoothed = smoothedBoxes.get(d.trackId)
+  return smoothed ?? d.box
+}
 
 /** 标记检测结果已更新，需要重新排序 */
 function invalidateSortedDetections() {
@@ -491,10 +528,11 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
 
   for (const d of sorted) {
     const { stroke, fill } = getColor(d.label, d.trackId)
-    const x = d.box.xmin * width
-    const y = d.box.ymin * height
-    const w = (d.box.xmax - d.box.xmin) * width
-    const h = (d.box.ymax - d.box.ymin) * height
+    const box = getSmoothedBox(d)
+    const x = box.xmin * width
+    const y = box.ymin * height
+    const w = (box.xmax - box.xmin) * width
+    const h = (box.ymax - box.ymin) * height
 
     /** 绘制圆角矩形框 + 半透明填充 */
     const r = Math.min(4, w / 4, h / 4)
