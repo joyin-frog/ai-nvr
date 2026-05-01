@@ -1133,23 +1133,36 @@ export function startServer(
   });
 
   /**
-   * 帧推送：最新帧优先策略
-   * 缓存每路摄像头最新帧，由定时器按固定间隔推送最新帧
-   * 避免"丢弃中间帧后推送旧帧"的延迟问题
+   * 帧推送：事件驱动 + 节流
+   * 帧到达后立即检查是否可推送，每路摄像头独立节流（30fps 上限）
+   * 相比定时器轮询，减少平均 16ms 推送延迟
    */
 
   /** 每路摄像头最新帧缓存 */
   const latestFrameByCamera = new Map<string, { data: Buffer; timestamp: number }>();
 
-  /** 推送间隔（ms），默认 33ms（~30fps） */
-  const FRAME_PUSH_INTERVAL_MS = 33;
+  /** 每路摄像头上次推送时间（用于节流） */
+  const lastPushTimeByCamera = new Map<string, number>();
 
-  /** 帧推送定时器 */
-  setInterval(() => {
+  /** 帧推送节流间隔（ms），~30fps 上限 */
+  const FRAME_THROTTLE_MS = 33;
+
+  /** 是否有待推送的帧（pending push flag） */
+  let pushScheduled = false;
+
+  /** 执行帧推送 */
+  function flushFrames() {
+    pushScheduled = false;
     if (wsClients.size === 0 || latestFrameByCamera.size === 0) return;
 
+    const now = Date.now();
     for (const [cameraId, frame] of latestFrameByCamera) {
+      /** 节流：每路摄像头不超过 30fps */
+      const lastPush = lastPushTimeByCamera.get(cameraId) ?? 0;
+      if (now - lastPush < FRAME_THROTTLE_MS) continue;
+
       latestFrameByCamera.delete(cameraId);
+      lastPushTimeByCamera.set(cameraId, now);
 
       const header = { event: "frame", cameraId, timestamp: frame.timestamp };
       const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
@@ -1167,7 +1180,21 @@ export function startServer(
         ws.send(message);
       }
     }
-  }, FRAME_PUSH_INTERVAL_MS);
+
+    /** 如果还有被节流的帧，安排下次 flush */
+    if (latestFrameByCamera.size > 0 && !pushScheduled) {
+      pushScheduled = true;
+      setTimeout(flushFrames, FRAME_THROTTLE_MS);
+    }
+  }
+
+  /** 调度帧推送（事件驱动） */
+  function schedulePush() {
+    if (pushScheduled) return;
+    pushScheduled = true;
+    /** 用 setImmediate 或 setTimeout(0) 实现微任务延迟 */
+    setTimeout(flushFrames, 0);
+  }
 
   /** 预分配 header 长度 buffer（4 字节复用） */
   const headerLenBuf = new Uint8Array(4);
@@ -1177,9 +1204,10 @@ export function startServer(
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
       if (event === "frame") {
-        /** 帧事件：缓存最新帧，由定时器统一推送 */
+        /** 帧事件：缓存最新帧，事件驱动推送 */
         const { cameraId, timestamp, data } = payload as { cameraId: string; timestamp: number; data: Buffer };
         latestFrameByCamera.set(cameraId, { data, timestamp });
+        schedulePush();
         return;
       }
 
