@@ -401,6 +401,8 @@ export default {
     modelDescYolosSmall: 'DETR架构，较老模型',
     modelDescYolosTiny: 'DETR架构，极小模型',
     modelDescDetrR50: '经典DETR模型',
+    importantLabels: '重要标签（逗号分隔）',
+    importantLabelsHint: '仅推送这些标签的检测结果到前端，留空=全部',
   },
   login: {
     title: 'JK NVR 登录',

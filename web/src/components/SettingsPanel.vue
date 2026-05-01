@@ -91,6 +91,7 @@ interface RuntimeSettings {
     autoMatchThreshold: number
     speedThreshold: number
     loiterThreshold: number
+    importantLabels: string[]
   }
   recording: {
     mode: string
@@ -444,6 +445,11 @@ onMounted(() => {
           <span class="field-label">{{ t('settings.loiterThreshold', '徘徊检测阈值(秒)') }}</span>
           <input type="number" v-model.number="settings.ai.loiterThreshold" step="5" min="0" max="600" class="input" />
           <span class="field-hint">0 = 禁用</span>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.importantLabels', '重要标签（逗号分隔）') }}</span>
+          <input type="text" :value="settings.ai.importantLabels?.join(', ') ?? ''" @change="settings.ai.importantLabels = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
+          <span class="field-hint">{{ t('settings.importantLabelsHint', '留空=全部推送') }}</span>
         </label>
         <label class="field">
           <span class="field-label">{{ t('settings.aiMode') }}</span>

@@ -399,6 +399,8 @@ export default {
     modelDescYolosSmall: 'DETR architecture, older model',
     modelDescYolosTiny: 'DETR architecture, tiny model',
     modelDescDetrR50: 'Classic DETR model',
+    importantLabels: 'Important labels (comma separated)',
+    importantLabelsHint: 'Only push these labels to frontend, empty = all',
   },
   login: {
     title: 'JK NVR Login',

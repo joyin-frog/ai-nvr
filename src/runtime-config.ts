@@ -206,6 +206,7 @@ export class RuntimeConfig {
       if (typeof a.autoMatchThreshold === "number") this.settings.ai.autoMatchThreshold = a.autoMatchThreshold;
       if (typeof a.speedThreshold === "number") this.settings.ai.speedThreshold = a.speedThreshold;
       if (typeof a.loiterThreshold === "number") this.settings.ai.loiterThreshold = a.loiterThreshold;
+      if (Array.isArray(a.importantLabels)) this.settings.ai.importantLabels = a.importantLabels.filter((l: unknown): l is string => typeof l === "string");
     }
 
     if (obj.recording && typeof obj.recording === "object") {
