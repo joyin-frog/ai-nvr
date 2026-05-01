@@ -2,10 +2,12 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import { pilot } from 'vite-plugin-pilot'
+import VueDevTools from 'vite-plugin-vue-devtools'
 
 export default defineConfig({
   plugins: [
     vue(),
+    VueDevTools(),
     pilot({ locale: 'zh' }),
     VitePWA({
       registerType: 'autoUpdate',
