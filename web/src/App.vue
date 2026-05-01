@@ -40,6 +40,12 @@ interface CameraStatus {
   recording: boolean
   /** 录像开始时间戳 */
   recordingStart: number
+  /** 是否双流模式（HD显示+SD检测） */
+  dualStream: boolean
+  /** 显示流帧率 */
+  displayFps: number
+  /** 检测流帧率 */
+  detectFps: number
 }
 
 /** 侧边栏激活的标签 */
@@ -276,6 +282,9 @@ async function loadCameras() {
       height: c.height ?? 0,
       recording: c.recording ?? false,
       recordingStart: c.recordingStart ?? 0,
+      dualStream: c.dualStream ?? false,
+      displayFps: c.displayFps ?? 0,
+      detectFps: c.detectFps ?? 0,
     }))
     updateTitle()
   } catch {
@@ -791,6 +800,8 @@ onUnmounted(() => {
                 :track-labels="trackLabelsMap[cam.id]"
                 :infer-ms="cameraInferMs[cam.id] ?? 0"
                 :ws-frame-version="wsFrameVersions[cam.id] ?? 0"
+                :dual-stream="cam.dualStream"
+                :detect-fps="cam.detectFps"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
                 @track-label-updated="loadTrackLabels"

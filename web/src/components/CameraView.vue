@@ -39,6 +39,10 @@ const props = defineProps<{
   inferMs?: number
   /** WS 帧版本号（每次收到新帧自增） */
   wsFrameVersion?: number
+  /** 是否双流模式 */
+  dualStream?: boolean
+  /** 检测流帧率 */
+  detectFps?: number
 }>()
 
 const emit = defineEmits<{
@@ -566,6 +570,10 @@ onUnmounted(() => {
         <template v-if="(fps ?? 0) > 0">{{ (fps ?? 0).toFixed(0) }} fps</template>
         <template v-if="resolutionText"><template v-if="(fps ?? 0) > 0"> · </template>{{ resolutionText }}</template>
       </div>
+      <!-- 双流模式标记 -->
+      <div v-if="online && hasFrame && dualStream" class="dual-stream-badge" :title="`HD显示 + SD检测(${(detectFps ?? 0).toFixed(0)}fps)`">
+        HD+SD
+      </div>
       <!-- 帧延迟指示 -->
       <div v-if="online && hasFrame && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
         {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
@@ -860,6 +868,20 @@ onUnmounted(() => {
   font-family: 'Courier New', Courier, monospace;
   pointer-events: none;
   color: #fff;
+}
+
+.dual-stream-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 90px;
+  background: rgba(78, 205, 196, 0.75);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+  color: #fff;
+  pointer-events: none;
 }
 
 .fps-badge.good {
