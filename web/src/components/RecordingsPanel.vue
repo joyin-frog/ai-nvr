@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
+import { takeFrame } from '../services/ws-frame-cache'
 import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
 import { confirmDialog } from '../composables/useConfirm'
@@ -1161,6 +1162,128 @@ async function playAtTime(cameraId: string, timestamp: number): Promise<boolean>
   return false
 }
 
+/** ========== PiP 画中画实时预览 ========== */
+/** PiP 显示开关 */
+const showPip = ref(false)
+/** PiP 显示的摄像头 ID（默认跟随当前播放录像的摄像头） */
+const pipCameraId = ref('')
+/** PiP canvas 引用 */
+const pipCanvasRef = ref<HTMLCanvasElement | null>(null)
+/** PiP 帧版本号（用于 poll） */
+let pipVersion = 0
+/** PiP rAF ID */
+let pipRafId = 0
+/** PiP 复用 Image 对象（避免每帧创建） */
+let pipImg = new Image()
+let pipImgUrl = ''
+/** PiP 窗口位置（viewport px） */
+const pipX = ref(0)
+const pipY = ref(0)
+/** PiP 窗口大小（px 宽度，高度按 16:9） */
+const pipSize = ref(240)
+/** PiP 拖拽状态 */
+let pipDragging = false
+
+/** PiP 可选摄像头列表（在线的摄像头） */
+const pipCameras = computed(() => {
+  const currentCamId = selectedRecording.value?.cameraId
+  return props.cameras.filter(c => c.id !== currentCamId)
+})
+
+/** 切换 PiP 显示 */
+function togglePip() {
+  showPip.value = !showPip.value
+  if (showPip.value && selectedRecording.value) {
+    /** 默认显示当前录像的摄像头 */
+    pipCameraId.value = selectedRecording.value.cameraId
+    pipVersion = 0
+    /** 初始位置：右下角 */
+    pipX.value = window.innerWidth - pipSize.value - 20
+    pipY.value = window.innerHeight - Math.round(pipSize.value * 9 / 16) - 60
+    startPipLoop()
+  } else {
+    stopPipLoop()
+  }
+}
+
+/** PiP 帧渲染循环 */
+function startPipLoop() {
+  stopPipLoop()
+  pipImg = new Image()
+  function loop() {
+    const canvas = pipCanvasRef.value
+    if (!canvas || !showPip.value) return
+    const camId = pipCameraId.value
+    if (camId) {
+      const frame = takeFrame(camId, pipVersion)
+      if (frame) {
+        pipVersion = frame.version
+        /** 释放上一帧的 object URL */
+        if (pipImgUrl) URL.revokeObjectURL(pipImgUrl)
+        pipImgUrl = URL.createObjectURL(new Blob([frame.jpeg], { type: 'image/jpeg' }))
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          pipImg.onload = () => {
+            canvas.width = pipImg.width
+            canvas.height = pipImg.height
+            ctx.drawImage(pipImg, 0, 0)
+          }
+          pipImg.src = pipImgUrl
+        }
+      }
+    }
+    pipRafId = requestAnimationFrame(loop)
+  }
+  pipRafId = requestAnimationFrame(loop)
+}
+
+function stopPipLoop() {
+  if (pipRafId) {
+    cancelAnimationFrame(pipRafId)
+    pipRafId = 0
+  }
+  if (pipImgUrl) {
+    URL.revokeObjectURL(pipImgUrl)
+    pipImgUrl = ''
+  }
+}
+
+/** PiP 拖拽开始 */
+function onPipDragStart(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  pipDragging = true
+  const startX = e.clientX
+  const startY = e.clientY
+  const origX = pipX.value
+  const origY = pipY.value
+  function onMove(ev: MouseEvent) {
+    if (!pipDragging) return
+    const dx = ev.clientX - startX
+    const dy = ev.clientY - startY
+    pipX.value = Math.max(0, Math.min(window.innerWidth - pipSize.value, origX + dx))
+    pipY.value = Math.max(0, Math.min(window.innerHeight - 100, origY + dy))
+  }
+  function onUp() {
+    pipDragging = false
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
+/** 关闭播放器时清理 PiP */
+const _origClosePlayer = closePlayer
+const closePlayerWithPip = closePlayer
+/** 重写 closePlayer 以清理 PiP */
+watch(selectedRecording, (rec) => {
+  if (!rec) {
+    showPip.value = false
+    stopPipLoop()
+  }
+})
+
 onMounted(() => {
   loadRecordings()
   /** 定时刷新录像列表（30 秒间隔） */
@@ -1169,6 +1292,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  stopPipLoop()
 })
 
 defineExpose({ loadRecordings, playAtTime })
@@ -1201,6 +1325,7 @@ defineExpose({ loadRecordings, playAtTime })
           <button :class="['detect-toggle-btn', { active: showPlaybackBoxes }]" @click="showPlaybackBoxes = !showPlaybackBoxes" :title="t('recording.toggleDetect')">&#x1F50D;</button>
           <button v-if="playbackEvents.length > 0" :class="['event-list-btn', { active: showPlaybackEventList }]" @click="showPlaybackEventList = !showPlaybackEventList" :title="t('recording.toggleDetect')">&#x2630; {{ playbackEvents.length }}</button>
           <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
+          <button :class="['pip-toggle-btn', { active: showPip }]" @click="togglePip" :title="t('recording.pip', '画中画')">&#x1F4FA;</button>
           <button class="player-help-btn" @click="showPlayerHelp = !showPlayerHelp" :title="t('header.help')">?</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
@@ -1249,6 +1374,20 @@ defineExpose({ loadRecordings, playAtTime })
             </div>
           </div>
         </div>
+        <!-- PiP 画中画实时预览浮窗（Teleport 到 body，fixed 定位，全屏时也能显示） -->
+        <Teleport to="body">
+          <div v-if="showPip && pipCameraId" class="pip-window" :style="{ left: pipX + 'px', top: pipY + 'px', width: pipSize + 'px' }">
+            <div class="pip-header" @mousedown="onPipDragStart">
+              <span class="pip-label">LIVE</span>
+              <select v-model="pipCameraId" class="pip-camera-select" @mousedown.stop>
+                <option :value="selectedRecording!.cameraId">{{ cameraNameMap[selectedRecording!.cameraId] ?? selectedRecording!.cameraId }}</option>
+                <option v-for="cam in pipCameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+              </select>
+              <button class="pip-close" @click="showPip = false; stopPipLoop()">&times;</button>
+            </div>
+            <canvas ref="pipCanvasRef" class="pip-canvas" />
+          </div>
+        </Teleport>
         <!-- 自定义进度条（绝对时间） -->
         <div v-if="selectedRecording" class="custom-controls">
           <button class="ctrl-btn play-pause" @click="isPlaying ? playerRef?.pause() : playerRef?.play()">
@@ -2744,5 +2883,98 @@ defineExpose({ loadRecordings, playAtTime })
   .rec-download {
     opacity: 0.6;
   }
+
+  .pip-window {
+    width: 160px !important;
+  }
+}
+
+/* PiP 切换按钮（在 scoped 播放器 header 内） */
+.pip-toggle-btn {
+  background: transparent;
+  border: 1px solid #444;
+  color: #aaa;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.pip-toggle-btn:hover {
+  color: #fff;
+  border-color: #5bc0de;
+}
+.pip-toggle-btn.active {
+  color: #5bc0de;
+  border-color: #5bc0de;
+  background: rgba(91, 192, 222, 0.15);
+}
+</style>
+
+<!-- PiP 使用 Teleport，样式需要非 scoped -->
+<style>
+.pip-window {
+  position: fixed;
+  z-index: 10000;
+  background: #000;
+  border: 2px solid #5bc0de;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+.pip-window:hover {
+  box-shadow: 0 4px 24px rgba(91, 192, 222, 0.3);
+}
+.pip-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: #0d1b2a;
+  cursor: move;
+  user-select: none;
+}
+.pip-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ff4444;
+  background: rgba(255, 68, 68, 0.15);
+  padding: 1px 4px;
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+  animation: pip-pulse 2s ease-in-out infinite;
+}
+@keyframes pip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.pip-camera-select {
+  flex: 1;
+  background: #16213e;
+  color: #ddd;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 2px;
+  cursor: pointer;
+  min-width: 0;
+}
+.pip-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.pip-close:hover {
+  color: #ff6b6b;
+}
+.pip-window .pip-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #111;
 }
 </style>

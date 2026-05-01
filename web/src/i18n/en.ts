@@ -132,6 +132,7 @@ export default {
     helpLoop: 'A-B loop',
     helpMute: 'Mute toggle',
     helpFullscreen: 'Fullscreen',
+    pip: 'PiP',
   },
   timeline: {
     today: 'Today',
