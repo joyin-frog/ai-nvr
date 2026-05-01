@@ -303,7 +303,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         sourceBuffer.addEventListener('updateend', onUpdateEnd)
         sourceBuffer.addEventListener('error', onBufferError)
         sourceBuffer.mode = 'segments'
-        console.log(`[fMP4] SourceBuffer created: ${c}`)
+        console.debug(`[fMP4] SourceBuffer created: ${c}`)
         return true
       } catch {
         /** codec 不支持，尝试下一个 */
@@ -430,7 +430,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       return
     }
     const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000)
-    console.log(`[fMP4] ${delay / 1000}s 后重连 (第 ${retryCount} 次)`)
+    console.warn(`[fMP4] ${delay / 1000}s 后重连 (第 ${retryCount} 次)`)
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       connect()
@@ -498,12 +498,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         wasConnectedBeforeHidden = true
         disconnect()
-        console.log('[fMP4] 页面隐藏，暂停流')
+        console.debug('[fMP4] 页面隐藏，暂停流')
       }
     } else if (wasConnectedBeforeHidden) {
       wasConnectedBeforeHidden = false
       connect()
-      console.log('[fMP4] 页面可见，恢复流')
+      console.debug('[fMP4] 页面可见，恢复流')
     }
   }
   document.addEventListener('visibilitychange', onVisibilityChange)

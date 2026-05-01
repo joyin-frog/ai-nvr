@@ -95,7 +95,6 @@ export class EventClient {
     this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
-      console.log('[EventClient] 已连接')
       this.reconnectAttempts = 0
       this.setState('connected')
       /** 连接后发送摄像头订阅（减少无关帧带宽） */
@@ -211,7 +210,7 @@ export class EventClient {
     this.reconnectAttempts++
     /** 指数退避：1s, 2s, 4s, 8s, 16s, 30s, 30s... */
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), EventClient.MAX_BACKOFF * 1000)
-    console.log(`[EventClient] 断开，${(delay / 1000).toFixed(0)} 秒后重连 (第 ${this.reconnectAttempts} 次)`)
+    console.warn(`[EventClient] 断开，${(delay / 1000).toFixed(0)}s 后重连 (第 ${this.reconnectAttempts} 次)`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()
