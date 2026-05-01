@@ -629,9 +629,10 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     const h = (box.ymax - box.ymin) * height
 
     /** 已命名目标：粗边框 + 实线；未命名目标：细边框 + 虚线 + 脉冲透明度 */
+    const isHovered = tid != null && hoveredTrackId.value === tid
     ctx.setLineDash(isNamed ? [] : [8, 4])
-    ctx.lineWidth = isNamed ? 2.5 : 1.5
-    ctx.globalAlpha = isNamed ? 1 : (0.5 + 0.5 * pulse)
+    ctx.lineWidth = isHovered ? 3.5 : isNamed ? 2.5 : 1.5
+    ctx.globalAlpha = isNamed || isHovered ? 1 : (0.5 + 0.5 * pulse)
 
     /** 绘制圆角矩形框 + 半透明填充 */
     const r = Math.min(4, w / 4, h / 4)
@@ -701,7 +702,48 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       }
     }
 
-    /** 绘制速度方向箭头（速度较大时显示） */
+    /** 悬停详情 tooltip */
+    if (isHovered && tid != null) {
+      ctx.font = '11px sans-serif'
+      const lines: string[] = []
+      lines.push(`${d.label} #${tid}`)
+      if (customName) lines.push(`名称: ${customName}`)
+      lines.push(`置信度: ${(d.score * 100).toFixed(0)}%`)
+      if (d.velocity) {
+        const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
+        if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
+      }
+      const tipX = x + w + 4
+      const tipY = y
+      const tipPad = 6
+      const lineH = 15
+      let maxLineW = 0
+      for (const line of lines) {
+        const lw = ctx.measureText(line).width
+        if (lw > maxLineW) maxLineW = lw
+      }
+      const tipW = maxLineW + tipPad * 2
+      const tipH = lines.length * lineH + tipPad * 2
+      /** 如果超出右边界，放到左侧 */
+      const finalX = tipX + tipW > width ? x - tipW - 4 : tipX
+      const finalY = Math.min(tipY, height - tipH - 4)
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)'
+      ctx.beginPath()
+      ctx.roundRect(finalX, finalY, tipW, tipH, 4)
+      ctx.fill()
+      /** 左边框高亮色 */
+      ctx.fillStyle = stroke
+      ctx.fillRect(finalX, finalY + 4, 2, tipH - 8)
+
+      ctx.fillStyle = '#fff'
+      ctx.textBaseline = 'top'
+      for (let li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li], finalX + tipPad, finalY + tipPad + li * lineH)
+      }
+      ctx.textBaseline = 'bottom'
+      ctx.font = 'bold 12px monospace'
+    }
     if (d.velocity && (Math.abs(d.velocity.dx) > 0.005 || Math.abs(d.velocity.dy) > 0.005)) {
       const cx = x + w / 2
       const cy = y + h / 2
@@ -1130,6 +1172,41 @@ function onPanEnd() {
   dragging = false
 }
 
+/** 鼠标悬停检测框追踪 */
+const hoveredTrackId = ref<number | null>(null)
+let mouseNormX = -1
+let mouseNormY = -1
+
+function onOverlayMouseMove(e: MouseEvent) {
+  const canvas = e.currentTarget as HTMLElement
+  const rect = canvas.getBoundingClientRect()
+  mouseNormX = (e.clientX - rect.left) / rect.width
+  mouseNormY = (e.clientY - rect.top) / rect.height
+
+  /** 检测鼠标是否在某个检测框内 */
+  const sorted = getSortedDetections()
+  let found: number | null = null
+  let bestArea = Infinity
+  for (const d of sorted) {
+    if (d.trackId == null) continue
+    const box = getSmoothedBox(d)
+    if (mouseNormX >= box.xmin && mouseNormX <= box.xmax && mouseNormY >= box.ymin && mouseNormY <= box.ymax) {
+      const area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
+      if (area < bestArea) {
+        found = d.trackId
+        bestArea = area
+      }
+    }
+  }
+  hoveredTrackId.value = found
+}
+
+function onOverlayMouseLeave() {
+  mouseNormX = -1
+  mouseNormY = -1
+  hoveredTrackId.value = null
+}
+
 /** 缩放 transform 样式 */
 const zoomTransform = computed(() => {
   if (zoomLevel.value <= 1) return 'none'
@@ -1200,6 +1277,8 @@ onUnmounted(() => {
               ref="overlayCanvas"
               class="camera-overlay"
               @contextmenu.prevent="onCanvasContext"
+              @mousemove="onOverlayMouseMove"
+              @mouseleave="onOverlayMouseLeave"
               @touchstart="onTouchStart"
               @touchmove="onTouchMove"
               @touchend="onTouchEnd"
@@ -1213,6 +1292,8 @@ onUnmounted(() => {
           class="camera-image"
           :style="{ filter: imageFilter }"
           @contextmenu.prevent="onCanvasContext"
+          @mousemove="onOverlayMouseMove"
+          @mouseleave="onOverlayMouseLeave"
           @touchstart="onTouchStart"
           @touchmove="onTouchMove"
           @touchend="onTouchEnd"
