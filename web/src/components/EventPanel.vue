@@ -39,14 +39,16 @@ interface EventItem {
   type: string
   cameraId: string
   detail: string
-  /** 原始 JSON detail（用于展开详情解析） */
+  /** 服务端摘要（如 "person ×2, car ×1"） */
+  summary: string | null
+  /** 原始 JSON detail（展开详情时按需加载） */
   rawDetail: string | null
   /** 是否已收藏 */
   starred: boolean
   /** 是否为实时新增事件（用于入场动画） */
   isNew?: boolean
   /** 关联的快照 URL（原始图） */
-  snapshotUrl?: string
+  snapshotUrl?: string | null
   /** 快照的检测结果（用于叠加标注框） */
   snapshotDetections?: Detection[] | null
 }
@@ -210,6 +212,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
     const recent = events.value[0]
     if (recent && recent.type === 'motion' && recent.cameraId === cameraId && (now - recent.timestamp) < 5000) {
       recent.detail = detail
+      recent.summary = detail
       recent.rawDetail = detail
       recent.time = new Date(now).toLocaleTimeString(locale.value)
       return
@@ -221,6 +224,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
     const recent = events.value[0]
     if (recent && recent.type === 'detect' && recent.cameraId === cameraId && (now - recent.timestamp) < 3000) {
       recent.detail = detail
+      recent.summary = detail
       recent.rawDetail = detail
       recent.time = new Date(now).toLocaleTimeString(locale.value)
       return
@@ -228,7 +232,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
   }
 
   const time = new Date(now).toLocaleTimeString(locale.value)
-  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail, starred: false, isNew: true })
+  events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, summary: detail, rawDetail: detail, starred: false, isNew: true })
   /** 1 秒后移除动画标记 */
   const eventId = now
   setTimeout(() => {
@@ -240,16 +244,28 @@ function addEvent(type: string, cameraId: string, detail: string) {
   }
 }
 
+/** 从检测结果生成摘要文本 */
+function summarizeDetections(detections: Detection[]): string {
+  const labelCounts = new Map<string, number>()
+  for (const d of detections) {
+    const name = (d as Record<string, unknown>).trackName as string ?? d.label
+    labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1)
+  }
+  return [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(', ')
+}
+
 /** 添加带快照的检测事件 */
 function addDetectEvent(type: string, cameraId: string, detail: string, snapshotUrl: string, detections: Detection[]) {
   if (filterType.value && filterType.value !== type) return
   if (filterCamera.value && filterCamera.value !== cameraId) return
   const now = Date.now()
+  const summary = summarizeDetections(detections)
 
   /** detect 事件去重：同一摄像头 3 秒内只更新不新增 */
   const recent = events.value[0]
   if (recent && recent.type === 'detect' && recent.cameraId === cameraId && (now - recent.timestamp) < 3000) {
-    recent.detail = detail
+    recent.detail = summary
+    recent.summary = summary
     recent.rawDetail = detail
     recent.time = new Date(now).toLocaleTimeString(locale.value)
     recent.snapshotUrl = snapshotUrl
@@ -259,7 +275,7 @@ function addDetectEvent(type: string, cameraId: string, detail: string, snapshot
 
   const time = new Date(now).toLocaleTimeString(locale.value)
   events.value.unshift({
-    id: now, time, timestamp: now, type, cameraId, detail, rawDetail: detail,
+    id: now, time, timestamp: now, type, cameraId, detail: summary, summary, rawDetail: detail,
     starred: false, isNew: true, snapshotUrl, snapshotDetections: detections,
   })
   const eventId = now
@@ -314,17 +330,18 @@ async function loadHistory() {
     const res = await authFetch(`/api/events/history?${params}`)
     if (res.ok) {
       const data = await res.json()
-      const historyEvents: EventItem[] = (data.events as (EventRecord & { snapshotUrl?: string; snapshotDetections?: Detection[] | null })[]).map((e) => ({
-        id: e.id,
-        time: formatTimestamp(e.timestamp),
-        timestamp: e.timestamp,
-        type: e.type,
-        cameraId: e.camera_id,
-        detail: parseDetail(e.type, e.detail),
-        rawDetail: e.detail,
+      const historyEvents: EventItem[] = (data.events as Array<Record<string, unknown>>).map((e) => ({
+        id: e.id as number,
+        time: formatTimestamp(e.timestamp as number),
+        timestamp: e.timestamp as number,
+        type: e.type as string,
+        cameraId: e.camera_id as string,
+        detail: (e.summary as string) || '',
+        summary: (e.summary as string) || null,
+        rawDetail: null,
         starred: e.starred === 1,
-        snapshotUrl: e.snapshotUrl,
-        snapshotDetections: e.snapshotDetections ?? undefined,
+        snapshotUrl: (e.snapshotUrl as string) || null,
+        snapshotDetections: (e.detections as Detection[]) || null,
       }))
       events.value = historyEvents
       totalCount.value = (data.total as number) ?? 0
@@ -359,15 +376,18 @@ async function loadMore() {
     const res = await authFetch(`/api/events/history?${params}`)
     if (res.ok) {
       const data = await res.json()
-      const moreEvents: EventItem[] = (data.events as EventRecord[]).map((e) => ({
-        id: e.id,
-        time: formatTimestamp(e.timestamp),
-        timestamp: e.timestamp,
-        type: e.type,
-        cameraId: e.camera_id,
-        detail: parseDetail(e.type, e.detail),
-        rawDetail: e.detail,
+      const moreEvents: EventItem[] = (data.events as Array<Record<string, unknown>>).map((e) => ({
+        id: e.id as number,
+        time: formatTimestamp(e.timestamp as number),
+        timestamp: e.timestamp as number,
+        type: e.type as string,
+        cameraId: e.camera_id as string,
+        detail: (e.summary as string) || '',
+        summary: (e.summary as string) || null,
+        rawDetail: null,
         starred: e.starred === 1,
+        snapshotUrl: (e.snapshotUrl as string) || null,
+        snapshotDetections: (e.detections as Detection[]) || null,
       }))
       events.value.push(...moreEvents)
       hasMore.value = moreEvents.length >= PAGE_SIZE
