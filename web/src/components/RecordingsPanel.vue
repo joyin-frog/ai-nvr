@@ -158,6 +158,70 @@ function onTimeUpdate() {
       playerRef.value.currentTime = loopStart.value
     }
   }
+  /** 更新回放检测框 */
+  updatePlaybackDetections()
+}
+
+/** 回放检测框叠加 */
+interface PlaybackDetection {
+  label: string
+  score: number
+  box: { xmin: number; ymin: number; xmax: number; ymax: number }
+  trackId?: number
+}
+/** 当前录像的检测事件列表（预加载） */
+const playbackEvents = ref<Array<{ timestamp: number; detections: PlaybackDetection[] }>>([])
+/** 当前显示的检测框 */
+const playbackDetections = ref<PlaybackDetection[]>([])
+/** 是否显示回放检测框 */
+const showPlaybackBoxes = ref(true)
+
+/** 播放录像时加载检测事件 */
+async function loadPlaybackDetections(rec: Recording) {
+  playbackEvents.value = []
+  playbackDetections.value = []
+  const params = new URLSearchParams({
+    type: 'detect',
+    cameraId: rec.cameraId,
+    since: String(rec.startTime),
+    until: String(rec.endTime),
+    limit: '2000',
+  })
+  try {
+    const res = await authFetch(`/api/events/history?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      playbackEvents.value = (data.events as Array<{ timestamp: number; detail: string | null }>)
+        .filter(e => e.detail)
+        .map(e => {
+          const detail = JSON.parse(e.detail!) as { detections?: PlaybackDetection[] }
+          return { timestamp: e.timestamp, detections: detail.detections ?? [] }
+        })
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** 根据 currentAbsTime 更新当前检测框 */
+function updatePlaybackDetections() {
+  if (!showPlaybackBoxes.value || playbackEvents.value.length === 0) {
+    playbackDetections.value = []
+    return
+  }
+  const t = currentAbsTime.value
+  /** 找到 timestamp <= t 的最后一个事件 */
+  let best = -1
+  for (let i = 0; i < playbackEvents.value.length; i++) {
+    if (playbackEvents.value[i]!.timestamp <= t) best = i
+    else break
+  }
+  /** 只显示 3 秒内的检测 */
+  if (best >= 0 && t - playbackEvents.value[best]!.timestamp < 3000) {
+    playbackDetections.value = playbackEvents.value[best]!.detections
+  } else {
+    playbackDetections.value = []
+  }
 }
 
 /** 设置循环起点/终点 */
@@ -652,6 +716,8 @@ function play(rec: Recording, seekToSec: number = -1) {
   exportFilename.value = ''
   exportStartSec.value = 0
   exportEndSec.value = totalDurationSec.value || 0
+  /** 加载该录像时间段的检测事件（用于回放叠加） */
+  loadPlaybackDetections(rec)
   /** 聚焦播放器 modal 以接收键盘事件 */
   nextTick(() => playerModalEl.value?.focus())
 }
@@ -996,6 +1062,7 @@ defineExpose({ loadRecordings, playAtTime })
           >&#9654;&#9654;</button>
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+          <button :class="['detect-toggle-btn', { active: showPlaybackBoxes }]" @click="showPlaybackBoxes = !showPlaybackBoxes" :title="t('recording.toggleDetect')">&#x1F50D;</button>
           <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
           <button class="player-help-btn" @click="showPlayerHelp = !showPlayerHelp" :title="t('header.help')">?</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
@@ -1012,19 +1079,39 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="help-row"><kbd>F</kbd> {{ t('recording.helpFullscreen') }}</div>
           </div>
         </div>
-        <video
-          ref="playerRef"
-          :src="videoUrl"
-          autoplay
-          class="player-video"
-          @dblclick="togglePlayerFullscreen"
-          @ratechange="onRateChange"
-          @loadedmetadata="onLoadedMetadata"
-          @ended="onVideoEnded"
-          @timeupdate="onTimeUpdate"
-          @play="onPlay"
-          @pause="onPause"
-        />
+        <div class="player-video-wrapper">
+          <video
+            ref="playerRef"
+            :src="videoUrl"
+            autoplay
+            class="player-video"
+            @dblclick="togglePlayerFullscreen"
+            @ratechange="onRateChange"
+            @loadedmetadata="onLoadedMetadata"
+            @ended="onVideoEnded"
+            @timeupdate="onTimeUpdate"
+            @play="onPlay"
+            @pause="onPause"
+          />
+          <!-- 回放检测框叠加 -->
+          <div v-if="showPlaybackBoxes && playbackDetections.length > 0" class="playback-detection-overlay">
+            <div
+              v-for="(d, i) in playbackDetections"
+              :key="i"
+              class="playback-detect-box"
+              :style="{
+                left: (d.box.xmin * 100) + '%',
+                top: (d.box.ymin * 100) + '%',
+                width: ((d.box.xmax - d.box.xmin) * 100) + '%',
+                height: ((d.box.ymax - d.box.ymin) * 100) + '%',
+              }"
+            >
+              <span class="playback-detect-label">
+                {{ d.trackId ? '#' + d.trackId + ' ' : '' }}{{ d.label }} {{ (d.score * 100).toFixed(0) }}%
+              </span>
+            </div>
+          </div>
+        </div>
         <!-- 自定义进度条（绝对时间） -->
         <div v-if="selectedRecording" class="custom-controls">
           <button class="ctrl-btn play-pause" @click="isPlaying ? playerRef?.pause() : playerRef?.play()">
@@ -1784,12 +1871,60 @@ defineExpose({ loadRecordings, playAtTime })
   border-color: #4ECDC4;
 }
 
+/* 视频容器（用于检测框叠加定位） */
+.player-video-wrapper {
+  position: relative;
+  line-height: 0;
+}
+
 .player-video {
   width: 100%;
   display: block;
   max-height: 75vh;
   background: #000;
   cursor: pointer;
+}
+
+/* 回放检测框叠加 */
+.playback-detection-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.playback-detect-box {
+  position: absolute;
+  border: 2px solid #5bc0de;
+  border-radius: 2px;
+  opacity: 0.85;
+}
+
+.playback-detect-label {
+  position: absolute;
+  top: -20px;
+  left: -2px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(91, 192, 222, 0.85);
+  padding: 1px 6px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+/* 检测框切换按钮 */
+.detect-toggle-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.detect-toggle-btn.active {
+  color: #5bc0de;
+  background: #5bc0de30;
 }
 
 /* 自定义控制栏 */

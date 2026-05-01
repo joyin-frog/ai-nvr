@@ -164,8 +164,8 @@ for (const eventType of RECORDED_EVENTS) {
     if (eventType === "motion") {
       detail = JSON.stringify({ ratio: (payload as { ratio: number }).ratio });
     } else if (eventType === "detect") {
-      const p = payload as { detections: Array<{ label: string; score: number }> };
-      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score })) });
+      const p = payload as { detections: Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number }> };
+      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId })) });
     } else if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });

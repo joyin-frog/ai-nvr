@@ -110,6 +110,7 @@ export default {
     prevDay: '前一天',
     nextDay: '后一天',
     autoPlayNext: '连续播放',
+    toggleDetect: 'AI 检测标注',
     delete: '删除',
     confirmDelete: '确认删除此录像文件？此操作不可恢复。',
     deleteSelected: '删除选中',

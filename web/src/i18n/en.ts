@@ -110,6 +110,7 @@ export default {
     prevDay: 'Previous day',
     nextDay: 'Next day',
     autoPlayNext: 'Auto play next',
+    toggleDetect: 'AI Detection Overlay',
     delete: 'Delete',
     confirmDelete: 'Delete this recording? This cannot be undone.',
     deleteSelected: 'Delete selected',
