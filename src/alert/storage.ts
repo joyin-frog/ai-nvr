@@ -13,6 +13,8 @@ export interface AlertRule {
   cameraId: string;
   /** 标签过滤（仅 detect 事件），逗号分隔，空表示不过滤 */
   labels: string;
+  /** 追踪命名过滤（仅 detect 事件），逗号分隔用户命名，空表示不过滤 */
+  trackNames: string;
   /** 时间窗口（秒） */
   windowSeconds: number;
   /** 窗口内触发次数阈值 */
@@ -62,6 +64,7 @@ export class AlertStorage {
         event_type TEXT NOT NULL,
         camera_id TEXT NOT NULL DEFAULT '',
         labels TEXT NOT NULL DEFAULT '',
+        track_names TEXT NOT NULL DEFAULT '',
         window_seconds INTEGER NOT NULL DEFAULT 60,
         threshold INTEGER NOT NULL DEFAULT 3,
         cooldown_seconds INTEGER NOT NULL DEFAULT 300,
@@ -72,10 +75,13 @@ export class AlertStorage {
       )
     `);
 
-    /** 迁移：为已有表添加 min_count 列 */
+    /** 迁移：为已有表添加缺失列 */
     const cols = this.db.query("PRAGMA table_info(alert_rules)").all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === "min_count")) {
       this.db.run("ALTER TABLE alert_rules ADD COLUMN min_count INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!cols.some(c => c.name === "track_names")) {
+      this.db.run("ALTER TABLE alert_rules ADD COLUMN track_names TEXT NOT NULL DEFAULT ''");
     }
 
     this.db.run(`
@@ -98,27 +104,27 @@ export class AlertStorage {
   /** 获取所有规则 */
   listRules(): AlertRule[] {
     return this.db.query(
-      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, min_count as minCount FROM alert_rules ORDER BY id"
+      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, track_names as trackNames, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, min_count as minCount FROM alert_rules ORDER BY id"
     ).all() as AlertRule[];
   }
 
   /** 获取启用的规则 */
   getEnabledRules(): AlertRule[] {
     return this.db.query(
-      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, min_count as minCount FROM alert_rules WHERE enabled = 1"
+      "SELECT id, name, event_type as eventType, camera_id as cameraId, labels, track_names as trackNames, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, min_count as minCount FROM alert_rules WHERE enabled = 1"
     ).all() as AlertRule[];
   }
 
   /** 添加规则 */
   addRule(rule: Omit<AlertRule, "id" | "enabled">): number {
     const result = this.db.query(
-      "INSERT INTO alert_rules (name, event_type, camera_id, labels, window_seconds, threshold, cooldown_seconds, enabled, silent_start, silent_end, min_count) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) RETURNING id"
-    ).get(rule.name, rule.eventType, rule.cameraId, rule.labels, rule.windowSeconds, rule.threshold, rule.cooldownSeconds, rule.silentStart ?? "", rule.silentEnd ?? "", rule.minCount ?? 0);
+      "INSERT INTO alert_rules (name, event_type, camera_id, labels, track_names, window_seconds, threshold, cooldown_seconds, enabled, silent_start, silent_end, min_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?) RETURNING id"
+    ).get(rule.name, rule.eventType, rule.cameraId, rule.labels, rule.trackNames ?? "", rule.windowSeconds, rule.threshold, rule.cooldownSeconds, rule.silentStart ?? "", rule.silentEnd ?? "", rule.minCount ?? 0);
     return (result as { id: number }).id;
   }
 
   /** 更新规则 */
-  updateRule(id: number, updates: Partial<Pick<AlertRule, "name" | "eventType" | "cameraId" | "labels" | "windowSeconds" | "threshold" | "cooldownSeconds" | "enabled" | "silentStart" | "silentEnd" | "minCount">>): boolean {
+  updateRule(id: number, updates: Partial<Pick<AlertRule, "name" | "eventType" | "cameraId" | "labels" | "trackNames" | "windowSeconds" | "threshold" | "cooldownSeconds" | "enabled" | "silentStart" | "silentEnd" | "minCount">>): boolean {
     const sets: string[] = [];
     const params: (string | number)[] = [];
 
@@ -126,6 +132,7 @@ export class AlertStorage {
     if (updates.eventType !== undefined) { sets.push("event_type = ?"); params.push(updates.eventType); }
     if (updates.cameraId !== undefined) { sets.push("camera_id = ?"); params.push(updates.cameraId); }
     if (updates.labels !== undefined) { sets.push("labels = ?"); params.push(updates.labels); }
+    if (updates.trackNames !== undefined) { sets.push("track_names = ?"); params.push(updates.trackNames); }
     if (updates.windowSeconds !== undefined) { sets.push("window_seconds = ?"); params.push(updates.windowSeconds); }
     if (updates.threshold !== undefined) { sets.push("threshold = ?"); params.push(updates.threshold); }
     if (updates.cooldownSeconds !== undefined) { sets.push("cooldown_seconds = ?"); params.push(updates.cooldownSeconds); }

@@ -733,6 +733,7 @@ export function startServer(
             eventType,
             cameraId: (obj.cameraId as string) ?? "",
             labels: (obj.labels as string) ?? "",
+            trackNames: (obj.trackNames as string) ?? "",
             windowSeconds: (obj.windowSeconds as number) ?? 60,
             threshold: (obj.threshold as number) ?? 3,
             cooldownSeconds: (obj.cooldownSeconds as number) ?? 300,
@@ -751,7 +752,7 @@ export function startServer(
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "eventType", "cameraId", "labels", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd"]) {
+          for (const key of ["name", "eventType", "cameraId", "labels", "trackNames", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "minCount"]) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
           alertStorage.updateRule(ruleId, updates as never);

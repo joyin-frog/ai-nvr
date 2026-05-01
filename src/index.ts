@@ -109,7 +109,8 @@ snapshotStorage.start();
 
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
-const alertEngine = new AlertEngine(eventBus, alertStorage);
+const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
+const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage);
 alertEngine.start();
 
 /** 录像缩略图生成器 */
@@ -117,9 +118,6 @@ const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), c
 
 /** 事件存储（cleaner 和 server 都需要） */
 const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
-
-/** 追踪目标标签存储（用户给 trackId 命名） */
-const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
 
 /** 录像导出器 */
 const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath);

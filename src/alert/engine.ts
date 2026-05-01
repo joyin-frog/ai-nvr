@@ -1,5 +1,6 @@
 import { type EventBus } from "@/event-bus";
 import { type AlertStorage, type AlertRule } from "@/alert/storage";
+import { type TrackLabelStorage } from "@/storage/track-labels";
 
 /** 每个规则的滑动窗口事件时间戳 */
 interface RuleWindow {
@@ -26,9 +27,15 @@ export class AlertEngine {
   /** EventBus 取消订阅函数 */
   private unsubscribers: Array<() => void> = [];
 
+  /** 追踪标签缓存：cameraId:trackId -> name */
+  private trackNameCache = new Map<string, string>();
+  /** 追踪标签缓存刷新时间 */
+  private trackNameCacheTime = 0;
+
   constructor(
     private eventBus: EventBus,
     private storage: AlertStorage,
+    private trackLabelStorage?: TrackLabelStorage,
   ) {}
 
   /** 启动引擎 */
@@ -79,9 +86,10 @@ export class AlertEngine {
     }
   }
 
-  /** 处理 detect 事件（需要标签过滤 + 数量条件） */
+  /** 处理 detect 事件（需要标签过滤 + 数量条件 + 命名匹配） */
   private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number; trackId?: number }>): void {
     this.refreshRules();
+    this.refreshTrackNames(cameraId);
 
     for (const rule of this.rules) {
       if (rule.eventType !== "detect") continue;
@@ -95,15 +103,44 @@ export class AlertEngine {
         if (matchedDetections.length === 0) continue;
       }
 
+      /** 命名匹配：规则指定 trackNames 时，只匹配指定名称的目标 */
+      if (rule.trackNames) {
+        const requiredNames = new Set(rule.trackNames.split(",").map(n => n.trim()));
+        matchedDetections = matchedDetections.filter(d => {
+          if (!d.trackId) return false;
+          const name = this.trackNameCache.get(`${cameraId}:${d.trackId}`);
+          return name && requiredNames.has(name);
+        });
+        if (matchedDetections.length === 0) continue;
+      }
+
       /** 数量条件：匹配标签的目标数必须 >= minCount */
       if (rule.minCount > 0 && matchedDetections.length < rule.minCount) continue;
 
-      const labels = matchedDetections.map(d => `${d.label}#${d.trackId ?? "?"}(${(d.score * 100).toFixed(0)}%)`).join(", ");
+      const labels = matchedDetections.map(d => {
+        const name = d.trackId ? this.trackNameCache.get(`${cameraId}:${d.trackId}`) : undefined;
+        const nameTag = name ? ` (${name})` : "";
+        return `${d.label}#${d.trackId ?? "?"}${nameTag}(${(d.score * 100).toFixed(0)}%)`;
+      }).join(", ");
       const detail = rule.minCount > 0
         ? JSON.stringify({ detections: labels, count: matchedDetections.length })
         : JSON.stringify({ detections: labels });
       this.checkRule(rule, cameraId, timestamp, detail);
     }
+  }
+
+  /** 刷新追踪标签缓存（30秒 TTL） */
+  private refreshTrackNames(cameraId: string): void {
+    if (!this.trackLabelStorage) return;
+    const now = Date.now();
+    if (now - this.trackNameCacheTime < AlertEngine.CACHE_TTL) return;
+    this.trackNameCache.clear();
+    for (const label of this.trackLabelStorage.listByCamera(cameraId)) {
+      if (label.name) {
+        this.trackNameCache.set(`${cameraId}:${label.trackId}`, label.name);
+      }
+    }
+    this.trackNameCacheTime = now;
   }
 
   /** 判断当前时间是否在静默时段内 */
