@@ -30,6 +30,8 @@ const editName = ref('')
 const filterLabel = ref('')
 /** 摄像头筛选 */
 const filterCamera = ref('')
+/** 仅显示未命名 */
+const filterUnnamed = ref(false)
 /** 名称/标签搜索 */
 const searchText = ref('')
 /** 展开事件历史的 trackId */
@@ -155,11 +157,12 @@ const allCameras = computed(() => {
   return [...set].sort()
 })
 
-/** 按标签 + 摄像头 + 搜索筛选后的列表 */
+/** 按标签 + 摄像头 + 搜索 + 未命名筛选后的列表 */
 const filteredTracks = computed(() => {
   let list = tracks.value
   if (filterLabel.value) list = list.filter(t => t.label === filterLabel.value)
   if (filterCamera.value) list = list.filter(t => t.cameraIds.includes(filterCamera.value))
+  if (filterUnnamed.value) list = list.filter(t => !t.customName)
   if (searchText.value) {
     const q = searchText.value.toLowerCase()
     list = list.filter(t =>
@@ -170,6 +173,15 @@ const filteredTracks = computed(() => {
   }
   return list
 })
+
+/** 未命名的目标数量 */
+const unnamedCount = computed(() => tracks.value.filter(t => !t.customName).length)
+
+/** 判断是否为新目标（最近 5 分钟内首次出现且未命名） */
+function isNewTrack(track: TrackInfo): boolean {
+  if (track.customName) return false
+  return Date.now() - track.firstSeen < 300000
+}
 
 let activeTickTimer: ReturnType<typeof setInterval> | null = null
 
@@ -204,6 +216,15 @@ onUnmounted(() => {
         <option value="">{{ t('tracks.all') }}</option>
         <option v-for="cam in allCameras" :key="cam" :value="cam">{{ cam }}</option>
       </select>
+      <button
+        v-if="unnamedCount > 0"
+        class="unnamed-filter-btn"
+        :class="{ active: filterUnnamed }"
+        @click="filterUnnamed = !filterUnnamed"
+        :title="t('tracks.filterUnnamed', '仅显示未命名')"
+      >
+        {{ unnamedCount }} {{ t('tracks.unnamed', '未命名') }}
+      </button>
       <button class="refresh-btn" @click="loadTracks" :disabled="loading">
         {{ loading ? '...' : '↻' }}
       </button>
@@ -214,7 +235,7 @@ onUnmounted(() => {
     </div>
 
     <div v-else class="track-grid">
-      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card">
+      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card" :class="{ 'new-track': isNewTrack(track) }">
         <!-- 快照 -->
         <div class="track-snapshot">
           <img
@@ -365,6 +386,34 @@ onUnmounted(() => {
 
 .refresh-btn:hover { background: #3a3a5a; }
 .refresh-btn:disabled { opacity: 0.5; }
+
+.unnamed-filter-btn {
+  background: #2a2a4a;
+  color: #FFC107;
+  border: 1px solid #FFC10740;
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.unnamed-filter-btn.active {
+  background: #FFC10720;
+  border-color: #FFC107;
+}
+
+.unnamed-filter-btn:hover { background: #FFC10720; }
+
+.new-track {
+  border-color: #FFC10760;
+  animation: new-track-glow 2s ease-out;
+}
+
+@keyframes new-track-glow {
+  0% { box-shadow: 0 0 12px #FFC10740; }
+  100% { box-shadow: none; }
+}
 
 .empty {
   color: #555;
