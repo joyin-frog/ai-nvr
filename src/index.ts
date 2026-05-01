@@ -155,12 +155,19 @@ startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared"] as const;
+/** 关注的目标标签（只有这些才记录 track 事件） */
+const importantLabelsSet = new Set(config.ai.importantLabels);
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
     if (eventType === "detect") {
       const p = payload as { detections: unknown[]; changed?: boolean };
       if (p.detections.length === 0 || p.changed === false) return;
+    }
+    /** track 事件只记录关注的目标 */
+    if (eventType === "track:appeared" || eventType === "track:disappeared") {
+      const p = payload as { label: string };
+      if (!importantLabelsSet.has(p.label)) return;
     }
     let detail: string | undefined;
     if (eventType === "motion") {
@@ -232,11 +239,13 @@ eventBus.on("detect", ({ cameraId, detections, timestamp }) => {
   console.log(`[Detect] ${time} | ${cameraId} | ${detections.length} 个目标: ${labels}`);
 });
 
-/** 控制台日志：打印追踪语义事件 */
+/** 控制台日志：打印追踪语义事件（仅关注目标） */
 eventBus.on("track:appeared", ({ cameraId, trackId, label, timestamp }) => {
+  if (!importantLabelsSet.has(label)) return;
   console.log(`[Track] ${new Date(timestamp).toLocaleTimeString("zh-CN")} | ${cameraId} | ${label}#${trackId} 出现`);
 });
 eventBus.on("track:disappeared", ({ cameraId, trackId, label, timestamp }) => {
+  if (!importantLabelsSet.has(label)) return;
   console.log(`[Track] ${new Date(timestamp).toLocaleTimeString("zh-CN")} | ${cameraId} | ${label}#${trackId} 消失`);
 });
 

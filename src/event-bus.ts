@@ -38,6 +38,8 @@ export interface EventPayloads {
     frameImage: Buffer;
     /** 是否为有意义的检测结果变化（用于事件记录/通知去重） */
     changed?: boolean;
+    /** AI 推理耗时（毫秒） */
+    inferMs?: number;
   };
 
   /** 摄像头上线 */

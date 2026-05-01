@@ -990,9 +990,18 @@ export function startServer(
   const headerLenBuf = new Uint8Array(4);
   const headerLenView = new DataView(headerLenBuf.buffer);
 
+  /** 关注的目标标签（track 事件只推送关注的目标） */
+  const wsImportantLabels = new Set(runtimeConfig.get().ai.importantLabels);
+
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
+      /** track 事件只推送关注的目标 */
+      if (event === "track:appeared" || event === "track:disappeared") {
+        const p = payload as { label: string };
+        if (!wsImportantLabels.has(p.label)) return;
+      }
+
       let frameData: Buffer | null = null;
 
       /** 构建 JSON 头（只保留事件类型和元数据，不含二进制） */
@@ -1009,9 +1018,9 @@ export function startServer(
         if (now - lastSent < FRAME_THROTTLE_MS) return;
         lastFrameSent.set(cameraId, now);
       } else if (event === "detect") {
-        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer; changed?: boolean };
+        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer; changed?: boolean; inferMs?: number };
         frameData = detectPayload.annotatedImage ?? null;
-        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections, changed: detectPayload.changed };
+        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections, changed: detectPayload.changed, inferMs: detectPayload.inferMs };
       } else {
         header = { event, ...payload };
       }

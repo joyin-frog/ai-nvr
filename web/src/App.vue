@@ -149,6 +149,8 @@ const cameras = ref<CameraStatus[]>([])
 const cameraOrder = ref<string[]>(JSON.parse(localStorage.getItem('nvr-camera-order') ?? '[]'))
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
+/** 每个摄像头的 AI 推理耗时（ms） */
+const cameraInferMs = ref<Record<string, number>>({})
 /** 是否显示检测框（从 settings API 获取） */
 const showBoxes = ref(true)
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
@@ -532,6 +534,10 @@ function setupEventListeners() {
     detectionsMap.value = { ...detectionsMap.value }
     detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
     detectVersions.value = { ...detectVersions.value }
+    if (payload.inferMs) {
+      cameraInferMs.value[payload.cameraId] = payload.inferMs
+      cameraInferMs.value = { ...cameraInferMs.value }
+    }
     /** 标注图快照 */
     if (payload.annotatedData) {
       const oldSnap = detectSnapshots.value[payload.cameraId]
@@ -773,6 +779,7 @@ onUnmounted(() => {
                 :recording="cam.recording"
                 :recording-start="cam.recordingStart"
                 :show-boxes="showBoxes"
+                :infer-ms="cameraInferMs[cam.id] ?? 0"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
               />

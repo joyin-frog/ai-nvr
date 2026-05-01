@@ -12,7 +12,7 @@ export interface Detection {
 export interface EventMap {
   frame: { cameraId: string; timestamp: number; jpegData: ArrayBuffer }
   motion: { cameraId: string; ratio: number; timestamp: number }
-  detect: { cameraId: string; timestamp: number; detections: Detection[]; annotatedData?: ArrayBuffer; changed?: boolean }
+  detect: { cameraId: string; timestamp: number; detections: Detection[]; annotatedData?: ArrayBuffer; changed?: boolean; inferMs?: number }
   'camera:online': { cameraId: string }
   'camera:offline': { cameraId: string }
   'camera:lowfps': { cameraId: string; fps: number }

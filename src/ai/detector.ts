@@ -384,6 +384,7 @@ export class AiDetector {
         annotatedImage,
         frameImage: jpeg,
         changed,
+        inferMs: result.inferMs,
       });
       const trackIds = trackResult.detections.map(d => `${d.label}#${d.trackId}`).join(", ");
       console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);

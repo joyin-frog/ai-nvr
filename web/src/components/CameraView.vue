@@ -32,6 +32,8 @@ const props = defineProps<{
   showBoxes?: boolean
   /** 追踪标签映射：trackId -> 自定义名称 */
   trackLabels?: Record<number, string>
+  /** AI 推理耗时（ms） */
+  inferMs?: number
 }>()
 
 const emit = defineEmits<{
@@ -491,6 +493,10 @@ onUnmounted(() => {
       <div v-if="online && hasFrame && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
         {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
       </div>
+      <!-- AI 推理耗时 -->
+      <div v-if="online && hasFrame && (inferMs ?? 0) > 0" class="infer-badge">
+        AI {{ inferMs!.toFixed(0) }}ms
+      </div>
     </div>
 
     <div class="camera-footer" v-if="showBoxes && sortedDetections.length > 0">
@@ -818,6 +824,21 @@ onUnmounted(() => {
 
 .latency-badge.poor {
   background: rgba(244, 67, 54, 0.7);
+}
+
+/* AI 推理耗时 */
+.infer-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 130px;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Courier New', Courier, monospace;
+  pointer-events: none;
+  color: #fff;
+  background: rgba(156, 39, 176, 0.65);
 }
 
 /* 数字时钟叠加 */
