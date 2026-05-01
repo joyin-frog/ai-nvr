@@ -251,6 +251,19 @@ async function runCleanup() {
       const total = (report.events ?? 0) + (report.alerts ?? 0) + (report.snapshots ?? 0)
       alert(t('settings.cleanupDone', { count: total }))
     }
+    loadCleanupStats()
+  } catch {
+    // ignore
+  }
+}
+
+/** 清理统计（含磁盘压力） */
+const cleanupStats = ref<{ diskPressure: string; diskUsedPercent: number } | null>(null)
+
+async function loadCleanupStats() {
+  try {
+    const res = await authFetch('/api/cleanup/stats')
+    if (res.ok) cleanupStats.value = await res.json()
   } catch {
     // ignore
   }
@@ -260,6 +273,7 @@ onMounted(() => {
   loadSettings()
   loadModelInfo()
   loadCameras()
+  loadCleanupStats()
 })
 </script>
 
@@ -548,6 +562,13 @@ onMounted(() => {
       <!-- 数据清理 -->
       <section class="section">
         <h3>{{ t('settings.cleanup') }}</h3>
+        <div v-if="cleanupStats" class="disk-pressure" :class="cleanupStats.diskPressure">
+          <span class="pressure-dot"></span>
+          <span>{{ t('settings.diskUsage', '磁盘使用') }}: {{ cleanupStats.diskUsedPercent }}%</span>
+          <span v-if="cleanupStats.diskPressure !== 'normal'" class="pressure-hint">
+            {{ t('settings.diskPressureHint', '自动缩短保留天数') }}
+          </span>
+        </div>
         <label class="field">
           <span class="field-label">{{ t('settings.eventsRetention') }}</span>
           <input type="number" v-model.number="settings.cleanup.eventsRetentionDays" step="1" min="1" max="365" class="input" />
@@ -646,6 +667,48 @@ onMounted(() => {
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.disk-pressure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #1a2a1a;
+  color: #4CAF50;
+}
+
+.disk-pressure.warning {
+  background: #2a2a1a;
+  color: #FFC107;
+}
+
+.disk-pressure.critical {
+  background: #2a1a1a;
+  color: #e74c3c;
+  animation: pressure-blink 1s infinite;
+}
+
+.pressure-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.pressure-hint {
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+@keyframes pressure-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .field {

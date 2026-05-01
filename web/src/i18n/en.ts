@@ -338,6 +338,8 @@ export default {
     modelLoadFailed: 'Model load failed: {error}',
     modelLoadError: 'Model load request failed',
     cleanupDone: 'Cleanup done: {count} records deleted',
+    diskUsage: 'Disk Usage',
+    diskPressureHint: 'Auto-shortening retention',
     loading: 'Loading...',
     dingtalkSecretPlaceholder: 'SEC... (optional)',
     watermarkEnabled: 'Recording Watermark',

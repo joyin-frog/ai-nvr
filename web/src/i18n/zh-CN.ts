@@ -340,6 +340,8 @@ export default {
     modelLoadFailed: '模型加载失败: {error}',
     modelLoadError: '模型加载请求失败',
     cleanupDone: '清理完成: {count} 条记录已删除',
+    diskUsage: '磁盘使用',
+    diskPressureHint: '自动缩短保留天数',
     loading: '加载中...',
     dingtalkSecretPlaceholder: 'SEC...（可选）',
     watermarkEnabled: '录像水印',
