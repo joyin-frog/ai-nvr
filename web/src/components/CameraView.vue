@@ -517,6 +517,20 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
     }
   }
 
+  /** 右上角：检测目标摘要（如 "张三 · 李四 +1 · car"） */
+  const summary = detectionSummary.value
+  if (summary && props.showBoxes !== false) {
+    ctx.font = 'bold 11px monospace'
+    ctx.textBaseline = 'top'
+    const pad = 5
+    const sm = ctx.measureText(summary)
+    const smW = sm.width + pad * 2
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.fillRect(width - smW - 4, 4, smW, 18)
+    ctx.fillStyle = '#4ECDC4'
+    ctx.fillText(summary, width - smW - 4 + pad, 8)
+  }
+
   ctx.restore()
 }
 
