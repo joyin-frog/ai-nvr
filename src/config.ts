@@ -166,7 +166,7 @@ export function loadConfig(configPath?: string): AppConfig {
       model: (aiNode?.model as string) ?? "onnx-community/rfdetr_nano-ONNX",
       threshold: (aiNode?.threshold as number) ?? 0.5,
       maxDetections: (aiNode?.max_detections as number) ?? 20,
-      inputWidth: (aiNode?.input_width as number) ?? 0,
+      inputWidth: (aiNode?.input_width as number) ?? 640,
       showBoxes: (aiNode?.show_boxes as boolean) ?? true,
       mode: (aiNode?.mode === "continuous" ? "continuous" : "motion") as DetectMode,
       interval: (aiNode?.interval as number) ?? 1000,

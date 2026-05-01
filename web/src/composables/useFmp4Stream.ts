@@ -210,7 +210,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         const codecLen = (raw[2]! << 8) | raw[1]!
         if (raw.length < 3 + codecLen) return
         const codec = new TextDecoder().decode(raw.subarray(3, 3 + codecLen))
-        const fmp4Data = raw.subarray(3 + codecLen).buffer
+        /** slice 创建独立 ArrayBuffer，避免 subarray.buffer 指向完整原始 buffer */
+        const fmp4Data = raw.slice(3 + codecLen).buffer
 
         /** codec 变化时需要重建 SourceBuffer */
         if (currentCodec !== codec) {
@@ -223,7 +224,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         }
         doAppend(fmp4Data)
       } else if (type === FMP4_TYPE_MEDIA) {
-        const fmp4Data = raw.subarray(1).buffer
+        /** slice 创建独立 ArrayBuffer，避免将 type 标记字节传入 MSE */
+        const fmp4Data = raw.slice(1).buffer
         queueAppend(fmp4Data)
 
         /** FPS 统计 */

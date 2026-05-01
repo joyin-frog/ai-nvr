@@ -120,12 +120,24 @@ export function startServer(
     return msg;
   }
 
-  /** 封装 fMP4 media segment */
+  /** 封装 fMP4 media segment（共享 Buffer，多客户端复用） */
   function encodeFmp4Media(data: Buffer): Buffer {
     const msg = Buffer.alloc(1 + data.length);
     msg[0] = FMP4_TYPE_MEDIA;
     data.copy(msg, 1);
     return msg;
+  }
+
+  /** 缓存最近编码的 media segment（避免 N 客户端重复编码） */
+  let cachedMediaMsg: { dataPtr: Buffer; encoded: Buffer } | null = null;
+
+  function getOrEncodeMedia(data: Buffer): Buffer {
+    if (cachedMediaMsg && cachedMediaMsg.dataPtr === data) {
+      return cachedMediaMsg.encoded;
+    }
+    const encoded = encodeFmp4Media(data);
+    cachedMediaMsg = { dataPtr: data, encoded };
+    return encoded;
   }
 
   function handleFmp4Connection(ws: WsClient, cameraId: string, camMgr: CameraManager, bus: EventBus) {
@@ -155,7 +167,7 @@ export function startServer(
     /** 监听 media segment */
     const unsubSeg = bus.on("fmp4:segment", (payload) => {
       if (payload.cameraId === cameraId) {
-        ws.send(encodeFmp4Media(payload.data));
+        ws.send(getOrEncodeMedia(payload.data));
       }
     });
     unsubs.push(unsubSeg);
