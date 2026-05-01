@@ -650,7 +650,7 @@ onUnmounted(() => {
     <!-- 合并确认对话框 -->
     <div v-if="mergeConfirm" class="merge-overlay" @click.self="mergeConfirm = null">
       <div class="merge-dialog">
-        <p class="merge-text">{{ t('tracks.mergeConfirm', `名称「${mergeConfirm.name}」已被其他目标使用`) }}</p>
+        <p class="merge-text">{{ t('tracks.mergeConfirm', { name: mergeConfirm.name }) }}</p>
         <p class="merge-hint">{{ t('tracks.mergeHint', '合并将把两个目标的记录整合到一起') }}</p>
         <div class="merge-actions">
           <button class="merge-yes-btn" @click="confirmMerge">{{ t('tracks.mergeAction', '合并') }}</button>

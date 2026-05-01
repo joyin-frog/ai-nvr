@@ -253,6 +253,7 @@ export default {
     testFail: 'Failed',
     testVideoInfo: 'Video: {info}',
     confirm: 'Confirm',
+    cancel: 'Cancel',
   },
   alert: {
     title: 'Alerts',

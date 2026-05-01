@@ -255,6 +255,7 @@ export default {
     testFail: '连接失败',
     testVideoInfo: '视频: {info}',
     confirm: '确认',
+    cancel: '取消',
   },
   alert: {
     title: '告警',
