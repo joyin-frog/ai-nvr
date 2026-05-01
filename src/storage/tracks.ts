@@ -40,6 +40,8 @@ interface TrackRecord {
   dhash?: string;
   /** HSV 颜色直方图（H=8 bins, S=4 bins, V=4 bins，共 128 维，量化为 uint8[]） */
   colorHist?: number[];
+  /** LBP 纹理直方图（uniform 模式 59 bins，量化为 uint8[]） */
+  lbpHist?: number[];
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -92,6 +94,7 @@ export class TrackStorage {
           /** 更新 dHash 和颜色直方图 */
           record.dhash = await this.computeDHash(frameImage, box);
           record.colorHist = await this.computeColorHist(frameImage, box);
+          record.lbpHist = await this.computeLBP(frameImage, box);
         }
       }
       this.scheduleSave();
@@ -103,6 +106,7 @@ export class TrackStorage {
     /** 计算 dHash 和颜色直方图 */
     const dhash = box ? await this.computeDHash(frameImage, box) : undefined;
     const colorHist = box ? await this.computeColorHist(frameImage, box) : undefined;
+    const lbpHist = box ? await this.computeLBP(frameImage, box) : undefined;
 
     record = {
       trackId,
@@ -115,6 +119,7 @@ export class TrackStorage {
       bestSnapshotScore: snapshotScore,
       dhash,
       colorHist,
+      lbpHist,
     };
     this.tracks.set(trackId, record);
     this.scheduleSave();
@@ -206,10 +211,10 @@ export class TrackStorage {
    */
   getSuggestions(): Array<{ trackId: number; label: string; suggestedName: string; distance: number }> {
     /** 收集所有已命名目标（有 dhash） */
-    const named: Array<{ trackId: number; label: string; customName: string; dhash: string; colorHist?: number[] }> = [];
+    const named: Array<{ trackId: number; label: string; customName: string; dhash: string; colorHist?: number[]; lbpHist?: number[] }> = [];
     for (const r of this.tracks.values()) {
       if (r.customName && r.dhash) {
-        named.push({ trackId: r.trackId, label: r.label, customName: r.customName, dhash: r.dhash, colorHist: r.colorHist });
+        named.push({ trackId: r.trackId, label: r.label, customName: r.customName, dhash: r.dhash, colorHist: r.colorHist, lbpHist: r.lbpHist });
       }
     }
     if (named.length === 0) return [];
@@ -220,14 +225,9 @@ export class TrackStorage {
       let bestDist = Infinity;
       let bestName = "";
       for (const n of named) {
-        const dhashDist = TrackStorage.hammingDistance(r.dhash, n.dhash) / 64;
-        let colorDist = 0.5;
-        if (r.colorHist && n.colorHist) {
-          colorDist = TrackStorage.colorHistDistance(r.colorHist, n.colorHist);
-        }
-        const combinedDist = (r.colorHist && n.colorHist)
-          ? dhashDist * 0.5 + colorDist * 0.5
-          : dhashDist;
+        const combinedDist = TrackStorage.computeAppearanceDistance(
+          r.dhash, n.dhash, r.colorHist, n.colorHist, r.lbpHist, n.lbpHist,
+        );
 
         /** 同标签直接比较；跨标签需要更近距离才接受 */
         const threshold = n.label === r.label ? 0.4 : 0.3;
@@ -483,6 +483,153 @@ export class TrackStorage {
   }
 
   /**
+   * 计算 LBP（Local Binary Pattern）纹理直方图
+   * 使用 uniform 模式（59 bins: 0-57 为 uniform 模式，58 为所有非 uniform 模式）
+   * 对光照变化鲁棒，能有效区分不同纹理（如衣物花纹）
+   */
+  async computeLBP(frameImage: Buffer, box: Detection["box"]): Promise<number[]> {
+    if (!box) return [];
+    const image = sharp(frameImage);
+    const meta = await image.metadata();
+    if (!meta.width || !meta.height) return [];
+
+    const padW = (box.xmax - box.xmin) * 0.2;
+    const padH = (box.ymax - box.ymin) * 0.2;
+    const left = Math.max(0, Math.floor((box.xmin - padW) * meta.width));
+    const top = Math.max(0, Math.floor((box.ymin - padH) * meta.height));
+    const width = Math.min(meta.width - left, Math.ceil((box.xmax - box.xmin + padW * 2) * meta.width));
+    const height = Math.min(meta.height - top, Math.ceil((box.ymax - box.ymin + padH * 2) * meta.height));
+
+    if (width < 10 || height < 10) return [];
+
+    /** 缩小到 32x32 减少计算量 */
+    const { data, info } = await image
+      .extract({ left, top, width, height })
+      .resize(32, 32, { fit: "fill" })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    /** LBP uniform 模式表：8 邻域最多 58 种 uniform 模式 */
+    const HIST_BINS = 59;
+    const bins = new Float64Array(HIST_BINS);
+    let totalPixels = 0;
+
+    for (let y = 1; y < info.height - 1; y++) {
+      for (let x = 1; x < info.width - 1; x++) {
+        const center = data[y * info.width + x]!;
+        /** 8 邻域顺时针从右上角开始 */
+        const neighbors = [
+          data[(y - 1) * info.width + x + 1]!,
+          data[y * info.width + x + 1]!,
+          data[(y + 1) * info.width + x + 1]!,
+          data[(y + 1) * info.width + x]!,
+          data[(y + 1) * info.width + x - 1]!,
+          data[y * info.width + x - 1]!,
+          data[(y - 1) * info.width + x - 1]!,
+          data[(y - 1) * info.width + x]!,
+        ];
+
+        /** 计算 LBP 值 */
+        let lbpVal = 0;
+        for (let i = 0; i < 8; i++) {
+          if (neighbors[i]! >= center) lbpVal |= (1 << i);
+        }
+
+        /** 映射到 uniform 模式 */
+        const bin = TrackStorage.lbpToUniform(lbpVal);
+        bins[bin]!++;
+        totalPixels++;
+      }
+    }
+
+    if (totalPixels === 0) return [];
+
+    /** 归一化并量化到 0-255 */
+    const result: number[] = new Array(HIST_BINS);
+    for (let i = 0; i < HIST_BINS; i++) {
+      result[i] = Math.round((bins[i]! / totalPixels) * 255);
+    }
+    return result;
+  }
+
+  /**
+   * 将 LBP 值映射到 uniform 模式索引（0-58）
+   * Uniform 模式：0→1 跳变次数 ≤ 2
+   */
+  private static lbpToUniform(lbp: number): number {
+    /** 计算 0→1 的跳变次数 */
+    let transitions = 0;
+    for (let i = 0; i < 8; i++) {
+      const curr = (lbp >> i) & 1;
+      const next = (lbp >> ((i + 1) % 8)) & 1;
+      if (curr !== next) transitions++;
+    }
+    /** 非 uniform 模式 → bin 58 */
+    if (transitions > 2) return 58;
+    /** uniform 模式 → 计算 1 的位数 */
+    let ones = 0;
+    for (let i = 0; i < 8; i++) {
+      if ((lbp >> i) & 1) ones++;
+    }
+    /** ones=0 → bin 0, ones=1 → bin 1-8, ones=2 → bin 9-16, ... */
+    /** 简化：直接用 ones 作为索引（0-8 映射到 0-8），其余 uniform 模式按顺序 */
+    if (ones <= 1) return ones;
+    if (ones === 7) return 57;
+    if (ones === 8) return 0;
+    /** ones 2-6：按旋转角度排序 */
+    return ones - 2 + 9;
+  }
+
+  /**
+   * 计算两个 LBP 直方图的卡方距离
+   * 返回 0-1 归一化距离
+   */
+  static lbpDistance(a: number[], b: number[]): number {
+    if (a.length !== 59 || b.length !== 59) return 1;
+    let chiSq = 0;
+    for (let i = 0; i < 59; i++) {
+      const ai = a[i]! / 255;
+      const bi = b[i]! / 255;
+      const sum = ai + bi;
+      if (sum > 0) {
+        chiSq += ((ai - bi) * (ai - bi)) / sum;
+      }
+    }
+    return Math.min(1, chiSq / 2);
+  }
+
+  /**
+   * 计算综合外观距离（dHash + 颜色 + LBP 三维特征融合）
+   * 权重：dHash 0.35 + 颜色 0.35 + LBP 0.30
+   * 缺少某个特征时，其权重分配给已有特征
+   */
+  static computeAppearanceDistance(
+    dhashA: string, dhashB: string,
+    colorA?: number[], colorB?: number[],
+    lbpA?: number[], lbpB?: number[],
+  ): number {
+    const dhashDist = TrackStorage.hammingDistance(dhashA, dhashB) / 64;
+    const hasColor = colorA && colorA.length === 128 && colorB && colorB.length === 128;
+    const hasLbp = lbpA && lbpA.length === 59 && lbpB && lbpB.length === 59;
+
+    if (hasColor && hasLbp) {
+      const colorDist = TrackStorage.colorHistDistance(colorA!, colorB!);
+      const lbpDist = TrackStorage.lbpDistance(lbpA!, lbpB!);
+      return dhashDist * 0.35 + colorDist * 0.35 + lbpDist * 0.30;
+    }
+    if (hasColor) {
+      const colorDist = TrackStorage.colorHistDistance(colorA!, colorB!);
+      return dhashDist * 0.50 + colorDist * 0.50;
+    }
+    if (hasLbp) {
+      const lbpDist = TrackStorage.lbpDistance(lbpA!, lbpB!);
+      return dhashDist * 0.55 + lbpDist * 0.45;
+    }
+    return dhashDist;
+  }
+
+  /**
    * HSV 色相范围 → 颜色名称
    * H 在 HSV 空间中范围是 0-1，对应 0°-360°
    */
@@ -545,8 +692,7 @@ export class TrackStorage {
 
   /**
    * 查找与指定目标外观相似的已命名目标
-   * 综合使用 dHash（结构相似度）和颜色直方图（颜色相似度）
-   * 综合距离 = dHash 距离 / 64（归一化）× 0.5 + 颜色距离 × 0.5
+   * 综合使用 dHash（结构）+ 颜色直方图（颜色）+ LBP（纹理）
    */
   findSimilar(
     trackId: number,
@@ -557,6 +703,8 @@ export class TrackStorage {
     maxDistance = 0.4,
     /** 颜色直方图（可选，提供时参与匹配） */
     colorHist?: number[],
+    /** LBP 纹理直方图（可选，提供时参与匹配） */
+    lbpHist?: number[],
   ): Array<{ trackId: number; customName: string; distance: number }> {
     if (!dhash) return [];
 
@@ -568,19 +716,9 @@ export class TrackStorage {
       if (record.trackId === trackId) continue;
       if (!record.customName || !record.dhash) continue;
 
-      /** dHash 结构距离（归一化到 0-1） */
-      const dhashDist = TrackStorage.hammingDistance(dhash, record.dhash) / 64;
-
-      /** 颜色直方图距离 */
-      let colorDist = 0.5;
-      if (colorHist && record.colorHist) {
-        colorDist = TrackStorage.colorHistDistance(colorHist, record.colorHist);
-      }
-
-      /** 综合距离：有颜色信息时各 50%，无颜色信息时纯用 dHash */
-      const combinedDist = (colorHist && record.colorHist)
-        ? dhashDist * 0.5 + colorDist * 0.5
-        : dhashDist;
+      const combinedDist = TrackStorage.computeAppearanceDistance(
+        dhash, record.dhash, colorHist, record.colorHist, lbpHist, record.lbpHist,
+      );
 
       if (record.label === label) {
         /** 同标签：使用原始阈值 */

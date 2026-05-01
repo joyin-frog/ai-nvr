@@ -389,7 +389,7 @@ export class AiDetector {
             /** 快照保存后，查找外观相似的已命名目标 */
             const record = this.trackStorage!.getRecord(target.trackId);
             if (record?.dhash) {
-              const matches = this.trackStorage!.findSimilar(target.trackId, cameraId, target.label, record.dhash, 0.4, record.colorHist);
+              const matches = this.trackStorage!.findSimilar(target.trackId, cameraId, target.label, record.dhash, 0.4, record.colorHist, record.lbpHist);
               if (matches.length > 0) {
                 this.eventBus.emit("track:match-suggest", {
                   cameraId,
