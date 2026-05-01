@@ -43,6 +43,8 @@ const props = defineProps<{
   detectFps?: number
   /** ROI 区域列表（归一化坐标多边形） */
   roiRegions?: Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>
+  /** 越线检测线段列表（归一化坐标） */
+  crossLines?: Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>
 }>()
 
 const emit = defineEmits<{
@@ -898,6 +900,71 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
         ctx.fillText(roi.name, cx, cy)
         ctx.textAlign = 'start'
         ctx.setLineDash([6, 4])
+      }
+    }
+    ctx.setLineDash([])
+  }
+
+  /** 绘制越线检测线段 */
+  if (props.crossLines && props.crossLines.length > 0) {
+    ctx.lineWidth = 2
+    ctx.setLineDash([4, 3])
+    for (const line of props.crossLines) {
+      const sx = line.start.x * width
+      const sy = line.start.y * height
+      const ex = line.end.x * width
+      const ey = line.end.y * height
+      /** 线段 */
+      ctx.strokeStyle = 'rgba(255, 111, 0, 0.7)'
+      ctx.beginPath()
+      ctx.moveTo(sx, sy)
+      ctx.lineTo(ex, ey)
+      ctx.stroke()
+      /** 端点圆点 */
+      ctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
+      ctx.beginPath()
+      ctx.arc(sx, sy, 3, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(ex, ey, 3, 0, Math.PI * 2)
+      ctx.fill()
+      /** 方向箭头（线段中点） */
+      const dx = ex - sx
+      const dy = ey - sy
+      const len = Math.sqrt(dx * dx + dy * dy)
+      if (len > 0) {
+        const mx = (sx + ex) / 2
+        const my = (sy + ey) / 2
+        const nx = dx / len
+        const ny = dy / len
+        const arrowSize = 6
+        const tx = mx + nx * arrowSize
+        const ty = my + ny * arrowSize
+        const lx = mx - nx * arrowSize * 0.5 - ny * arrowSize * 0.4
+        const ly = my - ny * arrowSize * 0.5 + nx * arrowSize * 0.4
+        const rx = mx - nx * arrowSize * 0.5 + ny * arrowSize * 0.4
+        const ry = my - ny * arrowSize * 0.5 - nx * arrowSize * 0.4
+        ctx.setLineDash([])
+        ctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
+        ctx.beginPath()
+        ctx.moveTo(lx, ly)
+        ctx.lineTo(tx, ty)
+        ctx.lineTo(rx, ry)
+        ctx.closePath()
+        ctx.fill()
+        ctx.setLineDash([4, 3])
+      }
+      /** 线段名称 */
+      if (line.name) {
+        ctx.setLineDash([])
+        ctx.font = 'bold 9px sans-serif'
+        ctx.fillStyle = 'rgba(255, 111, 0, 0.9)'
+        ctx.textAlign = 'center'
+        const labelY = Math.min(sy, ey) - 6
+        const labelX = (sx + ex) / 2
+        ctx.fillText(line.name, labelX, labelY)
+        ctx.textAlign = 'start'
+        ctx.setLineDash([4, 3])
       }
     }
     ctx.setLineDash([])

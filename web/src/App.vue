@@ -189,6 +189,8 @@ const trackLabelsMap = ref<Record<string, Record<number, string>>>({})
 const frameLatency = ref<Record<string, number>>({})
 /** ROI 区域数据（按摄像头分组） */
 const roiDataMap = ref<Record<string, Array<{ id: number; name: string; points: string }>>>({})
+/** 越线检测线段数据（按摄像头分组） */
+const crossLineDataMap = ref<Record<string, Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>>>({})
 /** 摄像头 ID → 解析后的 ROI 列表（归一化坐标） */
 const parsedRoiMap = computed(() => {
   const result: Record<string, Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>> = {}
@@ -347,8 +349,27 @@ async function loadRoiData() {
       grouped[r.cameraId]!.push({ id: r.id, name: r.name, points: r.points })
     }
     roiDataMap.value = grouped
+    /** 同时加载越线检测线段 */
+    loadCrossLineData()
   } catch {
     toastWarning('ROI ' + t('app.loadFailed'))
+  }
+}
+
+/** 加载越线检测线段数据 */
+async function loadCrossLineData() {
+  try {
+    const res = await authFetch('/api/cross-lines')
+    if (!res.ok) return
+    const allLines = await res.json() as Array<{ id: number; cameraId: string; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>
+    const grouped: Record<string, Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>> = {}
+    for (const l of allLines) {
+      if (!grouped[l.cameraId]) grouped[l.cameraId] = []
+      grouped[l.cameraId]!.push({ id: l.id, name: l.name, start: l.start, end: l.end })
+    }
+    crossLineDataMap.value = grouped
+  } catch {
+    // ignore
   }
 }
 
@@ -965,6 +986,7 @@ onUnmounted(() => {
                 :dual-stream="cam.dualStream"
                 :detect-fps="cam.detectFps"
                 :roi-regions="parsedRoiMap[cam.id]"
+                :cross-lines="crossLineDataMap[cam.id]"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
                 @track-label-updated="loadTrackLabels"
