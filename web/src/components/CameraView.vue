@@ -851,6 +851,49 @@ function onCanvasContext(e: MouseEvent) {
   nextTick(() => namingInput.value?.focus())
 }
 
+/** 触屏长按命名支持（移动端） */
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressTarget: { trackId: number; label: string; x: number; y: number } | null = null
+
+function onTouchStart(e: TouchEvent) {
+  if (e.touches.length !== 1) return
+  const touch = e.touches[0]!
+  const sorted = getSortedDetections()
+  if (sorted.length === 0) return
+  const canvas = e.currentTarget as HTMLElement
+  const rect = canvas.getBoundingClientRect()
+  const nx = (touch.clientX - rect.left) / rect.width
+  const ny = (touch.clientY - rect.top) / rect.height
+
+  let best: { trackId?: number; label: string; box: Detection['box'] } | null = null
+  let bestArea = Infinity
+  for (const d of sorted) {
+    const box = getSmoothedBox(d)
+    if (nx >= box.xmin && nx <= box.xmax && ny >= box.ymin && ny <= box.ymax) {
+      const area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
+      if (area < bestArea) { best = d; bestArea = area }
+    }
+  }
+  if (!best || !best.trackId) { longPressTarget = null; return }
+  longPressTarget = { trackId: best.trackId, label: best.label, x: nx * 100, y: ny * 100 }
+  longPressTimer = setTimeout(() => {
+    if (!longPressTarget) return
+    const existing = props.trackLabels?.[longPressTarget.trackId] ?? ''
+    namingBox.value = longPressTarget
+    namingName.value = existing
+    nextTick(() => namingInput.value?.focus())
+    longPressTarget = null
+  }, 600)
+}
+
+function onTouchMove() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressTarget = null }
+}
+
+function onTouchEnd() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressTarget = null }
+}
+
 async function saveNaming() {
   if (!namingBox.value || !namingName.value.trim()) { cancelNaming(); return }
   const { trackId, label } = namingBox.value
@@ -1099,6 +1142,9 @@ onUnmounted(() => {
               ref="overlayCanvas"
               class="camera-overlay"
               @contextmenu.prevent="onCanvasContext"
+              @touchstart="onTouchStart"
+              @touchmove="onTouchMove"
+              @touchend="onTouchEnd"
             />
           </div>
         </template>
@@ -1109,6 +1155,9 @@ onUnmounted(() => {
           class="camera-image"
           :style="{ filter: imageFilter }"
           @contextmenu.prevent="onCanvasContext"
+          @touchstart="onTouchStart"
+          @touchmove="onTouchMove"
+          @touchend="onTouchEnd"
         />
         <div v-else class="camera-placeholder">
           <div v-if="online" class="placeholder-icon">&#9679;</div>
