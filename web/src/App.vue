@@ -438,6 +438,7 @@ function startApp() {
       } else {
         loadCameras()
         eventPanel.value?.loadHistory()
+        recordingsPanel.value?.loadRecordings()
       }
     }
   })
