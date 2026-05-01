@@ -363,6 +363,8 @@ export default {
     soundAlert: '声音提醒',
     soundEnabled: '启用提示音',
     soundVolume: '音量',
+    soundTriggerEvents: '触发事件',
+    soundTriggerHint: '不选则所有事件都触发声音',
   },
   login: {
     title: 'JK NVR 登录',

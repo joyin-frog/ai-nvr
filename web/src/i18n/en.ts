@@ -361,6 +361,8 @@ export default {
     soundAlert: 'Sound Alert',
     soundEnabled: 'Enable alert sound',
     soundVolume: 'Volume',
+    soundTriggerEvents: 'Trigger Events',
+    soundTriggerHint: 'Leave empty to trigger on all events',
   },
   login: {
     title: 'JK NVR Login',

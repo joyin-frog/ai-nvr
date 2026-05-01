@@ -34,15 +34,41 @@ const PRESET_MODELS = [
 /** 声音提醒设置 */
 const soundEnabled = ref(true)
 const soundVolume = ref(80)
+/** 触发声音的事件类型（空数组=所有事件都触发） */
+const soundEvents = ref<string[]>([])
+
+/** 所有可配置的声音事件类型 */
+const SOUND_EVENT_OPTIONS = [
+  { key: 'camera:offline', label: '摄像头离线' },
+  { key: 'camera:lowfps', label: '低帧率' },
+  { key: 'alert', label: '告警' },
+  { key: 'detect', label: 'AI 检测' },
+  { key: 'track:appeared', label: '目标出现' },
+  { key: 'track:speed', label: '高速移动' },
+  { key: 'motion', label: '画面变动' },
+] as const
 
 getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
 getPref<number>('nvr-sound-volume', 80).then(v => { soundVolume.value = v })
+getPref<string[]>('nvr-sound-events', []).then(v => { soundEvents.value = v })
 
 function onSoundToggle() {
   setPref('nvr-sound-alert', soundEnabled.value)
 }
 function onVolumeChange() {
   setPref('nvr-sound-volume', soundVolume.value)
+}
+function onSoundEventToggle() {
+  setPref('nvr-sound-events', soundEvents.value)
+}
+function toggleSoundEvent(key: string) {
+  const idx = soundEvents.value.indexOf(key)
+  if (idx >= 0) {
+    soundEvents.value.splice(idx, 1)
+  } else {
+    soundEvents.value.push(key)
+  }
+  onSoundEventToggle()
 }
 
 /** 运行时设置 */
@@ -607,6 +633,18 @@ onMounted(() => {
             <span class="volume-val">{{ soundVolume }}%</span>
           </div>
         </label>
+        <div v-if="soundEnabled" class="field field-col sound-events">
+          <span class="field-label">{{ t('settings.soundTriggerEvents', '触发事件') }}</span>
+          <span class="field-hint">{{ t('settings.soundTriggerHint', '不选则所有事件都触发声音') }}</span>
+          <div class="sound-event-chips">
+            <button
+              v-for="opt in SOUND_EVENT_OPTIONS"
+              :key="opt.key"
+              :class="['event-chip', { active: soundEvents.includes(opt.key) }]"
+              @click="toggleSoundEvent(opt.key)"
+            >{{ opt.label }}</button>
+          </div>
+        </div>
       </section>
     </div>
     <div v-else class="empty">{{ t('settings.loading') }}</div>
@@ -1018,5 +1056,44 @@ onMounted(() => {
   color: #aaa;
   min-width: 36px;
   text-align: right;
+}
+
+.sound-events {
+  gap: 6px;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: #666;
+}
+
+.sound-event-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.event-chip {
+  background: #16213e;
+  color: #888;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.event-chip:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.event-chip.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border-color: #4ECDC4;
+  font-weight: 600;
 }
 </style>

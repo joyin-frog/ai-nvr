@@ -567,10 +567,24 @@ function startApp() {
 /** 声音提醒配置 */
 const soundEnabled = ref(true)
 const soundVolume = ref(0.8)
+/** 触发声音的事件类型（空数组=所有事件都触发） */
+const soundEvents = ref<string[]>([])
+
+/** 所有可配置的声音事件类型 */
+const SOUND_EVENT_OPTIONS = [
+  { key: 'camera:offline', label: '摄像头离线' },
+  { key: 'camera:lowfps', label: '低帧率' },
+  { key: 'alert', label: '告警' },
+  { key: 'detect', label: 'AI 检测' },
+  { key: 'track:appeared', label: '目标出现' },
+  { key: 'track:speed', label: '高速移动' },
+  { key: 'motion', label: '画面变动' },
+] as const
 
 /** 从后端恢复声音配置 */
 getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
 getPref<number>('nvr-sound-volume', 80).then(v => { soundVolume.value = v / 100 })
+getPref<string[]>('nvr-sound-events', []).then(v => { soundEvents.value = v })
 
 /** Web Audio API 播放提示音 */
 let audioCtx: AudioContext | null = null
@@ -591,8 +605,11 @@ function playAlertSound() {
   osc.stop(ctx.currentTime + 0.3)
 }
 
-function notify(title: string, body: string, cameraId?: string) {
-  playAlertSound()
+function notify(title: string, body: string, cameraId?: string, eventType?: string) {
+  /** 检查该事件类型是否在声音触发列表中 */
+  if (!eventType || soundEvents.value.length === 0 || soundEvents.value.includes(eventType)) {
+    playAlertSound()
+  }
   if ('Notification' in window && Notification.permission === 'granted') {
     const icon = cameraId ? authUrl(`/api/detection/annotated/${cameraId}`) : undefined
     const n = new Notification(title, { body, icon })
@@ -664,20 +681,20 @@ function setupEventListeners() {
     const cam = getCamera(payload.cameraId)
     if (cam) cam.online = false
     eventPanel.value?.addEvent('camera:offline', payload.cameraId, t('event.offline'))
-    notify(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), t('notify.cameraOfflineBody'), payload.cameraId)
+    notify(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), t('notify.cameraOfflineBody'), payload.cameraId, 'camera:offline')
     flashTitle(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), 10000)
   })
 
   client.on('camera:lowfps', (payload) => {
     const cam = getCamera(payload.cameraId)
     eventPanel.value?.addEvent('camera:lowfps', payload.cameraId, `FPS: ${payload.fps.toFixed(1)}`)
-    notify(t('notify.cameraLowFps', { name: cam?.name ?? payload.cameraId }), `FPS: ${payload.fps.toFixed(1)}`, payload.cameraId)
+    notify(t('notify.cameraLowFps', { name: cam?.name ?? payload.cameraId }), `FPS: ${payload.fps.toFixed(1)}`, payload.cameraId, 'camera:lowfps')
   })
 
   client.on('alert', (payload) => {
     eventPanel.value?.addEvent('alert', payload.cameraId, `${t('notify.alertPrefix')}: ${payload.ruleName}`)
     alertPanel.value?.addAlert(payload)
-    notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId)
+    notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId, 'alert')
     flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 
@@ -688,7 +705,7 @@ function setupEventListeners() {
     /** 已命名目标出现时发送浏览器通知 */
     if (customName) {
       const cam = cameras.value.find(c => c.id === payload.cameraId)
-      notify(displayName, `${t('event.trackAppeared', '出现')} · ${cam?.name ?? payload.cameraId}`, payload.cameraId)
+      notify(displayName, `${t('event.trackAppeared', '出现')} · ${cam?.name ?? payload.cameraId}`, payload.cameraId, 'track:appeared')
     }
   })
 
