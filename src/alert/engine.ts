@@ -23,6 +23,8 @@ export class AlertEngine {
   private rulesCacheTime = 0;
   /** 缓存 TTL（30 秒） */
   private static readonly CACHE_TTL = 30_000;
+  /** EventBus 取消订阅函数 */
+  private unsubscribers: Array<() => void> = [];
 
   constructor(
     private eventBus: EventBus,
@@ -32,15 +34,24 @@ export class AlertEngine {
   /** 启动引擎 */
   start(): void {
     this.refreshRules();
-    this.eventBus.on("motion", (payload) => this.onEvent("motion", payload.cameraId, payload.timestamp, payload.ratio));
-    this.eventBus.on("detect", (payload) => this.onDetect(payload.cameraId, payload.timestamp, payload.detections));
-    this.eventBus.on("camera:offline", (payload) => {
-      this.onEvent("camera:offline", payload.cameraId, Date.now());
-    });
-    this.eventBus.on("camera:lowfps", (payload) => {
-      this.onEvent("camera:lowfps", payload.cameraId, Date.now(), `FPS: ${payload.fps}`);
-    });
+    this.unsubscribers.push(
+      this.eventBus.on("motion", (payload) => this.onEvent("motion", payload.cameraId, payload.timestamp, payload.ratio)),
+      this.eventBus.on("detect", (payload) => this.onDetect(payload.cameraId, payload.timestamp, payload.detections)),
+      this.eventBus.on("camera:offline", (payload) => {
+        this.onEvent("camera:offline", payload.cameraId, Date.now());
+      }),
+      this.eventBus.on("camera:lowfps", (payload) => {
+        this.onEvent("camera:lowfps", payload.cameraId, Date.now(), `FPS: ${payload.fps}`);
+      }),
+    );
     console.log("[AlertEngine] 告警引擎已启动");
+  }
+
+  /** 停止引擎 */
+  stop(): void {
+    for (const unsub of this.unsubscribers) unsub();
+    this.unsubscribers = [];
+    this.windows.clear();
   }
 
   /** 刷新规则缓存 */
@@ -49,6 +60,11 @@ export class AlertEngine {
     if (now - this.rulesCacheTime < AlertEngine.CACHE_TTL && this.rules.length > 0) return;
     this.rules = this.storage.getEnabledRules();
     this.rulesCacheTime = now;
+    /** 清理已删除规则的滑动窗口 */
+    const activeIds = new Set(this.rules.map(r => r.id));
+    for (const id of this.windows.keys()) {
+      if (!activeIds.has(id)) this.windows.delete(id);
+    }
   }
 
   /** 处理通用事件（motion / camera:offline / camera:lowfps） */
