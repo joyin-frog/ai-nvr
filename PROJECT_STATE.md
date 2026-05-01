@@ -310,3 +310,6 @@ RTSP → ffmpeg(-fflags nobuffer) → JpegFrameSplitter → EventBus("frame")
 - AI 推理跳过 JPEG 重编码：detect-worker 中 sharp resize 后直接输出 RGB 像素给 RawImage，省约 15-25ms JPEG 编解码开销
 - 右键命名坐标修复：onCanvasContext 使用平滑后的检测框坐标匹配点击位置
 - 语义化行为分析（BehaviorAnalyzer）：订阅 detect 事件，维护追踪目标与 ROI 区域的关系，产出 track:enter-zone（进入区域）、track:leave-zone（离开区域，含 dwellMs）、track:dwell（停留超 3 秒后每 5 秒触发），射线法判断多边形包含，告警引擎支持新事件类型含 ROI 过滤，前端事件面板/告警面板完整支持
+- 行为事件持久化：track:appeared/disappeared/enter-zone/leave-zone 存入 SQLite，track:dwell 仅停留超 30 秒时持久化（减少高频写入），事件面板历史查询可检索
+- 行为事件展开详情：事件面板展开行为事件显示名称、标签、区域名称、停留时长，支持跳转录像
+- trackName 实时同步：BehaviorAnalyzer 每帧从 detect 事件同步最新 trackName 到行为事件载荷
