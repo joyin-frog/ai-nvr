@@ -711,7 +711,8 @@ onMounted(async () => {
   registerShortcut({ key: '3', description: t('shortcuts.switchTab'), handler: () => switchTab('status') })
   registerShortcut({ key: '4', description: t('shortcuts.switchTab'), handler: () => switchTab('cameras') })
   registerShortcut({ key: '5', description: t('shortcuts.switchTab'), handler: () => switchTab('alerts') })
-  registerShortcut({ key: '6', description: t('shortcuts.switchTab'), handler: () => switchTab('settings') })
+  registerShortcut({ key: '6', description: t('shortcuts.switchTab'), handler: () => switchTab('tracks') })
+  registerShortcut({ key: '7', description: t('shortcuts.switchTab'), handler: () => switchTab('settings') })
   registerShortcut({ key: 'f', description: t('shortcuts.fullscreen'), handler: () => {
     if (fullscreenCamera.value) exitFullscreen()
     else if (cameras.value.length > 0) enterFullscreen(cameras.value[0]!.id)
@@ -886,7 +887,7 @@ onUnmounted(() => {
           <button
             :class="['tab-btn', { active: activeTab === 'tracks' }]"
             @click="switchTab('tracks')"
-          >◉ {{ t('tab.tracks', '目标') }}</button>
+          >❖ {{ t('tab.tracks', '目标') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
@@ -947,7 +948,7 @@ onUnmounted(() => {
         >⚙ {{ t('tab.settings') }}</button>
       </div>
       <div class="mobile-content">
-        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" @play-recording="onPlayRecording" />
+        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" />
         <RecordingsPanel
           v-show="activeTab === 'recordings'"
           ref="recordingsPanel"
