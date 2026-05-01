@@ -545,8 +545,9 @@ onUnmounted(() => {
           <div class="track-cameras">
             <span
               v-for="(camId, idx) in track.cameraIds" :key="camId"
-              class="cam-tag"
-              :class="{ 'cam-online': props.cameras?.find(c => c.id === camId)?.online }"
+              class="cam-tag clickable"
+              :class="{ 'cam-online': props.cameras?.find(c => c.id === camId)?.online, active: filterCamera === camId }"
+              @click="filterCamera = filterCamera === camId ? '' : camId"
             >{{ camId }}{{ idx < track.cameraIds.length - 1 ? ',' : '' }}</span>
           </div>
           <div class="action-btns">
@@ -972,6 +973,21 @@ onUnmounted(() => {
 
 .cam-tag {
   color: #555;
+  cursor: default;
+}
+
+.cam-tag.clickable {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.cam-tag.clickable:hover {
+  color: #aaa;
+}
+
+.cam-tag.active {
+  color: #4ECDC4;
+  font-weight: 600;
 }
 
 .cam-tag.cam-online {
