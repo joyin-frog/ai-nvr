@@ -96,7 +96,11 @@ const playerRef = ref<HTMLVideoElement | null>(null)
 const seekOffset = ref(-1)
 
 /** 自动连续播放开关 */
-const autoPlayNext = ref(true)
+const autoPlayNext = ref(localStorage.getItem('nvr-auto-play-next') !== 'false')
+function toggleAutoPlay() {
+  autoPlayNext.value = !autoPlayNext.value
+  localStorage.setItem('nvr-auto-play-next', String(autoPlayNext.value))
+}
 
 /** 倍速变更时同步到 video 元素 */
 function changeSpeed(speed: number) {
@@ -1140,7 +1144,7 @@ defineExpose({ loadRecordings, playAtTime })
           </select>
           <button
             :class="['autoplay-btn', { active: autoPlayNext }]"
-            @click="autoPlayNext = !autoPlayNext"
+            @click="toggleAutoPlay"
             :title="t('recording.autoPlayNext')"
           >&#9654;&#9654;</button>
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
