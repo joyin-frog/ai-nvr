@@ -2,8 +2,18 @@ import { type Detection } from "@/ai/types";
 
 /** 事件载荷类型定义 */
 export interface EventPayloads {
-  /** 原始帧事件：每到一个帧就触发 */
+  /** 原始帧事件：每到一个帧就触发，用于前端显示和录像 */
   frame: {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** JPEG 帧数据 */
+    data: Buffer;
+    /** 时间戳 */
+    timestamp: number;
+  };
+
+  /** 检测帧事件：用于 AI 检测和变动检测（双流模式下由 SD 流触发，单流模式等同于 frame） */
+  "detect:frame": {
     /** 摄像头 ID */
     cameraId: string;
     /** JPEG 帧数据 */

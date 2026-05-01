@@ -44,9 +44,10 @@ export class MotionDetector {
     return state;
   }
 
-  /** 启动检测：监听帧事件 */
+  /** 启动检测：监听检测帧事件 */
   start(): void {
-    this.eventBus.on("frame", (payload) => {
+    /** 双流模式下由 SD 检测流触发，单流模式下由共用流触发 */
+    this.eventBus.on("detect:frame", (payload) => {
       this.processFrame(payload.cameraId, payload.data, payload.timestamp);
     });
   }

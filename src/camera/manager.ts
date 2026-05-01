@@ -6,12 +6,20 @@ import { FrameExtractor } from "./stream";
 /**
  * 摄像头管理器
  * 为每个启用的摄像头创建并管理帧提取器实例
- * 支持动态增删摄像头（配置热重载）
+ *
+ * 双流模式：当 HD 和 SD 码流都配置时
+ *   - HD 流（display）：高帧率、原始分辨率 → 用于前端显示和录像
+ *   - SD 流（detect）：低帧率、可缩放 → 用于 AI 检测和变动检测
+ * 单流模式：只有一个码流时，显示和检测共用同一流
  */
 export class CameraManager {
-  /** 摄像头 ID → 帧提取器 */
-  private extractors = new Map<string, FrameExtractor>();
-  /** 摄像头 ID → 最新一帧（ffmpeg 已缩放） */
+  /** 摄像头 ID → 显示流提取器 */
+  private displayExtractors = new Map<string, FrameExtractor>();
+  /** 摄像头 ID → 检测流提取器（双流模式专用） */
+  private detectExtractors = new Map<string, FrameExtractor>();
+  /** 摄像头 ID → 是否使用双流模式 */
+  private dualStreamFlags = new Map<string, boolean>();
+  /** 摄像头 ID → 最新一帧（显示流，高清） */
   private latestFrames = new Map<string, Buffer>();
   /** 当前摄像头配置列表 */
   private cameraConfigs: CameraConfig[] = [];
@@ -25,6 +33,7 @@ export class CameraManager {
   /** 启动所有摄像头 */
   start(): void {
     this.cameraConfigs = this.config.cameras;
+    /** 显示流的帧用于前端显示和录像 */
     this.eventBus.on("frame", ({ cameraId, data }) => {
       this.latestFrames.set(cameraId, data);
     });
@@ -36,24 +45,25 @@ export class CameraManager {
 
   /** 停止所有摄像头 */
   stop(): void {
-    for (const [id, extractor] of this.extractors) {
-      extractor.stop();
-      this.recorder.unregisterStream(id);
-      console.log(`[CameraManager] 停止摄像头: ${id}`);
+    for (const [id] of this.displayExtractors) {
+      this.stopCamera(id);
     }
-    this.extractors.clear();
+    this.displayExtractors.clear();
+    this.detectExtractors.clear();
+    this.dualStreamFlags.clear();
   }
 
-  /** 获取最新一帧 */
+  /** 获取最新一帧（显示流） */
   getLatestFrame(cameraId: string): Buffer | undefined {
     return this.latestFrames.get(cameraId);
   }
 
   /** 获取所有摄像头状态 */
-  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number }> {
-    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number }> = [];
+  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean }> {
+    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean }> = [];
     for (const cam of this.cameraConfigs) {
-      const extractor = this.extractors.get(cam.id);
+      const extractor = this.displayExtractors.get(cam.id);
+      const dual = this.dualStreamFlags.get(cam.id) ?? false;
       result.push({
         id: cam.id,
         name: cam.friendlyName,
@@ -63,6 +73,7 @@ export class CameraManager {
         ptz: cam.ptz?.enabled === true,
         width: cam.detectWidth,
         height: cam.detectHeight,
+        dualStream: dual,
       });
     }
     return result;
@@ -76,32 +87,20 @@ export class CameraManager {
     /** 停止已移除的摄像头 */
     for (const id of oldMap.keys()) {
       if (!newMap.has(id)) {
-        const extractor = this.extractors.get(id);
-        if (extractor) {
-          extractor.stop();
-          this.extractors.delete(id);
-          this.latestFrames.delete(id);
-          this.recorder.unregisterStream(id);
-          console.log(`[CameraManager] 移除摄像头: ${id}`);
-        }
+        this.stopCamera(id);
+        console.log(`[CameraManager] 移除摄像头: ${id}`);
       }
     }
 
-    /** 检测配置变更的摄像头（RTSP URL、FPS、分辨率等） */
+    /** 检测配置变更的摄像头 */
     for (const [id, newCam] of newMap) {
       const oldCam = oldMap.get(id);
       if (!oldCam) continue;
       if (this.configChanged(oldCam, newCam)) {
         console.log(`[CameraManager] 配置变更，重启摄像头: ${id}`);
-        const extractor = this.extractors.get(id);
-        if (extractor) {
-          extractor.stop();
-          this.extractors.delete(id);
-        }
-        this.recorder.unregisterStream(id);
+        this.stopCamera(id);
         this.startCamera(newCam);
       } else {
-        /** 仅更新名称等不影响 ffmpeg 的配置 */
         this.recorder.registerCameraName(id, newCam.friendlyName);
       }
     }
@@ -130,13 +129,61 @@ export class CameraManager {
 
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
-    const extractor = new FrameExtractor(cam, this.config.ffmpegPath, this.eventBus);
-    this.extractors.set(cam.id, extractor);
-    extractor.start();
+    const hasDual = !!(cam.stream.hd && cam.stream.sd);
 
-    /** 注册摄像头名称（录像器通过 EventBus 共享帧，不再单独拉流） */
+    if (hasDual) {
+      /** 双流模式：HD 显示 + SD 检测 */
+      this.dualStreamFlags.set(cam.id, true);
+
+      const displayExtractor = new FrameExtractor(
+        cam, this.config.ffmpegPath, this.eventBus,
+        "display",
+        cam.stream.hd,
+        0,
+        0,
+      );
+      this.displayExtractors.set(cam.id, displayExtractor);
+      displayExtractor.start();
+
+      const detectExtractor = new FrameExtractor(
+        cam, this.config.ffmpegPath, this.eventBus,
+        "detect",
+        cam.stream.sd,
+        cam.detectFps,
+        cam.detectWidth,
+      );
+      this.detectExtractors.set(cam.id, detectExtractor);
+      detectExtractor.start();
+
+      console.log(`[CameraManager] 双流模式: ${cam.friendlyName} (HD=显示, SD=检测)`);
+    } else {
+      /** 单流模式：显示和检测共用，行为与之前完全一致 */
+      this.dualStreamFlags.set(cam.id, false);
+
+      const extractor = new FrameExtractor(cam, this.config.ffmpegPath, this.eventBus);
+      this.displayExtractors.set(cam.id, extractor);
+      extractor.start();
+
+      console.log(`[CameraManager] 单流模式: ${cam.friendlyName} (${cam.id})`);
+    }
+
     this.recorder.registerCameraName(cam.id, cam.friendlyName);
+  }
 
-    console.log(`[CameraManager] 启动摄像头: ${cam.friendlyName} (${cam.id})`);
+  /** 停止单个摄像头的所有流 */
+  private stopCamera(id: string): void {
+    const display = this.displayExtractors.get(id);
+    if (display) {
+      display.stop();
+      this.displayExtractors.delete(id);
+    }
+    const detect = this.detectExtractors.get(id);
+    if (detect) {
+      detect.stop();
+      this.detectExtractors.delete(id);
+    }
+    this.latestFrames.delete(id);
+    this.dualStreamFlags.delete(id);
+    this.recorder.unregisterStream(id);
   }
 }

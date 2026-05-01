@@ -78,6 +78,29 @@ class JpegFrameSplitter {
   }
 }
 
+/** 帧提取器用途 */
+export type StreamPurpose = "display" | "detect";
+
+/** 帧提取器选项 */
+export interface FrameExtractorOptions {
+  /** 摄像头配置 */
+  config: CameraConfig;
+  /** ffmpeg 路径 */
+  ffmpegPath: string;
+  /** 事件总线 */
+  eventBus: EventBus;
+  /** 用途：display 用于前端显示和录像，detect 用于 AI/变动检测 */
+  purpose: StreamPurpose;
+  /** RTSP 流地址（覆盖 config 中的 stream.hd/sd） */
+  rtspUrl: string;
+  /** 帧率限制（0 = 不限制） */
+  fps: number;
+  /** 缩放宽度（0 = 原始分辨率） */
+  width: number;
+  /** JPEG 质量 */
+  jpegQuality: number;
+}
+
 /**
  * 帧提取器
  * 通过 ffmpeg 子进程从 RTSP 流中提取 JPEG 帧
@@ -97,12 +120,22 @@ export class FrameExtractor {
   private lastFrameTime = 0;
   /** 当前是否在线（用于检测状态变化） */
   private online = false;
+  /** 日志标签 */
+  private logTag: string;
 
   constructor(
     private config: CameraConfig,
     private ffmpegPath: string,
     private eventBus: EventBus,
-  ) {}
+    private purpose: StreamPurpose = "detect",
+    private rtspOverride?: string,
+    private fpsOverride?: number,
+    private widthOverride?: number,
+  ) {
+    this.logTag = purpose === "display"
+      ? `[Display][${config.id}]`
+      : `[Detect][${config.id}]`;
+  }
 
   /** 启动帧提取 */
   start(): void {
@@ -118,7 +151,8 @@ export class FrameExtractor {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    if (this.online) {
+    /** 只有显示流负责在线状态事件 */
+    if (this.online && this.purpose === "display") {
       this.online = false;
       this.eventBus.emit("camera:offline", { cameraId: this.config.id });
     }
@@ -137,17 +171,20 @@ export class FrameExtractor {
 
   /** 启动 ffmpeg 子进程 */
   private spawnFfmpeg(): void {
-    const { detectFps, detectWidth, jpegQuality, stream } = this.config;
+    const { detectWidth, jpegQuality, stream } = this.config;
 
-    /** 主码流提供最高清画面 */
-    const rtspUrl = stream.hd || stream.sd;
+    /** 显示流用 HD，检测流用 SD（fallback 到 HD） */
+    const rtspUrl = this.rtspOverride ?? (stream.hd || stream.sd);
+    const fps = this.fpsOverride ?? this.config.detectFps;
+    const width = this.widthOverride ?? detectWidth;
+
     const vfParts: string[] = [];
-    if (detectFps > 0) {
-      /** round=zero 减少帧缓冲延迟，输出时间戳更接近实际时间 */
-      vfParts.push(`fps=${detectFps}:round=zero`);
+    if (fps > 0 && this.purpose === "detect") {
+      /** 检测流限制帧率，显示流不限制以获得最高帧率 */
+      vfParts.push(`fps=${fps}:round=zero`);
     }
-    if (detectWidth > 0) {
-      vfParts.push(`scale=${detectWidth}:-4`);
+    if (width > 0) {
+      vfParts.push(`scale=${width}:-4`);
     }
     const vf = vfParts.length > 0 ? vfParts.join(",") : undefined;
 
@@ -175,7 +212,7 @@ export class FrameExtractor {
       "pipe:1",
     );
 
-    console.log(`[${this.config.id}] 启动 ffmpeg: ${this.ffmpegPath} ${args.join(" ")}`);
+    console.log(`${this.logTag} 启动 ffmpeg: ${this.ffmpegPath} ${args.join(" ")}`);
 
     this.proc = spawn(this.ffmpegPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -200,18 +237,33 @@ export class FrameExtractor {
           frameCount++;
           if (!this.online) {
             this.online = true;
-            this.eventBus.emit("camera:online", { cameraId: this.config.id });
-            console.log(`[${this.config.id}] 摄像头上线`);
+            /** 只有显示流触发在线/离线事件 */
+            if (this.purpose === "display") {
+              this.eventBus.emit("camera:online", { cameraId: this.config.id });
+              console.log(`${this.logTag} 摄像头上线`);
+            }
           }
-          this.eventBus.emit("frame", {
+          /** 显示流发 frame 事件，检测流发 detect:frame 事件 */
+          /** 单流模式（默认 purpose=detect）同时发两个事件，兼容所有消费者 */
+          const payload = {
             cameraId: this.config.id,
             data: frame,
             timestamp: now,
-          });
+          };
+          if (this.purpose === "display") {
+            this.eventBus.emit("frame", payload);
+          } else if (this.purpose === "detect" && this.rtspOverride) {
+            /** 双流模式的检测流只发 detect:frame */
+            this.eventBus.emit("detect:frame", payload);
+          } else {
+            /** 单流模式：同时发 frame（显示/录像）和 detect:frame（AI/变动检测） */
+            this.eventBus.emit("frame", payload);
+            this.eventBus.emit("detect:frame", payload);
+          }
           /** 每 10 秒输出性能日志 */
           if (now - lastPerfLog >= 10000) {
             const avgSize = totalFrameBytes / frameCount;
-            console.log(`[Perf][${this.config.id}] ${frameCount}帧/10s, avg ${(avgSize / 1024).toFixed(0)}KB/帧, split=${splitMs.toFixed(1)}ms`);
+            console.log(`[Perf]${this.logTag} ${frameCount}帧/10s, avg ${(avgSize / 1024).toFixed(0)}KB/帧, split=${splitMs.toFixed(1)}ms`);
             frameCount = 0;
             totalFrameBytes = 0;
             lastPerfLog = now;
@@ -223,21 +275,22 @@ export class FrameExtractor {
     if (stderr) {
       stderr.on("data", (chunk: Buffer) => {
         const msg = chunk.toString().trim();
-        /** 只打印关键错误，不打印 ffmpeg 的大量 info 日志 */
         if (msg.includes("error") || msg.includes("Error")) {
-          console.error(`[${this.config.id}] ffmpeg stderr:`, msg);
+          console.error(`${this.logTag} ffmpeg stderr:`, msg);
         }
       });
     }
 
     this.proc!.on("exit", (code: number | null) => {
-      console.log(`[${this.config.id}] ffmpeg 进程退出, code=${code}`);
+      console.log(`${this.logTag} ffmpeg 进程退出, code=${code}`);
       this.proc?.unref();
       this.proc = null;
       if (this.online) {
         this.online = false;
-        this.eventBus.emit("camera:offline", { cameraId: this.config.id });
-        console.log(`[${this.config.id}] 摄像头离线`);
+        if (this.purpose === "display") {
+          this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+          console.log(`${this.logTag} 摄像头离线`);
+        }
       }
       if (this.running) {
         this.scheduleReconnect();
@@ -245,16 +298,15 @@ export class FrameExtractor {
     });
 
     this.proc!.on("error", (err: Error) => {
-      console.error(`[${this.config.id}] ffmpeg 进程错误:`, err.message);
+      console.error(`${this.logTag} ffmpeg 进程错误:`, err.message);
     });
   }
 
   /** 计划重连（指数退避） */
   private scheduleReconnect(): void {
     this.retryCount++;
-    /** 指数退避：2s, 4s, 8s, ... 最大 60s */
     const delay = Math.min(2000 * Math.pow(2, this.retryCount - 1), 60_000);
-    console.log(`[${this.config.id}] ${delay}ms 后重连... (第 ${this.retryCount} 次)`);
+    console.log(`${this.logTag} ${delay}ms 后重连... (第 ${this.retryCount} 次)`);
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       this.spawnFfmpeg();
@@ -266,7 +318,6 @@ export class FrameExtractor {
     if (this.proc) {
       const proc = this.proc;
       this.proc = null;
-      /** 先关闭管道，避免阻塞 */
       proc.stdout?.destroy();
       proc.stderr?.destroy();
       proc.kill("SIGKILL");

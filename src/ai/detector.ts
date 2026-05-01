@@ -202,7 +202,7 @@ export class AiDetector {
     const config = this.runtimeConfig.get().ai;
 
     if (config.mode === "continuous") {
-      this.unsubFrame = this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
+      this.unsubFrame = this.eventBus.on("detect:frame", ({ cameraId, data, timestamp }) => {
         this.latestFrames.set(cameraId, { data, timestamp });
       });
 
