@@ -58,9 +58,23 @@ const searchText = ref('')
 /** 展开事件历史的 trackId */
 const expandedTrackId = ref<number | null>(null)
 /** trackId → 事件历史列表 */
-const trackEvents = ref<Record<number, Array<{ id: number; camera_id: string; timestamp: number; detail: string }>>>({})
+const trackEvents = ref<Record<number, Array<{ id: number; type: string; camera_id: string; timestamp: number; detail: string | null }>>>({})
 /** 事件历史加载中 */
 const loadingEvents = ref(false)
+
+/** 事件类型标签样式 */
+const EVENT_TYPE_STYLE: Record<string, { label: string; bg: string; color: string }> = {
+  'track:appeared': { label: '出现', bg: '#81C784', color: '#fff' },
+  'track:disappeared': { label: '消失', bg: '#E57373', color: '#fff' },
+  'track:enter-zone': { label: '进入', bg: '#26A69A', color: '#fff' },
+  'track:leave-zone': { label: '离开', bg: '#AB47BC', color: '#fff' },
+  'track:dwell': { label: '停留', bg: '#FF9800', color: '#fff' },
+  'track:speed': { label: '速度', bg: '#42A5F5', color: '#fff' },
+  'track:line-cross': { label: '越线', bg: '#FF6F00', color: '#fff' },
+  'track:match-suggest': { label: '匹配', bg: '#CE93D8', color: '#fff' },
+  'detect': { label: '检测', bg: '#4ECDC4', color: '#fff' },
+  'motion': { label: '变动', bg: '#FFC107', color: '#333' },
+}
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const emit = defineEmits<{
@@ -498,6 +512,7 @@ onUnmounted(() => {
             </div>
             <div v-for="ev in trackEvents[track.trackId]" :key="ev.id" class="event-item"
               @click="emit('jumpToRecording', ev.camera_id, ev.timestamp)">
+              <span v-if="EVENT_TYPE_STYLE[ev.type]" class="event-type-tag" :style="{ background: EVENT_TYPE_STYLE[ev.type].bg, color: EVENT_TYPE_STYLE[ev.type].color }">{{ EVENT_TYPE_STYLE[ev.type].label }}</span>
               <span class="event-time">{{ new Date(ev.timestamp).toLocaleString() }}</span>
               <span class="event-cam">{{ ev.camera_id }}</span>
               <button class="event-play" @click.stop="emit('jumpToRecording', ev.camera_id, ev.timestamp)">▶</button>
@@ -985,11 +1000,20 @@ onUnmounted(() => {
 .event-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 3px 4px;
   font-size: 10px;
   cursor: pointer;
   border-radius: 3px;
+}
+
+.event-type-tag {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .event-item:hover {
