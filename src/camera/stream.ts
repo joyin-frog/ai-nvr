@@ -167,8 +167,8 @@ export class FrameExtractor {
       "-vcodec", "mjpeg",
       "-q:v", String(jpegQuality),
       "-an",
-      /** 线程数：利用多核加速编码 */
-      "-threads", "2",
+      /** 线程数：利用多核加速 HEVC 解码 + MJPEG 编码 */
+      "-threads", "4",
       "pipe:1",
     );
 

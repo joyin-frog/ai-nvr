@@ -19,6 +19,22 @@ interface CameraInfo {
   name: string
 }
 
+/** 时间轴上的事件标记 */
+interface TimelineEvent {
+  timestamp: number
+  type: string
+  label?: string
+  cameraId?: string
+}
+
+/** 事件类型对应颜色 */
+const EVENT_MARKER_COLORS: Record<string, string> = {
+  detect: '#5bc0de',
+  motion: '#f0ad4e',
+  alert: '#d9534f',
+  'camera:offline': '#d9534f',
+}
+
 const props = defineProps<{
   recordings: Recording[]
   cameras: CameraInfo[]
@@ -26,6 +42,8 @@ const props = defineProps<{
   playbackTime?: number
   /** 当前播放的摄像头 ID */
   playbackCameraId?: string
+  /** 事件标记列表（按摄像头） */
+  events?: TimelineEvent[]
 }>()
 
 const emit = defineEmits<{
@@ -111,6 +129,52 @@ const playbackPosition = computed(() => {
   const { start, end } = timeRange.value
   if (props.playbackTime < start || props.playbackTime > end) return -1
   return ((props.playbackTime - start) / (end - start)) * 100
+})
+
+/** 按摄像头分组的事件标记 */
+const eventMarkersByCamera = computed(() => {
+  const evts = props.events
+  if (!evts || evts.length === 0) return new Map<string, Array<{ position: number; color: string; count: number; labels: string }>>()
+
+  const { start, end } = timeRange.value
+  const duration = end - start
+  const minGap = duration * 0.005
+
+  const byCam = new Map<string, TimelineEvent[]>()
+  for (const evt of evts) {
+    if (evt.timestamp < start || evt.timestamp > end) continue
+    const camId = evt.cameraId ?? ''
+    const list = byCam.get(camId) ?? []
+    list.push(evt)
+    byCam.set(camId, list)
+  }
+
+  const result = new Map<string, Array<{ position: number; color: string; count: number; labels: string }>>()
+  for (const [camId, camEvts] of byCam) {
+    camEvts.sort((a, b) => a.timestamp - b.timestamp)
+    const groups: Array<{ timestamp: number; types: Set<string>; labels: string[] }> = []
+    for (const evt of camEvts) {
+      const last = groups[groups.length - 1]
+      if (last && evt.timestamp - last.timestamp < minGap) {
+        last.types.add(evt.type)
+        if (evt.label) last.labels.push(evt.label)
+      } else {
+        groups.push({ timestamp: evt.timestamp, types: new Set([evt.type]), labels: evt.label ? [evt.label] : [] })
+      }
+    }
+    result.set(camId, groups.map(g => {
+      let primaryType = 'motion'
+      if (g.types.has('alert')) primaryType = 'alert'
+      else if (g.types.has('detect')) primaryType = 'detect'
+      return {
+        position: ((g.timestamp - start) / duration) * 100,
+        color: EVENT_MARKER_COLORS[primaryType] ?? '#888',
+        count: g.labels.length || g.types.size,
+        labels: [...new Set(g.labels)].slice(0, 3).join(', '),
+      }
+    }))
+  }
+  return result
 })
 
 /** 筛选日期范围内的录像 */
@@ -254,6 +318,12 @@ function onSegClick(e: MouseEvent, rec: Recording) {
             :title="new Date(rec.startTime).toLocaleTimeString(locale)"
             @click="onSegClick($event, rec)"
           />
+          <!-- 事件标记 -->
+          <template v-for="(m, mi) in eventMarkersByCamera.get(cam.id) ?? []" :key="'e'+mi">
+            <div class="mtl-event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'">
+              <div class="mtl-event-dot" :style="{ background: m.color }"></div>
+            </div>
+          </template>
           <!-- 当前时间指示器 -->
           <div v-if="nowPosition >= 0" class="mtl-now" :style="{ left: nowPosition + '%' }" />
           <!-- 播放位置指示器（仅当前播放的摄像头轨道） -->
@@ -422,6 +492,31 @@ function onSegClick(e: MouseEvent, rec: Recording) {
 .mtl-segment:hover {
   opacity: 1;
   background: #5EEEE6;
+}
+
+/* 事件标记 */
+.mtl-event-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.mtl-event-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  opacity: 0.9;
+}
+
+.mtl-event-marker:hover .mtl-event-dot {
+  opacity: 1;
+  transform: scale(1.5);
 }
 
 .mtl-now {

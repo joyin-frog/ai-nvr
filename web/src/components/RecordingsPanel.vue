@@ -594,6 +594,54 @@ async function loadRecordings() {
   } finally {
     loading.value = false
   }
+  /** 加载对应时间范围的事件标记 */
+  loadTimelineEvents()
+}
+
+/** 时间轴事件标记数据 */
+interface TimelineEvent {
+  timestamp: number
+  type: string
+  label?: string
+  cameraId?: string
+}
+const timelineEvents = ref<TimelineEvent[]>([])
+
+/** 根据录像时间范围加载事件 */
+async function loadTimelineEvents() {
+  /** 从录像列表推算时间范围 */
+  if (recordings.value.length === 0) {
+    timelineEvents.value = []
+    return
+  }
+  const allStart = recordings.value.reduce((min, r) => Math.min(min, r.startTime), Infinity)
+  const allEnd = recordings.value.reduce((max, r) => Math.max(max, r.endTime), -Infinity)
+  const params = new URLSearchParams({
+    type: 'detect',
+    since: String(allStart),
+    until: String(allEnd),
+    limit: '500',
+  })
+  if (filterCamera.value) params.set('cameraId', filterCamera.value)
+  try {
+    const res = await authFetch(`/api/events/history?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      timelineEvents.value = (data.events as Array<{ timestamp: number; type: string; detail: string | null; camera_id: string }>).map(e => {
+        /** 从 detail JSON 提取检测标签 */
+        let label: string | undefined
+        if (e.detail) {
+          const detail = JSON.parse(e.detail) as { detections?: Array<{ label: string }> }
+          if (detail.detections && detail.detections.length > 0) {
+            label = detail.detections.map(d => d.label).join(', ')
+          }
+        }
+        return { timestamp: e.timestamp, type: e.type, label, cameraId: e.camera_id }
+      })
+    }
+  } catch {
+    timelineEvents.value = []
+  }
 }
 
 /** 选择录像播放 */
@@ -1076,6 +1124,7 @@ defineExpose({ loadRecordings, playAtTime })
       :cameras="cameras"
       :playback-time="selectedRecording && isPlaying ? currentAbsTime : 0"
       :playback-camera-id="selectedRecording?.cameraId ?? ''"
+      :events="timelineEvents"
       @play="play"
     />
 
@@ -1085,6 +1134,7 @@ defineExpose({ loadRecordings, playAtTime })
       :recordings="filteredRecordings"
       :selected-camera="filterCamera"
       :playback-time="selectedRecording && isPlaying ? currentAbsTime : 0"
+      :events="timelineEvents"
       @play="play"
     />
 

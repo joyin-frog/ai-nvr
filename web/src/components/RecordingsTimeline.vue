@@ -13,6 +13,24 @@ interface Recording {
   size: number
 }
 
+/** 时间轴上的事件标记 */
+interface TimelineEvent {
+  /** 事件时间戳 ms */
+  timestamp: number
+  /** 事件类型：detect / motion / alert / camera:offline */
+  type: string
+  /** 检测到的目标标签（detect 事件时有值） */
+  label?: string
+}
+
+/** 事件类型对应颜色 */
+const EVENT_MARKER_COLORS: Record<string, string> = {
+  detect: '#5bc0de',
+  motion: '#f0ad4e',
+  alert: '#d9534f',
+  'camera:offline': '#d9534f',
+}
+
 const props = defineProps<{
   /** 录像列表 */
   recordings: Recording[]
@@ -20,6 +38,8 @@ const props = defineProps<{
   selectedCamera: string
   /** 当前播放位置（绝对时间戳 ms，0 表示未播放） */
   playbackTime?: number
+  /** 事件标记列表 */
+  events?: TimelineEvent[]
 }>()
 
 const emit = defineEmits<{
@@ -142,6 +162,46 @@ const segments = computed(() => {
       recording: rec,
       left: `${segStart}%`,
       width: `${Math.max(0.5, segEnd - segStart)}%`,
+    }
+  })
+})
+
+/** 事件标记在时间轴上的位置（聚合重叠） */
+const eventMarkers = computed(() => {
+  const evts = props.events
+  if (!evts || evts.length === 0) return []
+  const { start, end } = timeRange.value
+  const duration = end - start
+  /** 时间轴像素宽度约 600-800px，最小间距 4px 约对应 0.5% */
+  const minGap = duration * 0.005
+
+  const filtered = evts
+    .filter(e => e.timestamp >= start && e.timestamp <= end)
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+  /** 聚合：相邻时间差 < minGap 的合并 */
+  const groups: Array<{ timestamp: number; types: Set<string>; labels: string[] }> = []
+  for (const evt of filtered) {
+    const last = groups[groups.length - 1]
+    if (last && evt.timestamp - last.timestamp < minGap) {
+      last.types.add(evt.type)
+      if (evt.label) last.labels.push(evt.label)
+    } else {
+      groups.push({ timestamp: evt.timestamp, types: new Set([evt.type]), labels: evt.label ? [evt.label] : [] })
+    }
+  }
+
+  return groups.map(g => {
+    /** 取优先级最高的类型作为代表色：alert > detect > motion */
+    let primaryType = 'motion'
+    if (g.types.has('alert')) primaryType = 'alert'
+    else if (g.types.has('detect')) primaryType = 'detect'
+
+    return {
+      position: ((g.timestamp - start) / duration) * 100,
+      color: EVENT_MARKER_COLORS[primaryType] ?? '#888',
+      count: g.labels.length || g.types.size,
+      labels: [...new Set(g.labels)].slice(0, 3).join(', '),
     }
   })
 })
@@ -297,6 +357,12 @@ function goToday() {
           @mousemove="onSegmentMove"
           @mouseleave="onSegmentLeave"
         />
+      </div>
+
+      <!-- 事件标记 -->
+      <div v-for="(m, i) in eventMarkers" :key="'e'+i" class="event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'">
+        <div class="event-dot" :style="{ background: m.color }"></div>
+        <span v-if="m.count > 1" class="event-count">{{ m.count }}</span>
       </div>
 
       <!-- 当前时间指示器 -->
@@ -462,6 +528,39 @@ function goToday() {
 .segment:hover {
   opacity: 1;
   background: #5EEEE6;
+}
+
+/* 事件标记 */
+.event-marker {
+  position: absolute;
+  top: 0;
+  height: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.event-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 4px currentColor;
+  opacity: 0.9;
+}
+
+.event-marker:hover .event-dot {
+  opacity: 1;
+  transform: scale(1.4);
+}
+
+.event-count {
+  font-size: 8px;
+  color: #ccc;
+  margin-left: 2px;
+  line-height: 1;
 }
 
 /* 当前时间指示器 */
