@@ -309,6 +309,13 @@ function onProgressClick(e: MouseEvent) {
   playerRef.value.currentTime = pct * playerRef.value.duration
 }
 
+/** 点击检测事件标记跳转到对应位置 */
+function seekToMarker(positionPct: number) {
+  if (!playerRef.value) return
+  const pct = Math.max(0, Math.min(1, positionPct / 100))
+  playerRef.value.currentTime = pct * playerRef.value.duration
+}
+
 /** 进度条悬停提示 */
 const hoverPct = ref(-1)
 const hoverClientX = ref(0)
@@ -1231,7 +1238,7 @@ defineExpose({ loadRecordings, playAtTime })
             <div v-if="loopStart >= 0 && loopEnd > loopStart && playerRef" class="loop-region" :style="{ left: (loopStart / playerRef.duration * 100) + '%', width: ((loopEnd - loopStart) / playerRef.duration * 100) + '%' }" />
             <!-- 检测事件标记（按目标类别着色） -->
             <template v-for="m in progressEventMarkers" :key="m.key">
-              <div class="progress-event-marker" :style="{ left: m.position + '%', background: eventMarkerColor(m.labels) }" :title="m.labels.join(', ') + ' (' + m.count + ')'" />
+              <div class="progress-event-marker" :style="{ left: m.position + '%', background: eventMarkerColor(m.labels) }" :title="m.labels.join(', ') + ' (' + m.count + ')'" @click.stop="seekToMarker(m.position)" />
             </template>
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
@@ -2220,14 +2227,20 @@ defineExpose({ loadRecordings, playAtTime })
 /* 进度条检测事件标记 */
 .progress-event-marker {
   position: absolute;
-  top: -2px;
-  width: 3px;
-  height: 10px;
+  top: -4px;
+  width: 6px;
+  height: 14px;
   border-radius: 1px;
   transform: translateX(-50%);
-  pointer-events: none;
+  cursor: pointer;
   z-index: 2;
   opacity: 0.8;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.progress-event-marker:hover {
+  opacity: 1;
+  transform: translateX(-50%) scaleY(1.3);
 }
 
 .progress-fill {
