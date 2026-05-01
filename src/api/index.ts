@@ -455,7 +455,7 @@ export function startServer(
         return Response.json(result);
       }
 
-      /** 录像文件播放 */
+      /** 录像文件播放（支持 Range 请求，MP4 seek 必需） */
       const recordingMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/(.+\.mp4)$/);
       if (recordingMatch) {
         const camId = recordingMatch[1]!;
@@ -467,11 +467,37 @@ export function startServer(
         const resolved = realpathSync(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
         const stat = statSync(filePath);
+        const fileSize = stat.size;
+
+        /** 处理 Range 请求（浏览器 MP4 seek 必需） */
+        const rangeHeader = req.headers.get("range");
+        if (rangeHeader) {
+          const match = rangeHeader.match(/^bytes=(\d+)-(\d*)$/);
+          if (match) {
+            const start = parseInt(match[1]!, 10);
+            const end = match[2] ? parseInt(match[2]!, 10) : fileSize - 1;
+            const clampedEnd = Math.min(end, fileSize - 1);
+            if (start > clampedEnd || start >= fileSize) {
+              return new Response("Range Not Satisfiable", { status: 416, headers: { "Content-Range": `bytes */${fileSize}` } });
+            }
+            const slice = Bun.file(filePath).slice(start, clampedEnd + 1);
+            return new Response(slice, {
+              status: 206,
+              headers: {
+                "Content-Type": "video/mp4",
+                "Content-Length": String(clampedEnd - start + 1),
+                "Content-Range": `bytes ${start}-${clampedEnd}/${fileSize}`,
+                "Accept-Ranges": "bytes",
+              },
+            });
+          }
+        }
+
         const file = Bun.file(filePath);
         return new Response(file, {
           headers: {
             "Content-Type": "video/mp4",
-            "Content-Length": String(stat.size),
+            "Content-Length": String(fileSize),
             "Accept-Ranges": "bytes",
           },
         });
