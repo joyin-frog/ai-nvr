@@ -308,6 +308,11 @@ function formatDetail(detail: string): string {
   if (typeof obj.ratio === 'number') parts.push(`${t('event.motionRatio', { ratio: (obj.ratio * 100).toFixed(1) })}`)
   if (typeof obj.count === 'number') parts.push(`×${obj.count}`)
   if (typeof obj.fps === 'number') parts.push(`FPS: ${obj.fps}`)
+  if (typeof obj.speed === 'number') parts.push(`${obj.speed.toFixed(1)} m/s`)
+  if (typeof obj.zoneName === 'string') parts.push(obj.zoneName)
+  if (typeof obj.dwellMs === 'number') parts.push(`${(obj.dwellMs / 1000).toFixed(1)}s`)
+  if (typeof obj.trackName === 'string') parts.push(obj.trackName)
+  if (typeof obj.label === 'string' && !obj.detections) parts.push(obj.label)
   return parts.length > 0 ? parts.join(' · ') : detail
 }
 
@@ -846,6 +851,7 @@ select.input {
 .meta-tag.silent { color: #e74c3c; }
 .meta-tag.count { color: #FF9800; }
 .meta-tag.roi { color: #9C27B0; }
+.meta-tag.speed { color: #E91E63; }
 
 .meta-info {
   font-size: 11px;
