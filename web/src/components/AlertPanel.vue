@@ -121,6 +121,7 @@ const eventTypes = computed(() => [
   { value: 'track:dwell', label: t('event.trackDwell', '停留') },
   { value: 'track:speed', label: t('event.trackSpeed', '高速移动') },
   { value: 'track:line-cross', label: t('event.trackLineCross', '越线') },
+  { value: 'track:loiter', label: t('event.trackLoiter', '徘徊') },
 ])
 
 /** 是否显示标签/命名过滤字段（detect 和 track 事件类型都适用） */
@@ -132,7 +133,8 @@ const showLabelFields = computed(() =>
   || form.value.eventType === 'track:leave-zone'
   || form.value.eventType === 'track:dwell'
   || form.value.eventType === 'track:speed'
-  || form.value.eventType === 'track:line-cross',
+  || form.value.eventType === 'track:line-cross'
+  || form.value.eventType === 'track:loiter',
 )
 
 /** 加载 ROI 列表 */

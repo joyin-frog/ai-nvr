@@ -193,6 +193,7 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'track:dwell': { labelKey: 'event.trackDwell', bg: '#FF7043', color: '#fff' },
   'track:speed': { labelKey: 'event.trackSpeed', bg: '#E91E63', color: '#fff' },
   'track:line-cross': { labelKey: 'event.trackLineCross', bg: '#FF6F00', color: '#fff' },
+  'track:loiter': { labelKey: 'event.trackLoiter', bg: '#795548', color: '#fff' },
   'track:match-suggest': { labelKey: 'event.trackMatchSuggest', bg: '#9C27B0', color: '#fff' },
 }
 
@@ -546,6 +547,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         <button :class="['type-chip', { active: filterType === 'track:dwell' }]" @click="filterType = 'track:dwell'; onFilterChange('type')">{{ t('event.trackDwell', '停留') }}</button>
         <button :class="['type-chip', { active: filterType === 'track:speed' }]" @click="filterType = 'track:speed'; onFilterChange('type')">{{ t('event.trackSpeed', '高速') }}</button>
         <button :class="['type-chip', { active: filterType === 'track:line-cross' }]" @click="filterType = 'track:line-cross'; onFilterChange('type')">{{ t('event.trackLineCross', '越线') }}</button>
+        <button :class="['type-chip', { active: filterType === 'track:loiter' }]" @click="filterType = 'track:loiter'; onFilterChange('type')">{{ t('event.trackLoiter', '徘徊') }}</button>
       </div>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}

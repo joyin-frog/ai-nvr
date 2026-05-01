@@ -83,6 +83,9 @@ export class AlertEngine {
       this.eventBus.on("track:line-cross", (payload) => {
         this.onTrackEvent("track:line-cross", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.lineId, payload.lineName, undefined, undefined, payload.direction);
       }),
+      this.eventBus.on("track:loiter", (payload) => {
+        this.onTrackEvent("track:loiter", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.durationMs);
+      }),
     );
     console.log("[AlertEngine] 告警引擎已启动");
   }
