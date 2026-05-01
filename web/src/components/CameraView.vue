@@ -280,9 +280,50 @@ function getColor(label: string, trackId?: number): { stroke: string; fill: stri
   return { stroke: hex, fill: hex + '1F' }
 }
 
-/** Canvas overlay 绘制检测框（替代 HTML TransitionGroup，减少 DOM 操作开销） */
+/** Canvas overlay 绘制 OSD（摄像头名称 + 时钟） */
+function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.save()
+
+  /** 左上角：摄像头名称 */
+  if (props.name) {
+    ctx.font = 'bold 13px monospace'
+    ctx.textBaseline = 'top'
+    const nameText = props.name
+    const nm = ctx.measureText(nameText)
+    const pad = 4
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'
+    ctx.fillRect(4, 4, nm.width + pad * 2, 18)
+    ctx.fillStyle = '#fff'
+    ctx.fillText(nameText, 4 + pad, 6)
+  }
+
+  /** 左下角：时钟 */
+  if (clockText.value) {
+    ctx.font = 'bold 12px monospace'
+    ctx.textBaseline = 'bottom'
+    const tm = ctx.measureText(clockText.value)
+    const pad = 4
+    const y = height - 4
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'
+    ctx.fillRect(4, y - 18, tm.width + pad * 2, 18)
+    ctx.fillStyle = '#fff'
+    ctx.fillText(clockText.value, 4 + pad, y - 4)
+  }
+
+  ctx.restore()
+}
+
+/** Canvas overlay 绘制检测框 + OSD */
 function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  if (!props.showBoxes || !hasFrame.value) {
+  if (!hasFrame.value) {
+    trackTrails.clear()
+    return
+  }
+
+  /** 绘制 OSD（摄像头名称 + 时钟，始终显示） */
+  drawOSD(ctx, width, height)
+
+  if (!props.showBoxes) {
     trackTrails.clear()
     return
   }
@@ -697,16 +738,6 @@ onUnmounted(() => {
             <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
           </div>
         </div>
-
-        <!-- 摄像头名称叠加 -->
-        <div v-if="hasFrame" class="name-overlay">
-          <span class="name-text">{{ name }}</span>
-        </div>
-
-        <!-- 数字时钟叠加 -->
-        <div v-if="online && hasFrame" class="clock-overlay">
-          <span class="clock-text">{{ clockText }}</span>
-        </div>
       </div>
 
       <!-- FPS 质量指示 -->
@@ -1071,43 +1102,6 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* 数字时钟叠加 */
-.name-overlay {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 3px;
-  padding: 2px 8px;
-  pointer-events: none;
-}
-
-.name-text {
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-}
-
-.clock-overlay {
-  position: absolute;
-  bottom: 6px;
-  left: 6px;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 3px;
-  padding: 2px 8px;
-  pointer-events: none;
-}
-
-.clock-text {
-  color: #fff;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 /* 右键命名弹窗 */
