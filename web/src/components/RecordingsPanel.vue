@@ -203,6 +203,7 @@ interface PlaybackDetection {
   score: number
   box: { xmin: number; ymin: number; xmax: number; ymax: number }
   trackId?: number
+  trackName?: string
 }
 /** 当前录像的检测事件列表（预加载） */
 const playbackEvents = ref<Array<{ timestamp: number; detections: PlaybackDetection[] }>>([])
@@ -216,24 +217,37 @@ const showPlaybackEventList = ref(false)
 const showPlaybackTrail = ref(true)
 /** 回放轨迹线（每个 trackId 的历史中心点路径） */
 const playbackTrails = ref<Array<{ trackId: number; label: string; points: Array<{ x: number; y: number }> }>>([])
+/** 回放行为事件列表 */
+const playbackBehaviorEvents = ref<Array<{ timestamp: number; type: string; summary: string }>>([])
 /** 轨迹线颜色池 */
 const TRAIL_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#F4A460', '#87CEEB', '#98D8C8', '#F7DC6F']
 
-/** 播放录像时加载检测事件 */
+/** 播放录像时加载检测事件和行为事件 */
 async function loadPlaybackDetections(rec: Recording) {
   playbackEvents.value = []
   playbackDetections.value = []
-  const params = new URLSearchParams({
+  playbackBehaviorEvents.value = []
+  const detectParams = new URLSearchParams({
     type: 'detect',
     cameraId: rec.cameraId,
     since: String(rec.startTime),
     until: String(rec.endTime),
     limit: '2000',
   })
+  const behaviorParams = new URLSearchParams({
+    typeLike: 'track:%',
+    cameraId: rec.cameraId,
+    since: String(rec.startTime),
+    until: String(rec.endTime),
+    limit: '500',
+  })
   try {
-    const res = await authFetch(`/api/events/history?${params}`)
-    if (res.ok) {
-      const data = await res.json()
+    const [detectRes, behaviorRes] = await Promise.all([
+      authFetch(`/api/events/history?${detectParams}`),
+      authFetch(`/api/events/history?${behaviorParams}`),
+    ])
+    if (detectRes.ok) {
+      const data = await detectRes.json()
       playbackEvents.value = (data.events as Array<{ timestamp: number; detail: string | null }>)
         .filter(e => e.detail)
         .map(e => {
@@ -241,9 +255,36 @@ async function loadPlaybackDetections(rec: Recording) {
           return { timestamp: e.timestamp, detections: detail.detections ?? [] }
         })
     }
+    if (behaviorRes.ok) {
+      const data = await behaviorRes.json()
+      playbackBehaviorEvents.value = (data.events as Array<{ timestamp: number; type: string; detail: string | null }>)
+        .filter(e => e.detail)
+        .map(e => {
+          const d = JSON.parse(e.detail!) as { trackName?: string; label?: string; zoneName?: string; lineName?: string; dwellMs?: number }
+          const parts: string[] = []
+          if (d.trackName) parts.push(d.trackName)
+          else if (d.label) parts.push(d.label)
+          if (d.zoneName) parts.push(d.zoneName)
+          if (d.lineName) parts.push(d.lineName)
+          if (d.dwellMs && d.dwellMs > 0) parts.push(`${(d.dwellMs / 1000).toFixed(0)}s`)
+          return { timestamp: e.timestamp, type: e.type, summary: parts.join(' → ') }
+        })
+    }
   } catch {
     // ignore
   }
+}
+
+/** 行为事件类型样式 */
+const BEHAVIOR_EVENT_STYLE: Record<string, { label: string; bg: string }> = {
+  'track:enter-zone': { label: '进入', bg: '#26A69A' },
+  'track:leave-zone': { label: '离开', bg: '#7E57C2' },
+  'track:dwell': { label: '停留', bg: '#FF7043' },
+  'track:speed': { label: '高速', bg: '#E91E63' },
+  'track:line-cross': { label: '越线', bg: '#FF6F00' },
+  'track:loiter': { label: '徘徊', bg: '#795548' },
+  'track:appeared': { label: '出现', bg: '#66BB6A' },
+  'track:disappeared': { label: '消失', bg: '#EF5350' },
 }
 
 /** 根据 currentAbsTime 更新当前检测框和轨迹 */
@@ -317,9 +358,9 @@ function updatePlaybackDetections() {
 /** 获取回放检测框标签（含自定义名称） */
 function getPlaybackDetectLabel(cameraId: string, d: PlaybackDetection): string {
   const camLabels = props.trackLabels?.[cameraId]
-  const customName = d.trackId && camLabels?.[d.trackId]
+  const customName = d.trackName || (d.trackId && camLabels?.[d.trackId])
+  if (customName) return `${customName} ${(d.score * 100).toFixed(0)}%`
   const parts: string[] = []
-  if (customName) parts.push(customName)
   if (d.trackId) parts.push(`#${d.trackId}`)
   parts.push(d.label)
   parts.push(`${(d.score * 100).toFixed(0)}%`)
@@ -1601,8 +1642,24 @@ defineExpose({ loadRecordings, playAtTime })
               @click="seekToPlaybackEvent(ev.timestamp)"
             >
               <span class="pev-time">{{ formatAbsTime(ev.timestamp) }}</span>
-              <span class="pev-labels">{{ [...new Set(ev.detections.map(d => d.label))].join(', ') }}</span>
+              <span class="pev-labels">{{ [...new Set(ev.detections.map(d => d.trackName || d.label))].join(', ') }}</span>
               <span class="pev-count">{{ ev.detections.length }}</span>
+            </div>
+          </div>
+          <!-- 行为事件列表 -->
+          <div v-if="playbackBehaviorEvents.length > 0" class="playback-behavior-list">
+            <div class="playback-event-header">{{ playbackBehaviorEvents.length }} 行为事件</div>
+            <div class="playback-event-items">
+              <div
+                v-for="(ev, idx) in playbackBehaviorEvents"
+                :key="'b'+idx"
+                class="playback-event-item behavior-event"
+                @click="seekToPlaybackEvent(ev.timestamp)"
+              >
+                <span v-if="BEHAVIOR_EVENT_STYLE[ev.type]" class="behavior-tag" :style="{ background: BEHAVIOR_EVENT_STYLE[ev.type].bg }">{{ BEHAVIOR_EVENT_STYLE[ev.type].label }}</span>
+                <span class="pev-time">{{ formatAbsTime(ev.timestamp) }}</span>
+                <span class="pev-labels">{{ ev.summary }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -2847,6 +2904,24 @@ defineExpose({ loadRecordings, playAtTime })
 .pev-time { color: #aaa; flex-shrink: 0; min-width: 70px; }
 .pev-labels { color: #e0e0e0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pev-count { color: #4ECDC4; font-size: 10px; }
+
+.playback-behavior-list {
+  margin-top: 4px;
+  border-top: 1px solid #2a2a4a;
+  padding-top: 4px;
+}
+
+.behavior-event {
+  gap: 6px;
+}
+
+.behavior-tag {
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
 
 .export-panel {
   padding: 12px 16px;
