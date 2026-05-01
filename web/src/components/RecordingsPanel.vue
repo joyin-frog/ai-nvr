@@ -501,7 +501,14 @@ function onRecListKeydown(e: KeyboardEvent) {
   } else if (e.key === 'Enter' && focusedIndex.value >= 0) {
     e.preventDefault()
     const rec = filteredRecordings.value[focusedIndex.value]
-    if (rec) play(rec)
+    if (rec) {
+      if (multiSelectMode.value) toggleFileSelect(rec.filename)
+      else play(rec)
+    }
+  } else if (e.key === ' ' && focusedIndex.value >= 0 && multiSelectMode.value) {
+    e.preventDefault()
+    const rec = filteredRecordings.value[focusedIndex.value]
+    if (rec) toggleFileSelect(rec.filename)
   }
 }
 
