@@ -81,26 +81,6 @@ class JpegFrameSplitter {
 /** 帧提取器用途 */
 export type StreamPurpose = "display" | "detect";
 
-/** 帧提取器选项 */
-export interface FrameExtractorOptions {
-  /** 摄像头配置 */
-  config: CameraConfig;
-  /** ffmpeg 路径 */
-  ffmpegPath: string;
-  /** 事件总线 */
-  eventBus: EventBus;
-  /** 用途：display 用于前端显示和录像，detect 用于 AI/变动检测 */
-  purpose: StreamPurpose;
-  /** RTSP 流地址（覆盖 config 中的 stream.hd/sd） */
-  rtspUrl: string;
-  /** 帧率限制（0 = 不限制） */
-  fps: number;
-  /** 缩放宽度（0 = 原始分辨率） */
-  width: number;
-  /** JPEG 质量 */
-  jpegQuality: number;
-}
-
 /**
  * 帧提取器
  * 通过 ffmpeg 子进程从 RTSP 流中提取 JPEG 帧
@@ -122,6 +102,12 @@ export class FrameExtractor {
   private online = false;
   /** 日志标签 */
   private logTag: string;
+  /** 帧率统计：最近 5 秒的帧数 */
+  private fpsFrameCount = 0;
+  /** 帧率统计：上次统计时间 */
+  private fpsLastTime = 0;
+  /** 当前实际帧率（5秒滑动窗口） */
+  private currentFps = 0;
 
   constructor(
     private config: CameraConfig,
@@ -167,6 +153,11 @@ export class FrameExtractor {
   /** 获取最近一帧的时间 */
   get lastFrameAt(): number {
     return this.lastFrameTime;
+  }
+
+  /** 获取当前实际帧率（5秒滑动窗口） */
+  get fps(): number {
+    return this.currentFps;
   }
 
   /** 启动 ffmpeg 子进程 */
@@ -261,6 +252,13 @@ export class FrameExtractor {
             this.eventBus.emit("detect:frame", payload);
           }
           /** 每 10 秒输出性能日志 */
+          /** 帧率统计：5秒滑动窗口 */
+          this.fpsFrameCount++;
+          if (now - this.fpsLastTime >= 5000) {
+            this.currentFps = this.fpsFrameCount / ((now - this.fpsLastTime) / 1000);
+            this.fpsFrameCount = 0;
+            this.fpsLastTime = now;
+          }
           if (now - lastPerfLog >= 10000) {
             const avgSize = totalFrameBytes / frameCount;
             console.log(`[Perf]${this.logTag} ${frameCount}帧/10s, avg ${(avgSize / 1024).toFixed(0)}KB/帧, split=${splitMs.toFixed(1)}ms`);

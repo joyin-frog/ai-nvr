@@ -59,21 +59,24 @@ export class CameraManager {
   }
 
   /** 获取所有摄像头状态 */
-  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean }> {
-    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean }> = [];
+  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number }> {
+    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number }> = [];
     for (const cam of this.cameraConfigs) {
-      const extractor = this.displayExtractors.get(cam.id);
+      const display = this.displayExtractors.get(cam.id);
+      const detect = this.detectExtractors.get(cam.id);
       const dual = this.dualStreamFlags.get(cam.id) ?? false;
       result.push({
         id: cam.id,
         name: cam.friendlyName,
-        online: extractor?.isOnline ?? false,
-        lastFrameAt: extractor?.lastFrameAt ?? 0,
+        online: display?.isOnline ?? false,
+        lastFrameAt: display?.lastFrameAt ?? 0,
         group: cam.group,
         ptz: cam.ptz?.enabled === true,
         width: cam.detectWidth,
         height: cam.detectHeight,
         dualStream: dual,
+        displayFps: Math.round(display?.fps ?? 0),
+        detectFps: Math.round(detect?.fps ?? 0),
       });
     }
     return result;
