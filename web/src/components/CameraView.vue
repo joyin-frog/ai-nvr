@@ -83,6 +83,30 @@ const sortedDetections = computed(() =>
   [...props.detections].sort((a, b) => b.score - a.score)
 )
 
+/** 检测标签摘要（按 label 聚合计数） */
+const detectionSummary = computed(() => {
+  const counts = new Map<string, { count: number; customNames: string[] }>()
+  for (const det of props.detections) {
+    const entry = counts.get(det.label) ?? { count: 0, customNames: [] }
+    entry.count++
+    const camLabels = props.trackLabels
+    const customName = det.trackId && camLabels?.[det.trackId]
+    if (customName && !entry.customNames.includes(customName)) {
+      entry.customNames.push(customName)
+    }
+    counts.set(det.label, entry)
+  }
+  const parts: string[] = []
+  for (const [label, { count, customNames }] of counts) {
+    if (customNames.length > 0) {
+      parts.push(`${customNames.join(', ')}${count > customNames.length ? ` +${count - customNames.length}` : ''}`)
+    } else {
+      parts.push(count > 1 ? `${label} ×${count}` : label)
+    }
+  }
+  return parts.join(' · ')
+})
+
 /** 收到检测事件时拉取标注图片（仅截图用） */
 watch(() => props.detectVersion, async (v: number) => {
   if (v === 0) return
@@ -553,13 +577,7 @@ onUnmounted(() => {
     </div>
 
     <div class="camera-footer" v-if="showBoxes && sortedDetections.length > 0">
-      <div
-        v-for="(det, i) in sortedDetections"
-        :key="i"
-        class="detection-tag"
-      >
-        {{ det.label }} {{ (det.score * 100).toFixed(0) }}%
-      </div>
+      <span class="detection-summary">{{ detectionSummary }}</span>
     </div>
 
     <!-- 画面调节面板 -->
@@ -1014,20 +1032,15 @@ onUnmounted(() => {
 }
 
 .camera-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   background: #16213e;
   border-top: 1px solid #2a2a4a;
 }
 
-.detection-tag {
-  background: #2a2a4a;
+.detection-summary {
   color: #4ECDC4;
-  padding: 2px 8px;
-  border-radius: 4px;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .adjust-btn {
