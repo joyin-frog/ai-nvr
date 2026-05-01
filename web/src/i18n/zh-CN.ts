@@ -408,4 +408,13 @@ export default {
     zoom: '缩放',
     presets: '预置位',
   },
+  tracks: {
+    title: '追踪目标',
+    all: '全部',
+    empty: '暂无追踪目标',
+    playRecording: '查看录像',
+    history: '事件历史',
+    noEvents: '暂无事件',
+    delete: '删除',
+  },
 }

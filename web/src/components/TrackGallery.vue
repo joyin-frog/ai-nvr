@@ -151,13 +151,13 @@ onUnmounted(() => {
 <template>
   <div class="track-gallery">
     <div class="gallery-header">
-      <h3>{{ t('tracks.title', '追踪目标') }} <span class="track-total">{{ filteredTracks.length }}</span></h3>
+      <h3>{{ t('tracks.title') }} <span class="track-total">{{ filteredTracks.length }}</span></h3>
       <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
-        <option value="">{{ t('tracks.all', '全部') }}</option>
+        <option value="">{{ t('tracks.all') }}</option>
         <option v-for="label in allLabels" :key="label" :value="label">{{ label }}</option>
       </select>
       <select v-if="allCameras.length > 1" v-model="filterCamera" class="label-filter">
-        <option value="">{{ t('tracks.all', '全部') }}</option>
+        <option value="">{{ t('tracks.all') }}</option>
         <option v-for="cam in allCameras" :key="cam" :value="cam">{{ cam }}</option>
       </select>
       <button class="refresh-btn" @click="loadTracks" :disabled="loading">
@@ -166,7 +166,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="tracks.length === 0" class="empty">
-      {{ t('tracks.empty', '暂无追踪目标') }}
+      {{ t('tracks.empty') }}
     </div>
 
     <div v-else class="track-grid">
@@ -214,13 +214,13 @@ onUnmounted(() => {
             {{ track.cameraIds.join(', ') }}
           </div>
           <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
-            ▶ {{ t('tracks.playRecording', '查看录像') }}
+            ▶ {{ t('tracks.playRecording') }}
           </button>
           <div class="action-row">
             <button class="history-btn" @click="loadTrackEvents(track.trackId)">
-              {{ expandedTrackId === track.trackId ? '▲' : '▼' }} {{ t('tracks.history', '事件历史') }}
+              {{ expandedTrackId === track.trackId ? '▲' : '▼' }} {{ t('tracks.history') }}
             </button>
-            <button v-if="confirmDelete !== track.trackId" class="delete-btn" @click="confirmDelete = track.trackId" :title="t('tracks.delete', '删除')">✕</button>
+            <button v-if="confirmDelete !== track.trackId" class="delete-btn" @click="confirmDelete = track.trackId" :title="t('tracks.delete')">✕</button>
             <template v-else>
               <button class="delete-confirm-btn" @click="deleteTrack(track.trackId)">{{ t('manage.confirm', '确认') }}</button>
               <button class="delete-cancel-btn" @click="confirmDelete = null">{{ t('manage.cancel', '取消') }}</button>
@@ -229,7 +229,7 @@ onUnmounted(() => {
           <!-- 事件历史列表 -->
           <div v-if="expandedTrackId === track.trackId && trackEvents[track.trackId]" class="event-list">
             <div v-if="trackEvents[track.trackId].length === 0" class="event-empty">
-              {{ t('tracks.noEvents', '暂无事件') }}
+              {{ t('tracks.noEvents') }}
             </div>
             <div v-for="ev in trackEvents[track.trackId]" :key="ev.id" class="event-item"
               @click="emit('jumpToRecording', ev.camera_id, ev.timestamp)">

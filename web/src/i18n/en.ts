@@ -406,4 +406,13 @@ export default {
     zoom: 'Zoom',
     presets: 'Presets',
   },
+  tracks: {
+    title: 'Tracked Targets',
+    all: 'All',
+    empty: 'No tracked targets',
+    playRecording: 'View Recording',
+    history: 'Event History',
+    noEvents: 'No events',
+    delete: 'Delete',
+  },
 }
