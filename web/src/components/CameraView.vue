@@ -1135,7 +1135,52 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.textBaseline = 'bottom'
   }
 
+  /** ROI 区域内目标计数徽章 */
+  if (props.roiRegions && props.roiRegions.length > 0 && sorted.length > 0) {
+    ctx.font = 'bold 11px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    for (const roi of props.roiRegions) {
+      if (roi.points.length < 3) continue
+      let count = 0
+      for (const d of sorted) {
+        const cx = (d.box.xmin + d.box.xmax) / 2
+        const cy = (d.box.ymin + d.box.ymax) / 2
+        if (pointInPoly(cx, cy, roi.points)) count++
+      }
+      if (count === 0) continue
+      /** 在 ROI 名称右侧显示计数 */
+      const rcx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * width
+      const rcy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * height
+      const badgeX = rcx + (roi.name ? ctx.measureText(roi.name).width / 2 + 14 : 0)
+      const badgeY = rcy
+      /** 计数徽章背景 */
+      ctx.fillStyle = 'rgba(233, 30, 99, 0.9)'
+      ctx.beginPath()
+      ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2)
+      ctx.fill()
+      /** 计数文字 */
+      ctx.fillStyle = '#fff'
+      ctx.fillText(String(count), badgeX, badgeY + 1)
+    }
+    ctx.textAlign = 'start'
+    ctx.textBaseline = 'bottom'
+  }
+
   ctx.restore()
+}
+
+/** 点是否在多边形内（射线法） */
+function pointInPoly(x: number, y: number, poly: Array<{ x: number; y: number }>): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i]!.x, yi = poly[i]!.y
+    const xj = poly[j]!.x, yj = poly[j]!.y
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+      inside = !inside
+    }
+  }
+  return inside
 }
 
 /** 注册 Canvas overlay */
