@@ -81,8 +81,8 @@ const exporting = ref(false)
 /** 导出结果下载文件名 */
 const exportFilename = ref('')
 
-/** 当前播放速度 */
-const playbackSpeed = ref(1)
+/** 当前播放速度（localStorage 持久化） */
+const playbackSpeed = ref(Number(localStorage.getItem('nvr-playback-speed')) || 1)
 
 /** video 元素引用 */
 const playerRef = ref<HTMLVideoElement | null>(null)
@@ -96,6 +96,7 @@ const autoPlayNext = ref(true)
 /** 倍速变更时同步到 video 元素 */
 function changeSpeed(speed: number) {
   playbackSpeed.value = speed
+  localStorage.setItem('nvr-playback-speed', String(speed))
   if (playerRef.value) playerRef.value.playbackRate = speed
 }
 
