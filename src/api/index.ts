@@ -1539,6 +1539,39 @@ export function startServer(
         }
       }
 
+      /** 目标区域停留统计 GET /api/tracks/zone-stats/:trackId */
+      if (url.pathname.startsWith("/api/tracks/zone-stats/")) {
+        const parts = url.pathname.split("/");
+        if (parts.length === 5 && req.method === "GET") {
+          const trackId = parseInt(parts[4]!);
+          if (!trackId) return Response.json([]);
+          /** 从 leave-zone 事件中聚合停留时长（leave-zone 事件包含 dwellMs） */
+          const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : Date.now() - 7 * 86_400_000;
+          const rawEvents = eventStorage.query({
+            typeLike: "track:leave-zone%",
+            since,
+            limit: 500,
+            search: `"trackId":${trackId}`,
+          });
+          /** 按区域聚合停留时长 */
+          const zoneMap = new Map<string, { zoneName: string; totalDwellMs: number; visits: number }>();
+          for (const ev of rawEvents) {
+            if (!ev.detail) continue;
+            const d = JSON.parse(ev.detail) as { trackId?: number; zoneName?: string; dwellMs?: number };
+            if (d.trackId !== trackId || !d.zoneName) continue;
+            const key = d.zoneName;
+            const existing = zoneMap.get(key);
+            if (existing) {
+              existing.totalDwellMs += d.dwellMs ?? 0;
+              existing.visits++;
+            } else {
+              zoneMap.set(key, { zoneName: d.zoneName, totalDwellMs: d.dwellMs ?? 0, visits: 1 });
+            }
+          }
+          return Response.json([...zoneMap.values()].sort((a, b) => b.totalDwellMs - a.totalDwellMs));
+        }
+      }
+
       /** 合并追踪目标 */
       if (url.pathname === "/api/tracks/merge" && req.method === "POST") {
         const body = await req.json() as { sourceId?: number; targetId?: number };

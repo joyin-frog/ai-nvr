@@ -67,6 +67,8 @@ const loadingEvents = ref(false)
 const trackTrajectories = ref<Record<number, Array<{ x: number; y: number }>>>({})
 /** trackId → 活跃时段分布（24 小时） */
 const trackActivity = ref<Record<number, Array<{ hour: number; count: number }>>>({})
+/** trackId → 区域停留统计 */
+const trackZoneStats = ref<Record<number, Array<{ zoneName: string; totalDwellMs: number; visits: number }>>>({})
 
 /** 事件类型标签样式 */
 const EVENT_TYPE_STYLE: Record<string, { label: string; bg: string; color: string }> = {
@@ -252,6 +254,16 @@ async function loadTrackEvents(trackId: number) {
         .catch(() => {})
     )
   }
+  if (!trackZoneStats.value[trackId]) {
+    promises.push(
+      authFetch(`/api/tracks/zone-stats/${trackId}`)
+        .then(res => res.ok ? res.json() : [])
+        .then((data: Array<{ zoneName: string; totalDwellMs: number; visits: number }>) => {
+          if (data.length > 0) trackZoneStats.value = { ...trackZoneStats.value, [trackId]: data }
+        })
+        .catch(() => {})
+    )
+  }
   await Promise.all(promises)
 }
 
@@ -290,6 +302,23 @@ function activityHeight(trackId: number, count: number): number {
   if (!hours) return 0
   const max = Math.max(1, ...hours.map(h => h.count))
   return (count / max) * 100
+}
+
+/** 格式化毫秒时长为可读文本 */
+function formatDuration(ms: number): string {
+  if (ms < 60000) return `${Math.round(ms / 1000)}s`
+  if (ms < 3600000) return `${Math.round(ms / 60000)}min`
+  const h = Math.floor(ms / 3600000)
+  const m = Math.round((ms % 3600000) / 60000)
+  return m > 0 ? `${h}h${m}m` : `${h}h`
+}
+
+/** 区域停留条形图宽度（百分比） */
+function zoneBarWidth(trackId: number, dwellMs: number): number {
+  const stats = trackZoneStats.value[trackId]
+  if (!stats || stats.length === 0) return 0
+  const max = Math.max(1, ...stats.map(s => s.totalDwellMs))
+  return (dwellMs / max) * 100
 }
 
 /** 所有出现过的标签 */
@@ -588,6 +617,16 @@ onUnmounted(() => {
                   <div class="activity-fill" :style="{ height: activityHeight(track.trackId, h.count) + '%' }" />
                 </div>
                 <span v-if="h.hour % 4 === 0" class="activity-label">{{ h.hour }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- 区域停留统计 -->
+          <div v-if="expandedTrackId === track.trackId && trackZoneStats[track.trackId]?.length" class="zone-stats">
+            <div v-for="zs in trackZoneStats[track.trackId]" :key="zs.zoneName" class="zone-stat-row">
+              <span class="zone-stat-name">{{ zs.zoneName }}</span>
+              <span class="zone-stat-detail">{{ formatDuration(zs.totalDwellMs) }} / {{ zs.visits }}次</span>
+              <div class="zone-stat-bar">
+                <div class="zone-stat-fill" :style="{ width: zoneBarWidth(track.trackId, zs.totalDwellMs) + '%' }" />
               </div>
             </div>
           </div>
@@ -1154,6 +1193,49 @@ onUnmounted(() => {
   color: #555;
   line-height: 1;
   margin-top: 2px;
+}
+
+.zone-stats {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.zone-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.zone-stat-name {
+  color: #26A69A;
+  min-width: 40px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zone-stat-detail {
+  color: #888;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.zone-stat-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.zone-stat-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #26A69A, #FF9800);
+  border-radius: 2px;
+  transition: width 0.3s;
 }
 
 .event-list {
