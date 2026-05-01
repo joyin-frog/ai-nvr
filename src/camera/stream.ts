@@ -141,27 +141,29 @@ export class FrameExtractor {
 
     /** 主码流提供最高清画面 */
     const rtspUrl = stream.hd || stream.sd;
-    /**
-     * MJPEG 流方案不经过 JS 帧处理，不再需要限制 fps
-     * 直接使用配置帧率，原始分辨率(w=0)时使用配置值（默认 25fps）
-     */
-    const outputFps = detectFps;
-    const vfParts = [`fps=${outputFps}`];
+    const vfParts: string[] = [];
+    if (detectFps > 0) {
+      vfParts.push(`fps=${detectFps}`);
+    }
     if (detectWidth > 0) {
       vfParts.push(`scale=${detectWidth}:-4`);
     }
-    const vf = vfParts.join(",");
+    const vf = vfParts.length > 0 ? vfParts.join(",") : undefined;
 
-    const args = [
+    const args: string[] = [
       "-rtsp_transport", "tcp",
       "-i", rtspUrl,
-      "-vf", vf,
+    ];
+    if (vf) {
+      args.push("-vf", vf);
+    }
+    args.push(
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
       "-q:v", String(jpegQuality),
       "-an",
       "pipe:1",
-    ];
+    );
 
     console.log(`[${this.config.id}] 启动 ffmpeg: ${this.ffmpegPath} ${args.join(" ")}`);
 
@@ -169,8 +171,8 @@ export class FrameExtractor {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const stdout = this.proc.stdout;
-    const stderr = this.proc.stderr;
+    const stdout = this.proc.stdout!;
+    const stderr = this.proc.stderr!;
 
     if (stdout) {
       let frameCount = 0;
@@ -218,7 +220,7 @@ export class FrameExtractor {
       });
     }
 
-    this.proc.on("exit", (code: number | null) => {
+    this.proc!.on("exit", (code: number | null) => {
       console.log(`[${this.config.id}] ffmpeg 进程退出, code=${code}`);
       this.proc?.unref();
       this.proc = null;
@@ -232,7 +234,7 @@ export class FrameExtractor {
       }
     });
 
-    this.proc.on("error", (err: Error) => {
+    this.proc!.on("error", (err: Error) => {
       console.error(`[${this.config.id}] ffmpeg 进程错误:`, err.message);
     });
   }

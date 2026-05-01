@@ -273,9 +273,6 @@ export function startServer(
         if (!frame) return new Response("No frame", { status: 404 });
 
         const boundary = "--nvrboundary";
-        /** 流节流：每个客户端独立节流 */
-        let lastSent = 0;
-        const throttleMs = 40;
 
         let unsubscribe: (() => void) | null = null;
         const stream = new ReadableStream({
@@ -285,8 +282,6 @@ export function startServer(
             unsubscribe = eventBus.on("frame", (payload) => {
               if (payload.cameraId !== cameraId) return;
               const now = Date.now();
-              if (now - lastSent < throttleMs) return;
-              lastSent = now;
               streamFrames++;
 
               try {
@@ -310,7 +305,6 @@ export function startServer(
             controller.enqueue(new TextEncoder().encode(initHeader));
             controller.enqueue(frame);
             controller.enqueue(new TextEncoder().encode("\r\n"));
-            lastSent = Date.now();
           },
           cancel() {
             if (unsubscribe) unsubscribe();
