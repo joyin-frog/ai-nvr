@@ -457,7 +457,25 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     catchUpToLive()
   }, 5000)
 
+  /** 页面隐藏时暂停 fMP4 流（节省带宽），可见时恢复 */
+  let wasConnectedBeforeHidden = false
+  const onVisibilityChange = () => {
+    if (document.hidden) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        wasConnectedBeforeHidden = true
+        disconnect()
+        console.log('[fMP4] 页面隐藏，暂停流')
+      }
+    } else if (wasConnectedBeforeHidden) {
+      wasConnectedBeforeHidden = false
+      connect()
+      console.log('[fMP4] 页面可见，恢复流')
+    }
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
   onUnmounted(() => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
     disconnect()
   })
 
