@@ -175,12 +175,19 @@ export class FrameExtractor {
     const stderr = this.proc.stderr;
 
     if (stdout) {
+      let frameCount = 0;
+      let lastPerfLog = Date.now();
+      let totalFrameBytes = 0;
       stdout.on("data", (chunk: Buffer) => {
+        const t0 = performance.now();
         const frames = this.splitter.feed(chunk);
+        const splitMs = performance.now() - t0;
         for (const frame of frames) {
           const now = Date.now();
           this.lastFrameTime = now;
           this.retryCount = 0;
+          totalFrameBytes += frame.length;
+          frameCount++;
           if (!this.online) {
             this.online = true;
             this.eventBus.emit("camera:online", { cameraId: this.config.id });
@@ -191,6 +198,14 @@ export class FrameExtractor {
             data: frame,
             timestamp: now,
           });
+          /** 每 10 秒输出性能日志 */
+          if (now - lastPerfLog >= 10000) {
+            const avgSize = totalFrameBytes / frameCount;
+            console.log(`[Perf][${this.config.id}] ${frameCount}帧/10s, avg ${(avgSize / 1024).toFixed(0)}KB/帧, split=${splitMs.toFixed(1)}ms`);
+            frameCount = 0;
+            totalFrameBytes = 0;
+            lastPerfLog = now;
+          }
         }
       });
     }

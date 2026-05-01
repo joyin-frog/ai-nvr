@@ -279,17 +279,26 @@ export function startServer(
 
         const stream = new ReadableStream({
           start(controller) {
+            let streamFrames = 0;
+            let lastStreamLog = Date.now();
             const unsubscribe = eventBus.on("frame", (payload) => {
               if (payload.cameraId !== cameraId) return;
               const now = Date.now();
               if (now - lastSent < throttleMs) return;
               lastSent = now;
+              streamFrames++;
 
               try {
                 const header = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${payload.data.length}\r\n\r\n`;
                 controller.enqueue(new TextEncoder().encode(header));
                 controller.enqueue(payload.data);
                 controller.enqueue(new TextEncoder().encode("\r\n"));
+                /** 每 10 秒输出流性能日志 */
+                if (now - lastStreamLog >= 10000) {
+                  console.log(`[Perf][MJPEG][${cameraId}] ${streamFrames}帧/10s 推送给客户端`);
+                  streamFrames = 0;
+                  lastStreamLog = now;
+                }
               } catch {
                 unsubscribe();
               }

@@ -145,22 +145,28 @@ export class AiDetector {
 
     this.detecting = true;
     try {
+      const t0 = performance.now();
       /** 根据 inputWidth 配置决定推理输入分辨率 */
       let inferenceInput: Blob;
+      let resizeMs = 0;
       if (aiConfig.inputWidth > 0) {
+        const t1 = performance.now();
         const resized = await sharp(jpeg)
           .resize(aiConfig.inputWidth)
           .jpeg({ quality: 85 })
           .toBuffer();
+        resizeMs = performance.now() - t1;
         inferenceInput = new Blob([resized]);
       } else {
         inferenceInput = new Blob([jpeg]);
       }
 
+      const t2 = performance.now();
       const raw = await this.detector(inferenceInput, {
         threshold: aiConfig.threshold,
         percentage: true,
       });
+      const inferMs = performance.now() - t2;
 
       /** 提取前 maxDetections 个结果 */
       const detections = (raw as Array<{
@@ -175,9 +181,11 @@ export class AiDetector {
           box: item.box,
         }));
 
+      const totalMs = performance.now() - t0;
       if (detections.length > 0) {
-        /** 标注图片 */
+        const t3 = performance.now();
         const annotatedImage = await this.annotator.annotate(jpeg, detections);
+        const annotateMs = performance.now() - t3;
         this.annotator.setLatest(cameraId, annotatedImage);
 
         this.eventBus.emit("detect", {
@@ -186,6 +194,7 @@ export class AiDetector {
           detections,
           annotatedImage,
         });
+        console.log(`[Perf][AI][${cameraId}] 检测到 ${detections.length} 个目标, resize=${resizeMs.toFixed(0)}ms, infer=${inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
       }
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
