@@ -42,6 +42,16 @@ export class ThumbnailGenerator {
 
     mkdirSync(dirname(outputPath), { recursive: true });
 
+    const result = this.runFfmpeg(videoPath, timeSeconds, outputPath);
+    if (result) return result;
+
+    /** seek 超出视频时长时回退到开头 */
+    if (timeSeconds > 0) return this.runFfmpeg(videoPath, 0, outputPath);
+    return null;
+  }
+
+  /** 执行 ffmpeg 截帧 */
+  private runFfmpeg(videoPath: string, timeSeconds: number, outputPath: string): string | null {
     const args = [
       "-ss", String(Math.max(0, timeSeconds)),
       "-i", videoPath,

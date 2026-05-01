@@ -964,7 +964,6 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="help-row"><kbd>F</kbd> {{ t('recording.helpFullscreen') }}</div>
           </div>
         </div>
-        </div>
         <video
           ref="playerRef"
           :src="videoUrl"
