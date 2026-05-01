@@ -682,13 +682,14 @@ export function startServer(
         const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
         if (!label) return Response.json({ error: "label is required" }, { status: 400 });
 
-        /** 搜索 detect 事件的 detail 中包含该 label 的记录 */
+        /** 搜索 detect 事件的 detail 中包含该 label 或 trackName 的记录 */
+        const escapedLabel = label.replace(/"/g, '\\"');
         const events = eventStorage.query({
           type: "detect",
           cameraId,
           since,
           until,
-          search: `"label":"${label}"`,
+          search: `"${escapedLabel}"`,
           limit: 500,
         });
 

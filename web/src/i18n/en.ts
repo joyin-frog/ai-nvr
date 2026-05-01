@@ -130,7 +130,7 @@ export default {
     starSelected: 'Star selected',
     searchTime: 'Search time',
     jumpToTime: 'Jump',
-    searchLabel: 'Search target...',
+    searchLabel: 'Search label/name...',
     searchResult: 'Search results',
     helpPlayPause: 'Play/Pause',
     helpSeek: 'Seek ±5s',
