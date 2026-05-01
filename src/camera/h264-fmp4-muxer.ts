@@ -540,10 +540,12 @@ class VideoToFmp4Muxer {
 
   private extractHevcCodec(): string {
     if (!this.sps || this.sps.length < 15) return "hvc1.1.6.L93.B0";
-    /** profile_tier_level 从 SPS byte 3 开始 */
-    const profileSpace = (this.sps[3]! >> 6) & 3;
-    const profileIdc = this.sps[3]! & 0x1f;
-    const levelIdc = this.sps[14]!;
+    /** 必须先移除防竞争字节再读取 profile_tier_level */
+    const raw = this.removeEmulationPrevention(this.sps);
+    if (raw.length < 15) return "hvc1.1.6.L93.B0";
+    const profileSpace = (raw[3]! >> 6) & 3;
+    const profileIdc = raw[3]! & 0x1f;
+    const levelIdc = raw[14]!;
     const spacePrefix = profileSpace === 0 ? "" : String.fromCharCode("A".charCodeAt(0) + profileSpace - 1);
     return `hvc1${spacePrefix}.${profileIdc}.L${levelIdc}.B0`;
   }
