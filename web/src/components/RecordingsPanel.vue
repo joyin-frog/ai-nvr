@@ -520,6 +520,22 @@ const filteredRecordings = computed(() => {
   return sorted
 })
 
+/** 每个录像的检测事件数量 */
+const recordingEventCounts = computed(() => {
+  if (timelineEvents.value.length === 0) return new Map<string, number>()
+  const counts = new Map<string, number>()
+  for (const rec of filteredRecordings.value) {
+    let count = 0
+    for (const evt of timelineEvents.value) {
+      if (evt.timestamp >= rec.startTime && evt.timestamp <= rec.endTime && (!evt.cameraId || evt.cameraId === rec.cameraId)) {
+        count++
+      }
+    }
+    if (count > 0) counts.set(rec.filename, count)
+  }
+  return counts
+})
+
 /** 筛选后录像总大小 */
 const totalSize = computed(() => {
   return filteredRecordings.value.reduce((sum, r) => sum + r.size, 0)
@@ -1291,6 +1307,9 @@ defineExpose({ loadRecordings, playAtTime })
           <span v-if="rec.endTime > rec.startTime" class="rec-duration">
             {{ duration(rec.startTime, rec.endTime) }}
           </span>
+          <span v-if="recordingEventCounts.get(rec.filename)" class="rec-event-count" :title="recordingEventCounts.get(rec.filename) + ' detections'">
+            AI {{ recordingEventCounts.get(rec.filename) }}
+          </span>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
           <button :class="['rec-star', { starred: starredFiles.has(rec.filename) }]" @click.stop="toggleRecStar(rec.filename)" :title="t('recording.toggleStar')">
             {{ starredFiles.has(rec.filename) ? '★' : '☆' }}
@@ -1648,6 +1667,16 @@ defineExpose({ loadRecordings, playAtTime })
   display: block;
   font-size: 11px;
   color: #888;
+  margin-top: 2px;
+}
+
+.rec-event-count {
+  display: inline-block;
+  font-size: 10px;
+  color: #5bc0de;
+  background: #5bc0de20;
+  padding: 0 4px;
+  border-radius: 3px;
   margin-top: 2px;
 }
 
