@@ -39,6 +39,8 @@ export class EventClient {
   private reconnectAttempts = 0
   /** 最大重连间隔（秒） */
   private static readonly MAX_BACKOFF = 30
+  /** 已订阅的摄像头 ID 集合 */
+  private subscribedCameras = new Set<string>()
   /** 连接状态监听器 */
   private stateListeners = new Set<(state: ConnectionState) => void>()
   private _state: ConnectionState = 'disconnected'
@@ -80,6 +82,10 @@ export class EventClient {
       console.log('[EventClient] 已连接')
       this.reconnectAttempts = 0
       this.setState('connected')
+      /** 连接后发送摄像头订阅（减少无关帧带宽） */
+      if (this.subscribedCameras.size > 0) {
+        this.sendSubscribe()
+      }
     }
 
     this.ws.onmessage = (e) => {
@@ -137,6 +143,22 @@ export class EventClient {
     }
 
     this.dispatch(event, payload)
+  }
+
+  /**
+   * 订阅指定摄像头的帧推送
+   * 连接后自动发送 subscribe 消息给后端，仅接收订阅的摄像头帧
+   */
+  subscribe(cameraIds: string[]): void {
+    this.subscribedCameras = new Set(cameraIds)
+    this.sendSubscribe()
+  }
+
+  /** 发送订阅消息到后端 */
+  private sendSubscribe(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    if (this.subscribedCameras.size === 0) return
+    this.ws.send(JSON.stringify({ type: 'subscribe', cameraIds: [...this.subscribedCameras] }))
   }
 
   /** 订阅事件 */

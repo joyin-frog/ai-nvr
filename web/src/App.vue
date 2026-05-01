@@ -302,6 +302,8 @@ async function loadCameras() {
     }))
     updateTitle()
     loadRoiData()
+    /** 订阅当前摄像头的帧推送，减少无关帧带宽 */
+    client.subscribe(cameras.value.map(c => c.id))
   } catch {
     // retry later
   }
