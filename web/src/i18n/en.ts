@@ -24,6 +24,7 @@ export default {
     status: 'Status',
     cameras: 'Manage',
     alerts: 'Alerts',
+    tracks: 'Targets',
     settings: 'Settings',
   },
   camera: {

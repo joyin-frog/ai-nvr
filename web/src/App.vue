@@ -12,6 +12,7 @@ import RecordingsPanel from './components/RecordingsPanel.vue'
 import CameraStatusPanel from './components/CameraStatusPanel.vue'
 import CameraManagePanel from './components/CameraManagePanel.vue'
 import AlertPanel from './components/AlertPanel.vue'
+import TrackGallery from './components/TrackGallery.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import LoginView from './components/LoginView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -42,7 +43,7 @@ interface CameraStatus {
 }
 
 /** 侧边栏激活的标签 */
-type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'settings'
+type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'tracks' | 'settings'
 const savedTab = localStorage.getItem('nvr-active-tab') as SidebarTab | null
 const activeTab = ref<SidebarTab>(savedTab ?? 'events')
 
@@ -808,6 +809,10 @@ onUnmounted(() => {
             @click="switchTab('alerts')"
           >⚠ {{ t('tab.alerts') }}</button>
           <button
+            :class="['tab-btn', { active: activeTab === 'tracks' }]"
+            @click="switchTab('tracks')"
+          >◉ {{ t('tab.tracks', '目标') }}</button>
+          <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
           >⚙ {{ t('tab.settings') }}</button>
@@ -826,6 +831,7 @@ onUnmounted(() => {
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          <TrackGallery v-if="activeTab === 'tracks'" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
@@ -857,6 +863,10 @@ onUnmounted(() => {
           @click="switchTab('alerts')"
         >⚠ {{ t('tab.alerts') }}</button>
         <button
+          :class="['tab-btn', { active: activeTab === 'tracks' }]"
+          @click="switchTab('tracks')"
+        >◉ {{ t('tab.tracks', '目标') }}</button>
+        <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
         >⚙ {{ t('tab.settings') }}</button>
@@ -875,6 +885,7 @@ onUnmounted(() => {
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        <TrackGallery v-if="activeTab === 'tracks'" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

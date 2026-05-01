@@ -64,6 +64,7 @@ export function startServer(
   authConfig: AuthConfig,
   ptzController: PtzController,
   trackLabelStorage: import("@/storage/track-labels").TrackLabelStorage,
+  trackStorage: import("@/storage/tracks").TrackStorage,
 ): void {
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
   async function handleRequest(req: Request): Promise<Response | undefined> {
@@ -930,6 +931,30 @@ export function startServer(
         if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
         const ok = trackLabelStorage.remove(id);
         return Response.json({ ok });
+      }
+
+      /** 追踪目标列表 */
+      if (url.pathname === "/api/tracks" && req.method === "GET") {
+        return Response.json(trackStorage.listTracks());
+      }
+
+      /** 更新追踪目标自定义名称 */
+      if (url.pathname.startsWith("/api/tracks/") && req.method === "PATCH") {
+        const trackId = parseInt(url.pathname.split("/").pop() ?? "");
+        if (!trackId) return Response.json({ error: "invalid trackId" }, { status: 400 });
+        const body = await req.json() as { customName?: string };
+        trackStorage.setCustomName(trackId, body.customName ?? "");
+        const updated = trackStorage.getTrack(trackId);
+        return Response.json(updated);
+      }
+
+      /** 追踪目标快照图片 */
+      if (url.pathname.startsWith("/api/tracks/snapshot/") && req.method === "GET") {
+        const filename = url.pathname.slice("/api/tracks/snapshot/".length);
+        const filePath = trackStorage.getSnapshotPath(filename);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        const file = Bun.file(filePath);
+        return new Response(file);
       }
 
       /** API 路径未匹配 → 404 */

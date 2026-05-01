@@ -13,6 +13,7 @@ import { type Detection, type DetectMode } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
+import { type TrackStorage } from "@/storage/tracks";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,6 +76,7 @@ export class AiDetector {
     private eventBus: EventBus,
     private annotator: Annotator,
     private modelCacheDir: string,
+    private trackStorage?: TrackStorage,
   ) {}
 
   /** 异步初始化：加载模型 */
@@ -333,6 +335,20 @@ export class AiDetector {
         this.trackers.set(cameraId, tracker);
       }
       const trackResult = tracker.update(detections);
+
+      /** 新目标出现时保存裁剪快照到 TrackStorage */
+      if (this.trackStorage && trackResult.appeared.length > 0) {
+        for (const target of trackResult.appeared) {
+          this.trackStorage.upsert(
+            target.trackId,
+            target.label,
+            cameraId,
+            timestamp,
+            jpeg,
+            target.box,
+          ).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
+        }
+      }
 
       const totalMs = performance.now() - t0;
 

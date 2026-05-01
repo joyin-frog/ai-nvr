@@ -24,6 +24,7 @@ export default {
     status: '状态',
     cameras: '管理',
     alerts: '告警',
+    tracks: '目标',
     settings: '设置',
   },
   camera: {
