@@ -147,6 +147,19 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   alert: { labelKey: 'event.alert', bg: '#FFD93D', color: '#333' },
 }
 
+/** 从 detail 文本中提取变动比例（如 "变动 15.3%" → 15.3） */
+function motionRatio(detail: string): number {
+  const match = detail.match(/([\d.]+)%/)
+  return match ? parseFloat(match[1]!) : 0
+}
+
+/** 变动比例 → 颜色（绿→黄→红） */
+function motionBarColor(ratio: number): string {
+  if (ratio < 5) return '#4CAF50'
+  if (ratio < 15) return '#FFC107'
+  return '#F44336'
+}
+
 /** 添加实时事件（受筛选条件过滤） */
 function addEvent(type: string, cameraId: string, detail: string) {
   if (filterType.value && filterType.value !== type) return
@@ -481,6 +494,9 @@ defineExpose({ addEvent, loadHistory })
             alt=""
           />
           <span class="event-detail">{{ e.detail }}</span>
+          <div v-if="e.type === 'motion' && motionRatio(e.detail) > 0" class="motion-bar-wrap">
+            <div class="motion-bar" :style="{ width: Math.min(motionRatio(e.detail) * 10, 100) + '%', background: motionBarColor(motionRatio(e.detail)) }" />
+          </div>
           <span class="expand-icon">{{ expandedId === e.id ? '▾' : '▸' }}</span>
           <button :class="['star-btn', { starred: e.starred }]" @click.stop="toggleStar(e.id)" :title="t('event.toggleStar')">
             {{ e.starred ? '★' : '☆' }}
@@ -796,6 +812,21 @@ defineExpose({ addEvent, loadHistory })
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+
+.motion-bar-wrap {
+  width: 40px;
+  height: 4px;
+  background: #2a2a4a;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.motion-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
 }
 
 .expand-icon {
