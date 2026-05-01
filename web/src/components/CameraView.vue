@@ -152,6 +152,13 @@ watch(() => props.online, (on) => {
   if (on) {
     /** 启动 Canvas 渲染循环 */
     canvasRenderer.startLoop()
+    /** 首帧快照预加载：立即获取静态快照填充 Canvas，减少等待时间 */
+    authFetch(`/api/snapshot/${props.cameraId}`)
+      .then(res => res.ok ? res.arrayBuffer() : null)
+      .then(buf => {
+        if (buf && buf.byteLength > 100) feedFrame(buf)
+      })
+      .catch(() => { /* 快照获取失败不影响实时流 */ })
     /** 启动 MJPEG fetch 流（WS 帧的 fallback） */
     const url = authUrl(`/api/stream/${props.cameraId}`)
     mjpegStream.startFetch(url, feedFrame)
