@@ -42,6 +42,7 @@ export default {
     lastSeenHours: '{count} 小时前在线',
     lastSeenDays: '{count} 天前在线',
     adjust: '画面调节',
+    heatmap: '活动热力图',
     brightness: '亮度',
     contrast: '对比度',
     saturation: '饱和度',

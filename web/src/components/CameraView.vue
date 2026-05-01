@@ -202,6 +202,42 @@ const trackTrails = new Map<number, Array<{ x: number; y: number }>>()
 /** 消失目标的最后更新时间，用于渐隐 */
 const trailFadeStart = new Map<number, number>()
 
+/** 热力图状态 */
+const showHeatmap = ref(false)
+/** 热力图网格数据 */
+const heatmapGrid = ref<number[][]>([])
+const heatmapMaxCount = ref(0)
+let heatmapTimer: ReturnType<typeof setInterval> | null = null
+
+/** 加载热力图数据 */
+async function loadHeatmap() {
+  if (!showHeatmap.value || !props.online) return
+  try {
+    const res = await authFetch(`/api/tracks/heatmap/${props.cameraId}?cols=40&rows=30`)
+    if (!res.ok) return
+    const data = await res.json() as { grid: number[][]; maxCount: number; totalPoints: number }
+    heatmapGrid.value = data.grid
+    heatmapMaxCount.value = data.maxCount
+  } catch { /* 静默降级 */ }
+}
+
+/** 切换热力图显示 */
+watch(showHeatmap, (v) => {
+  if (v) {
+    loadHeatmap()
+    heatmapTimer = setInterval(loadHeatmap, 5000)
+  } else {
+    if (heatmapTimer) { clearInterval(heatmapTimer); heatmapTimer = null }
+    heatmapGrid.value = []
+    heatmapMaxCount.value = 0
+  }
+})
+
+/** 摄像头上线时加载热力图 */
+watch(() => props.online, (v) => {
+  if (v && showHeatmap.value) loadHeatmap()
+})
+
 /** 记录当前帧中所有检测目标的中心点到轨迹缓存 */
 function recordTrails() {
   for (const d of localDetections) {
@@ -1013,6 +1049,47 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     }
   }
 
+  /** 绘制热力图叠加层 */
+  if (showHeatmap.value && heatmapGrid.value.length > 0 && heatmapMaxCount.value > 0) {
+    const grid = heatmapGrid.value
+    const gridRows = grid.length
+    const gridCols = grid[0]?.length ?? 0
+    if (gridRows > 0 && gridCols > 0) {
+      const cellW = width / gridCols
+      const cellH = height / gridRows
+      ctx.save()
+      ctx.globalAlpha = 0.35
+      for (let row = 0; row < gridRows; row++) {
+        for (let col = 0; col < gridCols; col++) {
+          const count = grid[row]?.[col] ?? 0
+          if (count === 0) continue
+          const intensity = count / heatmapMaxCount.value
+          /** 热力颜色：低密度蓝 → 中密度绿 → 高密度红 */
+          let r: number, g: number, b: number
+          if (intensity < 0.33) {
+            const t = intensity / 0.33
+            r = 0; g = Math.round(t * 255); b = Math.round((1 - t) * 255)
+          } else if (intensity < 0.66) {
+            const t = (intensity - 0.33) / 0.33
+            r = Math.round(t * 255); g = 255; b = 0
+          } else {
+            const t = (intensity - 0.66) / 0.34
+            r = 255; g = Math.round((1 - t) * 255); b = 0
+          }
+          const cx = (col + 0.5) * cellW
+          const cy = (row + 0.5) * cellH
+          const radius = Math.max(cellW, cellH) * (0.6 + intensity * 0.8)
+          const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
+          gradient.addColorStop(0, `rgba(${r},${g},${b},0.8)`)
+          gradient.addColorStop(1, `rgba(${r},${g},${b},0)`)
+          ctx.fillStyle = gradient
+          ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2)
+        }
+      }
+      ctx.restore()
+    }
+  }
+
   /** 绘制追踪轨迹线（贝塞尔平滑曲线 + 渐隐） */
   if (trackTrails.size > 0) {
     const now = Date.now()
@@ -1616,6 +1693,7 @@ onUnmounted(() => {
   if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)
+  if (heatmapTimer) clearInterval(heatmapTimer)
 })
 </script>
 
@@ -1635,6 +1713,7 @@ onUnmounted(() => {
       <span v-if="frozen" class="frozen-badge">{{ t('camera.frozen') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+      <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
       <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
       <PtzControl v-if="ptz && online" :camera-id="cameraId" />
       <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
@@ -1903,6 +1982,22 @@ onUnmounted(() => {
 
 .screenshot-btn:hover {
   color: #4ECDC4;
+}
+
+.heatmap-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.heatmap-btn:hover,
+.heatmap-btn.active {
+  color: #ff6b6b;
 }
 
 .recording-btn {

@@ -1503,6 +1503,22 @@ export function startServer(
         }
       }
 
+      /** 摄像头轨迹热力图 GET /api/tracks/heatmap/:cameraId */
+      if (url.pathname.startsWith("/api/tracks/heatmap/")) {
+        const parts = url.pathname.split("/");
+        if (parts.length === 5 && req.method === "GET") {
+          const cameraId = parts[4]!;
+          if (!trajectoryStorage) return Response.json({ grid: [], maxCount: 0, totalPoints: 0 });
+          const cols = parseInt(url.searchParams.get("cols") ?? "20") || 20;
+          const rows = parseInt(url.searchParams.get("rows") ?? "15") || 15;
+          const since = url.searchParams.get("since");
+          const sinceMs = since ? parseInt(since) : Date.now() - 3_600_000;
+          const trackId = url.searchParams.get("trackId") ? parseInt(url.searchParams.get("trackId")!) : undefined;
+          const heatmap = trajectoryStorage.getHeatmap(cameraId, cols, rows, sinceMs, trackId);
+          return Response.json(heatmap);
+        }
+      }
+
       /** 查询追踪目标活跃时段分布（24小时按小时统计） */
       if (url.pathname.startsWith("/api/tracks/activity/")) {
         const parts = url.pathname.split("/");

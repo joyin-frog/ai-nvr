@@ -178,6 +178,50 @@ export class TrackTrajectoryStorage {
     return result.changes;
   }
 
+  /**
+   * 生成摄像头活动热力图
+   * 将画面划分为 cols×rows 网格，统计每个格子的轨迹点数
+   * 返回二维数组，每个值是该格子的点数（可视为"热度"）
+   */
+  getHeatmap(
+    cameraId: string,
+    /** 网格列数 */
+    cols = 20,
+    /** 网格行数 */
+    rows = 15,
+    /** 起始时间 ms，默认最近 1 小时 */
+    since?: number,
+    /** 可选：只统计指定目标 */
+    trackId?: number,
+  ): { grid: number[][]; maxCount: number; totalPoints: number } {
+    const sinceTime = since ?? Date.now() - 3_600_000;
+    let sql: string;
+    let params: [string, number] | [string, number, number];
+    if (trackId != null) {
+      sql = "SELECT x, y FROM trajectory_points WHERE camera_id = ? AND ts >= ? AND track_id = ?";
+      params = [cameraId, sinceTime, trackId];
+    } else {
+      sql = "SELECT x, y FROM trajectory_points WHERE camera_id = ? AND ts >= ?";
+      params = [cameraId, sinceTime];
+    }
+
+    const rows_data = this.db.prepare(sql).all(...params) as Array<{ x: number; y: number }>;
+
+    /** 初始化网格 */
+    const grid: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0) as number[]);
+    let maxCount = 0;
+
+    for (const pt of rows_data) {
+      /** 归一化坐标 → 网格索引 */
+      const col = Math.min(cols - 1, Math.max(0, Math.floor(pt.x * cols)));
+      const row = Math.min(rows - 1, Math.max(0, Math.floor(pt.y * rows)));
+      grid[row]![col]!++;
+      if (grid[row]![col]! > maxCount) maxCount = grid[row]![col]!;
+    }
+
+    return { grid, maxCount, totalPoints: rows_data.length };
+  }
+
   /** 获取轨迹点总数 */
   getPointCount(): number {
     const row = this.db

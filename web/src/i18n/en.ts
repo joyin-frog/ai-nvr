@@ -42,6 +42,7 @@ export default {
     lastSeenHours: 'Last seen {count}h ago',
     lastSeenDays: 'Last seen {count}d ago',
     adjust: 'Adjust image',
+    heatmap: 'Activity heatmap',
     brightness: 'Brightness',
     contrast: 'Contrast',
     saturation: 'Saturation',
