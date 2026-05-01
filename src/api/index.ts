@@ -23,12 +23,13 @@ import { resolve, extname } from "node:path";
 import { spawnSync } from "node:child_process";
 
 /** WebSocket 客户端集合 */
-const wsClients = new Set<import("bun").ServerWebSocket>();
+type WsClient = import("bun").ServerWebSocket<{ type?: string; cameraId?: string }>;
+const wsClients = new Set<WsClient>();
 
 /** WebSocket 心跳检测：每 30 秒 ping，60 秒无 pong 关闭假死连接 */
 const WS_PING_INTERVAL = 30_000;
 const WS_PONG_TIMEOUT = 60_000;
-const wsLastPong = new WeakMap<import("bun").ServerWebSocket, number>();
+const wsLastPong = new WeakMap<WsClient, number>();
 let wsHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 function startWsHeartbeat() {
   if (wsHeartbeatTimer) return;
@@ -96,6 +97,46 @@ export function startServer(
   preferencesStorage: PreferencesStorage,
   storageFs: StorageFs,
 ): void {
+  /** fMP4 流连接管理 */
+  const fmp4Unsubs = new WeakMap<WsClient, (() => void)[]>();
+
+  function handleFmp4Connection(ws: WsClient, cameraId: string, camMgr: CameraManager, bus: EventBus) {
+    const extractor = camMgr.getFmp4Extractor(cameraId);
+    const unsubs: (() => void)[] = [];
+
+    /** 发送缓存的 init segment */
+    if (extractor?.initSegment) {
+      ws.send(extractor.initSegment.data);
+    }
+
+    /** 监听新的 init segment */
+    const unsubInit = bus.on("fmp4:init", (payload) => {
+      if (payload.cameraId === cameraId) {
+        ws.send(payload.segment.data);
+      }
+    });
+    unsubs.push(unsubInit);
+
+    /** 监听 media segment */
+    const unsubSeg = bus.on("fmp4:segment", (payload) => {
+      if (payload.cameraId === cameraId) {
+        ws.send(payload.data);
+      }
+    });
+    unsubs.push(unsubSeg);
+
+    fmp4Unsubs.set(ws, unsubs);
+    console.log(`[fMP4] 客户端连接: ${cameraId}`);
+  }
+
+  function cleanupFmp4Connection(ws: WsClient) {
+    const unsubs = fmp4Unsubs.get(ws);
+    if (unsubs) {
+      for (const unsub of unsubs) unsub();
+    }
+    console.log(`[fMP4] 客户端断开`);
+  }
+
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
   async function handleRequest(req: Request): Promise<Response | undefined> {
     const url = new URL(req.url);
@@ -1145,7 +1186,7 @@ export function startServer(
       return serveStatic(url.pathname);
     }
 
-  Bun.serve({
+  Bun.serve<{ type?: string; cameraId?: string }>({
     port,
     async fetch(req, server) {
       /** CORS 预检请求 */
@@ -1163,7 +1204,17 @@ export function startServer(
           if (authConfig.token && !checkAuth(authConfig, req)) {
             return new Response("Unauthorized", { status: 401 });
           }
-          server.upgrade(req);
+          server.upgrade(req, { data: { type: "events" } });
+          return;
+        }
+        /** fMP4 流端点：/api/stream/:cameraId */
+        const streamMatch = url.pathname.match(/^\/api\/stream\/(.+)$/);
+        if (streamMatch) {
+          if (authConfig.token && !checkAuth(authConfig, req)) {
+            return new Response("Unauthorized", { status: 401 });
+          }
+          const cameraId = decodeURIComponent(streamMatch[1]!);
+          server.upgrade(req, { data: { type: "fmp4", cameraId } });
           return;
         }
       }
@@ -1174,12 +1225,24 @@ export function startServer(
     },
     websocket: {
       open(ws) {
+        const data = (ws as unknown as { data?: { type?: string; cameraId?: string } }).data;
+        /** fMP4 流连接 */
+        if (data?.type === "fmp4" && data.cameraId) {
+          handleFmp4Connection(ws, data.cameraId, cameraManager, eventBus);
+          return;
+        }
+        /** 事件推送连接 */
         wsClients.add(ws);
         wsLastPong.set(ws, Date.now());
         startWsHeartbeat();
         console.log(`[WS] 客户端连接，当前 ${wsClients.size} 个`);
       },
       close(ws) {
+        const data = (ws as unknown as { data?: { type?: string } }).data;
+        if (data?.type === "fmp4") {
+          cleanupFmp4Connection(ws);
+          return;
+        }
         wsClients.delete(ws);
         console.log(`[WS] 客户端断开，当前 ${wsClients.size} 个`);
       },
