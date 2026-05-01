@@ -1412,7 +1412,11 @@ export function startServer(
         /** 客户端订阅过滤：只推送给订阅了该摄像头的客户端 */
         const subscribed = (ws as unknown as { subscribedCameras?: Set<string> }).subscribedCameras;
         if (subscribed && !subscribed.has(cameraId)) continue;
-        ws.send(message);
+        try {
+          ws.send(message);
+        } catch {
+          /** 单个客户端发送失败不影响其他客户端 */
+        }
       }
     }
 
