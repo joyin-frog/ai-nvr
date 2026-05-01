@@ -96,6 +96,7 @@ export function startServer(
   trackStorage: import("@/storage/tracks").TrackStorage,
   preferencesStorage: PreferencesStorage,
   storageFs: StorageFs,
+  alertSnapshotStorage?: SnapshotStorage,
 ): void {
   /** fMP4 流连接管理 */
   const fmp4Unsubs = new WeakMap<WsClient, (() => void)[]>();
@@ -397,6 +398,13 @@ export function startServer(
               }
               summary = [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
             }
+          } else if (ev.type === "alert" && alertSnapshotStorage) {
+            const snapPath = alertSnapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+            if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
+            if (ev.detail) {
+              const detailObj = JSON.parse(ev.detail);
+              summary = detailObj?.ruleName ?? null;
+            }
           } else if (ev.type === "motion" && ev.detail) {
             const detailObj = JSON.parse(ev.detail);
             if (typeof detailObj?.ratio === "number") {
@@ -442,6 +450,9 @@ export function startServer(
         if (ev.type === "detect") {
           const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
           if (snapPath) snapshotUrl = `/api/snapshots/${snapPath}`;
+        } else if (ev.type === "alert" && alertSnapshotStorage) {
+          const snapPath = alertSnapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+          if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
         }
         return Response.json({ ...ev, snapshotUrl });
       }
@@ -930,6 +941,29 @@ export function startServer(
         const meta = snapshotStorage.getSnapshotMeta(`${camId}/${filename}`);
         if (!meta) return new Response("Not Found", { status: 404 });
         return Response.json(meta);
+      }
+
+      /** 告警快照列表 */
+      if (url.pathname === "/api/alert-snapshots" && alertSnapshotStorage) {
+        const cameraId = url.searchParams.get("cameraId") ?? undefined;
+        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
+        const snapshots = alertSnapshotStorage.listSnapshots(cameraId);
+        return Response.json(snapshots.slice(0, limit));
+      }
+
+      /** 告警快照图片文件 */
+      const alertSnapMatch = url.pathname.match(/^\/api\/alert-snapshots\/([^/]+)\/(.+\.jpg)$/);
+      if (alertSnapMatch && alertSnapshotStorage) {
+        const camId = alertSnapMatch[1]!;
+        const filename = alertSnapMatch[2]!;
+        const filePath = alertSnapshotStorage.getSnapshotPath(`${camId}/${filename}`);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        const snapRoot = realpathSync(alertSnapshotStorage.getSnapshotPath("."));
+        const resolved = realpathSync(filePath);
+        if (!resolved.startsWith(snapRoot)) return new Response("Forbidden", { status: 403 });
+        return new Response(Bun.file(filePath), {
+          headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
+        });
       }
 
       /** ROI 列表（全部） */

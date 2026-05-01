@@ -2,6 +2,7 @@ import { type EventBus } from "@/event-bus";
 import { type AlertStorage, type AlertRule } from "@/alert/storage";
 import { type TrackLabelStorage } from "@/storage/track-labels";
 import { type RoiStorage } from "@/storage/roi";
+import { type Annotator } from "@/ai/annotator";
 
 /** 每个规则的滑动窗口事件时间戳 */
 interface RuleWindow {
@@ -33,12 +34,21 @@ export class AlertEngine {
   /** 每个摄像头的缓存刷新时间 */
   private trackNameCacheTimeByCamera = new Map<string, number>();
 
+  /** 告警快照保存回调 */
+  private saveAlertSnapshot?: (cameraId: string, timestamp: number, jpeg: Buffer) => void;
+
   constructor(
     private eventBus: EventBus,
     private storage: AlertStorage,
     private trackLabelStorage?: TrackLabelStorage,
     private roiStorage?: RoiStorage,
+    private annotator?: Annotator,
   ) {}
+
+  /** 设置告警快照保存回调 */
+  setSaveAlertSnapshot(fn: (cameraId: string, timestamp: number, jpeg: Buffer) => void): void {
+    this.saveAlertSnapshot = fn;
+  }
 
   /** 启动引擎 */
   start(): void {
@@ -279,6 +289,13 @@ export class AlertEngine {
 
     /** 触发告警 */
     window.lastAlertTime = timestamp;
+
+    /** 异步保存带检测框的告警快照 */
+    if (this.annotator && this.saveAlertSnapshot) {
+      this.annotator.generateAnnotated(cameraId).then((jpeg) => {
+        if (jpeg) this.saveAlertSnapshot!(cameraId, timestamp, jpeg);
+      }).catch(() => { /* 快照保存失败不影响告警流程 */ });
+    }
 
     /** 写入存储 */
     this.storage.insertAlert(rule.id, rule.name, cameraId, timestamp, detail ?? "");

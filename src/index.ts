@@ -127,9 +127,15 @@ emailNotifier.start();
 const snapshotStorage = new SnapshotStorage(join(dataDir, "detection-snapshots"), eventBus);
 snapshotStorage.start();
 
+/** 告警快照存储（独立的目录，不监听 detect 事件） */
+const alertSnapshotStorage = new SnapshotStorage(join(dataDir, "alert-snapshots"), eventBus);
+
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
-const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage);
+const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage, annotator);
+alertEngine.setSaveAlertSnapshot((cameraId, timestamp, jpeg) => {
+  alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
+});
 alertEngine.start();
 
 /** 行为分析器（区域进入/离开/停留语义事件） */
@@ -175,7 +181,7 @@ for (const cam of config.cameras) {
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, storageFs);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, storageFs, alertSnapshotStorage);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"] as const;
