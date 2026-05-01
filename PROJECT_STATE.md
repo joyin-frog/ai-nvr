@@ -272,4 +272,8 @@ RTSP → ffmpeg → JpegFrameSplitter → EventBus("frame")
 - 录像缩略图批量预生成：ThumbnailGenerator.pregenerate() 后台批量生成，API POST /api/recordings/thumb-preload，前端列表加载后静默请求，悬停即显
 - 录像逐帧步进：播放器控制栏 ◂/▸ 逐帧按钮，逗号/句号键快捷键（1/30秒步进），自动暂停
 - 事件/录像面板筛选持久化：filterCamera/filterType 保存到 localStorage，切换标签后恢复
-- 下一步优先：事件详情增强、录像文件大小可视化
+- 录像时间轴视图手动切换：多路/单路/自动模式，持久化 localStorage
+- 录像播放器进度条悬停缩略图：200ms 防抖加载对应时间点帧预览
+- S 键截图快捷键：全局截取当前/全屏摄像头画面，快捷键帮助面板显示
+- 录像排序：最新/最早/最大三种排序模式，面板头部循环切换按钮，持久化 localStorage
+- 下一步优先：事件详情增强、摄像头画面延迟指标
