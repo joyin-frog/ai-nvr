@@ -391,6 +391,15 @@ function exitFullscreen() {
   }
 }
 
+/** 全屏模式智能帧订阅：单路全屏时只推送当前摄像头的 Canvas 帧，节省带宽 */
+watch(fullscreenCamera, (camId) => {
+  if (camId) {
+    client.subscribe([camId])
+  } else {
+    client.subscribe(cameras.value.map(c => c.id))
+  }
+})
+
 /** 轮巡模式 */
 const patrolActive = ref(false)
 /** 轮巡间隔（秒） */
