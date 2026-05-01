@@ -15,6 +15,16 @@ interface RoiRegion {
   enabled: boolean
 }
 
+/** 越线检测线段 */
+interface CrossLine {
+  id: number
+  cameraId: string
+  name: string
+  start: { x: number; y: number }
+  end: { x: number; y: number }
+  enabled: boolean
+}
+
 const props = defineProps<{
   cameraId: string
   /** 当前摄像头帧图片 URL（用于绘制底图） */
@@ -22,21 +32,27 @@ const props = defineProps<{
 }>()
 
 const regions = ref<RoiRegion[]>([])
+const crossLines = ref<CrossLine[]>([])
 const loading = ref(false)
 
-/** 绘制模式 */
-const drawing = ref(false)
+/** 绘制模式：none / polygon / line */
+type DrawMode = 'none' | 'polygon' | 'line'
+const drawMode = ref<DrawMode>('none')
 /** 当前正在绘制的顶点（归一化坐标） */
 const currentPoints = ref<Array<{ x: number; y: number }>>([])
-/** 新区域名称 */
-const newRegionName = ref('')
+/** 新区域/线段名称 */
+const newItemName = ref('')
 
-/** 加载 ROI 列表 */
+/** 加载 ROI 列表和越线检测线段 */
 async function loadRegions() {
   loading.value = true
   try {
-    const res = await authFetch(`/api/roi/${props.cameraId}`)
-    if (res.ok) regions.value = await res.json()
+    const [roiRes, lineRes] = await Promise.all([
+      authFetch(`/api/roi/${props.cameraId}`),
+      authFetch(`/api/cross-lines/${props.cameraId}`),
+    ])
+    if (roiRes.ok) regions.value = await roiRes.json()
+    if (lineRes.ok) crossLines.value = await lineRes.json()
   } catch {
     // ignore
   } finally {
@@ -44,53 +60,83 @@ async function loadRegions() {
   }
 }
 
-/** 开始绘制新区域 */
-function startDrawing() {
-  drawing.value = true
+/** 开始绘制多边形区域 */
+function startPolygon() {
+  drawMode.value = 'polygon'
   currentPoints.value = []
-  newRegionName.value = t('roi.regionDefault', { n: regions.value.length + 1 })
+  newItemName.value = t('roi.regionDefault', { n: regions.value.length + 1 })
+}
+
+/** 开始绘制越线检测线段 */
+function startLine() {
+  drawMode.value = 'line'
+  currentPoints.value = []
+  newItemName.value = `Line ${crossLines.value.length + 1}`
 }
 
 /** 取消绘制 */
 function cancelDrawing() {
-  drawing.value = false
+  drawMode.value = 'none'
   currentPoints.value = []
 }
 
 /** 点击画面添加顶点 */
 function onImageClick(e: MouseEvent) {
-  if (!drawing.value) return
+  if (drawMode.value === 'none') return
   const img = e.currentTarget as HTMLImageElement
   const rect = img.getBoundingClientRect()
   const x = (e.clientX - rect.left) / rect.width
   const y = (e.clientY - rect.top) / rect.height
   currentPoints.value.push({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })
+  /** 线段模式：2 个点自动完成 */
+  if (drawMode.value === 'line' && currentPoints.value.length === 2) {
+    finishDrawing()
+  }
 }
 
 /** 完成绘制并保存 */
 async function finishDrawing() {
-  if (currentPoints.value.length < 3) return
+  if (drawMode.value === 'polygon' && currentPoints.value.length < 3) return
+  if (drawMode.value === 'line' && currentPoints.value.length < 2) return
   try {
-    const res = await authFetch('/api/roi', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        cameraId: props.cameraId,
-        name: newRegionName.value,
-        points: JSON.stringify(currentPoints.value),
-      }),
-    })
-    if (res.ok) {
-      drawing.value = false
-      currentPoints.value = []
-      loadRegions()
+    if (drawMode.value === 'polygon') {
+      const res = await authFetch('/api/roi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cameraId: props.cameraId,
+          name: newItemName.value,
+          points: JSON.stringify(currentPoints.value),
+        }),
+      })
+      if (res.ok) {
+        drawMode.value = 'none'
+        currentPoints.value = []
+        loadRegions()
+      }
+    } else if (drawMode.value === 'line') {
+      const res = await authFetch('/api/cross-lines', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cameraId: props.cameraId,
+          name: newItemName.value,
+          start: currentPoints.value[0],
+          end: currentPoints.value[1],
+        }),
+      })
+      if (res.ok) {
+        drawMode.value = 'none'
+        currentPoints.value = []
+        loadRegions()
+      }
     }
   } catch {
     // ignore
   }
 }
 
-/** 切换启用/禁用 */
+/** 切换 ROI 启用/禁用 */
 async function toggleRegion(region: RoiRegion) {
   try {
     await authFetch(`/api/roi/item/${region.id}`, {
@@ -104,10 +150,34 @@ async function toggleRegion(region: RoiRegion) {
   }
 }
 
-/** 删除区域 */
+/** 删除 ROI */
 async function deleteRegion(id: number) {
   try {
     await authFetch(`/api/roi/item/${id}`, { method: 'DELETE' })
+    loadRegions()
+  } catch {
+    // ignore
+  }
+}
+
+/** 切换越线检测线段启用/禁用 */
+async function toggleLine(line: CrossLine) {
+  try {
+    await authFetch(`/api/cross-lines/${line.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !line.enabled }),
+    })
+    loadRegions()
+  } catch {
+    // ignore
+  }
+}
+
+/** 删除越线检测线段 */
+async function deleteLine(id: number) {
+  try {
+    await authFetch(`/api/cross-lines/${id}`, { method: 'DELETE' })
     loadRegions()
   } catch {
     // ignore
@@ -123,6 +193,30 @@ function parsePoints(pointsStr: string): Array<{ x: number; y: number }> {
   }
 }
 
+/** 线段方向箭头标记 SVG 路径 */
+function lineArrowPath(line: CrossLine): string {
+  const dx = line.end.x - line.start.x
+  const dy = line.end.y - line.start.y
+  const len = Math.sqrt(dx * dx + dy * dy)
+  if (len < 0.01) return ''
+  /** 中点 */
+  const mx = (line.start.x + line.end.x) / 2
+  const my = (line.start.y + line.end.y) / 2
+  /** 单位方向向量 */
+  const nx = dx / len
+  const ny = dy / len
+  /** 箭头大小 */
+  const s = 0.02
+  /** 箭头三个点：尖端和两翼 */
+  const tx = mx + nx * s
+  const ty = my + ny * s
+  const lx = mx - nx * s * 0.5 - ny * s * 0.5
+  const ly = my - ny * s * 0.5 + nx * s * 0.5
+  const rx = mx - nx * s * 0.5 + ny * s * 0.5
+  const ry = my - ny * s * 0.5 - nx * s * 0.5
+  return `M${lx},${ly} L${tx},${ty} L${rx},${ry} Z`
+}
+
 onMounted(() => {
   loadRegions()
 })
@@ -134,41 +228,68 @@ onMounted(() => {
     <div class="draw-area">
       <div class="draw-header">
         <span class="draw-title">{{ t('roi.title') }}</span>
-        <button v-if="!drawing" class="draw-btn" @click="startDrawing">{{ t('roi.addPoint') }}</button>
-        <template v-else>
+        <template v-if="drawMode === 'none'">
+          <button class="draw-btn" @click="startPolygon">{{ t('roi.addPoint') }}</button>
+          <button class="draw-btn line-draw-btn" @click="startLine">+ Line</button>
+        </template>
+        <template v-else-if="drawMode === 'polygon'">
           <span class="draw-hint">{{ t('roi.drawHint', { count: currentPoints.length }) }}</span>
           <button class="save-btn" :disabled="currentPoints.length < 3" @click="finishDrawing">{{ t('roi.save') }}</button>
           <button class="cancel-btn" @click="cancelDrawing">{{ t('settings.cancel') }}</button>
         </template>
+        <template v-else-if="drawMode === 'line'">
+          <span class="draw-hint">{{ currentPoints.length === 0 ? 'Click start point' : 'Click end point' }}</span>
+          <button class="save-btn" :disabled="currentPoints.length < 2" @click="finishDrawing">{{ t('roi.save') }}</button>
+          <button class="cancel-btn" @click="cancelDrawing">{{ t('settings.cancel') }}</button>
+        </template>
       </div>
 
-      <!-- 画面 + 多边形叠加 -->
-      <div class="image-container" v-if="drawing || regions.length > 0">
+      <!-- 画面 + 叠加层 -->
+      <div class="image-container" v-if="drawMode !== 'none' || regions.length > 0 || crossLines.length > 0">
         <img
           v-if="frameUrl"
           :src="frameUrl"
           class="roi-image"
           @click="onImageClick"
-          :class="{ clickable: drawing }"
+          :class="{ clickable: drawMode !== 'none' }"
           alt=""
         />
         <div v-else class="no-frame">{{ t('camera.noFrame') }}</div>
 
         <!-- SVG 叠加层 -->
         <svg class="roi-overlay" viewBox="0 0 1 1" preserveAspectRatio="none">
-          <!-- 已保存的区域 -->
-          <template v-for="region in regions" :key="region.id">
+          <!-- 已保存的多边形区域 -->
+          <template v-for="region in regions" :key="'r' + region.id">
             <polygon
               v-if="parsePoints(region.points).length >= 3"
               :points="parsePoints(region.points).map(p => `${p.x},${p.y}`).join(' ')"
               :class="['roi-polygon', { disabled: !region.enabled }]"
             />
           </template>
-          <!-- 当前绘制中的区域 -->
+          <!-- 已保存的越线检测线段 -->
+          <template v-for="line in crossLines" :key="'l' + line.id">
+            <line
+              :x1="line.start.x" :y1="line.start.y"
+              :x2="line.end.x" :y2="line.end.y"
+              :class="['cross-line', { disabled: !line.enabled }]"
+            />
+            <path :d="lineArrowPath(line)" :class="['cross-line-arrow', { disabled: !line.enabled }]" />
+            <circle :cx="line.start.x" :cy="line.start.y" r="0.01" :class="['cross-line-dot', { disabled: !line.enabled }]" />
+            <circle :cx="line.end.x" :cy="line.end.y" r="0.01" :class="['cross-line-dot', { disabled: !line.enabled }]" />
+          </template>
+          <!-- 当前绘制中的多边形 -->
           <polygon
-            v-if="currentPoints.length >= 3"
+            v-if="drawMode === 'polygon' && currentPoints.length >= 3"
             :points="currentPoints.map(p => `${p.x},${p.y}`).join(' ')"
             class="roi-polygon drawing"
+          />
+          <!-- 当前绘制中的线段 -->
+          <line
+            v-if="drawMode === 'line' && currentPoints.length >= 1"
+            :x1="currentPoints[0]!.x" :y1="currentPoints[0]!.y"
+            :x2="currentPoints.length >= 2 ? currentPoints[1]!.x : currentPoints[0]!.x"
+            :y2="currentPoints.length >= 2 ? currentPoints[1]!.y : currentPoints[0]!.y"
+            class="cross-line drawing"
           />
           <template v-for="(p, i) in currentPoints" :key="i">
             <circle :cx="p.x" :cy="p.y" r="0.015" class="roi-vertex" />
@@ -178,14 +299,24 @@ onMounted(() => {
     </div>
 
     <!-- 区域列表 -->
-    <div v-if="regions.length > 0" class="region-list">
-      <div v-for="region in regions" :key="region.id" class="region-item">
+    <div v-if="regions.length > 0 || crossLines.length > 0" class="region-list">
+      <div v-for="region in regions" :key="'r' + region.id" class="region-item">
         <button class="toggle-btn" @click="toggleRegion(region)">
           {{ region.enabled ? '●' : '○' }}
         </button>
+        <span class="region-icon region">◇</span>
         <span class="region-name">{{ region.name }}</span>
         <span class="region-vertices">{{ parsePoints(region.points).length }} {{ t('roi.vertices') }}</span>
         <button class="delete-btn" @click="deleteRegion(region.id)">{{ t('roi.delete') }}</button>
+      </div>
+      <div v-for="line in crossLines" :key="'l' + line.id" class="region-item">
+        <button class="toggle-btn line-toggle" @click="toggleLine(line)">
+          {{ line.enabled ? '●' : '○' }}
+        </button>
+        <span class="region-icon line">╱</span>
+        <span class="region-name">{{ line.name }}</span>
+        <span class="region-vertices line-label">A→B</span>
+        <button class="delete-btn" @click="deleteLine(line.id)">{{ t('roi.delete') }}</button>
       </div>
     </div>
   </div>
@@ -201,6 +332,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .draw-title {
@@ -219,6 +351,11 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.line-draw-btn {
+  background: #FF6F00;
+  margin-left: 4px;
 }
 
 .draw-hint {
@@ -310,6 +447,41 @@ onMounted(() => {
   stroke-width: 0.003;
 }
 
+/* 越线检测线段样式 */
+.cross-line {
+  stroke: #FF6F00;
+  stroke-width: 0.006;
+  stroke-linecap: round;
+}
+
+.cross-line.disabled {
+  stroke: #555;
+}
+
+.cross-line.drawing {
+  stroke: #FF6F00;
+  stroke-dasharray: 0.02;
+}
+
+.cross-line-arrow {
+  fill: #FF6F00;
+  opacity: 0.9;
+}
+
+.cross-line-arrow.disabled {
+  fill: #555;
+}
+
+.cross-line-dot {
+  fill: #FF6F00;
+  stroke: #1a1a2e;
+  stroke-width: 0.003;
+}
+
+.cross-line-dot.disabled {
+  fill: #555;
+}
+
 .region-list {
   margin-top: 8px;
   display: flex;
@@ -339,6 +511,24 @@ onMounted(() => {
   color: #4ECDC4;
 }
 
+.line-toggle {
+  color: #FF6F00;
+}
+
+.region-icon {
+  font-size: 11px;
+  width: 14px;
+  text-align: center;
+}
+
+.region-icon.region {
+  color: #4ECDC4;
+}
+
+.region-icon.line {
+  color: #FF6F00;
+}
+
 .region-name {
   color: #e0e0e0;
   font-weight: 500;
@@ -347,6 +537,11 @@ onMounted(() => {
 .region-vertices {
   color: #555;
   font-size: 11px;
+}
+
+.region-vertices.line-label {
+  color: #FF6F00;
+  font-size: 10px;
 }
 
 .delete-btn {
