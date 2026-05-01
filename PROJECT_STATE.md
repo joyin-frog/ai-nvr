@@ -304,3 +304,8 @@ RTSP → ffmpeg(-fflags nobuffer) → JpegFrameSplitter → EventBus("frame")
 - 追踪画廊未命名筛选：新追踪目标（5分钟内首次出现）黄色边框高亮+发光动画，未命名目标数量按钮筛选
 - 追踪目标合并/关联：TrackStorage.merge() 合并两个目标的摄像头列表/出现次数/时间范围，POST /api/tracks/merge 端点，前端命名时自动检测同名目标弹出合并确认
 - 检测框 EMA 平滑过渡：前端对检测框坐标做 EMA 插值（alpha=0.35），消除检测框位置抖动
+- fMP4 Buffer 切片修复：前端 subarray().buffer 改为 slice().buffer，避免将协议头字节传入 MSE 解码器（init + media 均修复）
+- fMP4 段广播共享编码：后端 N 客户端共享同一个编码后的 Buffer，避免重复 Buffer.alloc + copy
+- AI 推理分辨率默认值：inputWidth 从 0（原始分辨率）改为 640，1080p/4K 摄像头推理速度大幅提升
+- AI 推理跳过 JPEG 重编码：detect-worker 中 sharp resize 后直接输出 RGB 像素给 RawImage，省约 15-25ms JPEG 编解码开销
+- 右键命名坐标修复：onCanvasContext 使用平滑后的检测框坐标匹配点击位置
