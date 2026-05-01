@@ -1059,8 +1059,8 @@ watch(() => props.recording, (on) => {
 async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
-  const link = document.createElement('a')
-  link.download = `${props.name}_${ts}.jpg`
+
+  let blob: Blob | null = null
 
   if (useMse.value && fmp4.videoRef.value) {
     /** MSE 模式：从 video + overlay canvas 合成截图 */
@@ -1070,27 +1070,40 @@ async function takeScreenshot() {
     canvas.height = video.videoHeight || 1080
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(video, 0, 0)
-    /** 叠加 overlay */
     if (overlayCanvas.value) {
       ctx.drawImage(overlayCanvas.value, 0, 0)
     }
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92))
-    if (blob) {
-      const url = URL.createObjectURL(blob)
-      link.href = url
-      link.click()
-      URL.revokeObjectURL(url)
-    }
+    blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
   } else {
-    /** Canvas fallback 模式 */
-    const blob = await captureJpeg()
-    if (blob) {
-      const url = URL.createObjectURL(blob)
-      link.href = url
-      link.click()
-      URL.revokeObjectURL(url)
+    blob = await captureJpeg()
+  }
+
+  if (!blob) return
+
+  /** 复制到剪贴板（PNG 格式，保留透明通道支持） */
+  if (navigator.clipboard && window.ClipboardItem) {
+    const pngBlob = blob.type === 'image/png' ? blob : await new Promise<Blob | null>(resolve => {
+      const img = new Image()
+      img.onload = () => {
+        const c = document.createElement('canvas')
+        c.width = img.width
+        c.height = img.height
+        c.getContext('2d')!.drawImage(img, 0, 0)
+        c.toBlob(resolve, 'image/png')
+      }
+      img.src = URL.createObjectURL(blob!)
+    })
+    if (pngBlob) {
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]).catch(() => { /* 剪贴板权限被拒绝 */ })
     }
   }
+
+  /** 同时下载为 JPG */
+  const link = document.createElement('a')
+  link.download = `${props.name}_${ts}.jpg`
+  link.href = URL.createObjectURL(blob)
+  link.click()
+  URL.revokeObjectURL(link.href)
 }
 
 /** 画面调节面板 */
