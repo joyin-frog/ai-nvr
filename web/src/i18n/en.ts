@@ -252,6 +252,7 @@ export default {
     testOk: 'Connected',
     testFail: 'Failed',
     testVideoInfo: 'Video: {info}',
+    confirm: 'Confirm',
   },
   alert: {
     title: 'Alerts',
@@ -401,6 +402,9 @@ export default {
     modelDescDetrR50: 'Classic DETR model',
     importantLabels: 'Important labels (comma separated)',
     importantLabelsHint: 'Only push these labels to frontend, empty = all',
+    connection: 'Connection',
+    backendUrl: 'Backend URL',
+    inputWidth: 'Input Width',
   },
   login: {
     title: 'JK NVR Login',

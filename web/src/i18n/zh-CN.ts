@@ -254,6 +254,7 @@ export default {
     testOk: '连接成功',
     testFail: '连接失败',
     testVideoInfo: '视频: {info}',
+    confirm: '确认',
   },
   alert: {
     title: '告警',
@@ -403,6 +404,9 @@ export default {
     modelDescDetrR50: '经典DETR模型',
     importantLabels: '重要标签（逗号分隔）',
     importantLabelsHint: '仅推送这些标签的检测结果到前端，留空=全部',
+    connection: '连接',
+    backendUrl: '后端地址',
+    inputWidth: '输入宽度',
   },
   login: {
     title: 'JK NVR 登录',
