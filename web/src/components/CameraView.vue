@@ -831,6 +831,43 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       }
       ctx.stroke()
       ctx.globalAlpha = 1
+
+      /** 在轨迹末尾绘制速度方向箭头 */
+      const velocity = trackVelocities.get(trackId)
+      if (velocity && points.length >= 1) {
+        const last = points[points.length - 1]!
+        const speed = Math.sqrt(velocity.dx * velocity.dx + velocity.dy * velocity.dy)
+        if (speed > 0.005) {
+          /** 箭头长度与速度成正比，限制最大长度 */
+          const arrowLen = Math.min(speed * 800, 40)
+          const nx = velocity.dx / speed
+          const ny = velocity.dy / speed
+          const ex = last.x * width + nx * arrowLen
+          const ey = last.y * height + ny * arrowLen
+          const sx = last.x * width
+          const sy = last.y * height
+          /** 箭头线 */
+          const fadeAlpha2 = fadeStart ? Math.max(0, 1 - (now - fadeStart) / TRAIL_FADE_MS) : 1
+          ctx.globalAlpha = fadeAlpha2 * 0.7
+          ctx.strokeStyle = color.stroke
+          ctx.lineWidth = 2
+          ctx.setLineDash([])
+          ctx.beginPath()
+          ctx.moveTo(sx, sy)
+          ctx.lineTo(ex, ey)
+          ctx.stroke()
+          /** 箭头头部 */
+          const headLen = 6
+          const angle = Math.atan2(ey - sy, ex - sx)
+          ctx.beginPath()
+          ctx.moveTo(ex, ey)
+          ctx.lineTo(ex - headLen * Math.cos(angle - 0.5), ey - headLen * Math.sin(angle - 0.5))
+          ctx.moveTo(ex, ey)
+          ctx.lineTo(ex - headLen * Math.cos(angle + 0.5), ey - headLen * Math.sin(angle + 0.5))
+          ctx.stroke()
+          ctx.globalAlpha = 1
+        }
+      }
     }
   }
 
