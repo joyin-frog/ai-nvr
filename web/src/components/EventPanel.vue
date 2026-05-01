@@ -101,6 +101,8 @@ const snapshotList = ref<SnapshotInfo[]>([])
 const snapshotLoading = ref(false)
 /** 快照筛选摄像头 */
 const snapFilterCamera = ref('')
+/** 快照筛选标签 */
+const snapFilterLabel = ref('')
 /** 选中放大查看的快照 URL */
 const previewUrl = ref('')
 
@@ -135,6 +137,27 @@ const snapshotMapByCamera = computed(() => {
     }
   }
   return map
+})
+
+/** 快照中所有出现过的检测标签 */
+const allSnapshotLabels = computed(() => {
+  const set = new Set<string>()
+  for (const snap of snapshotList.value) {
+    if (snap.detectionLabels) {
+      for (const label of snap.detectionLabels.split(', ')) {
+        if (label) set.add(label)
+      }
+    }
+  }
+  return [...set].sort()
+})
+
+/** 按标签筛选后的快照列表 */
+const filteredSnapshots = computed(() => {
+  if (!snapFilterLabel.value) return snapshotList.value
+  return snapshotList.value.filter(s =>
+    s.detectionLabels?.includes(snapFilterLabel.value),
+  )
 })
 
 /** 打开快照大图预览 */
@@ -572,6 +595,10 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         <option value="">{{ t('event.allCameras') }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
+      <select v-if="allSnapshotLabels.length > 1" v-model="snapFilterLabel" class="filter-select">
+        <option value="">{{ t('event.allTypes') }}</option>
+        <option v-for="label in allSnapshotLabels" :key="label" :value="label">{{ label }}</option>
+      </select>
       <button class="refresh-btn" @click="loadSnapshots" :disabled="snapshotLoading">
         {{ t('event.refresh') }}
       </button>
@@ -665,12 +692,12 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 
     <!-- 快照画廊视图 -->
     <div v-if="subView === 'gallery'" class="gallery-container">
-      <div v-if="snapshotList.length === 0" class="empty">
+      <div v-if="filteredSnapshots.length === 0" class="empty">
         {{ snapshotLoading ? t('app.loading') : t('event.noSnapshots') }}
       </div>
       <div class="gallery-grid">
         <div
-          v-for="snap in snapshotList"
+          v-for="snap in filteredSnapshots"
           :key="snap.filename"
           class="gallery-item"
           @click="openSnapPreview(snap)"
