@@ -30,8 +30,8 @@ export class AlertEngine {
 
   /** 追踪标签缓存：cameraId:trackId -> name */
   private trackNameCache = new Map<string, string>();
-  /** 追踪标签缓存刷新时间 */
-  private trackNameCacheTime = 0;
+  /** 每个摄像头的缓存刷新时间 */
+  private trackNameCacheTimeByCamera = new Map<string, number>();
 
   constructor(
     private eventBus: EventBus,
@@ -79,6 +79,8 @@ export class AlertEngine {
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
     this.windows.clear();
+    this.trackNameCache.clear();
+    this.trackNameCacheTimeByCamera.clear();
   }
 
   /** 刷新规则缓存 */
@@ -215,18 +217,23 @@ export class AlertEngine {
     return inside;
   }
 
-  /** 刷新追踪标签缓存（30秒 TTL） */
+  /** 刷新追踪标签缓存（按摄像头独立 30 秒 TTL） */
   private refreshTrackNames(cameraId: string): void {
     if (!this.trackLabelStorage) return;
     const now = Date.now();
-    if (now - this.trackNameCacheTime < AlertEngine.CACHE_TTL) return;
-    this.trackNameCache.clear();
+    const lastTime = this.trackNameCacheTimeByCamera.get(cameraId) ?? 0;
+    if (now - lastTime < AlertEngine.CACHE_TTL) return;
+    /** 只清除当前摄像头的缓存 */
+    const prefix = `${cameraId}:`;
+    for (const key of this.trackNameCache.keys()) {
+      if (key.startsWith(prefix)) this.trackNameCache.delete(key);
+    }
     for (const label of this.trackLabelStorage.listByCamera(cameraId)) {
       if (label.name) {
         this.trackNameCache.set(`${cameraId}:${label.trackId}`, label.name);
       }
     }
-    this.trackNameCacheTime = now;
+    this.trackNameCacheTimeByCamera.set(cameraId, now);
   }
 
   /** 判断当前时间是否在静默时段内 */
