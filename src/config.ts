@@ -151,10 +151,10 @@ export function loadConfig(configPath?: string): AppConfig {
         hd: extractStreamUrl(go2rtc.streams, id, "hd"),
         sd: extractStreamUrl(go2rtc.streams, id, "sd"),
       },
-      detectWidth: ((cam.detect as Record<string, unknown>)?.width as number) || 640,
-      detectHeight: ((cam.detect as Record<string, unknown>)?.height as number) || 360,
+      detectWidth: ((cam.detect as Record<string, unknown>)?.width as number) ?? 0,
+      detectHeight: ((cam.detect as Record<string, unknown>)?.height as number) ?? 0,
       detectFps: (cam.detect as Record<string, unknown>)?.fps as number ?? 5,
-      jpegQuality: ((cam.detect as Record<string, unknown>)?.jpeg_quality as number) || 5,
+      jpegQuality: ((cam.detect as Record<string, unknown>)?.jpeg_quality as number) ?? 5,
       group: (cam.group as string) ?? "",
       ptz: parsePtzConfig(cam),
     });

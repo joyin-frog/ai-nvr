@@ -149,7 +149,9 @@ export class FrameExtractor {
   private spawnFfmpeg(): void {
     const { detectFps, detectWidth, jpegQuality, stream } = this.config;
 
-    /** fps 滤镜控制帧率；scale 仅在配置了低于原始的宽度时才缩放 */
+    /** 主码流提供最高清画面 */
+    const rtspUrl = stream.hd || stream.sd;
+    /** fps 滤镜控制帧率；scale 仅在配置了宽度时才缩放 */
     const vfParts = [`fps=${detectFps}`];
     if (detectWidth > 0) {
       vfParts.push(`scale=${detectWidth}:-4`);
@@ -158,7 +160,7 @@ export class FrameExtractor {
 
     const args = [
       "-rtsp_transport", "tcp",
-      "-i", stream.sd,
+      "-i", rtspUrl,
       "-vf", vf,
       "-f", "image2pipe",
       "-vcodec", "mjpeg",

@@ -130,7 +130,7 @@ export class CameraManager {
 
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
-    /** 子码流用于预览/检测 */
+    /** 主码流用于预览/检测（最高清画面） */
     const extractor = new FrameExtractor(cam, this.config.ffmpegPath, this.eventBus);
     this.extractors.set(cam.id, extractor);
     extractor.start();
