@@ -86,7 +86,7 @@ recorder.start();
 /** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
 const annotator = new Annotator();
 const trackStorage = new TrackStorage(join(dataDir, "tracks"));
-const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage);
+const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage);
 
 /** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder);
@@ -185,8 +185,8 @@ for (const eventType of RECORDED_EVENTS) {
     if (eventType === "motion") {
       detail = JSON.stringify({ ratio: (payload as { ratio: number }).ratio });
     } else if (eventType === "detect") {
-      const p = payload as { detections: Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number }> };
-      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId })) });
+      const p = payload as { detections: Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number; trackName?: string }> };
+      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId, trackName: d.trackName })) });
     } else if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });

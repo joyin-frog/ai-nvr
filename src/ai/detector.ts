@@ -14,6 +14,7 @@ import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type TrackStorage } from "@/storage/tracks";
+import { type TrackLabelStorage } from "@/storage/track-labels";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,6 +80,7 @@ export class AiDetector {
     private annotator: Annotator,
     private modelCacheDir: string,
     private trackStorage?: TrackStorage,
+    private trackLabelStorage?: TrackLabelStorage,
   ) {}
 
   /** 异步初始化：加载模型 */
@@ -415,10 +417,18 @@ export class AiDetector {
         });
       }
 
+      /** 为检测结果附带用户自定义名称 */
+      const enricheddetections = this.trackLabelStorage
+        ? trackResult.detections.map(d => {
+          const trackName = d.trackId ? this.trackLabelStorage!.findByTrack(cameraId, d.trackId)?.name : undefined;
+          return { ...d, trackName: trackName || undefined };
+        })
+        : trackResult.detections;
+
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
-        detections: trackResult.detections,
+        detections: enricheddetections,
         frameImage: jpeg,
         changed,
         inferMs: result.inferMs,

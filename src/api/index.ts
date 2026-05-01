@@ -1450,7 +1450,7 @@ export function startServer(
       let header: Record<string, unknown>;
 
       if (event === "detect") {
-        const detectPayload = payload as { cameraId: string; timestamp: number; detections: Array<{ label: string; score: number; box: unknown; trackId?: number }>; changed?: boolean; inferMs?: number };
+        const detectPayload = payload as { cameraId: string; timestamp: number; detections: Array<{ label: string; score: number; box: unknown; trackId?: number; trackName?: string }>; changed?: boolean; inferMs?: number };
         /** 只推送 importantLabels 中的检测结果给前端，减少 WS 带宽 */
         const importantLabels = runtimeConfig.get().ai.importantLabels;
         const importantSet = importantLabels.length > 0 ? new Set(importantLabels.map(l => l.toLowerCase())) : null;

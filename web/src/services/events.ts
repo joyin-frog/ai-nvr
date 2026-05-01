@@ -6,6 +6,8 @@ export interface Detection {
   score: number
   box: { xmin: number; ymin: number; xmax: number; ymax: number }
   trackId?: number
+  /** 用户自定义名称（如 "张三"） */
+  trackName?: string
 }
 
 /** 事件载荷类型 */
