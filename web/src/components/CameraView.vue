@@ -312,6 +312,8 @@ function resetZoom() {
 }
 
 onUnmounted(() => {
+  /** 显式断开 MJPEG 流连接 */
+  if (imgEl.value) imgEl.value.src = ''
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)

@@ -277,11 +277,12 @@ export function startServer(
         let lastSent = 0;
         const throttleMs = 40;
 
+        let unsubscribe: (() => void) | null = null;
         const stream = new ReadableStream({
           start(controller) {
             let streamFrames = 0;
             let lastStreamLog = Date.now();
-            const unsubscribe = eventBus.on("frame", (payload) => {
+            unsubscribe = eventBus.on("frame", (payload) => {
               if (payload.cameraId !== cameraId) return;
               const now = Date.now();
               if (now - lastSent < throttleMs) return;
@@ -300,7 +301,7 @@ export function startServer(
                   lastStreamLog = now;
                 }
               } catch {
-                unsubscribe();
+                if (unsubscribe) unsubscribe();
               }
             });
 
@@ -312,7 +313,7 @@ export function startServer(
             lastSent = Date.now();
           },
           cancel() {
-            /** 客户端断开时清理 */
+            if (unsubscribe) unsubscribe();
           },
         });
 
