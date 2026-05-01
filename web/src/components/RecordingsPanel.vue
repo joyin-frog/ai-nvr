@@ -249,6 +249,19 @@ const playProgress = computed(() => {
   return (playerRef.value.currentTime / playerRef.value.duration) * 100
 })
 
+/** 进度条上的检测事件标记位置 */
+const progressEventMarkers = computed(() => {
+  if (!selectedRecording.value || playbackEvents.value.length === 0) return []
+  const rec = selectedRecording.value
+  const duration = rec.endTime - rec.startTime
+  if (duration <= 0) return []
+  return playbackEvents.value.map((e, i) => ({
+    key: i,
+    position: ((e.timestamp - rec.startTime) / duration) * 100,
+    count: e.detections.length,
+  })).filter(m => m.position >= 0 && m.position <= 100)
+})
+
 /** 进度条拖拽 seek */
 const progressEl = ref<HTMLDivElement | null>(null)
 function onProgressClick(e: MouseEvent) {
@@ -1123,6 +1136,10 @@ defineExpose({ loadRecordings, playAtTime })
           <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" title="设B点 (])">B</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
             <div v-if="loopStart >= 0 && loopEnd > loopStart && playerRef" class="loop-region" :style="{ left: (loopStart / playerRef.duration * 100) + '%', width: ((loopEnd - loopStart) / playerRef.duration * 100) + '%' }" />
+            <!-- 检测事件标记 -->
+            <template v-for="m in progressEventMarkers" :key="m.key">
+              <div class="progress-event-marker" :style="{ left: m.position + '%' }" :title="m.count + ' detections'" />
+            </template>
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
             <div v-if="hoverPct >= 0 && selectedRecording" class="progress-tooltip" :style="{ left: (hoverPct * 100) + '%' }">
@@ -1986,6 +2003,20 @@ defineExpose({ loadRecordings, playAtTime })
   border-right: 1px solid #FFD93D;
   pointer-events: none;
   z-index: 1;
+}
+
+/* 进度条检测事件标记 */
+.progress-event-marker {
+  position: absolute;
+  top: -2px;
+  width: 3px;
+  height: 10px;
+  background: #5bc0de;
+  border-radius: 1px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.8;
 }
 
 .progress-fill {
