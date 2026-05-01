@@ -15,10 +15,14 @@ interface TrackInfo {
   hitCount: number
   cameraIds: string[]
   snapshotFile?: string
+  /** 当前是否活跃（前端计算） */
+  _active?: boolean
 }
 
 const tracks = ref<TrackInfo[]>([])
 const loading = ref(false)
+/** 强制视图更新的 tick（用于活跃状态刷新） */
+const viewTick = ref(0)
 /** 正在编辑名称的 trackId */
 const editingId = ref<number | null>(null)
 const editName = ref('')
@@ -131,6 +135,12 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86400000)}天前`
 }
 
+/** 判断目标是否活跃（最近 30 秒内被检测到） */
+function isTrackActive(track: TrackInfo): boolean {
+  void viewTick.value
+  return Date.now() - track.lastSeen < 30000
+}
+
 /** 所有出现过的标签 */
 const allLabels = computed(() => {
   const set = new Set<string>()
@@ -161,14 +171,19 @@ const filteredTracks = computed(() => {
   return list
 })
 
+let activeTickTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
   loadTracks()
-  /** 每 30 秒刷新 */
+  /** 每 30 秒刷新数据 */
   refreshTimer = setInterval(loadTracks, 30000)
+  /** 每 10 秒更新活跃状态指示 */
+  activeTickTimer = setInterval(() => { viewTick.value++ }, 10000)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (activeTickTimer) clearInterval(activeTickTimer)
 })
 </script>
 
@@ -248,6 +263,7 @@ onUnmounted(() => {
           </div>
           <div class="track-meta">
             <span class="track-id">#{{ track.trackId }}</span>
+            <span v-if="isTrackActive(track)" class="track-active" :title="t('tracks.active', '活跃中')">●</span>
             <span class="track-count">{{ track.hitCount }}次</span>
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
           </div>
@@ -482,6 +498,14 @@ onUnmounted(() => {
 .track-id { color: #4ECDC4; }
 .track-count { color: #aaa; }
 .track-time { color: #666; }
+.track-active {
+  color: #4CAF50;
+  animation: active-pulse 1.5s infinite;
+}
+@keyframes active-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 .track-cameras {
   font-size: 10px;
