@@ -36,6 +36,8 @@ interface TrackRecord {
   bestSnapshotScore: number;
   /** 感知差异哈希（dHash，64 位，hex string） */
   dhash?: string;
+  /** HSV 颜色直方图（H=8 bins, S=4 bins, V=4 bins，共 128 维，量化为 uint8[]） */
+  colorHist?: number[];
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -85,8 +87,9 @@ export class TrackStorage {
         if (snapshotFile) {
           record.snapshotFile = snapshotFile;
           record.bestSnapshotScore = snapshotScore;
-          /** 更新 dHash */
+          /** 更新 dHash 和颜色直方图 */
           record.dhash = await this.computeDHash(frameImage, box);
+          record.colorHist = await this.computeColorHist(frameImage, box);
         }
       }
       this.scheduleSave();
@@ -95,8 +98,9 @@ export class TrackStorage {
 
     /** 新目标：裁剪快照并保存 */
     const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
-    /** 计算 dHash */
+    /** 计算 dHash 和颜色直方图 */
     const dhash = box ? await this.computeDHash(frameImage, box) : undefined;
+    const colorHist = box ? await this.computeColorHist(frameImage, box) : undefined;
 
     record = {
       trackId,
@@ -108,6 +112,7 @@ export class TrackStorage {
       snapshotFile,
       bestSnapshotScore: snapshotScore,
       dhash,
+      colorHist,
     };
     this.tracks.set(trackId, record);
     this.scheduleSave();
@@ -194,13 +199,14 @@ export class TrackStorage {
   /**
    * 批量获取未命名目标的匹配建议
    * 对每个未命名且有 dhash 的目标，查找同标签已命名目标中最相似的
+   * 综合使用 dHash + 颜色直方图
    */
   getSuggestions(): Array<{ trackId: number; label: string; suggestedName: string; distance: number }> {
     /** 收集所有已命名目标（有 dhash） */
-    const named: Array<{ trackId: number; label: string; customName: string; dhash: string }> = [];
+    const named: Array<{ trackId: number; label: string; customName: string; dhash: string; colorHist?: number[] }> = [];
     for (const r of this.tracks.values()) {
       if (r.customName && r.dhash) {
-        named.push({ trackId: r.trackId, label: r.label, customName: r.customName, dhash: r.dhash });
+        named.push({ trackId: r.trackId, label: r.label, customName: r.customName, dhash: r.dhash, colorHist: r.colorHist });
       }
     }
     if (named.length === 0) return [];
@@ -212,14 +218,23 @@ export class TrackStorage {
       let bestName = "";
       for (const n of named) {
         if (n.label !== r.label) continue;
-        const dist = TrackStorage.hammingDistance(r.dhash, n.dhash);
-        if (dist < bestDist) {
-          bestDist = dist;
+
+        const dhashDist = TrackStorage.hammingDistance(r.dhash, n.dhash) / 64;
+        let colorDist = 0.5;
+        if (r.colorHist && n.colorHist) {
+          colorDist = TrackStorage.colorHistDistance(r.colorHist, n.colorHist);
+        }
+        const combinedDist = (r.colorHist && n.colorHist)
+          ? dhashDist * 0.5 + colorDist * 0.5
+          : dhashDist;
+
+        if (combinedDist < bestDist) {
+          bestDist = combinedDist;
           bestName = n.customName;
         }
       }
-      /** 汉明距离 <= 15（约 23% 差异）才返回 */
-      if (bestName && bestDist <= 15) {
+      /** 综合距离 <= 0.4（40% 差异阈值）才返回 */
+      if (bestName && bestDist <= 0.4) {
         results.push({ trackId: r.trackId, label: r.label, suggestedName: bestName, distance: bestDist });
       }
     }
@@ -369,30 +384,136 @@ export class TrackStorage {
   }
 
   /**
+   * 计算 HSV 颜色直方图
+   * H=8 bins, S=4 bins, V=4 bins = 128 维
+   * 归一化后量化为 0-255 的 uint8 数组
+   */
+  async computeColorHist(frameImage: Buffer, box: Detection["box"]): Promise<number[]> {
+    if (!box) return [];
+    const image = sharp(frameImage);
+    const meta = await image.metadata();
+    if (!meta.width || !meta.height) return [];
+
+    const padW = (box.xmax - box.xmin) * 0.2;
+    const padH = (box.ymax - box.ymin) * 0.2;
+    const left = Math.max(0, Math.floor((box.xmin - padW) * meta.width));
+    const top = Math.max(0, Math.floor((box.ymin - padH) * meta.height));
+    const width = Math.min(meta.width - left, Math.ceil((box.xmax - box.xmin + padW * 2) * meta.width));
+    const height = Math.min(meta.height - top, Math.ceil((box.ymax - box.ymin + padH * 2) * meta.height));
+
+    if (width < 10 || height < 10) return [];
+
+    /** 缩小到 32x32 减少计算量 */
+    const { data, info } = await image
+      .extract({ left, top, width, height })
+      .resize(32, 32, { fit: "fill" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    /** H=8, S=4, V=4 → 128 bins */
+    const bins = new Float64Array(128);
+    let totalPixels = 0;
+
+    for (let i = 0; i < data.length; i += info.channels) {
+      const r = data[i]! / 255;
+      const g = data[i + 1]! / 255;
+      const b = data[i + 2]! / 255;
+
+      /** RGB → HSV */
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      /** 明度 V */
+      const v = max;
+      /** 饱和度 S */
+      const s = max === 0 ? 0 : d / max;
+      /** 色相 H */
+      let h = 0;
+      if (d !== 0) {
+        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        else if (max === g) h = ((b - r) / d + 2) / 6;
+        else h = ((r - g) / d + 4) / 6;
+      }
+
+      /** 量化到 bins */
+      const hBin = Math.min(7, Math.floor(h * 8));
+      const sBin = Math.min(3, Math.floor(s * 4));
+      const vBin = Math.min(3, Math.floor(v * 4));
+      /** 组合索引: hBin * 16 + sBin * 4 + vBin */
+      const idx = hBin * 16 + sBin * 4 + vBin;
+      bins[idx]!++;
+      totalPixels++;
+    }
+
+    if (totalPixels === 0) return [];
+
+    /** 归一化并量化到 0-255 */
+    const result: number[] = new Array(128);
+    for (let i = 0; i < 128; i++) {
+      result[i] = Math.round((bins[i]! / totalPixels) * 255);
+    }
+    return result;
+  }
+
+  /**
+   * 计算两个颜色直方图的卡方距离
+   * 返回 0-1 之间的归一化距离（0=完全相同，1=完全不同）
+   */
+  static colorHistDistance(a: number[], b: number[]): number {
+    if (a.length !== 128 || b.length !== 128) return 1;
+    let chiSq = 0;
+    for (let i = 0; i < 128; i++) {
+      const ai = a[i]! / 255;
+      const bi = b[i]! / 255;
+      const sum = ai + bi;
+      if (sum > 0) {
+        chiSq += ((ai - bi) * (ai - bi)) / sum;
+      }
+    }
+    /** 归一化：卡方距离的最大值约为 2（完全不同的分布） */
+    return Math.min(1, chiSq / 2);
+  }
+
+  /**
    * 查找与指定目标外观相似的已命名目标
-   * 返回汉明距离小于阈值的匹配列表
+   * 综合使用 dHash（结构相似度）和颜色直方图（颜色相似度）
+   * 综合距离 = dHash 距离 / 64（归一化）× 0.5 + 颜色距离 × 0.5
    */
   findSimilar(
     trackId: number,
     cameraId: string,
     label: string,
     dhash: string,
-    /** 最大汉明距离（默认 15，64 位中约 23%） */
-    maxDistance = 15,
+    /** 最大综合距离（0-1，默认 0.4） */
+    maxDistance = 0.4,
+    /** 颜色直方图（可选，提供时参与匹配） */
+    colorHist?: number[],
   ): Array<{ trackId: number; customName: string; distance: number }> {
     if (!dhash) return [];
     const results: Array<{ trackId: number; customName: string; distance: number }> = [];
     for (const record of this.tracks.values()) {
       if (record.trackId === trackId) continue;
       if (!record.customName || !record.dhash) continue;
-      /** 同标签优先 */
       if (record.label !== label) continue;
-      const dist = TrackStorage.hammingDistance(dhash, record.dhash);
-      if (dist <= maxDistance) {
-        results.push({ trackId: record.trackId, customName: record.customName, distance: dist });
+
+      /** dHash 结构距离（归一化到 0-1） */
+      const dhashDist = TrackStorage.hammingDistance(dhash, record.dhash) / 64;
+
+      /** 颜色直方图距离 */
+      let colorDist = 0.5; /** 无颜色信息时使用中间值 */
+      if (colorHist && record.colorHist) {
+        colorDist = TrackStorage.colorHistDistance(colorHist, record.colorHist);
+      }
+
+      /** 综合距离：有颜色信息时各 50%，无颜色信息时纯用 dHash */
+      const combinedDist = (colorHist && record.colorHist)
+        ? dhashDist * 0.5 + colorDist * 0.5
+        : dhashDist;
+
+      if (combinedDist <= maxDistance) {
+        results.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
       }
     }
-    /** 按距离排序，最近匹配在前 */
     results.sort((a, b) => a.distance - b.distance);
     return results;
   }
