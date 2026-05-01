@@ -22,16 +22,49 @@ export class CameraManager {
     private recorder: MotionRecorder,
   ) {}
 
-  /** 启动所有摄像头 */
+  /** 启动所有摄像头（串行，避免同时连同一台 RTSP 服务器被拒绝） */
   start(): void {
     this.cameraConfigs = this.config.cameras;
     this.eventBus.on("frame", ({ cameraId, data }) => {
       this.latestFrames.set(cameraId, data);
     });
 
-    for (const cam of this.cameraConfigs) {
+    this.startCamerasSequentially();
+  }
+
+  /** 逐个启动摄像头，等前一个上线后再启动下一个 */
+  private startCamerasSequentially(): void {
+    const cams = this.cameraConfigs;
+    let index = 0;
+
+    const startNext = () => {
+      if (index >= cams.length) return;
+      const cam = cams[index]!;
       this.startCamera(cam);
-    }
+      index++;
+
+      if (index < cams.length) {
+        /** 等当前摄像头上线或 5 秒超时后启动下一个 */
+        let done = false;
+        const unsub = this.eventBus.on("camera:online", ({ cameraId }) => {
+          if (cameraId === cam.id && !done) {
+            done = true;
+            unsub();
+            clearTimeout(timer);
+            setTimeout(startNext, 500);
+          }
+        });
+        const timer = setTimeout(() => {
+          if (!done) {
+            done = true;
+            unsub();
+            startNext();
+          }
+        }, 5000);
+      }
+    };
+
+    startNext();
   }
 
   /** 停止所有摄像头 */
