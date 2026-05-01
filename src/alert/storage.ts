@@ -83,6 +83,7 @@ export class AlertStorage {
 
     this.db.run("CREATE INDEX IF NOT EXISTS idx_alert_records_timestamp ON alert_records(timestamp)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_alert_records_rule ON alert_records(rule_id)");
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_alert_records_camera_time ON alert_records(camera_id, timestamp)");
   }
 
   /** 获取所有规则 */
