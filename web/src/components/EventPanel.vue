@@ -155,6 +155,18 @@ const emit = defineEmits<{
   (e: 'play-recording', cameraId: string, timestamp: number): void
 }>()
 
+/** 摄像头 ID → 名称映射（O(1) 查找，替代模板中 find） */
+const cameraNameMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const c of props.cameras ?? []) map.set(c.id, c.name)
+  return map
+})
+
+/** 获取摄像头友好名称 */
+function cameraName(id: string): string {
+  return cameraNameMap.value.get(id) ?? id
+}
+
 /** 事件类型标签样式 */
 const typeConfig: Record<string, { labelKey: string; bg: string; color: string }> = {
   motion: { labelKey: 'event.motion', bg: '#FFEAA7', color: '#333' },
@@ -558,7 +570,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
             class="event-type"
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
-          <span class="event-cam">{{ cameras?.find(c => c.id === e.cameraId)?.name ?? e.cameraId }}</span>
+          <span class="event-cam">{{ cameraName(e.cameraId) }}</span>
           <div v-if="e.type === 'detect' && e.snapshotUrl" class="thumb-wrap">
             <img
               :src="authUrl(e.snapshotUrl)"
@@ -636,7 +648,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         >
           <img :src="snapThumbUrl(snap)" class="gallery-thumb" alt="" loading="lazy" />
           <div class="gallery-meta">
-            <span class="gallery-cam">{{ cameras?.find(c => c.id === snap.cameraId)?.name ?? snap.cameraId }}</span>
+            <span class="gallery-cam">{{ cameraName(snap.cameraId) }}</span>
             <span class="gallery-time">{{ new Date(snap.timestamp).toLocaleString(locale, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }}</span>
             <span v-if="snap.detectionLabels" class="gallery-labels">{{ snap.detectionLabels }}</span>
           </div>
