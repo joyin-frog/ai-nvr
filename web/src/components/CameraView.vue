@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch, authUrl } from '../services/auth'
 import { useCanvasRenderer } from '../composables/useCanvasRenderer'
+import { useFmp4Stream } from '../composables/useFmp4Stream'
 import { useMjpegStream } from '../composables/useMjpegStream'
 import { takeFrame } from '../services/ws-frame-cache'
 import { takeDetections, getInferMs } from '../services/ws-detect-cache'
@@ -50,9 +51,67 @@ const emit = defineEmits<{
   trackLabelUpdated: []
 }>()
 
-/** Canvas 渲染器（替代 <img> Blob URL） */
+/** Canvas 渲染器（Canvas fallback 模式） */
 const { canvasRef: _canvasRef, setCanvas, setOverlay, setFramePollFn, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize } = useCanvasRenderer()
+
+/** fMP4/MSE 渲染器（高性能模式，GPU 硬件解码） */
+const fmp4CameraId = computed(() => props.cameraId)
+const fmp4 = useFmp4Stream(fmp4CameraId)
+
+/** 当前渲染模式：MSE 优先，Canvas fallback */
+const useMse = ref(true)
 const mjpegStream = useMjpegStream()
+
+/** MSE 模式的检测框 overlay canvas */
+const overlayCanvas = ref<HTMLCanvasElement | null>(null)
+let overlayRafId: number | null = null
+
+/** MSE overlay 渲染循环 */
+function startOverlayLoop() {
+  if (overlayRafId) return
+  const draw = () => {
+    overlayRafId = requestAnimationFrame(draw)
+    const canvas = overlayCanvas.value
+    const video = fmp4.videoRef.value
+    if (!canvas || !video) return
+
+    const w = video.videoWidth
+    const h = video.videoHeight
+    if (w === 0 || h === 0) return
+
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w
+      canvas.height = h
+    }
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, w, h)
+
+    /** poll 检测结果 */
+    const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
+    if (detectResult) {
+      consumedDetectVersion = detectResult.version
+      localDetections = detectResult.detections
+      invalidateSortedDetections()
+      updateDetectionSummary()
+    }
+
+    if (hasFrame.value && props.showBoxes) {
+      drawDetectionOverlay(ctx, w, h)
+    } else {
+      drawOSD(ctx, w, h)
+    }
+  }
+  draw()
+}
+
+function stopOverlayLoop() {
+  if (overlayRafId) {
+    cancelAnimationFrame(overlayRafId)
+    overlayRafId = null
+  }
+}
 
 /** 实时时钟 */
 const clockText = ref('')
@@ -186,21 +245,27 @@ function onFrameDecoded(jpeg: ArrayBuffer) {
 
 watch(() => props.online, (on) => {
   if (on) {
-    /** 启动 Canvas 渲染循环 */
-    startLoop()
-    /** 首帧快照预加载：立即获取静态快照填充 Canvas，减少等待时间 */
-    authFetch(`/api/snapshot/${props.cameraId}`)
-      .then(res => res.ok ? res.arrayBuffer() : null)
-      .then(buf => {
-        if (buf && buf.byteLength > 100) onFrameDecoded(buf)
-      })
-      .catch(() => { /* 快照获取失败不影响实时流 */ })
-    /** 启动 MJPEG fetch 流（WS 帧的 fallback） */
-    const url = authUrl(`/api/stream/${props.cameraId}`)
-    mjpegStream.startFetch(url, onFrameDecoded)
+    if (useMse.value) {
+      /** MSE 模式：直接连接 fMP4 流 */
+      fmp4.connect()
+      nextTick(() => startOverlayLoop())
+    } else {
+      /** Canvas 模式：启动渲染循环 + MJPEG fallback */
+      startLoop()
+      authFetch(`/api/snapshot/${props.cameraId}`)
+        .then(res => res.ok ? res.arrayBuffer() : null)
+        .then(buf => {
+          if (buf && buf.byteLength > 100) onFrameDecoded(buf)
+        })
+        .catch(() => { /* 快照获取失败不影响实时流 */ })
+      const url = authUrl(`/api/stream/${props.cameraId}`)
+      mjpegStream.startFetch(url, onFrameDecoded)
+    }
     frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
   }
   else {
+    fmp4.disconnect()
+    stopOverlayLoop()
     mjpegStream.stopFetch()
     stopLoop()
     frozen.value = false
@@ -250,11 +315,13 @@ setFramePollFn(() => {
 })
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
 
-/** 画面比例：优先用帧实际尺寸，回退到 props */
+/** 画面比例：优先用帧实际尺寸/MSE video 尺寸，回退到 props */
 const frameSize = ref({ width: 0, height: 0 })
 const cameraBodyStyle = computed(() => {
-  const fw = frameSize.value.width || props.videoWidth || 0
-  const fh = frameSize.value.height || props.videoHeight || 0
+  const mseW = fmp4.videoWidth.value
+  const mseH = fmp4.videoHeight.value
+  const fw = mseW || frameSize.value.width || props.videoWidth || 0
+  const fh = mseH || frameSize.value.height || props.videoHeight || 0
   if (fw > 0 && fh > 0) {
     return { 'aspect-ratio': `${fw} / ${fh}` }
   }
@@ -622,12 +689,35 @@ async function takeScreenshot() {
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
   const link = document.createElement('a')
   link.download = `${props.name}_${ts}.jpg`
-  const blob = await captureJpeg()
-  if (blob) {
-    const url = URL.createObjectURL(blob)
-    link.href = url
-    link.click()
-    URL.revokeObjectURL(url)
+
+  if (useMse.value && fmp4.videoRef.value) {
+    /** MSE 模式：从 video + overlay canvas 合成截图 */
+    const video = fmp4.videoRef.value
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 1920
+    canvas.height = video.videoHeight || 1080
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(video, 0, 0)
+    /** 叠加 overlay */
+    if (overlayCanvas.value) {
+      ctx.drawImage(overlayCanvas.value, 0, 0)
+    }
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92))
+    if (blob) {
+      const url = URL.createObjectURL(blob)
+      link.href = url
+      link.click()
+      URL.revokeObjectURL(url)
+    }
+  } else {
+    /** Canvas fallback 模式 */
+    const blob = await captureJpeg()
+    if (blob) {
+      const url = URL.createObjectURL(blob)
+      link.href = url
+      link.click()
+      URL.revokeObjectURL(url)
+    }
   }
 }
 
@@ -740,6 +830,8 @@ function resetZoom() {
 }
 
 onUnmounted(() => {
+  fmp4.disconnect()
+  stopOverlayLoop()
   mjpegStream.stopFetch()
   stopLoop()
   if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
@@ -780,8 +872,25 @@ onUnmounted(() => {
       @mouseleave="onPanEnd"
     >
       <div class="camera-content" :style="{ transform: zoomTransform }">
+        <!-- MSE 模式：video 硬件解码 -->
+        <template v-if="useMse && online">
+          <video
+            :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
+            class="camera-video"
+            :style="{ filter: imageFilter }"
+            autoplay muted playsinline
+            @contextmenu.prevent="onCanvasContext"
+          />
+          <!-- 检测框 overlay canvas -->
+          <canvas
+            ref="overlayCanvas"
+            class="camera-overlay"
+            @contextmenu.prevent="onCanvasContext"
+          />
+        </template>
+        <!-- Canvas fallback 模式 -->
         <canvas
-          v-if="online"
+          v-else-if="online"
           :ref="(el: any) => setCanvas(el as HTMLCanvasElement | null)"
           class="camera-image"
           :style="{ filter: imageFilter }"
@@ -1024,6 +1133,22 @@ onUnmounted(() => {
   display: block;
   margin: auto;
   image-rendering: auto;
+}
+
+.camera-video {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  margin: auto;
+}
+
+.camera-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .zoom-badge {
