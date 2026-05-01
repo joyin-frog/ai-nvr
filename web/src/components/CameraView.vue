@@ -173,7 +173,10 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
  * 最大保留 30 个点（约 60 秒的轨迹，AI interval = 2s）
  */
 const MAX_TRAIL_POINTS = 30
+const TRAIL_FADE_MS = 3000
 const trackTrails = new Map<number, Array<{ x: number; y: number }>>()
+/** 消失目标的最后更新时间，用于渐隐 */
+const trailFadeStart = new Map<number, number>()
 
 /** 记录当前帧中所有检测目标的中心点到轨迹缓存 */
 function recordTrails() {
@@ -191,11 +194,20 @@ function recordTrails() {
   }
 }
 
-/** 清理不再活跃的轨迹（超过 MAX_TRAIL_POINTS 帧未更新的） */
+/** 清理不再活跃的轨迹（消失后保留 3 秒渐隐） */
 function cleanupTrails() {
+  const now = Date.now()
   const activeIds = new Set(localDetections.filter(d => d.trackId != null).map(d => d.trackId!))
   for (const id of trackTrails.keys()) {
-    if (!activeIds.has(id)) trackTrails.delete(id)
+    if (!activeIds.has(id)) {
+      if (!trailFadeStart.has(id)) trailFadeStart.set(id, now)
+      if (now - trailFadeStart.get(id)! > TRAIL_FADE_MS) {
+        trackTrails.delete(id)
+        trailFadeStart.delete(id)
+      }
+    } else {
+      trailFadeStart.delete(id)
+    }
   }
 }
 
@@ -664,15 +676,23 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     }
   }
 
-  /** 绘制追踪轨迹线（贝塞尔平滑曲线） */
+  /** 绘制追踪轨迹线（贝塞尔平滑曲线 + 渐隐） */
   if (trackTrails.size > 0) {
+    const now = Date.now()
     ctx.lineWidth = 1.5
     ctx.setLineDash([])
     for (const [trackId, points] of trackTrails) {
       if (points.length < 2) continue
       const color = getColor('', trackId)
       ctx.strokeStyle = color.stroke
-      ctx.globalAlpha = 0.5
+      /** 消失目标的轨迹渐隐 */
+      const fadeStart = trailFadeStart.get(trackId)
+      if (fadeStart) {
+        const fadeAlpha = Math.max(0, 1 - (now - fadeStart) / TRAIL_FADE_MS)
+        ctx.globalAlpha = fadeAlpha * 0.5
+      } else {
+        ctx.globalAlpha = 0.5
+      }
       ctx.beginPath()
       const p0 = points[0]!
       ctx.moveTo(p0.x * width, p0.y * height)
