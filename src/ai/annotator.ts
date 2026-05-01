@@ -26,6 +26,8 @@ const DEFAULT_COLOR = "#FF4444";
 export class Annotator {
   /** 最近一次标注后的图片（按摄像头 ID 存储） */
   private latestAnnotated = new Map<string, Buffer>();
+  /** 缓存的图片尺寸（按摄像头 ID） */
+  private cachedDimensions = new Map<string, { width: number; height: number }>();
 
   /** 保存标注后的图片 */
   setLatest(cameraId: string, image: Buffer): void {
@@ -38,13 +40,17 @@ export class Annotator {
   }
 
   /** 在图片上画检测框和标签 */
-  async annotate(jpeg: Buffer, detections: Detection[]): Promise<Buffer> {
+  async annotate(jpeg: Buffer, detections: Detection[], cameraId?: string): Promise<Buffer> {
     if (detections.length === 0) return jpeg;
 
-    /** 获取图片尺寸 */
-    const metadata = await sharp(jpeg).metadata();
-    const width = metadata.width ?? 640;
-    const height = metadata.height ?? 360;
+    /** 获取图片尺寸（优先使用缓存） */
+    let dims = cameraId ? this.cachedDimensions.get(cameraId) : undefined;
+    if (!dims) {
+      const metadata = await sharp(jpeg).metadata();
+      dims = { width: metadata.width ?? 640, height: metadata.height ?? 360 };
+      if (cameraId) this.cachedDimensions.set(cameraId, dims);
+    }
+    const { width, height } = dims;
 
     /** 构建 SVG 叠加层 */
     const svgElements: string[] = [];

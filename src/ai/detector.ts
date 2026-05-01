@@ -336,18 +336,25 @@ export class AiDetector {
 
       const totalMs = performance.now() - t0;
 
-      /** 标注图片（用追踪后的检测结果，显示 trackId） */
-      const t3 = performance.now();
-      const annotatedImage = trackResult.detections.length > 0
-        ? await this.annotator.annotate(jpeg, trackResult.detections)
-        : jpeg;
-      const annotateMs = performance.now() - t3;
-      this.annotator.setLatest(cameraId, annotatedImage);
-
-      /** 去重 */
+      /** 去重（在标注前计算，避免无变化时浪费标注开销） */
       const prevFp = this.lastDetectFingerprint.get(cameraId);
       const changed = result.fingerprint !== prevFp;
       this.lastDetectFingerprint.set(cameraId, result.fingerprint);
+
+      /** 标注图片：只在检测结果变化时重新生成，减少 sharp 开销 */
+      const t3 = performance.now();
+      let annotatedImage: Buffer;
+      if (trackResult.detections.length > 0 && changed) {
+        annotatedImage = await this.annotator.annotate(jpeg, trackResult.detections, cameraId);
+        this.annotator.setLatest(cameraId, annotatedImage);
+      } else if (trackResult.detections.length === 0) {
+        annotatedImage = jpeg;
+        this.annotator.setLatest(cameraId, jpeg);
+      } else {
+        /** 检测未变化，复用上次的标注图 */
+        annotatedImage = this.annotator.getLatest(cameraId) ?? jpeg;
+      }
+      const annotateMs = performance.now() - t3;
 
       /** 语义事件：新目标出现 */
       for (const obj of trackResult.appeared) {
