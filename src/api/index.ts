@@ -450,6 +450,17 @@ export function startServer(
             if (typeof detailObj?.ratio === "number") {
               summary = `变动 ${(detailObj.ratio * 100).toFixed(1)}%`;
             }
+          } else if (ev.type.startsWith("track:") && ev.detail) {
+            /** 行为事件摘要：名称 + 区域/动作 + 参数 */
+            const d = JSON.parse(ev.detail) as Record<string, unknown>;
+            const parts: string[] = [];
+            if (d.trackName) parts.push(String(d.trackName));
+            else if (d.label) parts.push(String(d.label));
+            if (d.zoneName) parts.push(String(d.zoneName));
+            if (d.lineName) parts.push(String(d.lineName));
+            if (typeof d.dwellMs === "number" && d.dwellMs > 0) parts.push(`${(d.dwellMs / 1000).toFixed(1)}s`);
+            if (d.direction) parts.push(String(d.direction));
+            if (parts.length > 0) summary = parts.join(" → ");
           }
 
           return {
