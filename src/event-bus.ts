@@ -70,6 +70,23 @@ export interface EventPayloads {
     /** 触发详情 */
     detail: string;
   };
+
+  /** 追踪目标首次出现 */
+  "track:appeared": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+    score: number;
+  };
+
+  /** 追踪目标消失 */
+  "track:disappeared": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+  };
 }
 
 /** 事件名类型 */

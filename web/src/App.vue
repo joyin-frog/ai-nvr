@@ -582,6 +582,22 @@ function setupEventListeners() {
     notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId)
     flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
+
+  /** 追踪语义事件 */
+  client.on('track:appeared', (payload) => {
+    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const name = cam?.name ?? payload.cameraId
+    const desc = `${payload.label}#${payload.trackId} ${(payload.score * 100).toFixed(0)}%`
+    eventPanel.value?.addEvent('track:appeared', payload.cameraId, desc)
+    if (IMPORTANT_LABELS.has(payload.label)) {
+      notify(t('notify.trackAppeared', { name }), desc, payload.cameraId)
+    }
+  })
+
+  client.on('track:disappeared', (payload) => {
+    const desc = `${payload.label}#${payload.trackId}`
+    eventPanel.value?.addEvent('track:disappeared', payload.cameraId, desc)
+  })
 }
 
 onMounted(async () => {

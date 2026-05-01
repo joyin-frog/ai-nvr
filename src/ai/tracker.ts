@@ -21,6 +21,16 @@ export interface TrackedDetection extends Detection {
   trackId: number;
 }
 
+/** 追踪更新结果 */
+export interface TrackUpdateResult {
+  /** 带追踪 ID 的检测结果 */
+  detections: TrackedDetection[];
+  /** 新出现的追踪 ID */
+  appeared: Array<{ trackId: number; label: string; score: number; box: TrackedObject["box"] }>;
+  /** 消失的追踪 ID（丢失超过阈值） */
+  disappeared: Array<{ trackId: number; label: string }>;
+}
+
 let nextTrackId = 1;
 
 /**
@@ -57,14 +67,22 @@ export class ObjectTracker {
 
   /**
    * 更新追踪器，输入新帧的检测结果
-   * 返回带 trackId 的检测结果
+   * 返回带 trackId 的检测结果和语义事件
    */
-  update(detections: Detection[]): TrackedDetection[] {
+  update(detections: Detection[]): TrackUpdateResult {
     this.frameIndex++;
+
+    const appeared: TrackUpdateResult["appeared"] = [];
+    const disappeared: TrackUpdateResult["disappeared"] = [];
+    const results: TrackedDetection[] = [];
 
     /** 分离高/低置信度检测 */
     const highDets = detections.filter(d => d.score >= this.newTrackThreshold);
-    const results: TrackedDetection[] = [];
+
+    /** 记录清理前的活跃追踪（用于检测消失） */
+    const prevActiveIds = new Set(
+      this.tracks.filter(t => this.frameIndex - t.lastMatched <= 2).map(t => t.trackId),
+    );
 
     /** 第一帧：全部创建新追踪 */
     if (this.tracks.length === 0) {
@@ -79,8 +97,9 @@ export class ObjectTracker {
         };
         this.tracks.push(track);
         results.push({ ...det, trackId: track.trackId });
+        appeared.push({ trackId: track.trackId, label: track.label, score: track.score, box: track.box });
       }
-      return results;
+      return { detections: results, appeared, disappeared };
     }
 
     /** 计算 IoU 矩阵：tracks × detections */
@@ -118,15 +137,23 @@ export class ObjectTracker {
       };
       this.tracks.push(track);
       results.push({ ...det, trackId: track.trackId });
+      appeared.push({ trackId: track.trackId, label: track.label, score: track.score, box: track.box });
     }
 
-    /** 清理丢失太久的追踪 */
+    /** 清理丢失太久的追踪，记录消失的目标 */
     this.tracks = this.tracks.filter(t => {
       const lost = this.frameIndex - t.lastMatched;
-      return lost <= this.maxLost;
+      if (lost > this.maxLost) {
+        /** 只记录之前活跃的追踪消失 */
+        if (prevActiveIds.has(t.trackId)) {
+          disappeared.push({ trackId: t.trackId, label: t.label });
+        }
+        return false;
+      }
+      return true;
     });
 
-    return results;
+    return { detections: results, appeared, disappeared };
   }
 
   /** 获取当前活跃的追踪目标 */

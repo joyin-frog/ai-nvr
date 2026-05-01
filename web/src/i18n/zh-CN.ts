@@ -57,6 +57,8 @@ export default {
     offline: '离线',
     lowfps: '帧率不足',
     alert: '告警',
+    trackAppeared: '出现',
+    trackDisappeared: '消失',
     ratio: '变动比例',
     targets: '检测目标',
     confidence: '置信度',
@@ -391,6 +393,7 @@ export default {
     alert: '告警: {ruleName}',
     detect: '检测',
     alertPrefix: '告警',
+    trackAppeared: '{name} 目标出现',
     titleOnline: '{total} 路 ({online} 在线)',
   },
   ptz: {

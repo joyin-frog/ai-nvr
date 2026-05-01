@@ -332,14 +332,14 @@ export class AiDetector {
         tracker = new ObjectTracker();
         this.trackers.set(cameraId, tracker);
       }
-      const trackedDetections = tracker.update(detections);
+      const trackResult = tracker.update(detections);
 
       const totalMs = performance.now() - t0;
 
       /** 标注图片（用追踪后的检测结果，显示 trackId） */
       const t3 = performance.now();
-      const annotatedImage = trackedDetections.length > 0
-        ? await this.annotator.annotate(jpeg, trackedDetections)
+      const annotatedImage = trackResult.detections.length > 0
+        ? await this.annotator.annotate(jpeg, trackResult.detections)
         : jpeg;
       const annotateMs = performance.now() - t3;
       this.annotator.setLatest(cameraId, annotatedImage);
@@ -349,16 +349,37 @@ export class AiDetector {
       const changed = result.fingerprint !== prevFp;
       this.lastDetectFingerprint.set(cameraId, result.fingerprint);
 
+      /** 语义事件：新目标出现 */
+      for (const obj of trackResult.appeared) {
+        this.eventBus.emit("track:appeared", {
+          cameraId,
+          timestamp,
+          trackId: obj.trackId,
+          label: obj.label,
+          score: obj.score,
+        });
+      }
+
+      /** 语义事件：目标消失 */
+      for (const obj of trackResult.disappeared) {
+        this.eventBus.emit("track:disappeared", {
+          cameraId,
+          timestamp,
+          trackId: obj.trackId,
+          label: obj.label,
+        });
+      }
+
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
-        detections: trackedDetections,
+        detections: trackResult.detections,
         annotatedImage,
         frameImage: jpeg,
         changed,
       });
-      const trackIds = trackedDetections.map(d => `${d.label}#${d.trackId}`).join(", ");
-      console.log(`[Perf][AI][${cameraId}] ${trackedDetections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
+      const trackIds = trackResult.detections.map(d => `${d.label}#${d.trackId}`).join(", ");
+      console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
     }

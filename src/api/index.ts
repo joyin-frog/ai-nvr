@@ -39,7 +39,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared"];
 
 /**
  * 启动 HTTP + WebSocket 服务

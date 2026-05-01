@@ -4,6 +4,13 @@ import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch, authUrl } from '../services/auth'
 
+/** 检测结果 */
+interface Detection {
+  label: string
+  score: number
+  box: { xmin: number; ymin: number; xmax: number; ymax: number }
+}
+
 const { t, locale } = useI18n()
 
 /** 事件记录 */
@@ -30,6 +37,10 @@ interface EventItem {
   starred: boolean
   /** 是否为实时新增事件（用于入场动画） */
   isNew?: boolean
+  /** 关联的快照 URL（原始图） */
+  snapshotUrl?: string
+  /** 快照的检测结果（用于叠加标注框） */
+  snapshotDetections?: Detection[] | null
 }
 
 const events = ref<EventItem[]>([])
@@ -53,6 +64,8 @@ const totalCount = ref(0)
 const sortDesc = ref(true)
 /** 仅看收藏 */
 const filterStarred = ref(false)
+/** 是否显示检测框标注 */
+const showDetectionBoxes = ref(true)
 
 /** 筛选条件变更：持久化 + 重新加载 */
 function onFilterChange(field: 'type' | 'camera') {
@@ -138,6 +151,8 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'camera:offline': { labelKey: 'event.offline', bg: '#F44336', color: '#fff' },
   'camera:lowfps': { labelKey: 'event.lowfps', bg: '#FF9800', color: '#fff' },
   alert: { labelKey: 'event.alert', bg: '#FFD93D', color: '#333' },
+  'track:appeared': { labelKey: 'event.trackAppeared', bg: '#81C784', color: '#fff' },
+  'track:disappeared': { labelKey: 'event.trackDisappeared', bg: '#E57373', color: '#fff' },
 }
 
 /** 从 detail 文本中提取变动比例（如 "变动 15.3%" → 15.3） */
@@ -236,7 +251,7 @@ async function loadHistory() {
     const res = await authFetch(`/api/events/history?${params}`)
     if (res.ok) {
       const data = await res.json()
-      const historyEvents: EventItem[] = (data.events as EventRecord[]).map((e) => ({
+      const historyEvents: EventItem[] = (data.events as (EventRecord & { snapshotUrl?: string; snapshotDetections?: Detection[] | null })[]).map((e) => ({
         id: e.id,
         time: formatTimestamp(e.timestamp),
         timestamp: e.timestamp,
@@ -245,6 +260,8 @@ async function loadHistory() {
         detail: parseDetail(e.type, e.detail),
         rawDetail: e.detail,
         starred: e.starred === 1,
+        snapshotUrl: e.snapshotUrl,
+        snapshotDetections: e.snapshotDetections ?? undefined,
       }))
       events.value = historyEvents
       totalCount.value = (data.total as number) ?? 0
@@ -443,6 +460,9 @@ defineExpose({ addEvent, loadHistory })
       <button :class="['sort-btn', { desc: sortDesc }]" @click="sortDesc = !sortDesc" :title="sortDesc ? t('event.sortOldest') : t('event.sortNewest')">
         {{ sortDesc ? '↓' : '↑' }}
       </button>
+      <button :class="['detect-box-btn', { active: showDetectionBoxes }]" @click="showDetectionBoxes = !showDetectionBoxes" title="Toggle detection boxes">
+        ⊡
+      </button>
       <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred; loadHistory()" :title="t('event.filterStarred')">
         {{ filterStarred ? '★' : '☆' }}
       </button>
@@ -480,12 +500,21 @@ defineExpose({ addEvent, loadHistory })
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ cameras?.find(c => c.id === e.cameraId)?.name ?? e.cameraId }}</span>
-          <img
-            v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
-            :src="snapshots[e.cameraId]"
-            class="event-thumb"
-            alt=""
-          />
+          <div v-if="e.type === 'detect' && (e.snapshotUrl || snapshots?.[e.cameraId])" class="thumb-wrap">
+            <img
+              :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshots![e.cameraId]"
+              class="event-thumb"
+              alt=""
+            />
+            <div v-if="showDetectionBoxes && e.snapshotDetections?.length" class="thumb-boxes">
+              <div
+                v-for="(d, i) in e.snapshotDetections"
+                :key="i"
+                class="thumb-box"
+                :style="{ left: d.box.xmin * 100 + '%', top: d.box.ymin * 100 + '%', width: (d.box.xmax - d.box.xmin) * 100 + '%', height: (d.box.ymax - d.box.ymin) * 100 + '%' }"
+              />
+            </div>
+          </div>
           <span class="event-detail">{{ e.detail }}</span>
           <div v-if="e.type === 'motion' && motionRatio(e.detail) > 0" class="motion-bar-wrap">
             <div class="motion-bar" :style="{ width: Math.min(motionRatio(e.detail) * 10, 100) + '%', background: motionBarColor(motionRatio(e.detail)) }" />
@@ -497,12 +526,23 @@ defineExpose({ addEvent, loadHistory })
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
-          <img
-            v-if="e.type === 'detect' && snapshots?.[e.cameraId]"
-            :src="snapshots[e.cameraId]"
-            class="expand-snapshot"
-            alt=""
-          />
+          <div v-if="e.type === 'detect' && (e.snapshotUrl || snapshots?.[e.cameraId])" class="expand-snap-wrap">
+            <img
+              :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshots![e.cameraId]"
+              class="expand-snapshot"
+              alt=""
+            />
+            <div v-if="showDetectionBoxes && e.snapshotDetections?.length" class="expand-boxes">
+              <div
+                v-for="(d, i) in e.snapshotDetections"
+                :key="i"
+                class="expand-box-item"
+                :style="{ left: d.box.xmin * 100 + '%', top: d.box.ymin * 100 + '%', width: (d.box.xmax - d.box.xmin) * 100 + '%', height: (d.box.ymax - d.box.ymin) * 100 + '%' }"
+              >
+                <span class="box-label">{{ d.label }} {{ (d.score * 100).toFixed(0) }}%</span>
+              </div>
+            </div>
+          </div>
           <div v-for="(item, i) in parseExpandedDetail(e)" :key="i" class="detail-row">
             <span class="detail-label">{{ item.label }}</span>
             <span class="detail-value">{{ item.value }}</span>
@@ -809,6 +849,50 @@ defineExpose({ addEvent, loadHistory })
   flex-shrink: 0;
 }
 
+.thumb-wrap {
+  position: relative;
+  width: 48px;
+  height: 27px;
+  flex-shrink: 0;
+}
+
+.thumb-wrap .event-thumb {
+  display: block;
+}
+
+.thumb-boxes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.thumb-box {
+  position: absolute;
+  border: 1px solid #FF6B6B;
+  border-radius: 1px;
+}
+
+.detect-box-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: 1px solid #444;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.detect-box-btn:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.detect-box-btn.active {
+  background: #4ECDC4;
+  border-color: #4ECDC4;
+  color: #1a1a2e;
+}
+
 .event-detail {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -842,10 +926,44 @@ defineExpose({ addEvent, loadHistory })
   border-top: 1px solid #2a2a4a;
 }
 
+.expand-snap-wrap {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+.expand-snap-wrap .expand-snapshot {
+  display: block;
+}
+
+.expand-boxes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.expand-box-item {
+  position: absolute;
+  border: 2px solid #FF6B6B;
+  border-radius: 2px;
+}
+
+.box-label {
+  position: absolute;
+  top: -18px;
+  left: -1px;
+  background: rgba(255, 107, 107, 0.85);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 .expand-snapshot {
   max-width: 320px;
   border-radius: 4px;
-  margin-bottom: 6px;
 }
 
 .detail-row {

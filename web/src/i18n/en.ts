@@ -57,6 +57,8 @@ export default {
     offline: 'Offline',
     lowfps: 'Low FPS',
     alert: 'Alert',
+    trackAppeared: 'Appeared',
+    trackDisappeared: 'Disappeared',
     ratio: 'Motion Ratio',
     targets: 'Targets',
     confidence: 'Confidence',
@@ -389,6 +391,7 @@ export default {
     alert: 'Alert: {ruleName}',
     detect: 'Detect',
     alertPrefix: 'Alert',
+    trackAppeared: '{name} target appeared',
     titleOnline: '{total} cams ({online} online)',
   },
   ptz: {
