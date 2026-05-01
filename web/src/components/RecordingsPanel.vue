@@ -135,6 +135,40 @@ function changeSpeed(speed: number) {
   if (playerRef.value) playerRef.value.playbackRate = speed
 }
 
+/** 智能倍速开关 */
+const smartSpeed = ref(false)
+/** 智能倍速：根据事件密度自动调整播放速度 */
+function updateSmartSpeed() {
+  if (!smartSpeed.value || !playerRef.value || !selectedRecording.value || playbackEvents.value.length === 0) return
+  const t = currentAbsTime.value
+  /** 查找距离当前时间最近的事件（前后 5 秒窗口） */
+  const windowMs = 5000
+  let nearestDist = Infinity
+  for (const e of playbackEvents.value) {
+    const dist = Math.abs(e.timestamp - t)
+    if (dist < nearestDist) nearestDist = dist
+  }
+  /** 根据距离最近事件的远近来决定倍速 */
+  let targetSpeed: number
+  if (nearestDist < 1000) {
+    targetSpeed = 1
+  } else if (nearestDist < 3000) {
+    targetSpeed = 1.5
+  } else if (nearestDist < windowMs) {
+    targetSpeed = 2
+  } else {
+    targetSpeed = 4
+  }
+  /** 平滑过渡（不直接跳变，而是渐进） */
+  const current = playerRef.value.playbackRate
+  const diff = targetSpeed - current
+  if (Math.abs(diff) > 0.2) {
+    const newSpeed = Math.round((current + diff * 0.3) * 10) / 10
+    playerRef.value.playbackRate = Math.max(0.5, Math.min(8, newSpeed))
+    playbackSpeed.value = playerRef.value.playbackRate
+  }
+}
+
 /** video 元素 ratechange 事件（用户通过浏览器原生控件改倍速时同步下拉框） */
 function onRateChange() {
   if (playerRef.value) playbackSpeed.value = playerRef.value.playbackRate
@@ -195,6 +229,8 @@ function onTimeUpdate() {
   }
   /** 更新回放检测框 */
   updatePlaybackDetections()
+  /** 智能倍速 */
+  updateSmartSpeed()
 }
 
 /** 回放检测框叠加 */
@@ -1526,7 +1562,7 @@ defineExpose({ loadRecordings, playAtTime })
           <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
           <button class="export-toggle-btn" @click="openExport" :title="t('recording.export')">{{ t('recording.export') }}</button>
-          <select :value="playbackSpeed" @change="changeSpeed(Number(($event.target as HTMLSelectElement).value))" class="speed-select" :title="t('recording.speed')">
+          <select :value="playbackSpeed" @change="changeSpeed(Number(($event.target as HTMLSelectElement).value)); smartSpeed = false" class="speed-select" :title="t('recording.speed')">
             <option :value="0.5">0.5x</option>
             <option :value="1">1x</option>
             <option :value="1.5">1.5x</option>
@@ -1534,6 +1570,7 @@ defineExpose({ loadRecordings, playAtTime })
             <option :value="4">4x</option>
             <option :value="8">8x</option>
           </select>
+          <button v-if="playbackEvents.length > 0" :class="['ctrl-btn', 'smart-speed-btn', { active: smartSpeed }]" @click="smartSpeed = !smartSpeed" :title="t('recording.smartSpeed', '智能倍速：事件密集降速，稀疏加速')">⚡</button>
           <button
             :class="['autoplay-btn', { active: autoPlayNext }]"
             @click="toggleAutoPlay"
@@ -2632,6 +2669,22 @@ defineExpose({ loadRecordings, playAtTime })
 .detect-toggle-btn.active {
   color: #5bc0de;
   background: #5bc0de30;
+}
+
+/* 智能倍速按钮 */
+.smart-speed-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.smart-speed-btn.active {
+  color: #FFEAA7;
+  background: #FFEAA730;
 }
 
 /* 轨迹切换按钮 */

@@ -151,6 +151,7 @@ export default {
     helpPrevEvent: '跳到上一个事件',
     pip: '画中画',
     matchCountTip: '匹配 {count} 次',
+    smartSpeed: '智能倍速：事件密集降速，稀疏加速',
   },
   timeline: {
     today: '今天',

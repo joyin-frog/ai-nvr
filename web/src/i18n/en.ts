@@ -151,6 +151,7 @@ export default {
     helpPrevEvent: 'Jump to previous event',
     pip: 'PiP',
     matchCountTip: '{count} matches',
+    smartSpeed: 'Smart speed: slow near events, fast between',
   },
   timeline: {
     today: 'Today',
