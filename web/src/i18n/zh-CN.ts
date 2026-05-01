@@ -249,6 +249,8 @@ export default {
     cameraPlaceholder: '留空表示所有',
     labelsPlaceholder: 'person, car（逗号分隔）',
     labelsPlaceholderShort: 'person, car',
+    trackNameFilter: '命名匹配',
+    trackNamesPlaceholder: '张三, 李四（右键命名的名称，逗号分隔）',
     triggerCount: '触发次数',
     minCount: '最少目标数 (0=不限)',
     silentStartLabel: '静默开始',

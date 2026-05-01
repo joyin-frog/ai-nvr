@@ -10,6 +10,7 @@ interface AlertRule {
   eventType: string
   cameraId: string
   labels: string
+  trackNames: string
   windowSeconds: number
   threshold: number
   cooldownSeconds: number
@@ -76,6 +77,7 @@ const form = ref({
   eventType: 'detect',
   cameraId: '',
   labels: '',
+  trackNames: '',
   windowSeconds: 60,
   threshold: 3,
   cooldownSeconds: 300,
@@ -85,7 +87,7 @@ const form = ref({
 })
 
 const emptyForm = {
-  name: '', eventType: 'detect', cameraId: '', labels: '',
+  name: '', eventType: 'detect', cameraId: '', labels: '', trackNames: '',
   windowSeconds: 60, threshold: 3, cooldownSeconds: 300,
   silentStart: '', silentEnd: '', minCount: 0,
 }
@@ -173,6 +175,7 @@ function startEdit(rule: AlertRule) {
     eventType: rule.eventType,
     cameraId: rule.cameraId,
     labels: rule.labels,
+    trackNames: rule.trackNames ?? '',
     windowSeconds: rule.windowSeconds,
     threshold: rule.threshold,
     cooldownSeconds: rule.cooldownSeconds,
@@ -349,6 +352,10 @@ defineExpose({ loadAlerts, addAlert })
         <label>{{ t('alert.labelFilter') }}</label>
         <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholder')" class="input" />
       </div>
+      <div class="form-field" v-if="form.eventType === 'detect'">
+        <label>{{ t('alert.trackNameFilter') }}</label>
+        <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
+      </div>
       <div class="form-row">
         <div class="form-field half">
           <label>{{ t('alert.windowSeconds') }}</label>
@@ -413,6 +420,10 @@ defineExpose({ loadAlerts, addAlert })
               <label>{{ t('alert.labelFilter') }}</label>
               <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholderShort')" class="input" />
             </div>
+            <div class="form-field" v-if="form.eventType === 'detect'">
+              <label>{{ t('alert.trackNameFilter') }}</label>
+              <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
+            </div>
             <div class="form-row">
               <div class="form-field half">
                 <label>{{ t('alert.windowSeconds') }}</label>
@@ -463,6 +474,7 @@ defineExpose({ loadAlerts, addAlert })
             <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
             <span v-if="rule.cameraId" class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
             <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
+            <span v-if="rule.trackNames" class="meta-tag track-name">{{ rule.trackNames }}</span>
             <span v-if="rule.minCount > 0" class="meta-tag count">≥{{ rule.minCount }}</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
@@ -754,6 +766,7 @@ select.input {
 
 .meta-tag.cam { color: #4ECDC4; }
 .meta-tag.label { color: #FFD93D; }
+.meta-tag.track-name { color: #FF6B6B; }
 .meta-tag.silent { color: #e74c3c; }
 .meta-tag.count { color: #FF9800; }
 

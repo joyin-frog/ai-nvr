@@ -247,6 +247,8 @@ export default {
     cameraPlaceholder: 'Leave empty for all',
     labelsPlaceholder: 'person, car (comma separated)',
     labelsPlaceholderShort: 'person, car',
+    trackNameFilter: 'Name Match',
+    trackNamesPlaceholder: 'Alice, Bob (user-named names, comma separated)',
     triggerCount: 'Trigger Count',
     minCount: 'Min Object Count (0=any)',
     silentStartLabel: 'Silent Start',
