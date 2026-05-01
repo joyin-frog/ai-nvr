@@ -492,8 +492,6 @@ function notify(title: string, body: string, cameraId?: string) {
   }
 }
 
-/** 重要检测目标 */
-const IMPORTANT_LABELS = new Set(['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'])
 
 /** 页面可见性优化：切到后台时跳过帧渲染 */
 const pageVisible = ref(!document.hidden)
@@ -550,15 +548,6 @@ function setupEventListeners() {
 
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)
-
-    const important = payload.detections.filter(d => IMPORTANT_LABELS.has(d.label))
-    if (important.length > 0) {
-      const cam = cameras.value.find(c => c.id === payload.cameraId)
-      const name = cam?.name ?? payload.cameraId
-      notify(t('notify.detectTarget', { name }), important.map(d => `${d.label} (${(d.score * 100).toFixed(0)}%)`).join(', '), payload.cameraId)
-      const detLabels = important.map(d => d.label).join(', ')
-      flashTitle(`${t('notify.detect')}: ${detLabels} - ${name}`)
-    }
   })
 
   client.on('camera:online', (payload) => {
@@ -591,13 +580,8 @@ function setupEventListeners() {
 
   /** 追踪语义事件 */
   client.on('track:appeared', (payload) => {
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
-    const name = cam?.name ?? payload.cameraId
     const desc = `${payload.label}#${payload.trackId} ${(payload.score * 100).toFixed(0)}%`
     eventPanel.value?.addEvent('track:appeared', payload.cameraId, desc)
-    if (IMPORTANT_LABELS.has(payload.label)) {
-      notify(t('notify.trackAppeared', { name }), desc, payload.cameraId)
-    }
   })
 
   client.on('track:disappeared', (payload) => {
