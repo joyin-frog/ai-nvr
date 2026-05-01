@@ -346,16 +346,31 @@ const cameraNameMap = computed(() => {
   return map
 })
 
+/** 排序模式 */
+type SortMode = 'newest' | 'oldest' | 'largest'
+const sortMode = ref<SortMode>(localStorage.getItem('nvr-rec-sort') as SortMode ?? 'newest')
+
+function setSortMode(mode: SortMode) {
+  sortMode.value = mode
+  localStorage.setItem('nvr-rec-sort', mode)
+}
+
 /** 按日期和收藏过滤后的录像列表 */
 const filteredRecordings = computed(() => {
   let list = recordings.value
   if (filterStarred.value) {
     list = list.filter(r => starredFiles.value.has(r.filename))
   }
-  if (!filterDate.value) return list
-  const since = new Date(`${filterDate.value}T00:00:00`).getTime()
-  const until = since + 86_400_000
-  return recordings.value.filter(r => r.startTime < until && r.endTime > since)
+  if (filterDate.value) {
+    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+    const until = since + 86_400_000
+    list = list.filter(r => r.startTime < until && r.endTime > since)
+  }
+  const sorted = [...list]
+  if (sortMode.value === 'newest') sorted.sort((a, b) => b.startTime - a.startTime)
+  else if (sortMode.value === 'oldest') sorted.sort((a, b) => a.startTime - b.startTime)
+  else if (sortMode.value === 'largest') sorted.sort((a, b) => b.size - a.size)
+  return sorted
 })
 
 /** 筛选后录像总大小 */
@@ -832,6 +847,9 @@ defineExpose({ loadRecordings, playAtTime })
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
+      <button class="sort-btn" @click="setSortMode(sortMode === 'newest' ? 'oldest' : sortMode === 'oldest' ? 'largest' : 'newest')" :title="sortMode === 'newest' ? '↓ Newest' : sortMode === 'oldest' ? '↑ Oldest' : '◎ Size'">
+        {{ sortMode === 'newest' ? '↓' : sortMode === 'oldest' ? '↑' : '◎' }}
+      </button>
       <button :class="['select-btn', { active: multiSelectMode }]" @click="toggleMultiSelect">{{ multiSelectMode ? t('recording.cancelSelect') : t('recording.selectMultiple') }}</button>
       <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred" :title="t('recording.filterStarred')">
         {{ filterStarred ? '★' : '☆' }}
@@ -1022,6 +1040,20 @@ defineExpose({ loadRecordings, playAtTime })
 .refresh-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.sort-btn {
+  background: #2a2a4a;
+  color: #4ECDC4;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sort-btn:hover {
+  background: #3a3a5a;
 }
 
 .select-btn {
