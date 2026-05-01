@@ -303,6 +303,7 @@ export class MotionRecorder {
       "-c:v", "libx264",
       "-preset", "ultrafast",
       "-crf", "23",
+      "-r", "15",
       "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       "-an",
