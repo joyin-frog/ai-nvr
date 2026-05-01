@@ -466,8 +466,22 @@ const LABEL_COLORS: Record<string, string> = {
   cat: '#FFB6C1',
 }
 
-/** 根据 trackId + label 获取颜色（trackId 优先保证唯一性） */
-function getColor(label: string, trackId?: number): { stroke: string; fill: string } {
+/** 字符串 hash（用于已命名目标的稳定着色） */
+function nameHash(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0
+  }
+  return Math.abs(h)
+}
+
+/** 根据 trackId + label + customName 获取颜色（同名目标同色） */
+function getColor(label: string, trackId?: number, customName?: string): { stroke: string; fill: string } {
+  if (customName) {
+    /** 已命名目标：按名称 hash 稳定着色，同名始终同色 */
+    const hue = nameHash(customName) % 360
+    return { stroke: `hsl(${hue}, 75%, 60%)`, fill: `hsla(${hue}, 75%, 60%, 0.12)` }
+  }
   if (trackId != null) {
     /** 黄金角分布：每个 trackId 色相间隔 ~137.5°，饱和度 75%，亮度 60% */
     const hue = (trackId * 137.508) % 360
@@ -622,7 +636,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     const tid = d.trackId
     const customName = tid ? props.trackLabels?.[tid] : undefined
     const isNamed = !!customName
-    const { stroke, fill } = getColor(d.label, d.trackId)
+    const { stroke, fill } = getColor(d.label, d.trackId, customName)
     const box = getSmoothedBox(d)
     const x = box.xmin * width
     const y = box.ymin * height
@@ -784,7 +798,8 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.setLineDash([])
     for (const [trackId, points] of trackTrails) {
       if (points.length < 2) continue
-      const color = getColor('', trackId)
+      const trailName = props.trackLabels?.[trackId]
+      const color = getColor('', trackId, trailName)
       ctx.strokeStyle = color.stroke
       /** 消失目标的轨迹渐隐 */
       const fadeStart = trailFadeStart.get(trackId)
