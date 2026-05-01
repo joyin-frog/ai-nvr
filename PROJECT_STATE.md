@@ -300,3 +300,7 @@ RTSP → ffmpeg(-fflags nobuffer) → JpegFrameSplitter → EventBus("frame")
 - 录像播放器倍速持久化：localStorage 记住用户上次选择的播放速度
 - 录像列表键盘导航：↑/↓ 焦点选择，Enter 播放/选中，空格多选切换
 - 告警历史 CSV 导出：按摄像头和日期筛选导出 UTF-8 CSV
+- 磁盘感知智能清理：StorageCleaner 根据磁盘使用率自动缩短保留天数（warning 85-95% 线性缩减，critical >95% 缩减至 25%），设置面板显示磁盘压力状态指示器（绿/黄/红）
+- 追踪画廊未命名筛选：新追踪目标（5分钟内首次出现）黄色边框高亮+发光动画，未命名目标数量按钮筛选
+- 追踪目标合并/关联：TrackStorage.merge() 合并两个目标的摄像头列表/出现次数/时间范围，POST /api/tracks/merge 端点，前端命名时自动检测同名目标弹出合并确认
+- 检测框 EMA 平滑过渡：前端对检测框坐标做 EMA 插值（alpha=0.35），消除检测框位置抖动
