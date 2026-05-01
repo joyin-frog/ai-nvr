@@ -112,6 +112,13 @@ export class TrackLabelStorage {
     return result.changes > 0;
   }
 
+  /** 按 cameraId + trackId 删除标签 */
+  removeByTrack(cameraId: string, trackId: number): boolean {
+    const stmt = this.db.prepare("DELETE FROM track_labels WHERE camera_id = ? AND track_id = ?");
+    const result = stmt.run(cameraId, trackId);
+    return result.changes > 0;
+  }
+
   /** 关闭数据库 */
   close(): void {
     this.db.close();

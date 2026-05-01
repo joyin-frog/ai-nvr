@@ -21,6 +21,8 @@ export interface TrackInfo {
   cameraIds: string[];
   /** 快照文件名（相对于 tracks 目录） */
   snapshotFile?: string;
+  /** 主色调名称（从 HSV 直方图提取，如 "red", "blue", "green"） */
+  dominantColor?: string;
 }
 
 interface TrackRecord {
@@ -183,6 +185,7 @@ export class TrackStorage {
       hitCount: r.hitCount,
       cameraIds: [...r.cameraIds],
       snapshotFile: r.snapshotFile,
+      dominantColor: r.colorHist ? TrackStorage.extractDominantColor(r.colorHist) : undefined,
     })).sort((a, b) => b.lastSeen - a.lastSeen);
   }
 
@@ -254,6 +257,7 @@ export class TrackStorage {
       hitCount: r.hitCount,
       cameraIds: [...r.cameraIds],
       snapshotFile: r.snapshotFile,
+      dominantColor: r.colorHist ? TrackStorage.extractDominantColor(r.colorHist) : undefined,
     };
   }
 
@@ -472,6 +476,67 @@ export class TrackStorage {
     }
     /** 归一化：卡方距离的最大值约为 2（完全不同的分布） */
     return Math.min(1, chiSq / 2);
+  }
+
+  /**
+   * HSV 色相范围 → 颜色名称
+   * H 在 HSV 空间中范围是 0-1，对应 0°-360°
+   */
+  private static readonly HUE_NAMES: Array<{ max: number; name: string }> = [
+    { max: 1 / 12, name: "red" },
+    { max: 2 / 12, name: "orange" },
+    { max: 3 / 12, name: "yellow" },
+    { max: 4 / 12, name: "lime" },
+    { max: 5 / 12, name: "green" },
+    { max: 7 / 12, name: "cyan" },
+    { max: 9 / 12, name: "blue" },
+    { max: 10 / 12, name: "purple" },
+    { max: 11 / 12, name: "pink" },
+    { max: 1, name: "red" },
+  ];
+
+  /**
+   * 从 HSV 颜色直方图中提取主色调名称
+   * 找出像素占比最大的色相区间
+   */
+  static extractDominantColor(hist: number[]): string {
+    if (hist.length !== 128) return "gray";
+
+    /** 按 H bin (0-7) 汇总所有 S/V 的像素量 */
+    const hueBins = new Float64Array(8);
+    let totalColorful = 0;
+
+    for (let h = 0; h < 8; h++) {
+      for (let s = 1; s < 4; s++) { /** s=0 是低饱和度，跳过 */
+        for (let v = 1; v < 4; v++) { /** v=0 是低亮度，跳过 */
+          const idx = h * 16 + s * 4 + v;
+          hueBins[h]! += hist[idx]!;
+          totalColorful += hist[idx]!;
+        }
+      }
+    }
+
+    /** 彩色像素不足 20% → 灰色/黑白 */
+    let totalPixels = 0;
+    for (let i = 0; i < 128; i++) totalPixels += hist[i]!;
+    if (totalPixels === 0 || totalColorful / totalPixels < 0.2) return "gray";
+
+    /** 找最大色相 bin */
+    let maxH = 0;
+    let maxVal = 0;
+    for (let h = 0; h < 8; h++) {
+      if (hueBins[h]! > maxVal) {
+        maxVal = hueBins[h]!;
+        maxH = h;
+      }
+    }
+
+    /** bin index → 色相中心值 (0-1) */
+    const hueCenter = (maxH + 0.5) / 8;
+    for (const entry of TrackStorage.HUE_NAMES) {
+      if (hueCenter <= entry.max) return entry.name;
+    }
+    return "gray";
   }
 
   /**

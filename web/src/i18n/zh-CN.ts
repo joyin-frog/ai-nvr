@@ -48,6 +48,8 @@ export default {
     resetAdjust: '重置',
     resetZoom: '重置缩放',
     jumpToRecording: '查看录像',
+    clearName: '清除',
+    saveFailed: '保存失败',
   },
   event: {
     title: '事件日志',

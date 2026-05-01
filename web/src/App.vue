@@ -793,7 +793,11 @@ function setupEventListeners() {
   client.on('track:label-updated', (payload) => {
     const map = { ...trackLabelsMap.value }
     const camMap = { ...(map[payload.cameraId] ?? {}) }
-    camMap[payload.trackId] = payload.name
+    if (payload.name) {
+      camMap[payload.trackId] = payload.name
+    } else {
+      delete camMap[payload.trackId]
+    }
     map[payload.cameraId] = camMap
     trackLabelsMap.value = map
   })

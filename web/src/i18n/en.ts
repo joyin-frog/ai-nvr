@@ -48,6 +48,8 @@ export default {
     resetAdjust: 'Reset',
     resetZoom: 'Reset zoom',
     jumpToRecording: 'View recording',
+    clearName: 'Clear',
+    saveFailed: 'Save failed',
   },
   event: {
     title: 'Event Log',

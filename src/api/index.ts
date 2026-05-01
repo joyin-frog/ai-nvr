@@ -1387,10 +1387,28 @@ export function startServer(
       }
 
       if (url.pathname.startsWith("/api/track-labels/") && req.method === "DELETE") {
-        const id = parseInt(url.pathname.split("/").pop() ?? "");
-        if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
-        const ok = trackLabelStorage.remove(id);
-        return Response.json({ ok });
+        const parts = url.pathname.split("/");
+        /** 支持两种格式: /api/track-labels/:id 或 /api/track-labels/:cameraId/:trackId */
+        if (parts.length === 5) {
+          const id = parseInt(parts[4] ?? "");
+          if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
+          const ok = trackLabelStorage.remove(id);
+          return Response.json({ ok });
+        }
+        if (parts.length === 6) {
+          const cameraId = parts[4];
+          const trackId = parseInt(parts[5] ?? "");
+          if (!cameraId || !trackId) return Response.json({ error: "invalid params" }, { status: 400 });
+          const ok = trackLabelStorage.removeByTrack(cameraId, trackId);
+          if (ok) {
+            /** 同步清除 TrackStorage 的 customName */
+            trackStorage.setCustomName(trackId, "");
+            /** 广播清除事件 */
+            eventBus.emit("track:label-updated", { cameraId, trackId, name: "" });
+          }
+          return Response.json({ ok });
+        }
+        return Response.json({ error: "invalid path" }, { status: 400 });
       }
 
       /** 追踪目标列表 */

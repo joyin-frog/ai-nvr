@@ -1016,6 +1016,8 @@ setOverlay(drawDetectionOverlay)
 const namingBox = ref<{ trackId: number; label: string; x: number; y: number } | null>(null)
 const namingName = ref('')
 const namingInput = ref<HTMLInputElement | null>(null)
+/** 命名操作错误提示 */
+const namingError = ref('')
 
 /** 当前命名目标的 dHash 匹配建议 */
 const namingSuggestion = computed(() => {
@@ -1116,13 +1118,32 @@ function onTouchEnd() {
 }
 
 async function saveNaming() {
-  if (!namingBox.value || !namingName.value.trim()) { cancelNaming(); return }
+  if (!namingBox.value) { cancelNaming(); return }
+  const name = namingName.value.trim()
+  if (!name) { cancelNaming(); return }
   const { trackId, label } = namingBox.value
-  await authFetch('/api/track-labels', {
+  const res = await authFetch('/api/track-labels', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cameraId: props.cameraId, trackId, label, name: namingName.value.trim() }),
+    body: JSON.stringify({ cameraId: props.cameraId, trackId, label, name }),
   })
+  if (!res.ok) {
+    namingError.value = t('camera.saveFailed')
+    return
+  }
+  emit('trackLabelUpdated')
+  cancelNaming()
+}
+
+/** 清除已命名目标的名称 */
+async function clearNaming() {
+  if (!namingBox.value) return
+  const { trackId } = namingBox.value
+  const res = await authFetch(`/api/track-labels/${props.cameraId}/${trackId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    namingError.value = t('camera.saveFailed')
+    return
+  }
   emit('trackLabelUpdated')
   cancelNaming()
 }
@@ -1130,6 +1151,7 @@ async function saveNaming() {
 function cancelNaming() {
   namingBox.value = null
   namingName.value = ''
+  namingError.value = ''
 }
 
 /** 从命名弹窗跳转到录像 */
@@ -1473,9 +1495,15 @@ onUnmounted(() => {
           </select>
           <div class="naming-actions">
             <button class="naming-save" @click="saveNaming">{{ t('manage.save') }}</button>
+            <button
+              v-if="props.trackLabels?.[namingBox.trackId]"
+              class="naming-clear"
+              @click="clearNaming"
+            >{{ t('camera.clearName', '清除') }}</button>
             <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
             <button class="naming-recording" @click="jumpToRecordingFromNaming" :title="t('camera.jumpToRecording')">&#x25B6;</button>
           </div>
+          <div v-if="namingError" class="naming-error">{{ namingError }}</div>
         </div>
       </div>
 
@@ -1872,6 +1900,27 @@ onUnmounted(() => {
   padding: 3px 0;
   font-size: 11px;
   cursor: pointer;
+}
+
+.naming-clear {
+  flex: 0;
+  background: none;
+  border: 1px solid #e74c3c40;
+  color: #e74c3c;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.naming-clear:hover {
+  background: #e74c3c20;
+  border-color: #e74c3c;
+}
+
+.naming-error {
+  color: #e74c3c;
+  font-size: 10px;
+  margin-top: 2px;
 }
 
 .naming-recording {
