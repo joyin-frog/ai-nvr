@@ -12,8 +12,6 @@ const props = defineProps<{
 
 /** 面板是否展开 */
 const expanded = ref(false)
-/** 当前 PTZ 位置 */
-const position = ref({ pan: 0, tilt: 0, zoom: 0 })
 /** 预置位列表 */
 const presets = ref<Array<{ token: string; name: string }>>([])
 /** 是否正在移动 */

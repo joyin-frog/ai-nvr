@@ -526,6 +526,9 @@ function setupEventListeners() {
     if (!pageVisible.value) return
     frameImages.value[payload.cameraId] = payload.jpegData
     frameImages.value = { ...frameImages.value }
+    /** 更新摄像头最后帧时间（防止"画面冻结"误判） */
+    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    if (cam) cam.lastFrameAt = payload.timestamp ?? Date.now()
     /** 计算帧延迟（ms）：当前时间 - 服务端帧时间戳 */
     if (payload.timestamp) {
       const latency = Math.max(0, Date.now() - payload.timestamp)

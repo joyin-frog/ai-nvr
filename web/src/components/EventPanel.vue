@@ -113,14 +113,6 @@ function switchToGallery() {
   loadSnapshots()
 }
 
-/** 下载快照图片 */
-function downloadSnapshot(snap: SnapshotInfo) {
-  const link = document.createElement('a')
-  link.href = snapThumbUrl(snap)
-  link.download = snap.filename
-  link.click()
-}
-
 /** 排序后的事件列表 */
 const sortedEvents = computed(() => {
   if (sortDesc.value) return events.value
