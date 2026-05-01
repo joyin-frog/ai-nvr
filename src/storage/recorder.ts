@@ -356,6 +356,19 @@ export class MotionRecorder {
       }
       state.recording = false;
 
+      /** 清理空或异常小的录像文件（< 1KB 视为无效） */
+      try {
+        const stat = statSync(outputPath);
+        if (stat.size < 1024) {
+          unlinkSync(outputPath);
+          console.warn(`[Recorder] ${cameraId} 清理无效录像: ${filename} (${stat.size} bytes)`);
+          this.listCache.clear();
+          return;
+        }
+      } catch {
+        // file may not exist
+      }
+
       /** 连续录制模式下非正常退出：3 秒后自动重启（避免长时间无录像） */
       if (code !== 0 && state.continuousTimer) {
         /** 清理旧的分段定时器，避免与重启后的定时器冲突 */
