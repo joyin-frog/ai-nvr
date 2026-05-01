@@ -270,6 +270,22 @@ const filteredTracks = computed(() => {
 /** 未命名的目标数量 */
 const unnamedCount = computed(() => tracks.value.filter(t => !t.customName).length)
 
+/** 有匹配建议的未命名目标数量 */
+const suggestableCount = computed(() => tracks.value.filter(t => !t.customName && suggestions.value.has(t.trackId)).length)
+
+/** 批量应用所有匹配建议 */
+async function applyAllSuggestions() {
+  const promises: Promise<void>[] = []
+  for (const t of tracks.value) {
+    if (t.customName) continue
+    const sug = suggestions.value.get(t.trackId)
+    if (!sug) continue
+    promises.push(doSaveName(t.trackId, sug.name))
+  }
+  await Promise.all(promises)
+  await loadTracks()
+}
+
 /** 判断是否为新目标（最近 5 分钟内首次出现且未命名） */
 function isNewTrack(track: TrackInfo): boolean {
   if (track.customName) return false
@@ -327,6 +343,14 @@ onUnmounted(() => {
         :title="t('tracks.filterUnnamed', '仅显示未命名')"
       >
         {{ unnamedCount }} {{ t('tracks.unnamed', '未命名') }}
+      </button>
+      <button
+        v-if="suggestableCount > 0"
+        class="suggest-all-btn"
+        @click="applyAllSuggestions"
+        :title="t('tracks.applyAllSuggestions', '一键应用所有匹配建议')"
+      >
+        ≈ {{ suggestableCount }}
       </button>
       <button class="refresh-btn" @click="loadTracks" :disabled="loading">
         {{ loading ? '...' : '↻' }}
@@ -546,6 +570,20 @@ onUnmounted(() => {
 }
 
 .unnamed-filter-btn:hover { background: #FFC10720; }
+
+.suggest-all-btn {
+  background: rgba(156, 39, 176, 0.2);
+  color: #CE93D8;
+  border: 1px solid rgba(156, 39, 176, 0.4);
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.suggest-all-btn:hover {
+  background: rgba(156, 39, 176, 0.35);
+}
 
 .new-track {
   border-color: #FFC10760;
