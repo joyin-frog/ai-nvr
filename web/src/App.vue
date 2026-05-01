@@ -663,6 +663,15 @@ function setupEventListeners() {
     eventPanel.value?.addEvent('track:disappeared', payload.cameraId, `${displayName} ${t('event.trackDisappeared', '消失')}`)
   })
 
+  /** 其他客户端更新了追踪标签 → 实时同步 */
+  client.on('track:label-updated', (payload) => {
+    const map = { ...trackLabelsMap.value }
+    const camMap = { ...(map[payload.cameraId] ?? {}) }
+    camMap[payload.trackId] = payload.name
+    map[payload.cameraId] = camMap
+    trackLabelsMap.value = map
+  })
+
 }
 
 onMounted(async () => {

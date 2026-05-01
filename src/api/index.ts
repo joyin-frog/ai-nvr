@@ -39,7 +39,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared", "track:label-updated"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -1000,6 +1000,12 @@ export function startServer(
         if (body.trackId && body.name) {
           trackStorage.setCustomName(body.trackId, body.name);
         }
+        /** 广播标签更新给其他客户端 */
+        eventBus.emit("track:label-updated", {
+          cameraId: body.cameraId,
+          trackId: body.trackId,
+          name: body.name,
+        });
         return Response.json(result);
       }
 
@@ -1022,6 +1028,16 @@ export function startServer(
         const body = await req.json() as { customName?: string };
         trackStorage.setCustomName(trackId, body.customName ?? "");
         const updated = trackStorage.getTrack(trackId);
+        /** 广播标签更新给其他客户端 */
+        if (updated && body.customName) {
+          for (const cameraId of updated.cameraIds) {
+            eventBus.emit("track:label-updated", {
+              cameraId,
+              trackId,
+              name: body.customName,
+            });
+          }
+        }
         return Response.json(updated);
       }
 

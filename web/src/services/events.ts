@@ -19,6 +19,7 @@ export interface EventMap {
   alert: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }
   'track:appeared': { cameraId: string; timestamp: number; trackId: number; label: string; score: number }
   'track:disappeared': { cameraId: string; timestamp: number; trackId: number; label: string }
+  'track:label-updated': { cameraId: string; trackId: number; name: string }
 }
 
 /** 事件回调 */

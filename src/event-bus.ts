@@ -107,6 +107,16 @@ export interface EventPayloads {
     label: string;
   };
 
+  /** 追踪目标标签更新（广播给其他客户端） */
+  "track:label-updated": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 追踪 ID */
+    trackId: number;
+    /** 自定义名称 */
+    name: string;
+  };
+
 }
 
 /** 事件名类型 */
