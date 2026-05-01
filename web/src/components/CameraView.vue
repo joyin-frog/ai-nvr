@@ -632,6 +632,16 @@ const namingPopupStyle = computed(() => {
   }
 })
 
+/** 当前摄像头已命名的目标名称列表（去重） */
+const existingTrackNames = computed(() => {
+  if (!props.trackLabels) return []
+  const names = new Set<string>()
+  for (const name of Object.values(props.trackLabels)) {
+    if (name) names.add(name)
+  }
+  return [...names].sort()
+})
+
 /** Canvas contextmenu 事件：根据点击位置匹配最近的检测框 */
 function onCanvasContext(e: MouseEvent) {
   const sorted = getSortedDetections()
@@ -941,6 +951,15 @@ onUnmounted(() => {
             @keydown.enter="saveNaming"
             @keydown.escape="cancelNaming"
           />
+          <!-- 快速关联已有名称 -->
+          <select
+            v-if="existingTrackNames.length > 0"
+            class="naming-preset"
+            @change="namingName = ($event.target as HTMLSelectElement).value"
+          >
+            <option value="">关联...</option>
+            <option v-for="name in existingTrackNames" :key="name" :value="name">{{ name }}</option>
+          </select>
           <div class="naming-actions">
             <button class="naming-save" @click="saveNaming">{{ t('manage.save') }}</button>
             <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
@@ -1289,6 +1308,24 @@ onUnmounted(() => {
 
 .naming-input:focus {
   border-color: #4ECDC4;
+}
+
+.naming-preset {
+  width: 100%;
+  background: #2a2a4a;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #aaa;
+  font-size: 11px;
+  padding: 2px 4px;
+  outline: none;
+  margin-top: 4px;
+  cursor: pointer;
+}
+
+.naming-preset:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
 }
 
 .naming-actions {
