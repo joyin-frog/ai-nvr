@@ -775,27 +775,27 @@ onUnmounted(() => {
           <button
             :class="['tab-btn', { active: activeTab === 'events' }]"
             @click="switchTab('events')"
-          >{{ t('tab.events') }}</button>
+          >☰ {{ t('tab.events') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'recordings' }]"
             @click="switchTab('recordings')"
-          >{{ t('tab.recordings') }}</button>
+          >▶ {{ t('tab.recordings') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'status' }]"
             @click="switchTab('status')"
-          >{{ t('tab.status') }}</button>
+          >◉ {{ t('tab.status') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'cameras' }]"
             @click="switchTab('cameras')"
-          >{{ t('tab.cameras') }}</button>
+          >◎ {{ t('tab.cameras') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'alerts' }]"
             @click="switchTab('alerts')"
-          >{{ t('tab.alerts') }}</button>
+          >⚠ {{ t('tab.alerts') }}</button>
           <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
-          >{{ t('tab.settings') }}</button>
+          >⚙ {{ t('tab.settings') }}</button>
         </div>
         <div class="sidebar-content">
           <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" :cameras="cameras" @play-recording="onPlayRecording" />
@@ -823,27 +823,27 @@ onUnmounted(() => {
         <button
           :class="['tab-btn', { active: activeTab === 'events' }]"
           @click="switchTab('events')"
-        >{{ t('tab.events') }}</button>
+        >☰ {{ t('tab.events') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'recordings' }]"
           @click="switchTab('recordings')"
-        >{{ t('tab.recordings') }}</button>
+        >▶ {{ t('tab.recordings') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'status' }]"
           @click="switchTab('status')"
-        >{{ t('tab.status') }}</button>
+        >◉ {{ t('tab.status') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'cameras' }]"
           @click="switchTab('cameras')"
-        >{{ t('tab.cameras') }}</button>
+        >◎ {{ t('tab.cameras') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'alerts' }]"
           @click="switchTab('alerts')"
-        >{{ t('tab.alerts') }}</button>
+        >⚠ {{ t('tab.alerts') }}</button>
         <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
-        >{{ t('tab.settings') }}</button>
+        >⚙ {{ t('tab.settings') }}</button>
       </div>
       <div class="mobile-content">
         <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :snapshots="detectSnapshots" :cameras="cameras" @play-recording="onPlayRecording" />
