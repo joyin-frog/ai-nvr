@@ -52,7 +52,7 @@ const emit = defineEmits<{
 }>()
 
 /** Canvas 渲染器（替代 <img> Blob URL） */
-const canvasRenderer = useCanvasRenderer()
+const { canvasRef: _canvasRef, setCanvas, setOverlay, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize } = useCanvasRenderer()
 const mjpegStream = useMjpegStream()
 
 /** 实时时钟 */
@@ -140,9 +140,9 @@ function checkFrozen() {
 let consumedWsVersion = 0
 
 /** 喂入帧数据并更新帧尺寸 */
-function feedFrame(jpeg: ArrayBuffer) {
-  canvasRenderer.feedFrame(jpeg)
-  const size = canvasRenderer.getFrameSize()
+function onFrameDecoded(jpeg: ArrayBuffer) {
+  feedFrame(jpeg)
+  const size = getFrameSize()
   if (size.width > 0 && size.height > 0) {
     frameSize.value = size
   }
@@ -151,22 +151,22 @@ function feedFrame(jpeg: ArrayBuffer) {
 watch(() => props.online, (on) => {
   if (on) {
     /** 启动 Canvas 渲染循环 */
-    canvasRenderer.startLoop()
+    startLoop()
     /** 首帧快照预加载：立即获取静态快照填充 Canvas，减少等待时间 */
     authFetch(`/api/snapshot/${props.cameraId}`)
       .then(res => res.ok ? res.arrayBuffer() : null)
       .then(buf => {
-        if (buf && buf.byteLength > 100) feedFrame(buf)
+        if (buf && buf.byteLength > 100) onFrameDecoded(buf)
       })
       .catch(() => { /* 快照获取失败不影响实时流 */ })
     /** 启动 MJPEG fetch 流（WS 帧的 fallback） */
     const url = authUrl(`/api/stream/${props.cameraId}`)
-    mjpegStream.startFetch(url, feedFrame)
+    mjpegStream.startFetch(url, onFrameDecoded)
     frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
   }
   else {
     mjpegStream.stopFetch()
-    canvasRenderer.stopLoop()
+    stopLoop()
     frozen.value = false
     if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null }
   }
@@ -181,7 +181,7 @@ watch(() => props.wsFrameVersion, () => {
   const result = takeFrame(props.cameraId, consumedWsVersion)
   if (result) {
     consumedWsVersion = result.version
-    feedFrame(result.jpeg)
+    onFrameDecoded(result.jpeg)
     /** 收到 WS 帧时暂停 MJPEG fetch（节省带宽） */
     if (!mjpegSuppressed) {
       mjpegStream.stopFetch()
@@ -192,7 +192,7 @@ watch(() => props.wsFrameVersion, () => {
     mjpegRestoreTimer = setTimeout(() => {
       if (mjpegSuppressed && props.online) {
         const url = authUrl(`/api/stream/${props.cameraId}`)
-        mjpegStream.startFetch(url, feedFrame)
+        mjpegStream.startFetch(url, onFrameDecoded)
         mjpegSuppressed = false
       }
     }, 3000)
@@ -238,32 +238,50 @@ function getColor(label: string): string {
   return LABEL_COLORS[label] ?? DEFAULT_COLOR
 }
 
-/** 检测框叠加在画面上的样式（用 trackId 做 key 保持稳定） */
-const detectionBoxes = computed(() => {
-  if (!sortedDetections.value.length) return []
-  return sortedDetections.value.map(d => {
+/** Canvas overlay 绘制检测框（替代 HTML TransitionGroup，减少 DOM 操作开销） */
+function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  if (!props.showBoxes || !hasFrame.value || sortedDetections.value.length === 0) return
+
+  ctx.save()
+  ctx.lineWidth = 2
+  ctx.font = 'bold 11px monospace'
+  ctx.textBaseline = 'bottom'
+
+  for (const d of sortedDetections.value) {
+    const color = getColor(d.label)
+    const x = d.box.xmin * width
+    const y = d.box.ymin * height
+    const w = (d.box.xmax - d.box.xmin) * width
+    const h = (d.box.ymax - d.box.ymin) * height
+
+    /** 绘制矩形框 */
+    ctx.strokeStyle = color
+    ctx.strokeRect(x, y, w, h)
+
+    /** 绘制标签背景和文字 */
     const tid = d.trackId
     const customName = tid ? props.trackLabels?.[tid] : undefined
-    const color = getColor(d.label)
-    return {
-      key: tid ?? `${d.label}-${Math.round(d.box.xmin * 100)}`,
-      label: d.label,
-      score: d.score,
-      trackId: tid,
-      customName,
-      color,
-      style: {
-        left: `${d.box.xmin * 100}%`,
-        top: `${d.box.ymin * 100}%`,
-        width: `${(d.box.xmax - d.box.xmin) * 100}%`,
-        height: `${(d.box.ymax - d.box.ymin) * 100}%`,
-        borderColor: color,
-      },
-    }
-  })
-})
+    const parts: string[] = []
+    if (customName) parts.push(customName)
+    if (tid) parts.push(`#${tid}`)
+    parts.push(d.label)
+    parts.push(`${(d.score * 100).toFixed(0)}%`)
+    const text = parts.join(' ')
 
-/** 右键命名功能 */
+    const textMetrics = ctx.measureText(text)
+    const labelH = 16
+    const labelY = y > labelH + 2 ? y - 2 : y + h + labelH + 2
+
+    ctx.fillStyle = color
+    ctx.fillRect(x, labelY - labelH, textMetrics.width + 8, labelH)
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillText(text, x + 4, labelY - 3)
+  }
+  ctx.restore()
+}
+
+/** 注册 Canvas overlay */
+setOverlay(drawDetectionOverlay)
 const namingBox = ref<{ trackId: number; label: string; x: number; y: number } | null>(null)
 const namingName = ref('')
 const namingInput = ref<HTMLInputElement | null>(null)
@@ -276,13 +294,31 @@ const namingPopupStyle = computed(() => {
   }
 })
 
-function onBoxContext(e: MouseEvent, box: { trackId?: number; label: string }) {
-  if (!box.trackId) return
-  const rect = (e.currentTarget as HTMLElement).parentElement?.getBoundingClientRect()
-  const x = rect ? ((e.clientX - rect.left) / rect.width) * 100 : 50
-  const y = rect ? ((e.clientY - rect.top) / rect.height) * 100 : 50
-  const existing = props.trackLabels?.[box.trackId] ?? ''
-  namingBox.value = { trackId: box.trackId, label: box.label, x, y }
+/** Canvas contextmenu 事件：根据点击位置匹配最近的检测框 */
+function onCanvasContext(e: MouseEvent) {
+  if (sortedDetections.value.length === 0) return
+  const canvas = e.currentTarget as HTMLElement
+  const rect = canvas.getBoundingClientRect()
+  const nx = (e.clientX - rect.left) / rect.width
+  const ny = (e.clientY - rect.top) / rect.height
+
+  /** 找到包含点击位置且面积最小的检测框（最精确匹配） */
+  let best: { trackId?: number; label: string; box: Detection['box'] } | null = null
+  let bestArea = Infinity
+  for (const d of sortedDetections.value) {
+    if (nx >= d.box.xmin && nx <= d.box.xmax && ny >= d.box.ymin && ny <= d.box.ymax) {
+      const area = (d.box.xmax - d.box.xmin) * (d.box.ymax - d.box.ymin)
+      if (area < bestArea) {
+        best = d
+        bestArea = area
+      }
+    }
+  }
+  if (!best || !best.trackId) return
+  const x = nx * 100
+  const y = ny * 100
+  const existing = props.trackLabels?.[best.trackId] ?? ''
+  namingBox.value = { trackId: best.trackId, label: best.label, x, y }
   namingName.value = existing
   nextTick(() => namingInput.value?.focus())
 }
@@ -380,7 +416,7 @@ async function takeScreenshot() {
     return
   }
   /** 从 Canvas 截图 */
-  const blob = await canvasRenderer.captureJpeg()
+  const blob = await captureJpeg()
   if (blob) {
     const url = URL.createObjectURL(blob)
     link.href = url
@@ -470,7 +506,7 @@ function resetZoom() {
 
 onUnmounted(() => {
   mjpegStream.stopFetch()
-  canvasRenderer.stopLoop()
+  stopLoop()
   if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
@@ -512,9 +548,10 @@ onUnmounted(() => {
       <div class="camera-content" :style="{ transform: zoomTransform }">
         <canvas
           v-if="online"
-          :ref="(el: any) => canvasRenderer.setCanvas(el as HTMLCanvasElement | null)"
+          :ref="(el: any) => setCanvas(el as HTMLCanvasElement | null)"
           class="camera-image"
           :style="{ filter: imageFilter }"
+          @contextmenu.prevent="onCanvasContext"
         />
         <div v-else class="camera-placeholder">
           <div v-if="online" class="placeholder-icon">&#9679;</div>
@@ -523,26 +560,7 @@ onUnmounted(() => {
           <span v-if="!online && lastSeenText" class="last-seen">{{ lastSeenText }}</span>
         </div>
 
-        <!-- 检测框叠加层 -->
-        <TransitionGroup
-          v-if="showBoxes && hasFrame && detectionBoxes.length > 0"
-          name="detect-box"
-          tag="div"
-          class="detection-overlay"
-        >
-          <div
-            v-for="box in detectionBoxes"
-            :key="box.key"
-            class="detect-box"
-            :style="box.style"
-            :title="box.customName ? `${box.customName} (#${box.trackId}) ${box.label} ${(box.score * 100).toFixed(0)}%` : box.trackId ? `#${box.trackId} ${box.label} ${(box.score * 100).toFixed(0)}%` : `${box.label} ${(box.score * 100).toFixed(0)}%`"
-            @contextmenu.prevent="onBoxContext($event, box)"
-          >
-            <span class="detect-label" :style="{ background: box.color }">
-              {{ box.customName ? box.customName + ' ' : '' }}{{ box.trackId ? '#' + box.trackId + ' ' : '' }}{{ box.label }} {{ (box.score * 100).toFixed(0) }}%
-            </span>
-          </div>
-        </TransitionGroup>
+        <!-- 检测框由 Canvas overlay 绘制（不再使用 HTML TransitionGroup） -->
 
         <!-- 右键命名弹出框 -->
         <div v-if="namingBox" class="naming-popup" :style="namingPopupStyle">
@@ -836,33 +854,6 @@ onUnmounted(() => {
 }
 
 /* 检测框叠加层 */
-.detection-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-/* 检测框过渡动画 */
-.detect-box-enter-active {
-  transition: opacity 0.3s ease-out;
-}
-
-.detect-box-leave-active {
-  transition: opacity 0.8s ease-in;
-}
-
-.detect-box-enter-from {
-  opacity: 0;
-}
-
-.detect-box-leave-to {
-  opacity: 0;
-}
-
-.detect-box-move {
-  transition: transform 0.3s ease-out;
-}
-
 /* FPS 质量徽标 */
 .fps-badge {
   position: absolute;
@@ -998,25 +989,6 @@ onUnmounted(() => {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-}
-
-.detect-box {
-  position: absolute;
-  border: 2px solid;
-  border-radius: 3px;
-  transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out;
-}
-
-.detect-label {
-  position: absolute;
-  top: -20px;
-  left: -2px;
-  color: #1a1a2e;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 2px;
-  white-space: nowrap;
 }
 
 /* 右键命名弹窗 */
