@@ -488,10 +488,23 @@ export function startServer(
           return val;
         }
 
-        const header = "id,type,camera_id,timestamp,detail,starred";
+        const header = "id,type,camera_id,timestamp,track_id,track_name,label,zone_name,dwell_ms,speed,direction,starred";
         const rows = rawEvents.map(ev => {
           const ts = new Date(ev.timestamp).toISOString();
-          return `${ev.id},${ev.type},${csvEscape(ev.camera_id)},${ts},${csvEscape(ev.detail ?? "")},${ev.starred ? 1 : 0}`;
+          /** 解析 detail JSON 提取结构化字段 */
+          let trackId = "", trackName = "", label = "", zoneName = "", dwellMs = "", speed = "", direction = "";
+          if (ev.detail) {
+            const d = JSON.parse(ev.detail) as Record<string, unknown>;
+            if (d.trackId != null) trackId = String(d.trackId);
+            if (d.trackName) trackName = String(d.trackName);
+            if (d.label) label = String(d.label);
+            if (d.zoneName) zoneName = String(d.zoneName);
+            if (d.lineName) zoneName = String(d.lineName);
+            if (d.dwellMs != null) dwellMs = String(d.dwellMs);
+            if (d.speed != null) speed = String(d.speed);
+            if (d.direction) direction = String(d.direction);
+          }
+          return `${ev.id},${ev.type},${csvEscape(ev.camera_id)},${ts},${trackId},${csvEscape(trackName)},${csvEscape(label)},${csvEscape(zoneName)},${dwellMs},${speed},${csvEscape(direction)},${ev.starred ? 1 : 0}`;
         });
         const csv = [header, ...rows].join("\n");
 
