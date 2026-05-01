@@ -236,13 +236,14 @@ const LABEL_COLORS: Record<string, string> = {
 }
 
 /** 根据 trackId + label 获取颜色（trackId 优先保证唯一性） */
-function getColor(label: string, trackId?: number): string {
+function getColor(label: string, trackId?: number): { stroke: string; fill: string } {
   if (trackId != null) {
     /** 黄金角分布：每个 trackId 色相间隔 ~137.5°，饱和度 75%，亮度 60% */
     const hue = (trackId * 137.508) % 360
-    return `hsl(${hue}, 75%, 60%)`
+    return { stroke: `hsl(${hue}, 75%, 60%)`, fill: `hsla(${hue}, 75%, 60%, 0.12)` }
   }
-  return LABEL_COLORS[label] ?? '#4ECDC4'
+  const hex = LABEL_COLORS[label] ?? '#4ECDC4'
+  return { stroke: hex, fill: hex + '1F' }
 }
 
 /** Canvas overlay 绘制检测框（替代 HTML TransitionGroup，减少 DOM 操作开销） */
@@ -250,20 +251,35 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   if (!props.showBoxes || !hasFrame.value || sortedDetections.value.length === 0) return
 
   ctx.save()
-  ctx.lineWidth = 2
-  ctx.font = 'bold 11px monospace'
+  ctx.font = 'bold 12px monospace'
   ctx.textBaseline = 'bottom'
 
   for (const d of sortedDetections.value) {
-    const color = getColor(d.label, d.trackId)
+    const { stroke, fill } = getColor(d.label, d.trackId)
     const x = d.box.xmin * width
     const y = d.box.ymin * height
     const w = (d.box.xmax - d.box.xmin) * width
     const h = (d.box.ymax - d.box.ymin) * height
 
-    /** 绘制矩形框 */
-    ctx.strokeStyle = color
-    ctx.strokeRect(x, y, w, h)
+    /** 绘制圆角矩形框 + 半透明填充 */
+    const r = Math.min(4, w / 4, h / 4)
+    ctx.beginPath()
+    ctx.moveTo(x + r, y)
+    ctx.lineTo(x + w - r, y)
+    ctx.arcTo(x + w, y, x + w, y + r, r)
+    ctx.lineTo(x + w, y + h - r)
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
+    ctx.lineTo(x + r, y + h)
+    ctx.arcTo(x, y + h, x, y + h - r, r)
+    ctx.lineTo(x, y + r)
+    ctx.arcTo(x, y, x + r, y, r)
+    ctx.closePath()
+
+    ctx.fillStyle = fill
+    ctx.fill()
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 2
+    ctx.stroke()
 
     /** 绘制标签背景和文字 */
     const tid = d.trackId
@@ -276,13 +292,26 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     const text = parts.join(' ')
 
     const textMetrics = ctx.measureText(text)
-    const labelH = 16
+    const labelH = 18
     const labelY = y > labelH + 2 ? y - 2 : y + h + labelH + 2
+    const labelW = textMetrics.width + 10
 
-    ctx.fillStyle = color
-    ctx.fillRect(x, labelY - labelH, textMetrics.width + 8, labelH)
-    ctx.fillStyle = '#1a1a2e'
-    ctx.fillText(text, x + 4, labelY - 3)
+    /** 标签背景：圆角 + 不透明填充 */
+    ctx.beginPath()
+    ctx.moveTo(x + 2, labelY - labelH)
+    ctx.lineTo(x + labelW - 2, labelY - labelH)
+    ctx.arcTo(x + labelW, labelY - labelH, x + labelW, labelY - labelH + 2, 2)
+    ctx.lineTo(x + labelW, labelY - 2)
+    ctx.arcTo(x + labelW, labelY, x + labelW - 2, labelY, 2)
+    ctx.lineTo(x + 2, labelY)
+    ctx.arcTo(x, labelY, x, labelY - 2, 2)
+    ctx.lineTo(x, labelY - labelH + 2)
+    ctx.arcTo(x, labelY - labelH, x + 2, labelY - labelH, 2)
+    ctx.closePath()
+    ctx.fillStyle = stroke
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(text, x + 5, labelY - 4)
   }
 
   /** 绘制 ROI 区域 */
