@@ -549,8 +549,9 @@ function startApp() {
       if (firstConnection) {
         firstConnection = false
       } else {
-        loadCameras()
+        loadCameras().then(() => loadTrackLabels())
         loadRoiData()
+        loadShowBoxes()
         eventPanel.value?.loadHistory()
         recordingsPanel.value?.loadRecordings()
       }
