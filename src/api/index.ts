@@ -156,6 +156,11 @@ export function startServer(
       ws.send(encodeFmp4Init(extractor.initSegment.codec, extractor.initSegment.data));
     }
 
+    /** 发送缓存的最近 media segment（立即显示画面，消除黑屏等待） */
+    if (extractor.lastMediaSegment) {
+      ws.send(getOrEncodeMedia(extractor.lastMediaSegment));
+    }
+
     /** 监听新的 init segment */
     const unsubInit = bus.on("fmp4:init", (payload) => {
       if (payload.cameraId === cameraId) {

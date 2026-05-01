@@ -140,6 +140,8 @@ export class Fmp4Extractor {
   private currentFps = 0;
   /** 缓存 init segment（新客户端连接时发送） */
   private cachedInit: Fmp4InitSegment | null = null;
+  /** 缓存最近一个 media segment（新客户端快速显示首帧） */
+  private cachedMedia: Buffer | null = null;
 
   constructor(
     private config: CameraConfig,
@@ -173,6 +175,9 @@ export class Fmp4Extractor {
 
   /** 获取缓存的 init segment */
   get initSegment(): Fmp4InitSegment | null { return this.cachedInit; }
+
+  /** 获取缓存的最近 media segment（新客户端快速显示首帧） */
+  get lastMediaSegment(): Buffer | null { return this.cachedMedia; }
 
   /** 获取当前 FPS */
   get fps(): number { return this.currentFps; }
@@ -208,6 +213,8 @@ export class Fmp4Extractor {
           this.cachedInit = seg;
           this.eventBus.emit("fmp4:init", { cameraId: this.config.id, segment: seg });
         } else {
+          /** 缓存最近 media segment（新客户端快速显示首帧） */
+          this.cachedMedia = seg.data;
           this.eventBus.emit("fmp4:segment", { cameraId: this.config.id, data: seg.data });
 
           /** FPS 统计 */

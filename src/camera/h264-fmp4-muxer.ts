@@ -100,6 +100,10 @@ class VideoToFmp4Muxer {
 
   get lastInitSegment(): Fmp4InitSegment | null { return this.lastInit; }
 
+  /** 最近一个 media segment（用于新客户端快速显示首帧） */
+  private lastMediaData: Buffer | null = null;
+  get lastMediaSegment(): Buffer | null { return this.lastMediaData; }
+
   /** 获取检测到的码流类型 */
   get detectedCodec(): CodecType | null { return this.codecType; }
 
@@ -791,6 +795,8 @@ class VideoToFmp4Muxer {
     this.sequenceNumber++;
     const moofMdat = this.buildMediaSegment();
     if (moofMdat) {
+      /** 缓存最近 media segment（新客户端快速显示首帧） */
+      this.lastMediaData = moofMdat;
       eventBus.emit("fmp4:segment", { cameraId, data: moofMdat });
     }
 
@@ -960,6 +966,9 @@ export class H264Fmp4Extractor {
   get fps(): number { return this.muxer.fps; }
 
   get initSegment(): Fmp4InitSegment | null { return this.cachedInit; }
+
+  /** 获取缓存的最近 media segment（新客户端连接时立即显示画面） */
+  get lastMediaSegment(): Buffer | null { return this.muxer.lastMediaSegment; }
 
   get lastFrameAt(): number { return this.online ? Date.now() : 0; }
 
