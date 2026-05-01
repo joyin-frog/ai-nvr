@@ -196,6 +196,36 @@ function recordTrails() {
   }
 }
 
+/**
+ * 从后端加载历史轨迹，合并到内存中的 trackTrails
+ * 摄像头上线时调用一次，获取最近 2 分钟的历史轨迹点
+ */
+async function loadHistoryTrails() {
+  try {
+    const res = await authFetch(`/api/tracks/trajectory-camera/${props.cameraId}`)
+    if (!res.ok) return
+    const data = await res.json() as Array<{ trackId: number; points: Array<{ ts: number; x: number; y: number }> }>
+    for (const { trackId, points } of data) {
+      if (points.length < 2) continue
+      /** 只保留坐标，与实时轨迹格式一致 */
+      const coords = points.map(p => ({ x: p.x, y: p.y }))
+      /** 与现有轨迹合并（避免重复） */
+      const existing = trackTrails.get(trackId)
+      if (existing) {
+        /** 历史轨迹放前面，实时轨迹放后面 */
+        trackTrails.set(trackId, [...coords, ...existing])
+      } else {
+        trackTrails.set(trackId, coords)
+      }
+      /** 限制总点数 */
+      const trail = trackTrails.get(trackId)!
+      if (trail.length > MAX_TRAIL_POINTS * 3) {
+        trail.splice(0, trail.length - MAX_TRAIL_POINTS * 3)
+      }
+    }
+  } catch { /* 静默降级 */ }
+}
+
 /** 清理不再活跃的轨迹（消失后保留 3 秒渐隐） */
 function cleanupTrails() {
   const now = Date.now()
@@ -368,6 +398,8 @@ function onFrameDecoded(jpeg: ArrayBuffer) {
 
 watch(() => props.online, (on) => {
   if (on) {
+    /** 加载历史轨迹（后台静默） */
+    loadHistoryTrails()
     if (useMse.value) {
       /** MSE 模式：直接连接 fMP4 流 */
       fmp4.connect()

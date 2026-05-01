@@ -15,6 +15,7 @@ import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
 import { TrackStorage } from "@/storage/tracks";
 import { type TrackLabelStorage } from "@/storage/track-labels";
+import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -87,6 +88,7 @@ export class AiDetector {
     private modelCacheDir: string,
     private trackStorage?: TrackStorage,
     private trackLabelStorage?: TrackLabelStorage,
+    private trajectoryStorage?: TrackTrajectoryStorage,
   ) {}
 
   /** 异步初始化：加载模型 */
@@ -463,6 +465,22 @@ export class AiDetector {
           label: target.label,
           trackName: trackName || undefined,
         });
+      }
+
+      /** 写入轨迹采样点（持久化追踪目标的位置历史） */
+      if (this.trajectoryStorage && trackResult.detections.length > 0) {
+        const trajItems = trackResult.detections
+          .filter(d => d.trackId != null && d.box)
+          .map(d => ({
+            trackId: d.trackId!,
+            cx: (d.box.xmin + d.box.xmax) / 2,
+            cy: (d.box.ymin + d.box.ymax) / 2,
+            w: d.box.xmax - d.box.xmin,
+            h: d.box.ymax - d.box.ymin,
+          }));
+        if (trajItems.length > 0) {
+          this.trajectoryStorage.insertBatch(cameraId, timestamp, trajItems);
+        }
       }
 
       /** 为检测结果附带用户自定义名称和主色调 */

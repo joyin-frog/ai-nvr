@@ -100,6 +100,7 @@ export function startServer(
   crossLineStorage: CrossLineStorage,
   storageFs: StorageFs,
   alertSnapshotStorage?: SnapshotStorage,
+  trajectoryStorage?: import("@/storage/track-trajectory").TrackTrajectoryStorage,
 ): void {
   /** 登录速率限制：IP → { count, resetAt } */
   const loginRateLimits = new Map<string, { count: number; resetAt: number }>();
@@ -1423,6 +1424,30 @@ export function startServer(
         return Response.json(result);
       }
 
+      /** 追踪目标统计 */
+      if (url.pathname === "/api/tracks/stats" && req.method === "GET") {
+        const all = trackStorage.listTracks();
+        const now = Date.now();
+        const total = all.length;
+        const named = all.filter(t => t.customName).length;
+        const active = all.filter(t => now - t.lastSeen < 30000).length;
+        /** 按标签统计 */
+        const byLabel: Record<string, number> = {};
+        for (const t of all) {
+          byLabel[t.label] = (byLabel[t.label] ?? 0) + 1;
+        }
+        /** 按小时统计最近 24 小时的出现次数 */
+        const byHour: Array<{ hour: number; count: number }> = [];
+        const dayAgo = now - 86400000;
+        for (let h = 0; h < 24; h++) {
+          const hourStart = new Date(now).setHours(h, 0, 0, 0);
+          const hourEnd = hourStart + 3600000;
+          const count = all.filter(t => t.lastSeen >= Math.max(hourStart, dayAgo) && t.lastSeen < hourEnd).length;
+          if (hourStart >= dayAgo) byHour.push({ hour: h, count });
+        }
+        return Response.json({ total, named, unnamed: total - named, active, byLabel, byHour });
+      }
+
       /** 未命名目标的 dHash 匹配建议 */
       if (url.pathname === "/api/tracks/suggestions" && req.method === "GET") {
         return Response.json(trackStorage.getSuggestions());
@@ -1449,6 +1474,35 @@ export function startServer(
       }
 
       /** 删除追踪目标 */
+
+      /** 查询追踪目标轨迹 */
+      if (url.pathname.startsWith("/api/tracks/trajectory/")) {
+        const parts = url.pathname.split("/");
+        /** /api/tracks/trajectory/:trackId — 单目标轨迹 */
+        if (parts.length === 5 && req.method === "GET") {
+          const trackId = parseInt(parts[4]!);
+          if (!trackId || !trajectoryStorage) return Response.json({ points: [] });
+          const since = url.searchParams.get("since");
+          const sinceMs = since ? parseInt(since) : Date.now() - 300_000;
+          const points = trajectoryStorage.getTrajectory(trackId, sinceMs);
+          return Response.json({ trackId, points });
+        }
+      }
+
+      /** 查询摄像头所有活跃目标轨迹 */
+      if (url.pathname.startsWith("/api/tracks/trajectory-camera/")) {
+        const parts = url.pathname.split("/");
+        /** /api/tracks/trajectory-camera/:cameraId */
+        if (parts.length === 5 && req.method === "GET") {
+          const cameraId = parts[4]!;
+          if (!trajectoryStorage) return Response.json([]);
+          const since = url.searchParams.get("since");
+          const sinceMs = since ? parseInt(since) : Date.now() - 120_000;
+          const trajectories = trajectoryStorage.getCameraTrajectories(cameraId, sinceMs);
+          return Response.json(trajectories);
+        }
+      }
+
       /** 合并追踪目标 */
       if (url.pathname === "/api/tracks/merge" && req.method === "POST") {
         const body = await req.json() as { sourceId?: number; targetId?: number };

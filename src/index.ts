@@ -28,6 +28,7 @@ import { TrackLabelStorage } from "@/storage/track-labels";
 import { TrackStorage } from "@/storage/tracks";
 import { PreferencesStorage } from "@/storage/preferences";
 import { CrossLineStorage } from "@/storage/cross-lines";
+import { TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { StorageFs } from "@/storage/storage-fs";
 
 /**
@@ -95,7 +96,8 @@ recorder.start();
 const annotator = new Annotator();
 const trackStorage = new TrackStorage(join(dataDir, "tracks"));
 const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
-const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage);
+const trajectoryStorage = new TrackTrajectoryStorage(join(dataDir, "track-trajectory.db"));
+const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage, trajectoryStorage);
 
 /** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder);
@@ -192,7 +194,7 @@ for (const cam of config.cameras) {
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross"] as const;
@@ -250,6 +252,7 @@ process.on("SIGINT", () => {
   alertStorage.close();
   preferencesStorage.close();
   diskUsage.close();
+  trajectoryStorage.close();
   eventBus.clear();
   process.exit(0);
 });
