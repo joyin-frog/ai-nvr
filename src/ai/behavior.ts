@@ -78,6 +78,7 @@ export class BehaviorAnalyzer {
     detections: Array<{
       label: string;
       trackId?: number;
+      trackName?: string;
       box: { xmin: number; ymin: number; xmax: number; ymax: number };
     }>,
   ): void {
@@ -97,6 +98,8 @@ export class BehaviorAnalyzer {
       const cy = (det.box.ymin + det.box.ymax) / 2;
 
       const trackState = this.getOrCreateTrackState(cameraStates, det.trackId, det.label);
+      /** 同步最新的 trackName */
+      if (det.trackName) trackState.trackName = det.trackName;
       const currentZoneIds = new Set(trackState.zones.keys());
 
       /** 检查目标在哪些区域 */
