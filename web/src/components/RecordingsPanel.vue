@@ -1188,9 +1188,8 @@ const pipCanvasRef = ref<HTMLCanvasElement | null>(null)
 let pipVersion = 0
 /** PiP rAF ID */
 let pipRafId = 0
-/** PiP 复用 Image 对象（避免每帧创建） */
-let pipImg = new Image()
-let pipImgUrl = ''
+/** PiP 复用 ImageBitmap（避免每帧创建 Image + objectURL） */
+let pipBitmap: ImageBitmap | null = null
 /** PiP 窗口位置（viewport px） */
 const pipX = ref(0)
 const pipY = ref(0)
@@ -1224,7 +1223,6 @@ function togglePip() {
 /** PiP 帧渲染循环 */
 function startPipLoop() {
   stopPipLoop()
-  pipImg = new Image()
   function loop() {
     const canvas = pipCanvasRef.value
     if (!canvas || !showPip.value) return
@@ -1233,17 +1231,17 @@ function startPipLoop() {
       const frame = takeFrame(camId, pipVersion)
       if (frame) {
         pipVersion = frame.version
-        /** 释放上一帧的 object URL */
-        if (pipImgUrl) URL.revokeObjectURL(pipImgUrl)
-        pipImgUrl = URL.createObjectURL(new Blob([frame.jpeg], { type: 'image/jpeg' }))
         const ctx = canvas.getContext('2d')
         if (ctx) {
-          pipImg.onload = () => {
-            canvas.width = pipImg.width
-            canvas.height = pipImg.height
-            ctx.drawImage(pipImg, 0, 0)
-          }
-          pipImg.src = pipImgUrl
+          const blob = new Blob([frame.jpeg], { type: 'image/jpeg' })
+          createImageBitmap(blob).then(bitmap => {
+            /** 释放上一帧 bitmap */
+            if (pipBitmap) pipBitmap.close()
+            pipBitmap = bitmap
+            canvas.width = bitmap.width
+            canvas.height = bitmap.height
+            ctx.drawImage(bitmap, 0, 0)
+          })
         }
       }
     }
@@ -1257,9 +1255,9 @@ function stopPipLoop() {
     cancelAnimationFrame(pipRafId)
     pipRafId = 0
   }
-  if (pipImgUrl) {
-    URL.revokeObjectURL(pipImgUrl)
-    pipImgUrl = ''
+  if (pipBitmap) {
+    pipBitmap.close()
+    pipBitmap = null
   }
 }
 
