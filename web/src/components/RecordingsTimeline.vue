@@ -202,6 +202,7 @@ const eventMarkers = computed(() => {
       color: EVENT_MARKER_COLORS[primaryType] ?? '#888',
       count: g.labels.length || g.types.size,
       labels: [...new Set(g.labels)].slice(0, 3).join(', '),
+      timestamp: g.timestamp,
     }
   })
 })
@@ -319,6 +320,16 @@ function goToday() {
   selectedDate.value = new Date().toISOString().slice(0, 10)
   selectedHour.value = new Date().getHours()
 }
+
+/** 点击事件标记：跳转到对应时间的录像 */
+function onEventMarkerClick(timestamp: number) {
+  /** 找到包含该时间戳的录像片段 */
+  const match = filteredRecordings.value.find(r => r.startTime <= timestamp && r.endTime >= timestamp)
+  if (match) {
+    const offsetSec = Math.max(0, (timestamp - match.startTime) / 1000)
+    emit('play', match, offsetSec)
+  }
+}
 </script>
 
 <template>
@@ -360,7 +371,7 @@ function goToday() {
       </div>
 
       <!-- 事件标记 -->
-      <div v-for="(m, i) in eventMarkers" :key="'e'+i" class="event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'">
+      <div v-for="(m, i) in eventMarkers" :key="'e'+i" class="event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'" @click.stop="onEventMarkerClick(m.timestamp)">
         <div class="event-dot" :style="{ background: m.color }"></div>
         <span v-if="m.count > 1" class="event-count">{{ m.count }}</span>
       </div>

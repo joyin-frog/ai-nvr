@@ -171,6 +171,7 @@ const eventMarkersByCamera = computed(() => {
         color: EVENT_MARKER_COLORS[primaryType] ?? '#888',
         count: g.labels.length || g.types.size,
         labels: [...new Set(g.labels)].slice(0, 3).join(', '),
+        timestamp: g.timestamp,
       }
     }))
   }
@@ -277,6 +278,16 @@ function onSegClick(e: MouseEvent, rec: Recording) {
   const offsetSec = Math.max(0, (pct * (rec.endTime - rec.startTime)) / 1000)
   emit('play', rec, offsetSec)
 }
+
+/** 点击事件标记：跳转到对应时间的录像 */
+function onEventMarkerClick(cameraId: string, timestamp: number) {
+  const camRecs = filterByRange(recordingsByCamera.value.get(cameraId) ?? [])
+  const match = camRecs.find(r => r.startTime <= timestamp && r.endTime >= timestamp)
+  if (match) {
+    const offsetSec = Math.max(0, (timestamp - match.startTime) / 1000)
+    emit('play', match, offsetSec)
+  }
+}
 </script>
 
 <template>
@@ -320,7 +331,7 @@ function onSegClick(e: MouseEvent, rec: Recording) {
           />
           <!-- 事件标记 -->
           <template v-for="(m, mi) in eventMarkersByCamera.get(cam.id) ?? []" :key="'e'+mi">
-            <div class="mtl-event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'">
+            <div class="mtl-event-marker" :style="{ left: m.position + '%' }" :title="m.labels || '事件'" @click.stop="onEventMarkerClick(cam.id, m.timestamp)">
               <div class="mtl-event-dot" :style="{ background: m.color }"></div>
             </div>
           </template>
