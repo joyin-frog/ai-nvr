@@ -181,18 +181,35 @@ export class TrackStorage {
     frameImage: Buffer,
     box: Detection["box"],
     score: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const record = this.tracks.get(trackId);
-    if (!record || !box) return;
+    if (!record || !box) return false;
     const snapshotScore = this.calcSnapshotScore(box, score);
     /** 质量分数超过当前最佳 20% 时更新快照 */
-    if (snapshotScore <= record.bestSnapshotScore * 1.2) return;
+    if (snapshotScore <= record.bestSnapshotScore * 1.2) return false;
     const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
     if (snapshotFile) {
+      /** 旧指纹移入备选列表 */
+      if (record.dhash) {
+        const alt: AltFingerprint = { dhash: record.dhash, colorHist: record.colorHist, lbpHist: record.lbpHist, score: record.bestSnapshotScore };
+        if (!record.altFingerprints) record.altFingerprints = [];
+        const isDup = record.altFingerprints.some(a => a.dhash === record.dhash);
+        if (!isDup) {
+          record.altFingerprints.push(alt);
+          record.altFingerprints.sort((a, b) => b.score - a.score);
+          if (record.altFingerprints.length > 2) record.altFingerprints.length = 2;
+        }
+      }
       record.snapshotFile = snapshotFile;
       record.bestSnapshotScore = snapshotScore;
+      /** 同时更新指纹 */
+      record.dhash = await this.computeDHash(frameImage, box);
+      record.colorHist = await this.computeColorHist(frameImage, box);
+      record.lbpHist = await this.computeLBP(frameImage, box);
       this.scheduleSave();
+      return true;
     }
+    return false;
   }
 
   /** 设置自定义名称 */

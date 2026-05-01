@@ -429,6 +429,27 @@ export class AiDetector {
           const best = existing.reduce((a, b) => (a.score > b.score ? a : b));
           if (best.box) {
             this.trackStorage.tryUpdateSnapshot(best.trackId!, cameraId, jpeg, best.box, best.score)
+              .then(updated => {
+                /** 快照更新成功后，如果目标未命名，尝试延迟重新匹配 */
+                if (!updated) return;
+                const rec = this.trackStorage!.getRecord(best.trackId!);
+                if (!rec || rec.customName || !rec.dhash) return;
+                const matches = this.trackStorage!.findSimilar(best.trackId!, cameraId, rec.label, rec.dhash, 0.4, rec.colorHist, rec.lbpHist);
+                if (matches.length === 0) return;
+                const top = matches[0]!;
+                const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
+                if (autoThreshold > 0 && top.distance < autoThreshold && this.trackLabelStorage) {
+                  this.trackLabelStorage.upsert(cameraId, best.trackId!, rec.label, top.customName);
+                  this.trackStorage!.setCustomName(best.trackId!, top.customName);
+                  this.trackNameCache.delete(`${cameraId}:${best.trackId}`);
+                  this.eventBus.emit("track:label-updated", {
+                    cameraId,
+                    trackId: best.trackId,
+                    name: top.customName,
+                  });
+                  console.log(`[AiDetector] 延迟匹配: track#${best.trackId} → ${top.customName} (${(top.distance * 100).toFixed(0)}%)`);
+                }
+              })
               .catch(() => { /* 快照更新失败不影响主流程 */ });
           }
         }
