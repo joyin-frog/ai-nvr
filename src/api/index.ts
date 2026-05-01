@@ -1411,11 +1411,16 @@ export function startServer(
         return Response.json({ error: "invalid path" }, { status: 400 });
       }
 
-      /** 追踪目标列表 */
+      /** 追踪目标列表（附带行为事件统计） */
       if (url.pathname === "/api/tracks" && req.method === "GET") {
         const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 200;
         const all = trackStorage.listTracks();
-        return Response.json(all.slice(0, limit));
+        const eventCounts = eventStorage.countByTrackId();
+        const result = all.slice(0, limit).map(t => ({
+          ...t,
+          eventCount: eventCounts.get(t.trackId) ?? 0,
+        }));
+        return Response.json(result);
       }
 
       /** 未命名目标的 dHash 匹配建议 */

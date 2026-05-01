@@ -21,6 +21,8 @@ interface TrackInfo {
   snapshotFile?: string
   /** 主色调名称 */
   dominantColor?: string
+  /** 行为事件数量 */
+  eventCount?: number
   /** 当前是否活跃（前端计算） */
   _active?: boolean
 }
@@ -400,6 +402,7 @@ onUnmounted(() => {
             ></span>
             <span v-if="isTrackActive(track)" class="track-active" :title="t('tracks.active', '活跃中')">●</span>
             <span class="track-count">{{ track.hitCount }}次</span>
+            <span v-if="track.eventCount" class="track-event-count" :title="t('tracks.eventCount', '行为事件')">{{ track.eventCount }}evt</span>
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
           </div>
           <div class="track-cameras">
@@ -728,6 +731,7 @@ onUnmounted(() => {
   transform: scale(1.2);
 }
 .track-count { color: #aaa; }
+.track-event-count { color: #FF9800; font-size: 9px; }
 .track-time { color: #666; }
 .track-active {
   color: #4CAF50;

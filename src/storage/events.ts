@@ -136,6 +136,28 @@ export class EventStorage {
     ).all(...params) as Array<{ camera_id: string; count: number }>;
   }
 
+  /**
+   * 批量统计所有追踪目标的行为事件数量
+   * 从 detail JSON 中提取 trackId 并聚合
+   * 返回 trackId → 事件数量映射
+   */
+  countByTrackId(): Map<number, number> {
+    const result = new Map<number, number>();
+    try {
+      const rows = this.db.query(
+        `SELECT detail FROM events WHERE type LIKE 'track:%'`
+      ).all() as Array<{ detail: string | null }>;
+      for (const row of rows) {
+        if (!row.detail) continue;
+        const data = JSON.parse(row.detail) as { trackId?: number };
+        if (data.trackId) {
+          result.set(data.trackId, (result.get(data.trackId) ?? 0) + 1);
+        }
+      }
+    } catch { /* ignore parse errors */ }
+    return result;
+  }
+
   /** 关闭数据库 */
   close(): void {
     this.db.close();
