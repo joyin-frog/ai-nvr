@@ -59,20 +59,24 @@ const fmp4CameraId = computed(() => props.cameraId)
 const fmp4 = useFmp4Stream(fmp4CameraId)
 
 /**
- * 当前渲染模式：MSE 优先，Canvas fallback
- * 检测 MediaSource + H.264 codec 支持
+ * 当前渲染模式：默认 Canvas（MJPEG），MSE 作为可选增强
+ * MSE 需要用户通过偏好设置手动开启
  */
-function canUseMse(): boolean {
-  if (typeof MediaSource === 'undefined') return false
-  /** 检测常见 H.264 codec 是否支持 */
-  const codecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
-  for (const codec of codecs) {
-    if (MediaSource.isTypeSupported(`video/mp4; codecs="${codec}"`)) return true
-  }
-  return false
-}
-const useMse = ref(canUseMse())
+const useMse = ref(false)
 const mjpegStream = useMjpegStream()
+
+/** 从后端偏好恢复 MSE 设置 */
+getPref<boolean>('nvr-use-mse').then(v => {
+  if (v && typeof MediaSource !== 'undefined') {
+    const codecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
+    for (const codec of codecs) {
+      if (MediaSource.isTypeSupported(`video/mp4; codecs="${codec}"`)) {
+        useMse.value = true
+        return
+      }
+    }
+  }
+})
 
 /** MSE 连续失败时自动回退到 Canvas 模式 */
 watch(() => fmp4.failed.value, (failed) => {
@@ -81,7 +85,6 @@ watch(() => fmp4.failed.value, (failed) => {
     useMse.value = false
     stopOverlayLoop()
     fmp4.disconnect()
-    /** 等待 Vue 渲染 Canvas 元素后再启动渲染循环 */
     nextTick(() => {
       if (props.online) {
         startLoop()
