@@ -43,8 +43,6 @@ export class EventClient {
   constructor(url?: string) {
     if (url) {
       this.url = url
-    } else if (import.meta.env.DEV) {
-      this.url = 'ws://localhost:3100/api/events'
     } else {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
       this.url = `${protocol}//${location.host}/api/events`

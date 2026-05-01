@@ -863,27 +863,28 @@ export function startServer(
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
-      /** 构建 JSON 头（不含二进制数据） */
-      const header: Record<string, unknown> = { event, ...payload };
-
       let frameData: Buffer | null = null;
 
+      /** 构建 JSON 头（只保留事件类型和元数据，不含二进制） */
+      let header: Record<string, unknown>;
+
       if (event === "frame") {
-        /** 帧事件：提取二进制数据，头中不包含 */
+        /** 帧事件：轻量 header */
+        const { cameraId, timestamp } = payload as { cameraId: string; timestamp: number; data: Buffer };
         frameData = (payload as { data: Buffer }).data;
-        header.data = undefined;
-        /** 帧节流：跳过距离上次推送不到 80ms 的帧 */
-        const cameraId = (payload as { cameraId: string }).cameraId;
+        header = { event, cameraId, timestamp };
+        /** 帧节流 */
         const now = Date.now();
         const lastSent = lastFrameSent.get(cameraId) ?? 0;
         if (now - lastSent < FRAME_THROTTLE_MS) return;
         lastFrameSent.set(cameraId, now);
-      }
-      if (event === "detect") {
+      } else if (event === "detect") {
         /** 检测事件：将标注图作为二进制帧推送，头中只保留 detections */
-        const detectPayload = payload as { annotatedImage: Buffer };
+        const detectPayload = payload as { cameraId: string; timestamp: number; detections: unknown[]; annotatedImage: Buffer };
         frameData = detectPayload.annotatedImage ?? null;
-        header.annotatedImage = undefined;
+        header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: detectPayload.detections };
+      } else {
+        header = { event, ...payload };
       }
 
       /** 二进制协议：[4字节头长度 LE uint32][JSON头][可选二进制帧] */
@@ -891,12 +892,15 @@ export function startServer(
       const headerLen = Buffer.alloc(4);
       headerLen.writeUInt32LE(headerBuf.length, 0);
 
+      if (wsClients.size === 0) return;
+
+      /** 预构建完整消息，避免每个 WS 客户端重复 Buffer.concat */
+      const message = frameData
+        ? Buffer.concat([headerLen, headerBuf, frameData])
+        : Buffer.concat([headerLen, headerBuf]);
+
       for (const ws of wsClients) {
-        if (frameData) {
-          ws.send(Buffer.concat([headerLen, headerBuf, frameData]));
-        } else {
-          ws.send(Buffer.concat([headerLen, headerBuf]));
-        }
+        ws.send(message);
       }
     });
   }

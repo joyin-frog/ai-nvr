@@ -213,9 +213,7 @@ async function checkDiskSpace() {
 
 /** 创建带认证的 WebSocket 客户端 */
 const client = new EventClient(authWsUrl(
-  import.meta.env.DEV
-    ? 'ws://localhost:3100/api/events'
-    : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/events`
+  `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/events`
 ))
 
 /** 动态标题：闪烁后自动恢复 */
