@@ -579,7 +579,8 @@ function playAlertSound() {
 function notify(title: string, body: string, cameraId?: string) {
   playAlertSound()
   if ('Notification' in window && Notification.permission === 'granted') {
-    const n = new Notification(title, { body })
+    const icon = cameraId ? authUrl(`/api/detection/annotated/${cameraId}`) : undefined
+    const n = new Notification(title, { body, icon })
     n.onclick = () => {
       window.focus()
       if (cameraId) enterFullscreen(cameraId)
