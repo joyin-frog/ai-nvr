@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { authFetch } from '@/services/auth'
+import { authFetch } from '../services/auth'
 
 /** 模块级单例状态 */
 const cache = ref<Record<string, unknown>>({})
