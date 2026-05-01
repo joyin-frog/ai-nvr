@@ -1027,6 +1027,12 @@ function cancelNaming() {
   namingName.value = ''
 }
 
+/** 从命名弹窗跳转到录像 */
+function jumpToRecordingFromNaming() {
+  emit('jumpToRecording', props.cameraId, Date.now())
+  cancelNaming()
+}
+
 /** 离线时显示"最后在线 x 分钟前" */
 const lastSeenText = computed(() => {
   if (props.online || !props.lastFrameAt) return ''
@@ -1363,6 +1369,7 @@ onUnmounted(() => {
           <div class="naming-actions">
             <button class="naming-save" @click="saveNaming">{{ t('manage.save') }}</button>
             <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
+            <button class="naming-recording" @click="jumpToRecordingFromNaming" :title="t('camera.jumpToRecording')">&#x25B6;</button>
           </div>
         </div>
       </div>
@@ -1760,6 +1767,22 @@ onUnmounted(() => {
   padding: 3px 0;
   font-size: 11px;
   cursor: pointer;
+}
+
+.naming-recording {
+  flex: 0;
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.naming-recording:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
 }
 
 .naming-save:hover {
