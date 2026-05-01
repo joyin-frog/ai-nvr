@@ -87,7 +87,7 @@ class VideoToFmp4Muxer {
   /** 当前 segment 中每帧是否关键帧 */
   private segmentFrameFlags: boolean[] = [];
   /** 每个 segment 累积的最大帧数，超过则强制刷新 */
-  private static readonly MAX_SEGMENT_FRAMES = 10;
+  private static readonly MAX_SEGMENT_FRAMES = 5;
   /** 是否已经在这个 segment 中遇到过 IDR（避免非起始 IDR 触发重复切分） */
   private segmentHasIdr = false;
 
@@ -353,10 +353,17 @@ class VideoToFmp4Muxer {
     this.segmentFrameFlags.push(isIdr);
     this.nextDts += this.frameDuration;
 
-    /** 帧数达到上限时强制发送段（不等待下一个 IDR） */
-    if (this.segmentFrames.length >= VideoToFmp4Muxer.MAX_SEGMENT_FRAMES && this.segmentHasIdr) {
+    /**
+     * 段发送策略：
+     * - 有 IDR 帧且帧数达到阈值：立即发送（保证前端尽早开始播放）
+     * - 非 IDR 段但帧数超过 2 倍阈值：强制发送（防止 GOP 过大导致延迟堆积）
+     */
+    const maxFrames = VideoToFmp4Muxer.MAX_SEGMENT_FRAMES;
+    if (this.segmentHasIdr && this.segmentFrames.length >= maxFrames) {
       this.flushSegment(eventBus, cameraId);
       this.segmentHasIdr = false;
+    } else if (!this.segmentHasIdr && this.segmentFrames.length >= maxFrames * 2) {
+      this.flushSegment(eventBus, cameraId);
     }
 
     /** FPS 统计 */
