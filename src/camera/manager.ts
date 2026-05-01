@@ -2,6 +2,7 @@ import { type AppConfig, type CameraConfig } from "@/config";
 import { type EventBus } from "@/event-bus";
 import { type MotionRecorder } from "@/storage/recorder";
 import { FrameExtractor } from "./stream";
+import { Fmp4Extractor } from "./fmp4-stream";
 
 /**
  * 摄像头管理器
@@ -17,6 +18,8 @@ export class CameraManager {
   private displayExtractors = new Map<string, FrameExtractor>();
   /** 摄像头 ID → 检测流提取器（双流模式专用） */
   private detectExtractors = new Map<string, FrameExtractor>();
+  /** 摄像头 ID → fMP4 流提取器（高分辨率零转码） */
+  private fmp4Extractors = new Map<string, Fmp4Extractor>();
   /** 摄像头 ID → 是否使用双流模式 */
   private dualStreamFlags = new Map<string, boolean>();
   /** 摄像头 ID → 最新一帧（显示流，高清） */
@@ -56,6 +59,11 @@ export class CameraManager {
   /** 获取最新一帧（显示流） */
   getLatestFrame(cameraId: string): Buffer | undefined {
     return this.latestFrames.get(cameraId);
+  }
+
+  /** 获取 fMP4 提取器 */
+  getFmp4Extractor(cameraId: string): Fmp4Extractor | undefined {
+    return this.fmp4Extractors.get(cameraId);
   }
 
   /** 获取所有摄像头状态 */
@@ -133,6 +141,8 @@ export class CameraManager {
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
     const hasDual = !!(cam.stream.hd && cam.stream.sd);
+    /** fMP4 零转码流使用的 RTSP URL */
+    const fmp4Url = cam.stream.hd || cam.stream.sd;
 
     if (hasDual) {
       /** 双流模式：HD 显示 + SD 检测 */
@@ -170,6 +180,13 @@ export class CameraManager {
       console.log(`[CameraManager] 单流模式: ${cam.friendlyName} (${cam.id})`);
     }
 
+    /** fMP4 零转码流（高清，前端 MSE 解码） */
+    if (fmp4Url) {
+      const fmp4Extractor = new Fmp4Extractor(cam, this.config.ffmpegPath, this.eventBus, fmp4Url);
+      this.fmp4Extractors.set(cam.id, fmp4Extractor);
+      fmp4Extractor.start();
+    }
+
     this.recorder.registerCameraName(cam.id, cam.friendlyName);
   }
 
@@ -184,6 +201,11 @@ export class CameraManager {
     if (detect) {
       detect.stop();
       this.detectExtractors.delete(id);
+    }
+    const fmp4 = this.fmp4Extractors.get(id);
+    if (fmp4) {
+      fmp4.stop();
+      this.fmp4Extractors.delete(id);
     }
     this.latestFrames.delete(id);
     this.dualStreamFlags.delete(id);
