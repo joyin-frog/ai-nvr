@@ -24,8 +24,6 @@ import { type RuntimeConfig } from "@/runtime-config";
 export class AiDetector {
   /** Hugging Face 目标检测 pipeline */
   private detector: ObjectDetectionPipeline | null = null;
-  /** 是否正在检测中（避免并发推理） */
-  private detecting = false;
   /** 是否已初始化 */
   private initialized = false;
   /** 当前加载的模型名称 */
@@ -38,6 +36,10 @@ export class AiDetector {
   private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 帧事件取消订阅函数 */
   private unsubFrame: (() => void) | null = null;
+  /** 待检测摄像头队列 */
+  private detectQueue: string[] = [];
+  /** 队列处理中 */
+  private processingQueue = false;
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -92,12 +94,29 @@ export class AiDetector {
   private startContinuousLoop(interval: number): void {
     if (this.continuousTimer) clearInterval(this.continuousTimer);
     this.continuousTimer = setInterval(() => {
+      /** 每次定时器触发，将所有有新帧的摄像头加入队列 */
       for (const [cameraId, frame] of this.latestFrames) {
-        /** 避免使用过旧的帧（超过间隔 3 倍） */
         if (Date.now() - frame.timestamp > interval * 3) continue;
-        this.detect(cameraId, frame.data, frame.timestamp);
+        if (!this.detectQueue.includes(cameraId)) {
+          this.detectQueue.push(cameraId);
+        }
       }
+      this.processQueue(interval);
     }, interval);
+  }
+
+  /** 依次处理检测队列，每个摄像头检测完再处理下一个 */
+  private async processQueue(interval: number): Promise<void> {
+    if (this.processingQueue) return;
+    this.processingQueue = true;
+    while (this.detectQueue.length > 0) {
+      const cameraId = this.detectQueue.shift()!;
+      const frame = this.latestFrames.get(cameraId);
+      if (!frame) continue;
+      if (Date.now() - frame.timestamp > interval * 3) continue;
+      await this.detect(cameraId, frame.data, frame.timestamp);
+    }
+    this.processingQueue = false;
   }
 
   /** 停止连续检测 */
@@ -111,6 +130,8 @@ export class AiDetector {
       this.unsubFrame = null;
     }
     this.latestFrames.clear();
+    this.detectQueue = [];
+    this.processingQueue = false;
   }
 
   /** 加载指定模型（带重试） */
@@ -205,13 +226,12 @@ export class AiDetector {
 
   /** 执行目标检测 */
   private async detect(cameraId: string, jpeg: Buffer, timestamp: number): Promise<void> {
-    if (!this.initialized || !this.detector || this.detecting) return;
+    if (!this.initialized || !this.detector) return;
 
     /** 从 RuntimeConfig 获取最新的 AI 配置 */
     const aiConfig = this.runtimeConfig.get().ai;
     if (!aiConfig.enabled) return;
 
-    this.detecting = true;
     try {
       const t0 = performance.now();
       /** 根据 inputWidth 配置决定推理输入分辨率 */
@@ -268,8 +288,6 @@ export class AiDetector {
       console.log(`[Perf][AI][${cameraId}] ${detections.length} 目标, resize=${resizeMs.toFixed(0)}ms, infer=${inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
-    } finally {
-      this.detecting = false;
     }
   }
 
