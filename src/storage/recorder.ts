@@ -19,6 +19,41 @@ export interface RecordingInfo {
   size: number;
 }
 
+/**
+ * 环形帧缓冲区
+ * 保存最近 N 帧 JPEG 数据，用于 motion 触发前的预缓冲录像
+ */
+class FrameRingBuffer {
+  /** 缓冲帧数组 */
+  private frames: Array<{ data: Buffer; timestamp: number }> = [];
+  /** 最大帧数（约 2 秒 @15fps） */
+  private maxSize: number;
+
+  constructor(maxSize: number = 30) {
+    this.maxSize = maxSize;
+  }
+
+  /** 追加一帧 */
+  push(data: Buffer, timestamp: number): void {
+    this.frames.push({ data, timestamp });
+    if (this.frames.length > this.maxSize) {
+      this.frames.shift();
+    }
+  }
+
+  /** 取出所有缓冲帧（清空缓冲区） */
+  drain(): Array<{ data: Buffer; timestamp: number }> {
+    const result = this.frames;
+    this.frames = [];
+    return result;
+  }
+
+  /** 清空缓冲区 */
+  clear(): void {
+    this.frames = [];
+  }
+}
+
 /** 每个摄像头的录像状态 */
 interface RecordingState {
   /** 当前正在运行的 ffmpeg 录像进程 */
@@ -61,6 +96,8 @@ export class MotionRecorder {
   private unsubFrame: (() => void) | null = null;
   /** 存储文件系统（增量统计） */
   private storageFs: StorageFs | null;
+  /** 每路摄像头的帧预缓冲区（motion 触发前保留 ~2 秒帧） */
+  private preBuffers = new Map<string, FrameRingBuffer>();
 
   constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig, storageFs?: StorageFs) {
     this.storagePath = storagePath;
@@ -78,6 +115,7 @@ export class MotionRecorder {
   /** 移除摄像头 */
   unregisterStream(cameraId: string): void {
     this.forceStop(cameraId);
+    this.preBuffers.delete(cameraId);
   }
 
   /** 启动：订阅帧事件 + 根据模式初始化录制 */
@@ -180,10 +218,25 @@ export class MotionRecorder {
   /** 将帧数据写入录像进程 */
   private writeFrame(cameraId: string, jpegData: Buffer): void {
     const state = this.states.get(cameraId);
-    if (!state?.recording || !state.proc?.stdin?.writable || state.writing) return;
+    const now = Date.now();
+
+    if (!state?.recording || !state.proc?.stdin?.writable || state.writing) {
+      /** 不在录像状态 → 缓存到预缓冲区（motion 触发模式） */
+      if (this.runtimeConfig.get().recording.mode !== "continuous") {
+        let buf = this.preBuffers.get(cameraId);
+        if (!buf) {
+          buf = new FrameRingBuffer(30);
+          this.preBuffers.set(cameraId, buf);
+        }
+        /** 预缓冲也做帧率节流 */
+        if (now - (state?.lastWriteTime ?? 0) >= MotionRecorder.WRITE_THROTTLE_MS) {
+          buf.push(jpegData, now);
+        }
+      }
+      return;
+    }
 
     /** 帧率节流：避免双流模式下 HD 高帧率写入过多帧 */
-    const now = Date.now();
     if (now - state.lastWriteTime < MotionRecorder.WRITE_THROTTLE_MS) return;
     state.lastWriteTime = now;
 
@@ -426,6 +479,18 @@ export class MotionRecorder {
     state.recording = true;
     state.proc = proc;
     state.startTime = timestamp;
+
+    /** 写入预缓冲帧（motion 触发前的帧，确保不丢失触发瞬间的画面） */
+    const preBuffer = this.preBuffers.get(cameraId);
+    if (preBuffer) {
+      const frames = preBuffer.drain();
+      if (frames.length > 0) {
+        console.log(`[Recorder] ${cameraId} 写入预缓冲帧: ${frames.length} 帧`);
+        for (const frame of frames) {
+          proc.stdin?.write(frame.data);
+        }
+      }
+    }
   }
 
   /** 延迟停止录像（最后一次 motion 后等待一段时间） */
