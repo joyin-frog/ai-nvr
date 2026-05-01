@@ -145,12 +145,15 @@ export class FrameExtractor {
     return this.lastFrameTime;
   }
 
+  /** 当前使用的码流 URL（主码流失败后降级到子码流） */
+  private currentStreamUrl = "";
+
   /** 启动 ffmpeg 子进程 */
   private spawnFfmpeg(): void {
     const { detectFps, detectWidth, jpegQuality, stream } = this.config;
 
-    /** 主码流提供最高清画面 */
-    const rtspUrl = stream.hd || stream.sd;
+    /** 优先主码流，若已降级则使用子码流 */
+    const rtspUrl = this.currentStreamUrl || stream.hd || stream.sd;
     /** fps 滤镜控制帧率；scale 仅在配置了宽度时才缩放 */
     const vfParts = [`fps=${detectFps}`];
     if (detectWidth > 0) {
@@ -218,6 +221,13 @@ export class FrameExtractor {
         console.log(`[${this.config.id}] 摄像头离线`);
       }
       if (this.running) {
+        /** 主码流失败且未降级过，尝试降级到子码流 */
+        const { stream } = this.config;
+        const wasHd = this.currentStreamUrl === stream.hd || (!this.currentStreamUrl && stream.hd);
+        if (wasHd && stream.sd && stream.hd !== stream.sd) {
+          console.log(`[${this.config.id}] 主码流连接失败，降级到子码流: ${stream.sd}`);
+          this.currentStreamUrl = stream.sd;
+        }
         this.scheduleReconnect();
       }
     });
