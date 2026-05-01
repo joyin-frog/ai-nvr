@@ -315,12 +315,17 @@ export class TrackStorage {
     return true;
   }
 
-  /** 清理超过 maxAge 天的目标 */
+  /**
+   * 清理超期目标
+   * 已命名目标保留期延长 3 倍（用户手动命名的目标价值更高）
+   */
   cleanup(maxAgeDays: number): number {
     const cutoff = Date.now() - maxAgeDays * 86_400_000;
+    const namedCutoff = Date.now() - maxAgeDays * 3 * 86_400_000;
     let removed = 0;
     for (const [id, record] of this.tracks) {
-      if (record.lastSeen < cutoff) {
+      const threshold = record.customName ? namedCutoff : cutoff;
+      if (record.lastSeen < threshold) {
         if (record.snapshotFile) {
           const path = join(this.storagePath, record.snapshotFile);
           if (existsSync(path)) unlinkSync(path);
