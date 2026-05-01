@@ -134,7 +134,7 @@ const playbackPosition = computed(() => {
 /** 按摄像头分组的事件标记 */
 const eventMarkersByCamera = computed(() => {
   const evts = props.events
-  if (!evts || evts.length === 0) return new Map<string, Array<{ position: number; color: string; count: number; labels: string }>>()
+  if (!evts || evts.length === 0) return new Map<string, Array<{ position: number; color: string; count: number; labels: string; timestamp: number }>>()
 
   const { start, end } = timeRange.value
   const duration = end - start
@@ -149,7 +149,7 @@ const eventMarkersByCamera = computed(() => {
     byCam.set(camId, list)
   }
 
-  const result = new Map<string, Array<{ position: number; color: string; count: number; labels: string }>>()
+  const result = new Map<string, Array<{ position: number; color: string; count: number; labels: string; timestamp: number }>>()
   for (const [camId, camEvts] of byCam) {
     camEvts.sort((a, b) => a.timestamp - b.timestamp)
     const groups: Array<{ timestamp: number; types: Set<string>; labels: string[] }> = []

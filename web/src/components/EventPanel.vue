@@ -115,6 +115,17 @@ function snapThumbUrl(snap: SnapshotInfo): string {
   return authUrl(`/api/snapshots/${snap.cameraId}/${snap.filename}`)
 }
 
+/** 按摄像头 ID 索引的快照缩略图 URL */
+const snapshotMapByCamera = computed(() => {
+  const map = new Map<string, string>()
+  for (const snap of snapshotList.value) {
+    if (!map.has(snap.cameraId)) {
+      map.set(snap.cameraId, snapThumbUrl(snap))
+    }
+  }
+  return map
+})
+
 /** 打开快照大图预览 */
 function openSnapPreview(snap: SnapshotInfo) {
   previewUrl.value = snapThumbUrl(snap)
@@ -542,9 +553,9 @@ defineExpose({ addEvent, loadHistory })
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
-          <div v-if="e.type === 'detect' && (e.snapshotUrl || snapshots?.[e.cameraId])" class="expand-snap-wrap">
+          <div v-if="e.type === 'detect' && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
             <img
-              :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshots![e.cameraId]"
+              :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshotMapByCamera.get(e.cameraId)"
               class="expand-snapshot"
               alt=""
             />

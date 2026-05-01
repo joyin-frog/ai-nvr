@@ -477,7 +477,7 @@ onUnmounted(() => {
       <div class="camera-content" :style="{ transform: zoomTransform }">
         <canvas
           v-if="online"
-          :ref="canvasRenderer.setCanvas"
+          :ref="(el: any) => canvasRenderer.setCanvas(el as HTMLCanvasElement | null)"
           class="camera-image"
           :style="{ filter: imageFilter }"
         />
