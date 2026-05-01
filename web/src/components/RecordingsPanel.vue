@@ -42,6 +42,8 @@ interface Recording {
   size: number
   /** 标签搜索时返回的匹配事件数 */
   matchCount?: number
+  /** 搜索匹配的事件时间戳数组 */
+  matchTimestamps?: number[]
 }
 
 const props = defineProps<{
@@ -1634,6 +1636,15 @@ defineExpose({ loadRecordings, playAtTime })
           <span v-if="rec.matchCount" class="rec-match-count" :title="t('recording.matchCountTip', { count: rec.matchCount })">
             ⚡{{ rec.matchCount }}
           </span>
+          <!-- 搜索匹配时间标记条 -->
+          <div v-if="rec.matchTimestamps?.length && rec.endTime > rec.startTime" class="rec-match-bar" :title="t('recording.matchCountTip', { count: rec.matchCount })">
+            <span
+              v-for="(ts, mi) in rec.matchTimestamps"
+              :key="mi"
+              class="rec-match-dot"
+              :style="{ left: ((ts - rec.startTime) / (rec.endTime - rec.startTime) * 100) + '%' }"
+            />
+          </div>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
           <button :class="['rec-star', { starred: starredFiles.has(rec.filename) }]" @click.stop="toggleRecStar(rec.filename)" :title="t('recording.toggleStar')">
             {{ starredFiles.has(rec.filename) ? '★' : '☆' }}
@@ -2031,6 +2042,25 @@ defineExpose({ loadRecordings, playAtTime })
   padding: 0 4px;
   border-radius: 3px;
   margin-top: 2px;
+}
+
+.rec-match-bar {
+  position: relative;
+  width: 60px;
+  height: 6px;
+  background: #2a2a4a;
+  border-radius: 3px;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.rec-match-dot {
+  position: absolute;
+  width: 3px;
+  height: 6px;
+  background: #FFD93D;
+  border-radius: 1px;
+  transform: translateX(-50%);
 }
 
 .ai-search {

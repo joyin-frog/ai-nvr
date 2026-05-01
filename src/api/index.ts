@@ -695,7 +695,7 @@ export function startServer(
 
         /** 按 cameraId + timestamp 映射到录像文件 */
         const matchedCameraIds = new Set(events.map(e => e.camera_id));
-        const result: Array<{ filename: string; cameraId: string; startTime: number; endTime: number; size: number; matchCount: number }> = [];
+        const result: Array<{ filename: string; cameraId: string; startTime: number; endTime: number; size: number; matchCount: number; matchTimestamps: number[] }> = [];
         for (const camId of matchedCameraIds) {
           const timestamps = events.filter(e => e.camera_id === camId).map(e => e.timestamp);
           const minTs = Math.min(...timestamps);
@@ -707,7 +707,7 @@ export function startServer(
               e.camera_id === rec.cameraId && e.timestamp >= rec.startTime && e.timestamp <= rec.endTime
             );
             if (matchEvents.length > 0) {
-              result.push({ ...rec, matchCount: matchEvents.length });
+              result.push({ ...rec, matchCount: matchEvents.length, matchTimestamps: matchEvents.map(e => e.timestamp) });
             }
           }
         }
