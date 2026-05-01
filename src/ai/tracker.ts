@@ -60,7 +60,7 @@ export class ObjectTracker {
     iouThreshold?: number;
     newTrackThreshold?: number;
   }) {
-    this.maxLost = options?.maxLost ?? 30;
+    this.maxLost = options?.maxLost ?? 5;
     this.iouThreshold = options?.iouThreshold ?? 0.3;
     this.newTrackThreshold = options?.newTrackThreshold ?? 0.5;
   }
