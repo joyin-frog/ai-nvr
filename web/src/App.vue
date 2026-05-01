@@ -57,6 +57,21 @@ const activeTab = ref<SidebarTab>(savedTab ?? 'events')
 /** 摄像头 FPS 映射（从 health API 更新） */
 const cameraFpsMap = ref<Record<string, number>>({})
 
+/** 摄像头 ID → 索引映射（避免每帧 Array.find 的 O(n) 查找） */
+const cameraIndexMap = computed(() => {
+  const map = new Map<string, number>()
+  for (let i = 0; i < cameras.value.length; i++) {
+    map.set(cameras.value[i]!.id, i)
+  }
+  return map
+})
+
+/** 快速查找摄像头（O(1) Map 查找替代 Array.find） */
+function getCamera(id: string): CameraStatus | undefined {
+  const idx = cameraIndexMap.value.get(id)
+  return idx !== undefined ? cameras.value[idx] : undefined
+}
+
 /** 全屏摄像头 ID（null 为网格模式） */
 const fullscreenCamera = ref<string | null>(null)
 
@@ -597,7 +612,7 @@ function setupEventListeners() {
 
   client.on('frame', (payload) => {
     /** 更新摄像头最后帧时间（防止"画面冻结"误判） */
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const cam = getCamera(payload.cameraId)
     if (cam) cam.lastFrameAt = payload.timestamp ?? Date.now()
     /** 计算帧延迟（ms）：当前时间 - 服务端帧时间戳 */
     if (payload.timestamp) {
@@ -622,14 +637,14 @@ function setupEventListeners() {
   })
 
   client.on('camera:online', (payload) => {
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const cam = getCamera(payload.cameraId)
     if (cam) cam.online = true
     eventPanel.value?.addEvent('camera:online', payload.cameraId, t('event.online'))
     updateTitle()
   })
 
   client.on('camera:offline', (payload) => {
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const cam = getCamera(payload.cameraId)
     if (cam) cam.online = false
     eventPanel.value?.addEvent('camera:offline', payload.cameraId, t('event.offline'))
     notify(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), t('notify.cameraOfflineBody'), payload.cameraId)
@@ -637,7 +652,7 @@ function setupEventListeners() {
   })
 
   client.on('camera:lowfps', (payload) => {
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const cam = getCamera(payload.cameraId)
     eventPanel.value?.addEvent('camera:lowfps', payload.cameraId, `FPS: ${payload.fps.toFixed(1)}`)
     notify(t('notify.cameraLowFps', { name: cam?.name ?? payload.cameraId }), `FPS: ${payload.fps.toFixed(1)}`, payload.cameraId)
   })
@@ -650,14 +665,14 @@ function setupEventListeners() {
   })
 
   client.on('track:appeared', (payload) => {
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const cam = getCamera(payload.cameraId)
     const customName = trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:appeared', payload.cameraId, `${displayName} ${t('event.trackAppeared', '出现')}`)
   })
 
   client.on('track:disappeared', (payload) => {
-    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    const cam = getCamera(payload.cameraId)
     const customName = trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:disappeared', payload.cameraId, `${displayName} ${t('event.trackDisappeared', '消失')}`)
