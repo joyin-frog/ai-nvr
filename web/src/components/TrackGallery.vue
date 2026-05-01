@@ -36,6 +36,8 @@ const COLOR_MAP: Record<string, string> = {
 
 const tracks = ref<TrackInfo[]>([])
 const loading = ref(false)
+/** 快照放大预览 URL */
+const previewUrl = ref('')
 /** dHash 匹配建议：trackId → { name, distance } */
 const suggestions = ref<Map<number, { name: string; distance: number }>>(new Map())
 /** 强制视图更新的 tick（用于活跃状态刷新） */
@@ -338,11 +340,12 @@ onUnmounted(() => {
     <div v-else class="track-grid">
       <div v-for="track in filteredTracks" :key="track.trackId" class="track-card" :class="{ 'new-track': isNewTrack(track) }">
         <!-- 快照 -->
-        <div class="track-snapshot">
+        <div class="track-snapshot" @click="track.snapshotFile && (previewUrl = snapshotUrl(track.snapshotFile))">
           <img
             v-if="track.snapshotFile"
             :src="snapshotUrl(track.snapshotFile)"
             :alt="`Track #${track.trackId}`"
+            class="snapshot-img"
           />
           <div v-else class="no-snapshot">
             <span>{{ track.label.charAt(0).toUpperCase() }}</span>
@@ -452,6 +455,11 @@ onUnmounted(() => {
           <button class="merge-cancel-btn" @click="mergeConfirm = null; editingId = null">{{ t('manage.cancel', '取消') }}</button>
         </div>
       </div>
+    </div>
+
+    <!-- 快照放大预览 -->
+    <div v-if="previewUrl" class="preview-overlay" @click="previewUrl = ''">
+      <img :src="previewUrl" class="preview-img" @click.stop />
     </div>
   </div>
 </template>
@@ -964,5 +972,35 @@ onUnmounted(() => {
   font-size: 12px;
   cursor: pointer;
   margin-left: auto;
+}
+
+.snapshot-img {
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.snapshot-img:hover {
+  transform: scale(1.05);
+}
+
+.preview-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: pointer;
+}
+
+.preview-img {
+  max-width: 90vw;
+  max-height: 85vh;
+  border-radius: 8px;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
 }
 </style>
