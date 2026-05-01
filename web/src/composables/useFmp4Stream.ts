@@ -199,7 +199,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         /** codec 变化时需要重建 SourceBuffer */
         if (currentCodec !== codec) {
           currentCodec = codec
-          ensureSourceBuffer(codec)
+          if (!ensureSourceBuffer(codec)) {
+            failed.value = true
+            ws?.close()
+            return
+          }
         }
         doAppend(fmp4Data)
       } else if (type === FMP4_TYPE_MEDIA) {
@@ -228,9 +232,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
-  /** 创建或重建 SourceBuffer */
-  function ensureSourceBuffer(codec: string) {
-    if (!mediaSource || mediaSource.readyState !== 'open') return
+  /** 创建或重建 SourceBuffer，返回是否成功 */
+  function ensureSourceBuffer(codec: string): boolean {
+    if (!mediaSource || mediaSource.readyState !== 'open') return false
 
     /** 移除旧的 SourceBuffer */
     if (sourceBuffer) {
@@ -251,19 +255,29 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     /** 去重 */
     const unique = [...new Set(codecs)]
 
-    for (const c of unique) {
+    /** 先用 isTypeSupported 过滤掉明确不支持的 codec，避免抛异常 */
+    const supported = unique.filter(c =>
+      MediaSource.isTypeSupported(`video/mp4; codecs="${c}"`)
+    )
+    if (supported.length === 0) {
+      console.warn(`[fMP4] 浏览器不支持任何候选 codec (${unique.join(', ')})，回退到 Canvas`)
+      return false
+    }
+
+    for (const c of supported) {
       try {
         sourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${c}"`)
         sourceBuffer.addEventListener('updateend', onUpdateEnd)
         sourceBuffer.addEventListener('error', () => { /* ignore */ })
         sourceBuffer.mode = 'segments'
         console.log(`[fMP4] SourceBuffer created: ${c}`)
-        return
+        return true
       } catch {
         /** codec 不支持，尝试下一个 */
       }
     }
     console.error('[fMP4] 无法创建 SourceBuffer')
+    return false
   }
 
   function queueAppend(data: ArrayBuffer) {
