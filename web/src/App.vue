@@ -486,6 +486,13 @@ function notify(title: string, body: string, cameraId?: string) {
 /** 重要检测目标 */
 const IMPORTANT_LABELS = new Set(['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'])
 
+/** 页面可见性优化：切到后台时跳过帧渲染 */
+const pageVisible = ref(!document.hidden)
+function onVisibilityChange() {
+  pageVisible.value = !document.hidden
+}
+document.addEventListener('visibilitychange', onVisibilityChange)
+
 /** 注册事件监听器 */
 function setupEventListeners() {
   /** 首次用户交互时请求通知权限（需要用户手势） */
@@ -502,6 +509,11 @@ function setupEventListeners() {
   })
 
   client.on('frame', (payload) => {
+    /** 页面不可见时跳过帧渲染，释放 blob 避免内存泄漏 */
+    if (!pageVisible.value) {
+      if (payload.image) URL.revokeObjectURL(payload.image)
+      return
+    }
     const old = frameImages.value[payload.cameraId]
     if (old) URL.revokeObjectURL(old)
     frameImages.value[payload.cameraId] = payload.image
@@ -629,6 +641,7 @@ onMounted(async () => {
 onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   stopPatrol()
   if (diskCheckTimer) clearInterval(diskCheckTimer)
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
