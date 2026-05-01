@@ -160,6 +160,10 @@ export class FrameExtractor {
 
     const args = [
       "-rtsp_transport", "tcp",
+      "-stimeout", "5000000",
+      "-reconnect", "1",
+      "-reconnect_streamed", "1",
+      "-reconnect_delay_max", "5",
       "-i", rtspUrl,
       "-vf", vf,
       "-f", "image2pipe",
@@ -211,6 +215,7 @@ export class FrameExtractor {
 
     this.proc.on("exit", (code: number | null) => {
       console.log(`[${this.config.id}] ffmpeg 进程退出, code=${code}`);
+      this.proc?.unref();
       this.proc = null;
       if (this.online) {
         this.online = false;
@@ -242,7 +247,8 @@ export class FrameExtractor {
   /** 杀死 ffmpeg 进程 */
   private killProcess(): void {
     if (this.proc) {
-      this.proc.kill("SIGTERM");
+      this.proc.kill("SIGKILL");
+      this.proc.unref();
       this.proc = null;
     }
   }
