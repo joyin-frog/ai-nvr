@@ -87,7 +87,7 @@ class VideoToFmp4Muxer {
   /** 当前 segment 中每帧是否关键帧 */
   private segmentFrameFlags: boolean[] = [];
   /** 每个 segment 累积的最大帧数，超过则强制刷新 */
-  private static readonly MAX_SEGMENT_FRAMES = 5;
+  private static readonly MAX_SEGMENT_FRAMES = 2;
   /** 是否已经在这个 segment 中遇到过 IDR（避免非起始 IDR 触发重复切分） */
   private segmentHasIdr = false;
 
