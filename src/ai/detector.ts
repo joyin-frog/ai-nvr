@@ -73,6 +73,10 @@ export class AiDetector {
   private lastDetectFingerprint = new Map<string, string>();
   /** 每个摄像头的目标追踪器 */
   private trackers = new Map<string, ObjectTracker>();
+  /** trackName 缓存：cameraId:trackId -> name，定期刷新 */
+  private trackNameCache = new Map<string, string>();
+  /** 缓存刷新定时器 */
+  private trackNameCacheTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -107,6 +111,11 @@ export class AiDetector {
 
     /** 启动检测模式 */
     this.startDetection();
+
+    /** 定期刷新 trackName 缓存（30秒） */
+    if (this.trackLabelStorage) {
+      this.trackNameCacheTimer = setInterval(() => this.trackNameCache.clear(), 30000);
+    }
   }
 
   /** 启动 Worker 线程并加载模型 */
@@ -400,7 +409,7 @@ export class AiDetector {
 
       /** 发射追踪目标出现/消失事件 */
       for (const target of trackResult.appeared) {
-        const trackName = this.trackLabelStorage?.findByTrack(cameraId, target.trackId)?.name;
+        const trackName = this.lookupTrackName(cameraId, target.trackId);
         this.eventBus.emit("track:appeared", {
           cameraId,
           timestamp,
@@ -411,7 +420,7 @@ export class AiDetector {
         });
       }
       for (const target of trackResult.disappeared) {
-        const trackName = this.trackLabelStorage?.findByTrack(cameraId, target.trackId)?.name;
+        const trackName = this.lookupTrackName(cameraId, target.trackId);
         this.eventBus.emit("track:disappeared", {
           cameraId,
           timestamp,
@@ -424,7 +433,7 @@ export class AiDetector {
       /** 为检测结果附带用户自定义名称 */
       const enricheddetections = this.trackLabelStorage
         ? trackResult.detections.map(d => {
-          const trackName = d.trackId ? this.trackLabelStorage!.findByTrack(cameraId, d.trackId)?.name : undefined;
+          const trackName = d.trackId ? this.lookupTrackName(cameraId, d.trackId) : undefined;
           return { ...d, trackName: trackName || undefined };
         })
         : trackResult.detections;
@@ -447,10 +456,25 @@ export class AiDetector {
   /** 销毁检测器 */
   dispose(): void {
     this.stopContinuousLoop();
+    if (this.trackNameCacheTimer) {
+      clearInterval(this.trackNameCacheTimer);
+      this.trackNameCacheTimer = null;
+    }
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
     }
     this.initialized = false;
+  }
+
+  /** 查找 trackName（带内存缓存，30 秒刷新） */
+  private lookupTrackName(cameraId: string, trackId: number): string | undefined {
+    if (!this.trackLabelStorage) return undefined;
+    const key = `${cameraId}:${trackId}`;
+    const cached = this.trackNameCache.get(key);
+    if (cached !== undefined) return cached || undefined;
+    const name = this.trackLabelStorage.findByTrack(cameraId, trackId)?.name ?? "";
+    this.trackNameCache.set(key, name);
+    return name || undefined;
   }
 }
