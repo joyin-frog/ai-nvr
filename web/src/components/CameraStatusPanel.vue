@@ -15,6 +15,7 @@ interface CameraMetric {
   detectCount: number
   avgMotionRatio: number
   avgFrameSizeKb: number
+  avgInferMs: number
 }
 
 /** 系统指标 */
@@ -726,6 +727,10 @@ onUnmounted(() => {
             <div v-if="cam.avgFrameSizeKb > 0" class="metric">
               <span class="metric-val">{{ cam.avgFrameSizeKb.toFixed(0) }}<span class="metric-unit">KB</span></span>
               <span class="metric-unit">~{{ (cam.avgFrameSizeKb * cam.fps / 1024).toFixed(1) }} MB/s</span>
+            </div>
+            <div v-if="cam.avgInferMs > 0" class="metric">
+              <span class="metric-val" :style="{ color: cam.avgInferMs < 100 ? '#4CAF50' : cam.avgInferMs < 300 ? '#FFC107' : '#F44336' }">{{ cam.avgInferMs }}</span>
+              <span class="metric-unit">ms AI</span>
             </div>
           </div>
         </div>
