@@ -5,6 +5,7 @@ import type { Detection } from '../services/events'
 import { authFetch, authUrl } from '../services/auth'
 import { useCanvasRenderer } from '../composables/useCanvasRenderer'
 import { useMjpegStream } from '../composables/useMjpegStream'
+import { takeFrame } from '../services/ws-frame-cache'
 import PtzControl from './PtzControl.vue'
 
 const { t } = useI18n()
@@ -36,6 +37,8 @@ const props = defineProps<{
   trackLabels?: Record<number, string>
   /** AI 推理耗时（ms） */
   inferMs?: number
+  /** WS 帧版本号（每次收到新帧自增） */
+  wsFrameVersion?: number
 }>()
 
 const emit = defineEmits<{
@@ -105,19 +108,25 @@ function checkFrozen() {
   if (!props.online) { frozen.value = false; return }
   frozen.value = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
 }
+/** WS 帧消费：上次已消费的版本号 */
+let consumedWsVersion = 0
+
+/** 喂入帧数据并更新帧尺寸 */
+function feedFrame(jpeg: ArrayBuffer) {
+  canvasRenderer.feedFrame(jpeg)
+  const size = canvasRenderer.getFrameSize()
+  if (size.width > 0 && size.height > 0) {
+    frameSize.value = size
+  }
+}
+
 watch(() => props.online, (on) => {
   if (on) {
-    /** 启动 Canvas 渲染循环 + MJPEG fetch 流 */
+    /** 启动 Canvas 渲染循环 */
     canvasRenderer.startLoop()
+    /** 启动 MJPEG fetch 流（WS 帧的 fallback） */
     const url = authUrl(`/api/stream/${props.cameraId}`)
-    mjpegStream.startFetch(url, (jpeg) => {
-      canvasRenderer.feedFrame(jpeg)
-      /** 更新帧尺寸 */
-      const size = canvasRenderer.getFrameSize()
-      if (size.width > 0 && size.height > 0) {
-        frameSize.value = size
-      }
-    })
+    mjpegStream.startFetch(url, feedFrame)
     frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
   }
   else {
@@ -127,6 +136,33 @@ watch(() => props.online, (on) => {
     if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null }
   }
 }, { immediate: true })
+
+/** 监听 WS 帧版本变化，优先使用 WS 帧 */
+let mjpegSuppressed = false
+let mjpegRestoreTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(() => props.wsFrameVersion, () => {
+  if (!props.online) return
+  const result = takeFrame(props.cameraId, consumedWsVersion)
+  if (result) {
+    consumedWsVersion = result.version
+    feedFrame(result.jpeg)
+    /** 收到 WS 帧时暂停 MJPEG fetch（节省带宽） */
+    if (!mjpegSuppressed) {
+      mjpegStream.stopFetch()
+      mjpegSuppressed = true
+    }
+    /** 重置恢复定时器：3 秒无 WS 帧则恢复 MJPEG */
+    if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
+    mjpegRestoreTimer = setTimeout(() => {
+      if (mjpegSuppressed && props.online) {
+        const url = authUrl(`/api/stream/${props.cameraId}`)
+        mjpegStream.startFetch(url, feedFrame)
+        mjpegSuppressed = false
+      }
+    }, 3000)
+  }
+})
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
 
 /** 画面比例：优先用帧实际尺寸，回退到 props */
@@ -400,6 +436,7 @@ function resetZoom() {
 onUnmounted(() => {
   mjpegStream.stopFetch()
   canvasRenderer.stopLoop()
+  if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)

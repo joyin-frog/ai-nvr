@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EventClient, type Detection, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl } from './services/auth'
+import { putFrame, getVersion } from './services/ws-frame-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import CameraView from './components/CameraView.vue'
@@ -157,6 +158,8 @@ const showBoxes = ref(true)
 const trackLabelsMap = ref<Record<string, Record<number, string>>>({})
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
 const frameLatency = ref<Record<string, number>>({})
+/** 每个摄像头的 WS 帧版本号（用于触发 CameraView 更新） */
+const wsFrameVersions = ref<Record<string, number>>({})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
@@ -544,6 +547,11 @@ function setupEventListeners() {
       frameLatency.value[payload.cameraId] = latency
       frameLatency.value = { ...frameLatency.value }
     }
+    /** 缓存 WS 帧数据供 CameraView 直接消费 */
+    if (payload.jpegData) {
+      putFrame(payload.cameraId, payload.jpegData)
+      wsFrameVersions.value = { ...wsFrameVersions.value, [payload.cameraId]: getVersion(payload.cameraId) }
+    }
   })
 
   client.on('detect', (payload) => {
@@ -763,6 +771,7 @@ onUnmounted(() => {
                 :show-boxes="showBoxes"
                 :track-labels="trackLabelsMap[cam.id]"
                 :infer-ms="cameraInferMs[cam.id] ?? 0"
+                :ws-frame-version="wsFrameVersions[cam.id] ?? 0"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
                 @track-label-updated="loadTrackLabels"

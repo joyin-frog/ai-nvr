@@ -983,9 +983,9 @@ export function startServer(
     },
   });
 
-  /** 帧推送节流：每个摄像头至少间隔 150ms 推送一帧（~7fps） */
+  /** 帧推送节流：每个摄像头至少间隔 50ms 推送一帧（~20fps） */
   const lastFrameSent = new Map<string, number>();
-  const FRAME_THROTTLE_MS = 150;
+  const FRAME_THROTTLE_MS = 50;
 
   /** 预分配 header 长度 buffer（4 字节复用） */
   const headerLenBuf = new Uint8Array(4);
