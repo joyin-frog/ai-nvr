@@ -67,6 +67,9 @@ export class AlertEngine {
       this.eventBus.on("track:dwell", (payload) => {
         this.onTrackEvent("track:dwell", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs);
       }),
+      this.eventBus.on("track:speed", (payload) => {
+        this.onTrackEvent("track:speed", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, undefined, undefined, undefined, payload.speed);
+      }),
     );
     console.log("[AlertEngine] 告警引擎已启动");
   }
@@ -103,8 +106,8 @@ export class AlertEngine {
     }
   }
 
-  /** 处理追踪目标事件（track:appeared / track:disappeared / track:enter-zone / track:leave-zone / track:dwell） */
-  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number, zoneId?: number, zoneName?: string, dwellMs?: number): void {
+  /** 处理追踪目标事件（track:appeared / track:disappeared / track:enter-zone / track:leave-zone / track:dwell / track:speed） */
+  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number, zoneId?: number, zoneName?: string, dwellMs?: number, speed?: number): void {
     this.refreshRules();
     this.refreshTrackNames(cameraId);
 
@@ -134,6 +137,7 @@ export class AlertEngine {
       if (zoneName) detailObj.zoneName = zoneName;
       if (dwellMs !== undefined) detailObj.dwellMs = dwellMs;
       if (score !== undefined) detailObj.score = score;
+      if (speed !== undefined) detailObj.speed = speed;
 
       void score;
       this.checkRule(rule, cameraId, timestamp, JSON.stringify(detailObj));

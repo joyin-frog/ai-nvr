@@ -162,6 +162,19 @@ export interface EventPayloads {
     dwellMs: number;
   };
 
+  /** 目标高速移动事件 */
+  "track:speed": {
+    cameraId: string;
+    timestamp: number;
+    trackId: number;
+    label: string;
+    trackName?: string;
+    /** 移动速度（归一化坐标/帧的向量长度） */
+    speed: number;
+    /** 速度向量 */
+    velocity: { dx: number; dy: number };
+  };
+
   /** fMP4 初始化段（ftyp + moov） */
   "fmp4:init": {
     cameraId: string;

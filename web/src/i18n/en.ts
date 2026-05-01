@@ -64,6 +64,7 @@ export default {
     trackEnterZone: 'Enter Zone',
     trackLeaveZone: 'Leave Zone',
     trackDwell: 'Dwell',
+    trackSpeed: 'Speed',
     ratio: 'Motion Ratio',
     targets: 'Targets',
     confidence: 'Confidence',

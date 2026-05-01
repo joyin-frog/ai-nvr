@@ -17,6 +17,8 @@ interface TrackZoneState {
   label: string;
   /** 用户名称 */
   trackName?: string;
+  /** 上次速度告警时间 */
+  lastSpeedAlertAt: number;
 }
 
 /** 停留事件触发间隔（毫秒） */
@@ -25,10 +27,13 @@ const DWELL_INTERVAL_MS = 5000;
 /** 停留事件最低触发阈值（毫秒）— 少于此时间不触发 */
 const DWELL_MIN_MS = 3000;
 
+/** 速度告警触发间隔（毫秒）— 同一目标在此期间不重复触发 */
+const SPEED_ALERT_INTERVAL_MS = 10000;
+
 /**
  * 行为分析器
  * 监听 detect 事件，维护追踪目标的位置与 ROI 区域的关系
- * 产出语义事件：track:enter-zone / track:leave-zone / track:dwell
+ * 产出语义事件：track:enter-zone / track:leave-zone / track:dwell / track:speed
  */
 export class BehaviorAnalyzer {
   private eventBus: EventBus;
@@ -80,6 +85,7 @@ export class BehaviorAnalyzer {
       trackId?: number;
       trackName?: string;
       box: { xmin: number; ymin: number; xmax: number; ymax: number };
+      velocity?: { dx: number; dy: number };
     }>,
   ): void {
     const zones = this.getZones(cameraId);
@@ -177,6 +183,28 @@ export class BehaviorAnalyzer {
       trackState.zones.clear();
       cameraStates.delete(trackId);
     }
+
+    /** 速度告警：检测高速移动的目标 */
+    for (const det of detections) {
+      if (det.trackId == null || !det.velocity) continue;
+      const speed = Math.sqrt(det.velocity.dx * det.velocity.dx + det.velocity.dy * det.velocity.dy);
+      /** 速度阈值：归一化坐标/帧，0.02 约等于画面宽度 2%/帧，对 1080p 约 20px/帧 */
+      if (speed < 0.02) continue;
+      const trackState = cameraStates.get(det.trackId);
+      if (!trackState) continue;
+      /** 冷却期检查 */
+      if (timestamp - trackState.lastSpeedAlertAt < SPEED_ALERT_INTERVAL_MS) continue;
+      trackState.lastSpeedAlertAt = timestamp;
+      this.eventBus.emit("track:speed", {
+        cameraId,
+        timestamp,
+        trackId: det.trackId,
+        label: det.label,
+        trackName: trackState.trackName,
+        speed,
+        velocity: det.velocity,
+      });
+    }
   }
 
   /** 获取摄像头的 ROI 多边形（带缓存） */
@@ -208,7 +236,7 @@ export class BehaviorAnalyzer {
   private getOrCreateTrackState(cameraStates: Map<number, TrackZoneState>, trackId: number, label: string): TrackZoneState {
     let state = cameraStates.get(trackId);
     if (!state) {
-      state = { zones: new Map(), label };
+      state = { zones: new Map(), label, lastSpeedAlertAt: 0 };
       cameraStates.set(trackId, state);
     }
     return state;

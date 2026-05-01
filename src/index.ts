@@ -178,7 +178,7 @@ const monitor = new SystemMonitor(eventBus);
 startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, storageFs);
 
 /** 自动记录事件到 SQLite */
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */

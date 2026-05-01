@@ -716,6 +716,12 @@ function setupEventListeners() {
     pushZoneNotification(payload.cameraId, { type: 'dwell', name: customName || payload.label, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
   })
 
+  client.on('track:speed', (payload) => {
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
+    eventPanel.value?.addEvent('track:speed', payload.cameraId, `${displayName} 高速移动 (${payload.speed.toFixed(3)}/帧)`)
+  })
+
   /** 其他客户端更新了追踪标签 → 实时同步 */
   client.on('track:label-updated', (payload) => {
     const map = { ...trackLabelsMap.value }

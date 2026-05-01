@@ -27,6 +27,7 @@ export interface EventMap {
   'track:enter-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string }
   'track:leave-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; dwellMs: number }
   'track:dwell': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; dwellMs: number }
+  'track:speed': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; speed: number }
 }
 
 /** 事件回调 */
