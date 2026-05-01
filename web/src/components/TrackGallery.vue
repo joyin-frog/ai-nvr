@@ -5,6 +5,10 @@ import { authFetch, authUrl } from '../services/auth'
 
 const { t } = useI18n()
 
+const props = defineProps<{
+  cameras?: Array<{ id: string; online?: boolean }>
+}>()
+
 /** 追踪目标信息 */
 interface TrackInfo {
   trackId: number
@@ -399,7 +403,11 @@ onUnmounted(() => {
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
           </div>
           <div class="track-cameras">
-            {{ track.cameraIds.join(', ') }}
+            <span
+              v-for="(camId, idx) in track.cameraIds" :key="camId"
+              class="cam-tag"
+              :class="{ 'cam-online': props.cameras?.find(c => c.id === camId)?.online }"
+            >{{ camId }}{{ idx < track.cameraIds.length - 1 ? ',' : '' }}</span>
           </div>
           <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
             ▶ {{ t('tracks.playRecording') }}
@@ -734,6 +742,17 @@ onUnmounted(() => {
   font-size: 10px;
   color: #555;
   margin-top: 2px;
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.cam-tag {
+  color: #555;
+}
+
+.cam-tag.cam-online {
+  color: #4CAF50;
 }
 
 .play-btn {
