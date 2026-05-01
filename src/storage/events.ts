@@ -161,7 +161,7 @@ export class EventStorage {
 
   /**
    * 按区域聚合统计事件（enter-zone / leave-zone / dwell / loiter / line-cross）
-   * 返回每个区域的进入次数、离开次数、总停留时间、平均停留时间
+   * 单次查询取出所有 track:% 类型事件，内存中按类型和区域聚合
    */
   zoneStats(options: { cameraId?: string; since?: number; until?: number } = {}): Array<{
     zoneId: number;
@@ -180,36 +180,34 @@ export class EventStorage {
       totalDwellMs: number; dwellCount: number;
     }>();
 
-    const types = ["track:enter-zone", "track:leave-zone", "track:dwell", "track:loiter", "track:line-cross"];
-    for (const type of types) {
-      const { conditions, params } = this.buildConditions({ ...options, type });
-      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-      const rows = this.db.query(
-        `SELECT detail FROM events ${where}`
-      ).all(...params) as Array<{ detail: string | null }>;
+    const targetTypes = new Set(["track:enter-zone", "track:leave-zone", "track:dwell", "track:loiter", "track:line-cross"]);
+    const { conditions, params } = this.buildConditions({ ...options, typeLike: "track:%" });
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = this.db.query(
+      `SELECT type, detail FROM events ${where}`
+    ).all(...params) as Array<{ type: string; detail: string | null }>;
 
-      for (const row of rows) {
-        if (!row.detail) continue;
-        const d = JSON.parse(row.detail) as {
-          zoneId?: number; zoneName?: string; dwellMs?: number;
-          lineId?: number; lineName?: string;
-        };
-        /** line-cross 事件用 lineId/lineName 作为区域标识 */
-        const zId = type === "track:line-cross" ? d.lineId : d.zoneId;
-        const zName = type === "track:line-cross" ? d.lineName : d.zoneName;
-        if (zId == null || !zName) continue;
+    for (const row of rows) {
+      if (!targetTypes.has(row.type) || !row.detail) continue;
+      const d = JSON.parse(row.detail) as {
+        zoneId?: number; zoneName?: string; dwellMs?: number;
+        lineId?: number; lineName?: string;
+      };
+      const isLineCross = row.type === "track:line-cross";
+      const zId = isLineCross ? d.lineId : d.zoneId;
+      const zName = isLineCross ? d.lineName : d.zoneName;
+      if (zId == null || !zName) continue;
 
-        const key = `${zId}:${zName}`;
-        if (!zoneMap.has(key)) {
-          zoneMap.set(key, { zoneId: zId, zoneName: zName, enters: 0, leaves: 0, dwells: 0, loiters: 0, lineCrosses: 0, totalDwellMs: 0, dwellCount: 0 });
-        }
-        const entry = zoneMap.get(key)!;
-        if (type === "track:enter-zone") entry.enters++;
-        else if (type === "track:leave-zone") { entry.leaves++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
-        else if (type === "track:dwell") { entry.dwells++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
-        else if (type === "track:loiter") entry.loiters++;
-        else if (type === "track:line-cross") entry.lineCrosses++;
+      const key = `${zId}:${zName}`;
+      if (!zoneMap.has(key)) {
+        zoneMap.set(key, { zoneId: zId, zoneName: zName, enters: 0, leaves: 0, dwells: 0, loiters: 0, lineCrosses: 0, totalDwellMs: 0, dwellCount: 0 });
       }
+      const entry = zoneMap.get(key)!;
+      if (row.type === "track:enter-zone") entry.enters++;
+      else if (row.type === "track:leave-zone") { entry.leaves++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
+      else if (row.type === "track:dwell") { entry.dwells++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
+      else if (row.type === "track:loiter") entry.loiters++;
+      else if (row.type === "track:line-cross") entry.lineCrosses++;
     }
 
     return Array.from(zoneMap.values())
