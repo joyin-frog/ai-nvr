@@ -259,6 +259,7 @@ export default {
     eventTypeDetect: 'AI Detect',
     eventTypeMotion: 'Motion Detect',
     eventTypeOffline: 'Camera Offline',
+    eventTypeLowfps: 'Low FPS',
     loadMore: 'Load More',
     totalCount: '{count} total',
     filterCamera: 'Filter Camera',

@@ -93,6 +93,7 @@ const eventTypes = computed(() => [
   { value: 'detect', label: t('alert.eventTypeDetect') },
   { value: 'motion', label: t('alert.eventTypeMotion') },
   { value: 'camera:offline', label: t('alert.eventTypeOffline') },
+  { value: 'camera:lowfps', label: t('alert.eventTypeLowfps') },
 ])
 
 /** 加载规则列表 */
