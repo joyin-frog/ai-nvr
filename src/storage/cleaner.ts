@@ -5,6 +5,7 @@ import { type SnapshotStorage } from "@/storage/snapshots";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type RecordingExporter } from "@/storage/export";
 import { type TrackStorage } from "@/storage/tracks";
+import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type MotionRecorder } from "@/storage/recorder";
 
@@ -30,6 +31,7 @@ export class StorageCleaner {
     private recorder: MotionRecorder,
     private trackStorage?: TrackStorage,
     private alertSnapshotStorage?: SnapshotStorage,
+    private trajectoryStorage?: TrackTrajectoryStorage,
   ) {}
 
   /** 启动定时清理（每小时执行一次） */
@@ -114,6 +116,11 @@ export class StorageCleaner {
     /** 清理过期追踪目标 */
     if (this.trackStorage) {
       report.tracks = this.trackStorage.cleanup(snapshotsDays);
+    }
+
+    /** 清理过期轨迹采样数据 */
+    if (this.trajectoryStorage) {
+      this.trajectoryStorage.cleanup(snapshotsDays);
     }
 
     /** 磁盘压力时触发录像加速清理 */
