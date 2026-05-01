@@ -181,6 +181,8 @@ export default {
     trackNamed: '已命名',
     trackUnnamed: '未命名',
     trackActive: '活跃',
+    zoneStats: '区域统计',
+    zoneEnters: '次进入',
     today: '今日',
     days: '天',
     diskUsage: '磁盘用量',

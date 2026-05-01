@@ -181,6 +181,8 @@ export default {
     trackNamed: 'Named',
     trackUnnamed: 'Unnamed',
     trackActive: 'Active',
+    zoneStats: 'Zone Statistics',
+    zoneEnters: 'entries',
     today: 'Today',
     days: 'd',
     diskUsage: 'Disk Usage',

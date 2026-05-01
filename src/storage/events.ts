@@ -159,6 +159,70 @@ export class EventStorage {
     return result;
   }
 
+  /**
+   * 按区域聚合统计事件（enter-zone / leave-zone / dwell / loiter / line-cross）
+   * 返回每个区域的进入次数、离开次数、总停留时间、平均停留时间
+   */
+  zoneStats(options: { cameraId?: string; since?: number; until?: number } = {}): Array<{
+    zoneId: number;
+    zoneName: string;
+    enters: number;
+    leaves: number;
+    dwells: number;
+    loiters: number;
+    lineCrosses: number;
+    totalDwellMs: number;
+    avgDwellMs: number;
+  }> {
+    const zoneMap = new Map<string, {
+      zoneId: number; zoneName: string;
+      enters: number; leaves: number; dwells: number; loiters: number; lineCrosses: number;
+      totalDwellMs: number; dwellCount: number;
+    }>();
+
+    const types = ["track:enter-zone", "track:leave-zone", "track:dwell", "track:loiter", "track:line-cross"];
+    for (const type of types) {
+      const { conditions, params } = this.buildConditions({ ...options, type });
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const rows = this.db.query(
+        `SELECT detail FROM events ${where}`
+      ).all(...params) as Array<{ detail: string | null }>;
+
+      for (const row of rows) {
+        if (!row.detail) continue;
+        const d = JSON.parse(row.detail) as {
+          zoneId?: number; zoneName?: string; dwellMs?: number;
+          lineId?: number; lineName?: string;
+        };
+        /** line-cross 事件用 lineId/lineName 作为区域标识 */
+        const zId = type === "track:line-cross" ? d.lineId : d.zoneId;
+        const zName = type === "track:line-cross" ? d.lineName : d.zoneName;
+        if (zId == null || !zName) continue;
+
+        const key = `${zId}:${zName}`;
+        if (!zoneMap.has(key)) {
+          zoneMap.set(key, { zoneId: zId, zoneName: zName, enters: 0, leaves: 0, dwells: 0, loiters: 0, lineCrosses: 0, totalDwellMs: 0, dwellCount: 0 });
+        }
+        const entry = zoneMap.get(key)!;
+        if (type === "track:enter-zone") entry.enters++;
+        else if (type === "track:leave-zone") { entry.leaves++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
+        else if (type === "track:dwell") { entry.dwells++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
+        else if (type === "track:loiter") entry.loiters++;
+        else if (type === "track:line-cross") entry.lineCrosses++;
+      }
+    }
+
+    return Array.from(zoneMap.values())
+      .map(e => ({
+        zoneId: e.zoneId, zoneName: e.zoneName,
+        enters: e.enters, leaves: e.leaves, dwells: e.dwells,
+        loiters: e.loiters, lineCrosses: e.lineCrosses,
+        totalDwellMs: e.totalDwellMs,
+        avgDwellMs: e.dwellCount > 0 ? Math.round(e.totalDwellMs / e.dwellCount) : 0,
+      }))
+      .sort((a, b) => b.enters - a.enters);
+  }
+
   /** 关闭数据库 */
   close(): void {
     this.db.close();

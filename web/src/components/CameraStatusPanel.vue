@@ -353,12 +353,57 @@ async function loadWeekStats() {
   weekStats.value = result
 }
 
-/** 加载追踪目标统计 */
-async function loadTrackStats() {
+/** 区域统计 */
+interface ZoneStat {
+  zoneId: number
+  zoneName: string
+  enters: number
+  leaves: number
+  dwells: number
+  loiters: number
+  lineCrosses: number
+  totalDwellMs: number
+  avgDwellMs: number
+}
+const zoneStats = ref<ZoneStat[]>([])
+
+async function loadZoneStats() {
+  const startOfDay = new Date()
+  startOfDay.setHours(0, 0, 0, 0)
   try {
-    const res = await authFetch('/api/tracks/stats')
-    if (res.ok) trackStats.value = await res.json()
+    const results: ZoneStat[] = []
+    for (const cam of props.cameras) {
+      const res = await authFetch(`/api/roi/stats/${cam.id}?since=${startOfDay.getTime()}`)
+      if (!res.ok) continue
+      const data = await res.json() as ZoneStat[]
+      results.push(...data)
+    }
+    /** 合并同名区域 */
+    const merged = new Map<string, ZoneStat>()
+    for (const z of results) {
+      const key = z.zoneName
+      const existing = merged.get(key)
+      if (existing) {
+        existing.enters += z.enters
+        existing.leaves += z.leaves
+        existing.dwells += z.dwells
+        existing.loiters += z.loiters
+        existing.lineCrosses += z.lineCrosses
+        existing.totalDwellMs += z.totalDwellMs
+        existing.avgDwellMs = existing.leaves > 0 ? Math.round(existing.totalDwellMs / existing.leaves) : 0
+      } else {
+        merged.set(key, { ...z })
+      }
+    }
+    zoneStats.value = Array.from(merged.values()).sort((a, b) => b.enters - a.enters)
   } catch { /* ignore */ }
+}
+
+/** 格式化停留时间 */
+function formatDwell(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`
 }
 
 onMounted(() => {
@@ -366,6 +411,7 @@ onMounted(() => {
   loadTodayStats()
   loadWeekStats()
   loadTrackStats()
+  loadZoneStats()
   timer = setInterval(loadMetrics, 5000)
   statsTimer = setInterval(loadTodayStats, 30000)
 })
@@ -501,6 +547,27 @@ onUnmounted(() => {
             <div class="label-bar-fill track-bar" :style="{ width: `${(count / Math.max(...Object.values(trackStats.byLabel))) * 100}%` }" />
           </div>
           <span class="label-count">{{ count }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 区域统计 -->
+    <div v-if="zoneStats.length" class="zone-section">
+      <div class="stats-title">{{ t('status.zoneStats', 'Zone Stats') }}</div>
+      <div class="zone-list">
+        <div v-for="z in zoneStats" :key="z.zoneName" class="zone-row">
+          <div class="zone-header">
+            <span class="zone-name">{{ z.zoneName }}</span>
+            <span class="zone-enters">{{ z.enters }} {{ t('status.zoneEnters', 'entries') }}</span>
+          </div>
+          <div class="zone-metrics">
+            <span v-if="z.avgDwellMs" class="zone-metric" title="Average dwell time">~{{ formatDwell(z.avgDwellMs) }}</span>
+            <span v-if="z.loiters" class="zone-metric loiter">{{ z.loiters }} loiter</span>
+            <span v-if="z.lineCrosses" class="zone-metric cross">{{ z.lineCrosses }} cross</span>
+          </div>
+          <div class="zone-bar-bg">
+            <div class="zone-bar-fill" :style="{ width: `${(z.enters / zoneStats[0]!.enters) * 100}%` }" />
+          </div>
         </div>
       </div>
     </div>
@@ -1264,4 +1331,73 @@ onUnmounted(() => {
 .log-tag { color: #4ECDC4; flex-shrink: 0; }
 .log-msg { flex: 1; }
 .log-empty { color: #555; text-align: center; padding: 8px; }
+
+/* 区域统计 */
+.zone-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.zone-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zone-row {
+  background: #16213e;
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid #2a2a4a;
+}
+
+.zone-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.zone-name {
+  color: #e0e0e0;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.zone-enters {
+  color: #4ECDC4;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.zone-metrics {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.zone-metric {
+  font-size: 10px;
+  color: #888;
+  background: #0a0a1a;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.zone-metric.loiter { color: #FFC107; }
+.zone-metric.cross { color: #FF6F00; }
+
+.zone-bar-bg {
+  height: 3px;
+  background: #0a0a1a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.zone-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ECDC4, #44B09E);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
 </style>

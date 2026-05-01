@@ -1056,6 +1056,15 @@ export function startServer(
         return Response.json(roiStorage.list(cameraId));
       }
 
+      /** 区域统计（按摄像头聚合所有区域事件） */
+      const roiStatsMatch = url.pathname.match(/^\/api\/roi\/stats\/([^/]+)$/);
+      if (roiStatsMatch && req.method === "GET") {
+        const cameraId = roiStatsMatch[1]!;
+        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
+        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        return Response.json(eventStorage.zoneStats({ cameraId, since, until }));
+      }
+
       /** ROI 添加 */
       if (url.pathname === "/api/roi" && req.method === "POST") {
         return req.json().then((body: unknown) => {
