@@ -132,8 +132,15 @@ export function startServer(
     const extractor = camMgr.getFmp4Extractor(cameraId);
     const unsubs: (() => void)[] = [];
 
+    /** 没有 fMP4 提取器时直接关闭，让前端回退到 Canvas */
+    if (!extractor) {
+      console.warn(`[fMP4] 摄像头 ${cameraId} 没有 fMP4 流，关闭连接`);
+      ws.close();
+      return;
+    }
+
     /** 发送缓存的 init segment（带协议头） */
-    if (extractor?.initSegment) {
+    if (extractor.initSegment) {
       ws.send(encodeFmp4Init(extractor.initSegment.codec, extractor.initSegment.data));
     }
 
