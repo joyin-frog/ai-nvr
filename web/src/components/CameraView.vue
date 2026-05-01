@@ -7,7 +7,7 @@ import { useCanvasRenderer } from '../composables/useCanvasRenderer'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
 import { useMjpegStream } from '../composables/useMjpegStream'
 import { takeFrame } from '../services/ws-frame-cache'
-import { takeDetections, getInferMs, takeZoneNotifications, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 
@@ -529,6 +529,17 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   ctx.font = 'bold 12px monospace'
   ctx.textBaseline = 'bottom'
 
+  /** 获取外观匹配建议 */
+  const suggestions = takeMatchSuggestions(props.cameraId)
+  const suggestMap = new Map<number, string>()
+  for (const s of suggestions) {
+    if (s.matches.length > 0) {
+      const best = s.matches[0]!
+      const pct = ((64 - best.distance) / 64 * 100).toFixed(0)
+      suggestMap.set(s.trackId, `${best.customName} ${pct}%`)
+    }
+  }
+
   for (const d of sorted) {
     const tid = d.trackId
     const customName = tid ? props.trackLabels?.[tid] : undefined
@@ -594,6 +605,24 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.fillText(text, x + 5, labelY - 4)
+
+    /** 绘制匹配建议提示（未命名目标有匹配时） */
+    if (tid && !isNamed) {
+      const suggest = suggestMap.get(tid)
+      if (suggest) {
+        const sugY = y > labelH * 2 + 4 ? labelY - labelH - 2 : y + h + 2
+        ctx.font = '11px sans-serif'
+        const sugTm = ctx.measureText(`≈ ${suggest}`)
+        const sugW = sugTm.width + 8
+        ctx.fillStyle = 'rgba(233, 30, 99, 0.85)'
+        ctx.beginPath()
+        ctx.roundRect(x, sugY - 16, sugW, 16, 3)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.fillText(`≈ ${suggest}`, x + 4, sugY - 3)
+        ctx.font = 'bold 12px monospace'
+      }
+    }
 
     /** 绘制速度方向箭头（速度较大时显示） */
     if (d.velocity && (Math.abs(d.velocity.dx) > 0.005 || Math.abs(d.velocity.dy) > 0.005)) {

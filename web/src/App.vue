@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame } from './services/ws-frame-cache'
-import { putDetections, pushZoneNotification } from './services/ws-detect-cache'
+import { putDetections, pushZoneNotification, pushMatchSuggestion } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -720,6 +720,14 @@ function setupEventListeners() {
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
     const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
     eventPanel.value?.addEvent('track:speed', payload.cameraId, `${displayName} 高速移动 (${payload.speed.toFixed(3)}/帧)`)
+  })
+
+  client.on('track:match-suggest', (payload) => {
+    const best = payload.matches[0]
+    if (!best) return
+    const dist = ((64 - best.distance) / 64 * 100).toFixed(0)
+    eventPanel.value?.addEvent('track:match-suggest', payload.cameraId, `${payload.label} #${payload.trackId} 可能是 "${best.customName}" (${dist}% 相似)`)
+    pushMatchSuggestion(payload.cameraId, { trackId: payload.trackId, label: payload.label, matches: payload.matches, timestamp: payload.timestamp })
   })
 
   /** 其他客户端更新了追踪标签 → 实时同步 */

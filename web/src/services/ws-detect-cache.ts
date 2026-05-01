@@ -87,3 +87,47 @@ export function takeZoneNotifications(cameraId: string): ZoneNotification[] {
   zoneNotifications.set(cameraId, active)
   return active
 }
+
+/**
+ * 外观匹配建议缓存
+ * track:match-suggest 事件到达时存入，CameraView overlay 显示建议提示
+ */
+
+export interface MatchSuggestion {
+  /** 新目标 trackId */
+  trackId: number
+  /** 目标标签 */
+  label: string
+  /** 匹配建议列表 */
+  matches: Array<{ trackId: number; customName: string; distance: number }>
+  /** 事件时间戳 */
+  timestamp: number
+}
+
+/** 建议显示时长（ms） */
+const SUGGESTION_TTL = 10000
+
+/** 每个摄像头的匹配建议队列 */
+const matchSuggestions = new Map<string, MatchSuggestion[]>()
+
+/** 添加匹配建议 */
+export function pushMatchSuggestion(cameraId: string, suggestion: MatchSuggestion): void {
+  let queue = matchSuggestions.get(cameraId)
+  if (!queue) {
+    queue = []
+    matchSuggestions.set(cameraId, queue)
+  }
+  queue.push(suggestion)
+  /** 限制队列长度 */
+  if (queue.length > 3) queue.shift()
+}
+
+/** 获取并清理过期的匹配建议 */
+export function takeMatchSuggestions(cameraId: string): MatchSuggestion[] {
+  const queue = matchSuggestions.get(cameraId)
+  if (!queue || queue.length === 0) return []
+  const now = Date.now()
+  const active = queue.filter(s => now - s.timestamp < SUGGESTION_TTL)
+  matchSuggestions.set(cameraId, active)
+  return active
+}

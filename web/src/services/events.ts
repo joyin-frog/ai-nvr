@@ -28,6 +28,7 @@ export interface EventMap {
   'track:leave-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; dwellMs: number }
   'track:dwell': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; dwellMs: number }
   'track:speed': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; speed: number }
+  'track:match-suggest': { cameraId: string; timestamp: number; trackId: number; label: string; matches: Array<{ trackId: number; customName: string; distance: number }> }
 }
 
 /** 事件回调 */

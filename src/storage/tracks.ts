@@ -34,6 +34,8 @@ interface TrackRecord {
   snapshotFile?: string;
   /** 当前快照的质量分数（score × box面积） */
   bestSnapshotScore: number;
+  /** 感知差异哈希（dHash，64 位，hex string） */
+  dhash?: string;
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -83,6 +85,8 @@ export class TrackStorage {
         if (snapshotFile) {
           record.snapshotFile = snapshotFile;
           record.bestSnapshotScore = snapshotScore;
+          /** 更新 dHash */
+          record.dhash = await this.computeDHash(frameImage, box);
         }
       }
       this.scheduleSave();
@@ -91,6 +95,8 @@ export class TrackStorage {
 
     /** 新目标：裁剪快照并保存 */
     const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
+    /** 计算 dHash */
+    const dhash = box ? await this.computeDHash(frameImage, box) : undefined;
 
     record = {
       trackId,
@@ -101,6 +107,7 @@ export class TrackStorage {
       cameraIds: [cameraId],
       snapshotFile,
       bestSnapshotScore: snapshotScore,
+      dhash,
     };
     this.tracks.set(trackId, record);
     this.scheduleSave();
@@ -177,6 +184,11 @@ export class TrackStorage {
   /** 获取快照文件路径 */
   getSnapshotPath(filename: string): string {
     return join(this.storagePath, filename);
+  }
+
+  /** 获取包含内部字段的完整记录（含 dhash） */
+  getRecord(trackId: number): TrackRecord | undefined {
+    return this.tracks.get(trackId);
   }
 
   /** 获取单个追踪目标 */
@@ -265,6 +277,89 @@ export class TrackStorage {
     }
     if (removed > 0) this.saveNow();
     return removed;
+  }
+
+  /**
+   * 计算图像的差异哈希（dHash）
+   * 缩放到 9x8 灰度，比较相邻像素亮度，生成 64 位哈希
+   */
+  async computeDHash(frameImage: Buffer, box: Detection["box"]): Promise<string> {
+    if (!box) return "";
+    const image = sharp(frameImage);
+    const meta = await image.metadata();
+    if (!meta.width || !meta.height) return "";
+
+    const padW = (box.xmax - box.xmin) * 0.2;
+    const padH = (box.ymax - box.ymin) * 0.2;
+    const left = Math.max(0, Math.floor((box.xmin - padW) * meta.width));
+    const top = Math.max(0, Math.floor((box.ymin - padH) * meta.height));
+    const width = Math.min(meta.width - left, Math.ceil((box.xmax - box.xmin + padW * 2) * meta.width));
+    const height = Math.min(meta.height - top, Math.ceil((box.ymax - box.ymin + padH * 2) * meta.height));
+
+    if (width < 10 || height < 10) return "";
+
+    const { data, info } = await image
+      .extract({ left, top, width, height })
+      .resize(9, 8, { fit: "fill" })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    /** dHash: 每行比较相邻像素，左 > 右 = 1 */
+    let hash = BigInt(0);
+    for (let row = 0; row < info.height; row++) {
+      for (let col = 0; col < info.width - 1; col++) {
+        const idx = row * info.width + col;
+        if (data[idx]! > data[idx + 1]!) {
+          hash |= BigInt(1) << BigInt(row * 8 + col);
+        }
+      }
+    }
+    return hash.toString(16).padStart(16, "0");
+  }
+
+  /**
+   * 计算两个 dHash 的汉明距离（不同位的数量）
+   */
+  static hammingDistance(a: string, b: string): number {
+    const ba = BigInt("0x" + a);
+    const bb = BigInt("0x" + b);
+    let xor = ba ^ bb;
+    let count = 0;
+    while (xor) {
+      count += Number(xor & BigInt(1));
+      xor >>= BigInt(1);
+    }
+    return count;
+  }
+
+  /**
+   * 查找与指定目标外观相似的已命名目标
+   * 返回汉明距离小于阈值的匹配列表
+   */
+  findSimilar(
+    trackId: number,
+    cameraId: string,
+    label: string,
+    dhash: string,
+    /** 最大汉明距离（默认 15，64 位中约 23%） */
+    maxDistance = 15,
+  ): Array<{ trackId: number; customName: string; distance: number }> {
+    if (!dhash) return [];
+    const results: Array<{ trackId: number; customName: string; distance: number }> = [];
+    for (const record of this.tracks.values()) {
+      if (record.trackId === trackId) continue;
+      if (!record.customName || !record.dhash) continue;
+      /** 同标签优先 */
+      if (record.label !== label) continue;
+      const dist = TrackStorage.hammingDistance(dhash, record.dhash);
+      if (dist <= maxDistance) {
+        results.push({ trackId: record.trackId, customName: record.customName, distance: dist });
+      }
+    }
+    /** 按距离排序，最近匹配在前 */
+    results.sort((a, b) => a.distance - b.distance);
+    return results;
   }
 
   /** 从帧中裁剪目标区域并保存为快照 */

@@ -378,7 +378,22 @@ export class AiDetector {
             jpeg,
             target.box,
             target.score,
-          ).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
+          ).then(() => {
+            /** 快照保存后，查找外观相似的已命名目标 */
+            const record = this.trackStorage!.getRecord(target.trackId);
+            if (record?.dhash) {
+              const matches = this.trackStorage!.findSimilar(target.trackId, cameraId, target.label, record.dhash);
+              if (matches.length > 0) {
+                this.eventBus.emit("track:match-suggest", {
+                  cameraId,
+                  timestamp,
+                  trackId: target.trackId,
+                  label: target.label,
+                  matches,
+                });
+              }
+            }
+          }).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
         }
       }
       /** 更新已有活跃目标的 lastSeen/hitCount */

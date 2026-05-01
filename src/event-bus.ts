@@ -175,6 +175,25 @@ export interface EventPayloads {
     velocity: { dx: number; dy: number };
   };
 
+  /** 追踪目标外观匹配建议（与已命名目标相似时触发） */
+  "track:match-suggest": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 新目标 trackId */
+    trackId: number;
+    /** 目标标签 */
+    label: string;
+    /** 匹配建议列表 */
+    matches: Array<{
+      trackId: number;
+      customName: string;
+      /** 汉明距离（越小越相似） */
+      distance: number;
+    }>;
+  };
+
   /** fMP4 初始化段（ftyp + moov） */
   "fmp4:init": {
     cameraId: string;
