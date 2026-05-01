@@ -420,13 +420,12 @@ defineExpose({ addEvent, loadHistory })
         <option value="">{{ t('event.allCameras') }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
-      <select v-model="filterType" @change="onFilterChange('type')" class="filter-select">
-        <option value="">{{ t('event.allTypesLabel') }}</option>
-        <option value="motion">{{ t('event.motion') }}</option>
-        <option value="detect">{{ t('event.detect') }}</option>
-        <option value="camera:online">{{ t('event.online') }}</option>
-        <option value="camera:offline">{{ t('event.offline') }}</option>
-      </select>
+      <div class="type-chips">
+        <button :class="['type-chip', { active: !filterType }]" @click="filterType = ''; onFilterChange('type')">{{ t('event.allTypes') }}</button>
+        <button :class="['type-chip', 'motion', { active: filterType === 'motion' }]" @click="filterType = 'motion'; onFilterChange('type')">{{ t('event.motion') }}</button>
+        <button :class="['type-chip', 'detect', { active: filterType === 'detect' }]" @click="filterType = 'detect'; onFilterChange('type')">{{ t('event.detect') }}</button>
+        <button :class="['type-chip', 'offline', { active: filterType === 'camera:offline' }]" @click="filterType = 'camera:offline'; onFilterChange('type')">{{ t('event.offline') }}</button>
+      </div>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}
       </button>
@@ -597,6 +596,46 @@ defineExpose({ addEvent, loadHistory })
   padding: 2px 6px;
   font-size: 12px;
   width: 100px;
+}
+
+.type-chips {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.type-chip {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.type-chip:hover {
+  color: #e0e0e0;
+}
+
+.type-chip.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  font-weight: 600;
+}
+
+.type-chip.motion.active {
+  background: #FFD93D;
+}
+
+.type-chip.detect.active {
+  background: #4ECDC4;
+}
+
+.type-chip.offline.active {
+  background: #e74c3c;
+  color: #fff;
 }
 
 .refresh-btn {
