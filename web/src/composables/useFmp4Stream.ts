@@ -74,7 +74,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       bindVideoEvents(el)
       /** 如果已有 MediaSource 但还没绑定到 video，现在绑定 */
       if (mediaSource && !el.src) {
-        el.src = URL.createObjectURL(mediaSource)
+        if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl)
+        currentBlobUrl = URL.createObjectURL(mediaSource)
+        el.src = currentBlobUrl
       }
     }
   }
@@ -138,6 +140,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
+  /** 当前 blob URL（用于清理释放） */
+  let currentBlobUrl: string | null = null
+
   /** 连接 fMP4 流 */
   function connect() {
     disconnect()
@@ -149,7 +154,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
     mediaSource = new MediaSource()
     if (videoRef.value) {
-      videoRef.value.src = URL.createObjectURL(mediaSource)
+      /** 释放旧 blob URL */
+      if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl)
+      }
+      currentBlobUrl = URL.createObjectURL(mediaSource)
+      videoRef.value.src = currentBlobUrl
     }
 
     mediaSource.addEventListener('sourceopen', onSourceOpen)
@@ -401,6 +411,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       }
     }
     mediaSource = null
+    /** 释放 blob URL */
+    if (currentBlobUrl) {
+      URL.revokeObjectURL(currentBlobUrl)
+      currentBlobUrl = null
+    }
     currentCodec = ''
     pendingQueue = []
     appending = false
