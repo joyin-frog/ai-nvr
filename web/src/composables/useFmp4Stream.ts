@@ -301,7 +301,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       try {
         sourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${c}"`)
         sourceBuffer.addEventListener('updateend', onUpdateEnd)
-        sourceBuffer.addEventListener('error', () => { /* ignore */ })
+        sourceBuffer.addEventListener('error', onBufferError)
         sourceBuffer.mode = 'segments'
         console.log(`[fMP4] SourceBuffer created: ${c}`)
         return true
@@ -336,8 +336,32 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     appending = true
     try {
       sourceBuffer.appendBuffer(data)
-    } catch {
+    } catch (e) {
       appending = false
+      /** QuotaExceeded: 清理缓冲区后重试 */
+      if (sourceBuffer && e instanceof DOMException && e.name === 'QuotaExceededError') {
+        console.warn('[fMP4] QuotaExceeded，清理缓冲区')
+        pruneBuffer(sourceBuffer.buffered, 0)
+        /** 丢弃待处理队列，等待新段 */
+        pendingQueue = []
+      }
+    }
+  }
+
+  /** SourceBuffer error 事件处理 */
+  function onBufferError(): void {
+    console.warn('[fMP4] SourceBuffer error，尝试清理缓冲区')
+    if (!sourceBuffer) return
+    appending = false
+    pendingQueue = []
+    /** 清理已缓冲的数据 */
+    if (!sourceBuffer.updating && mediaSource.readyState === 'open') {
+      const buffered = sourceBuffer.buffered
+      if (buffered.length > 0) {
+        try {
+          sourceBuffer.remove(buffered.start(0), buffered.end(buffered.length - 1))
+        } catch { /* ignore */ }
+      }
     }
   }
 
