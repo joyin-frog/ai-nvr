@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
+import { type StorageFs } from "@/storage/storage-fs";
 
 /** 录像片段元信息 */
 export interface RecordingInfo {
@@ -58,11 +59,14 @@ export class MotionRecorder {
   private runtimeConfig: RuntimeConfig;
   /** 帧事件取消订阅函数 */
   private unsubFrame: (() => void) | null = null;
+  /** 存储文件系统（增量统计） */
+  private storageFs: StorageFs | null;
 
-  constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig) {
+  constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig, storageFs?: StorageFs) {
     this.storagePath = storagePath;
     this.ffmpegPath = ffmpegPath;
     this.runtimeConfig = runtimeConfig;
+    this.storageFs = storageFs ?? null;
     mkdirSync(storagePath, { recursive: true });
   }
 
@@ -381,13 +385,27 @@ export class MotionRecorder {
       try {
         const stat = statSync(outputPath);
         if (stat.size < 1024) {
-          unlinkSync(outputPath);
+          if (this.storageFs) {
+            this.storageFs.deleteFile(`recordings/${cameraId}/${filename}`);
+          } else {
+            unlinkSync(outputPath);
+          }
           console.warn(`[Recorder] ${cameraId} 清理无效录像: ${filename} (${stat.size} bytes)`);
           this.listCache.clear();
           return;
         }
       } catch {
         // file may not exist
+      }
+
+      /** 记录有效录像文件增量 */
+      if (this.storageFs && code === 0) {
+        try {
+          const stat = statSync(outputPath);
+          if (stat.size >= 1024) {
+            this.storageFs.diskUsage.recordAdd("recordings", stat.size);
+          }
+        } catch { /* */ }
       }
 
       /** 连续录制模式下非正常退出：3 秒后自动重启（避免长时间无录像） */
@@ -469,7 +487,11 @@ export class MotionRecorder {
           const filePath = join(camPath, file);
           const stat = statSync(filePath);
           if (stat.mtimeMs < cutoff) {
-            unlinkSync(filePath);
+            if (this.storageFs) {
+              this.storageFs.deleteFile(`recordings/${camDir}/${file}`);
+            } else {
+              unlinkSync(filePath);
+            }
             console.log(`[Recorder] 清理过期录像: ${camDir}/${file}`);
           }
         }

@@ -15,9 +15,10 @@ import { type RecordingExporter } from "@/storage/export";
 import { type AiDetector } from "@/ai/detector";
 import { type PtzController } from "@/ptz";
 import { type PreferencesStorage } from "@/storage/preferences";
+import { type StorageFs } from "@/storage/storage-fs";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
-import { existsSync, statSync, realpathSync, unlinkSync } from "node:fs";
+import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -93,6 +94,7 @@ export function startServer(
   trackLabelStorage: import("@/storage/track-labels").TrackLabelStorage,
   trackStorage: import("@/storage/tracks").TrackStorage,
   preferencesStorage: PreferencesStorage,
+  storageFs: StorageFs,
 ): void {
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
   async function handleRequest(req: Request): Promise<Response | undefined> {
@@ -537,12 +539,14 @@ export function startServer(
       if (recordingMatch && req.method === "DELETE") {
         const camId = recordingMatch[1]!;
         const filename = recordingMatch[2]!;
-        const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
+        const relPath = `recordings/${camId}/${filename}`;
+        const filePath = storageFs.resolve(relPath);
         if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
-        const storageRoot = realpathSync(recorder.getRecordingPath("."));
+        /** 路径遍历防护 */
+        const storageRoot = realpathSync(storageFs.resolve("recordings"));
         const resolved = realpathSync(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
-        unlinkSync(resolved);
+        storageFs.deleteFile(relPath);
         return Response.json({ ok: true });
       }
 
@@ -1031,6 +1035,12 @@ export function startServer(
           return Response.json({ error: "no valid keys (must start with nvr-)" }, { status: 400 });
         }
         preferencesStorage.setMany(filtered);
+        return Response.json({ ok: true });
+      }
+
+      /** 全量校准磁盘用量 */
+      if (url.pathname === "/api/storage/calibrate" && req.method === "POST") {
+        diskUsage.calibrate();
         return Response.json({ ok: true });
       }
 

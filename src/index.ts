@@ -26,6 +26,7 @@ import { PtzController } from "@/ptz";
 import { TrackLabelStorage } from "@/storage/track-labels";
 import { TrackStorage } from "@/storage/tracks";
 import { PreferencesStorage } from "@/storage/preferences";
+import { StorageFs } from "@/storage/storage-fs";
 
 /**
  * 设置 Hugging Face 镜像（国内网络加速模型下载）
@@ -59,8 +60,15 @@ const dataDir = config.storage.dataDir;
 /** 运行时配置（支持 API 热修改，检测器实时读取） */
 const runtimeConfig = new RuntimeConfig(config);
 
+/** 磁盘用量统计（SQLite 持久化增量追踪） */
+const diskUsage = new DiskUsage(dataDir);
+diskUsage.ensureCalibrated();
+
+/** 存储文件系统封装（统一文件操作 + 自动增量统计） */
+const storageFs = new StorageFs(dataDir, diskUsage);
+
 /** 录像器（通过 EventBus 接收帧，不单独拉 RTSP 流） */
-const recorder = new MotionRecorder(join(dataDir, "recordings"), config.ffmpegPath, eventBus, runtimeConfig);
+const recorder = new MotionRecorder(join(dataDir, "recordings"), config.ffmpegPath, eventBus, runtimeConfig, storageFs);
 /** 注册摄像头友好名称（用于录像水印） */
 for (const cam of config.cameras) {
   recorder.registerCameraName(cam.id, cam.friendlyName);
@@ -132,8 +140,7 @@ const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPa
 const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter, trackStorage);
 cleaner.start();
 
-/** 磁盘用量统计 */
-const diskUsage = new DiskUsage(dataDir);
+/** 磁盘用量统计已在上方创建 */
 
 /** PTZ 云台控制器 */
 const ptzController = new PtzController();
@@ -155,7 +162,7 @@ for (const cam of config.cameras) {
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, storageFs);
 
 /** 自动记录事件到 SQLite */
 const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert"] as const;
@@ -196,6 +203,7 @@ process.on("SIGINT", () => {
   roiStorage.close();
   alertStorage.close();
   preferencesStorage.close();
+  diskUsage.close();
   eventBus.clear();
   process.exit(0);
 });
