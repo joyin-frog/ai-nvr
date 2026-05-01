@@ -63,6 +63,7 @@ export function startServer(
   aiDetector: AiDetector,
   authConfig: AuthConfig,
   ptzController: PtzController,
+  trackLabelStorage: import("@/storage/track-labels").TrackLabelStorage,
 ): void {
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
   async function handleRequest(req: Request): Promise<Response | undefined> {
@@ -905,6 +906,29 @@ export function startServer(
         return ptzController.gotoHomePosition(cameraId)
           .then(() => Response.json({ ok: true }))
           .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+      }
+
+      /** 追踪标签 API */
+      if (url.pathname === "/api/track-labels" && req.method === "GET") {
+        const cameraId = url.searchParams.get("camera_id") ?? "";
+        if (!cameraId) return Response.json({ error: "camera_id required" }, { status: 400 });
+        return Response.json(trackLabelStorage.listByCamera(cameraId));
+      }
+
+      if (url.pathname === "/api/track-labels" && req.method === "POST") {
+        const body = await req.json() as { cameraId: string; trackId: number; label: string; name: string; snapshotPath?: string };
+        if (!body.cameraId || !body.trackId || !body.name) {
+          return Response.json({ error: "cameraId, trackId, name required" }, { status: 400 });
+        }
+        const result = trackLabelStorage.upsert(body.cameraId, body.trackId, body.label, body.name, body.snapshotPath);
+        return Response.json(result);
+      }
+
+      if (url.pathname.startsWith("/api/track-labels/") && req.method === "DELETE") {
+        const id = parseInt(url.pathname.split("/").pop() ?? "");
+        if (!id) return Response.json({ error: "invalid id" }, { status: 400 });
+        const ok = trackLabelStorage.remove(id);
+        return Response.json({ ok });
       }
 
       /** API 路径未匹配 → 404 */
