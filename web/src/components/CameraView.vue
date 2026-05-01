@@ -1506,6 +1506,60 @@ function onPanEnd() {
   dragging = false
 }
 
+/** 触摸手势：双指缩放 + 单指平移 */
+let touchStartDist = 0
+let touchStartZoom = 1
+let touchPanning = false
+let touchStartPanX = 0
+let touchStartPanY = 0
+let touchStartClientX = 0
+let touchStartClientY = 0
+
+function onTouchStart(e: TouchEvent) {
+  if (e.touches.length === 2) {
+    /** 双指缩放开始 */
+    e.preventDefault()
+    const dx = e.touches[1]!.clientX - e.touches[0]!.clientX
+    const dy = e.touches[1]!.clientY - e.touches[0]!.clientY
+    touchStartDist = Math.sqrt(dx * dx + dy * dy)
+    touchStartZoom = zoomLevel.value
+  } else if (e.touches.length === 1 && zoomLevel.value > 1) {
+    /** 单指平移开始（仅缩放时） */
+    touchPanning = true
+    touchStartClientX = e.touches[0]!.clientX
+    touchStartClientY = e.touches[0]!.clientY
+    touchStartPanX = panX.value
+    touchStartPanY = panY.value
+  }
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (e.touches.length === 2) {
+    /** 双指缩放 */
+    e.preventDefault()
+    const dx = e.touches[1]!.clientX - e.touches[0]!.clientX
+    const dy = e.touches[1]!.clientY - e.touches[0]!.clientY
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (touchStartDist === 0) return
+    const scale = dist / touchStartDist
+    zoomLevel.value = Math.max(1, Math.min(5, touchStartZoom * scale))
+    if (zoomLevel.value <= 1) {
+      panX.value = 0
+      panY.value = 0
+    }
+  } else if (e.touches.length === 1 && touchPanning) {
+    /** 单指平移 */
+    e.preventDefault()
+    panX.value = touchStartPanX + (e.touches[0]!.clientX - touchStartClientX)
+    panY.value = touchStartPanY + (e.touches[0]!.clientY - touchStartClientY)
+  }
+}
+
+function onTouchEnd() {
+  touchPanning = false
+  touchStartDist = 0
+}
+
 /** 鼠标悬停检测框追踪 */
 const hoveredTrackId = ref<number | null>(null)
 let mouseNormX = -1
@@ -1594,6 +1648,9 @@ onUnmounted(() => {
       @mousedown="onPanStart"
       @mousemove="onPanMove"
       @mouseup="onPanEnd"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
       @mouseleave="onPanEnd"
     >
       <div class="camera-content" :style="{ transform: zoomTransform }">
