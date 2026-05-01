@@ -212,6 +212,12 @@ const playbackDetections = ref<PlaybackDetection[]>([])
 const showPlaybackBoxes = ref(true)
 /** 显示播放器事件列表 */
 const showPlaybackEventList = ref(false)
+/** 是否显示回放轨迹 */
+const showPlaybackTrail = ref(true)
+/** 回放轨迹线（每个 trackId 的历史中心点路径） */
+const playbackTrails = ref<Array<{ trackId: number; label: string; points: Array<{ x: number; y: number }> }>>([])
+/** 轨迹线颜色池 */
+const TRAIL_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#F4A460', '#87CEEB', '#98D8C8', '#F7DC6F']
 
 /** 播放录像时加载检测事件 */
 async function loadPlaybackDetections(rec: Recording) {
@@ -240,10 +246,11 @@ async function loadPlaybackDetections(rec: Recording) {
   }
 }
 
-/** 根据 currentAbsTime 更新当前检测框 */
+/** 根据 currentAbsTime 更新当前检测框和轨迹 */
 function updatePlaybackDetections() {
   if (!showPlaybackBoxes.value || playbackEvents.value.length === 0) {
     playbackDetections.value = []
+    playbackTrails.value = []
     return
   }
   const t = currentAbsTime.value
@@ -263,6 +270,48 @@ function updatePlaybackDetections() {
   } else {
     playbackDetections.value = []
   }
+
+  /** 计算轨迹：从当前帧往前回溯，收集每个 trackId 的历史中心点 */
+  if (!showPlaybackTrail.value || best < 0) {
+    playbackTrails.value = []
+    return
+  }
+  /** 收集当前帧中活跃的 trackId */
+  const activeTracks = new Map<number, string>()
+  for (const d of playbackDetections.value) {
+    if (d.trackId != null) activeTracks.set(d.trackId, d.label)
+  }
+  if (activeTracks.size === 0) {
+    playbackTrails.value = []
+    return
+  }
+  /** 回溯最近 5 秒的事件，构建轨迹 */
+  const trailWindow = 5000
+  const trailStart = t - trailWindow
+  const trailMap = new Map<number, Array<{ x: number; y: number }>>()
+  for (let i = 0; i <= best; i++) {
+    const evt = playbackEvents.value[i]!
+    if (evt.timestamp < trailStart) continue
+    for (const d of evt.detections) {
+      if (d.trackId == null || !activeTracks.has(d.trackId)) continue
+      const cx = (d.box.xmin + d.box.xmax) / 2
+      const cy = (d.box.ymin + d.box.ymax) / 2
+      let trail = trailMap.get(d.trackId)
+      if (!trail) {
+        trail = []
+        trailMap.set(d.trackId, trail)
+      }
+      trail.push({ x: cx, y: cy })
+    }
+  }
+  /** 转换为 playbackTrails 数组 */
+  const trails: Array<{ trackId: number; label: string; points: Array<{ x: number; y: number }> }> = []
+  for (const [trackId, points] of trailMap) {
+    if (points.length >= 2) {
+      trails.push({ trackId, label: activeTracks.get(trackId) ?? '', points })
+    }
+  }
+  playbackTrails.value = trails
 }
 
 /** 获取回放检测框标签（含自定义名称） */
@@ -1385,6 +1434,7 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
           <button :class="['detect-toggle-btn', { active: showPlaybackBoxes }]" @click="showPlaybackBoxes = !showPlaybackBoxes" :title="t('recording.toggleDetect')">&#x1F50D;</button>
+          <button v-if="showPlaybackBoxes && playbackEvents.length > 0" :class="['trail-toggle-btn', { active: showPlaybackTrail }]" @click="showPlaybackTrail = !showPlaybackTrail" title="Trail">&#x2728;</button>
           <button v-if="playbackEvents.length > 0" :class="['event-list-btn', { active: showPlaybackEventList }]" @click="showPlaybackEventList = !showPlaybackEventList" :title="t('recording.toggleDetect')">&#x2630; {{ playbackEvents.length }}</button>
           <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
           <button :class="['pip-toggle-btn', { active: showPip }]" @click="togglePip" :title="t('recording.pip', '画中画')">&#x1F4FA;</button>
@@ -1421,6 +1471,20 @@ defineExpose({ loadRecordings, playAtTime })
           />
           <!-- 回放检测框叠加 -->
           <div v-if="showPlaybackBoxes" class="playback-detection-overlay">
+            <!-- 轨迹 SVG 层 -->
+            <svg v-if="showPlaybackTrail && playbackTrails.length > 0" class="playback-trail-svg" viewBox="0 0 1 1" preserveAspectRatio="none">
+              <polyline
+                v-for="(trail, ti) in playbackTrails"
+                :key="trail.trackId"
+                :points="trail.points.map(p => `${p.x},${p.y}`).join(' ')"
+                fill="none"
+                :stroke="TRAIL_COLORS[ti % TRAIL_COLORS.length]"
+                stroke-width="0.003"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                opacity="0.7"
+              />
+            </svg>
             <div
               v-for="d in playbackDetections"
               :key="d.trackId ?? `${d.label}-${Math.round(d.box.xmin * 100)}`"
@@ -2440,6 +2504,36 @@ defineExpose({ loadRecordings, playAtTime })
 .detect-toggle-btn.active {
   color: #5bc0de;
   background: #5bc0de30;
+}
+
+/* 轨迹切换按钮 */
+.trail-toggle-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.trail-toggle-btn.active {
+  color: #FFEAA7;
+  background: #FFEAA720;
+}
+
+.trail-toggle-btn:hover {
+  color: #FFEAA7;
+}
+
+/* 回放轨迹 SVG 层 */
+.playback-trail-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* 自定义控制栏 */
