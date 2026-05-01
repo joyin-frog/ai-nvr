@@ -51,6 +51,8 @@ const filterLabel = ref('')
 const filterCamera = ref('')
 /** 仅显示未命名 */
 const filterUnnamed = ref(false)
+/** 仅显示活跃目标 */
+const filterActive = ref(false)
 /** 主色调筛选 */
 const filterColor = ref('')
 /** 名称/标签搜索 */
@@ -271,6 +273,7 @@ const filteredTracks = computed(() => {
   if (filterCamera.value) list = list.filter(t => t.cameraIds.includes(filterCamera.value))
   if (filterColor.value) list = list.filter(t => t.dominantColor === filterColor.value)
   if (filterUnnamed.value) list = list.filter(t => !t.customName)
+  if (filterActive.value) list = list.filter(t => isTrackActive(t))
   if (searchText.value) {
     const q = searchText.value.toLowerCase()
     list = list.filter(t =>
@@ -284,6 +287,12 @@ const filteredTracks = computed(() => {
 
 /** 未命名的目标数量 */
 const unnamedCount = computed(() => tracks.value.filter(t => !t.customName).length)
+
+/** 活跃目标数量 */
+const activeCount = computed(() => {
+  void viewTick.value
+  return tracks.value.filter(t => Date.now() - t.lastSeen < 30000).length
+})
 
 /** 有匹配建议的未命名目标数量 */
 const suggestableCount = computed(() => tracks.value.filter(t => !t.customName && suggestions.value.has(t.trackId)).length)
@@ -365,6 +374,15 @@ onUnmounted(() => {
           @click="filterColor = filterColor === color ? '' : color"
         ></button>
       </div>
+      <button
+        v-if="activeCount > 0"
+        class="active-filter-btn"
+        :class="{ active: filterActive }"
+        @click="filterActive = !filterActive"
+        :title="t('tracks.filterActive', '仅显示活跃目标')"
+      >
+        ● {{ activeCount }} {{ t('tracks.active', '活跃') }}
+      </button>
       <button
         v-if="unnamedCount > 0"
         class="unnamed-filter-btn"
@@ -625,6 +643,24 @@ onUnmounted(() => {
 }
 
 .unnamed-filter-btn:hover { background: #FFC10720; }
+
+.active-filter-btn {
+  background: #2a2a4a;
+  color: #4CAF50;
+  border: 1px solid #4CAF5040;
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.active-filter-btn.active {
+  background: #4CAF5020;
+  border-color: #4CAF50;
+}
+
+.active-filter-btn:hover { background: #4CAF5020; }
 
 .suggest-all-btn {
   background: rgba(156, 39, 176, 0.2);
