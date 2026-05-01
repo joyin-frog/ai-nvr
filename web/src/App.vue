@@ -581,13 +581,13 @@ const soundEvents = ref<string[]>([])
 
 /** 所有可配置的声音事件类型 */
 const SOUND_EVENT_OPTIONS = [
-  { key: 'camera:offline', label: '摄像头离线' },
-  { key: 'camera:lowfps', label: '低帧率' },
-  { key: 'alert', label: '告警' },
-  { key: 'detect', label: 'AI 检测' },
-  { key: 'track:appeared', label: '目标出现' },
-  { key: 'track:speed', label: '高速移动' },
-  { key: 'motion', label: '画面变动' },
+  { key: 'camera:offline', labelKey: 'settings.soundEventCameraOffline' },
+  { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
+  { key: 'alert', labelKey: 'settings.soundEventAlert' },
+  { key: 'detect', labelKey: 'settings.soundEventDetect' },
+  { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
+  { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
+  { key: 'motion', labelKey: 'settings.soundEventMotion' },
 ] as const
 
 /** 从后端恢复声音配置 */

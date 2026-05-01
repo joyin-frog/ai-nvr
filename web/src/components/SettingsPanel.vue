@@ -21,14 +21,14 @@ function saveBackendUrl() {
 
 /** 预设 AI 模型列表 */
 const PRESET_MODELS = [
-  { id: 'onnx-community/yolo26m-ONNX', name: 'YOLO26m (推荐)', desc: '中等体量，速度/精度平衡' },
-  { id: 'onnx-community/yolo26l-ONNX', name: 'YOLO26l', desc: '大体量，精度更高' },
-  { id: 'onnx-community/yolo26x-ONNX', name: 'YOLO26x', desc: '超大体量，最高精度' },
-  { id: 'onnx-community/yolo26s-ONNX', name: 'YOLO26s', desc: '小体量，推理更快' },
-  { id: 'onnx-community/yolo26n-ONNX', name: 'YOLO26n', desc: '最小体量，速度最快' },
-  { id: 'Xenova/yolos-small', name: 'YOLOS-small', desc: 'DETR架构，较老模型' },
-  { id: 'Xenova/yolos-tiny', name: 'YOLOS-tiny', desc: 'DETR架构，极小模型' },
-  { id: 'Xenova/detr-resnet-50', name: 'DETR-R50', desc: '经典DETR模型' },
+  { id: 'onnx-community/yolo26m-ONNX', name: 'YOLO26m', descKey: 'settings.modelDescYolo26m' },
+  { id: 'onnx-community/yolo26l-ONNX', name: 'YOLO26l', descKey: 'settings.modelDescYolo26l' },
+  { id: 'onnx-community/yolo26x-ONNX', name: 'YOLO26x', descKey: 'settings.modelDescYolo26x' },
+  { id: 'onnx-community/yolo26s-ONNX', name: 'YOLO26s', descKey: 'settings.modelDescYolo26s' },
+  { id: 'onnx-community/yolo26n-ONNX', name: 'YOLO26n', descKey: 'settings.modelDescYolo26n' },
+  { id: 'Xenova/yolos-small', name: 'YOLOS-small', descKey: 'settings.modelDescYolosSmall' },
+  { id: 'Xenova/yolos-tiny', name: 'YOLOS-tiny', descKey: 'settings.modelDescYolosTiny' },
+  { id: 'Xenova/detr-resnet-50', name: 'DETR-R50', descKey: 'settings.modelDescDetrR50' },
 ]
 
 /** 声音提醒设置 */
@@ -39,13 +39,13 @@ const soundEvents = ref<string[]>([])
 
 /** 所有可配置的声音事件类型 */
 const SOUND_EVENT_OPTIONS = [
-  { key: 'camera:offline', label: '摄像头离线' },
-  { key: 'camera:lowfps', label: '低帧率' },
-  { key: 'alert', label: '告警' },
-  { key: 'detect', label: 'AI 检测' },
-  { key: 'track:appeared', label: '目标出现' },
-  { key: 'track:speed', label: '高速移动' },
-  { key: 'motion', label: '画面变动' },
+  { key: 'camera:offline', labelKey: 'settings.soundEventCameraOffline' },
+  { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
+  { key: 'alert', labelKey: 'settings.soundEventAlert' },
+  { key: 'detect', labelKey: 'settings.soundEventDetect' },
+  { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
+  { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
+  { key: 'motion', labelKey: 'settings.soundEventMotion' },
 ] as const
 
 getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
@@ -383,7 +383,7 @@ onMounted(() => {
               :key="m.id"
               :class="['preset-btn', { active: settings.ai.model === m.id }]"
               @click="settings.ai.model = m.id"
-              :title="m.desc"
+              :title="t(m.descKey)"
             >{{ m.name }}</button>
           </div>
           <div class="model-row">
@@ -642,7 +642,7 @@ onMounted(() => {
               :key="opt.key"
               :class="['event-chip', { active: soundEvents.includes(opt.key) }]"
               @click="toggleSoundEvent(opt.key)"
-            >{{ opt.label }}</button>
+            >{{ t(opt.labelKey) }}</button>
           </div>
         </div>
       </section>
