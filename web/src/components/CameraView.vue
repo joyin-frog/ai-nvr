@@ -599,8 +599,9 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   const sorted = getSortedDetections()
   if (sorted.length === 0) return
 
-  /** 动画脉冲因子（用于未命名目标边框闪烁） */
-  const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 500)
+  /** 动画脉冲因子（用于未命名目标边框闪烁），减少动画模式下不闪烁 */
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const pulse = reduceMotion ? 0.8 : 0.5 + 0.5 * Math.sin(Date.now() / 500)
 
   ctx.save()
   ctx.font = 'bold 12px monospace'
