@@ -89,6 +89,14 @@ export class TrackLabelStorage {
     return (stmt.all(cameraId) as Record<string, unknown>[]).map(r => this.mapRow(r));
   }
 
+  /** 获取所有标签（按摄像头分组） */
+  listAll(): TrackLabel[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM track_labels ORDER BY last_seen_at DESC"
+    );
+    return (stmt.all() as Record<string, unknown>[]).map(r => this.mapRow(r));
+  }
+
   /** 获取某摄像头某类别的所有标签（如所有 person） */
   listByLabel(cameraId: string, label: string): TrackLabel[] {
     const stmt = this.db.prepare(

@@ -503,24 +503,22 @@ async function loadShowBoxes() {
   }
 }
 
-/** 加载所有摄像头的追踪标签（合并 TrackLabelStorage + TrackStorage customName） */
+/** 加载所有摄像头的追踪标签（批量请求替代 N+1 串行） */
 async function loadTrackLabels() {
   const map: Record<string, Record<number, string>> = {}
-  /** 1) TrackLabelStorage 手动标签 */
-  for (const cam of cameras.value) {
-    try {
-      const res = await authFetch(`/api/track-labels?cameraId=${cam.id}`)
-      if (res.ok) {
-        const labels = await res.json() as Array<{ trackId: number; name: string }>
-        const entries: Record<number, string> = {}
-        for (const l of labels) {
-          if (l.name) entries[l.trackId] = l.name
-        }
-        if (Object.keys(entries).length > 0) map[cam.id] = entries
+  /** 批量加载所有 TrackLabel 标签（单次请求） */
+  try {
+    const res = await authFetch('/api/track-labels')
+    if (res.ok) {
+      const labels = await res.json() as Array<{ cameraId: string; trackId: number; name: string }>
+      for (const l of labels) {
+        if (!l.name) continue
+        if (!map[l.cameraId]) map[l.cameraId] = {}
+        map[l.cameraId][l.trackId] = l.name
       }
-    } catch { /* non-critical */ }
-  }
-  /** 2) TrackStorage 自动快照目标的 customName */
+    }
+  } catch { /* non-critical */ }
+  /** TrackStorage 自动快照目标的 customName */
   try {
     const res = await authFetch('/api/tracks')
     if (res.ok) {
