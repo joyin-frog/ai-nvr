@@ -541,11 +541,12 @@ function setupEventListeners() {
     detectionsMap.value = { ...detectionsMap.value }
     detectVersions.value[payload.cameraId] = (detectVersions.value[payload.cameraId] ?? 0) + 1
     detectVersions.value = { ...detectVersions.value }
-    const frame = frameImages.value[payload.cameraId]
-    if (frame) {
+    /** 优先使用 WS 推送的标注图，回退到实时帧 */
+    const annotatedOrFrame = payload.annotatedData ?? frameImages.value[payload.cameraId]
+    if (annotatedOrFrame) {
       const oldSnap = detectSnapshots.value[payload.cameraId]
       if (oldSnap) URL.revokeObjectURL(oldSnap)
-      detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([frame], { type: 'image/jpeg' }))
+      detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([annotatedOrFrame], { type: 'image/jpeg' }))
       detectSnapshots.value = { ...detectSnapshots.value }
     }
     const labels = payload.detections.map((d) => d.label).join(', ')

@@ -790,10 +790,13 @@ export function startServer(
         });
       }
 
-      /** WebSocket 升级 */
+      /** WebSocket 升级（需要认证） */
       if (req.headers.get("upgrade") === "websocket") {
         const url = new URL(req.url);
         if (url.pathname === "/api/events") {
+          if (authConfig.token && !checkAuth(authConfig, req)) {
+            return new Response("Unauthorized", { status: 401 });
+          }
           server.upgrade(req);
           return;
         }
@@ -832,6 +835,9 @@ export function startServer(
         header.data = undefined;
       }
       if (event === "detect") {
+        /** 检测事件：将标注图作为二进制帧推送，头中只保留 detections */
+        const detectPayload = payload as { annotatedImage: Buffer };
+        frameData = detectPayload.annotatedImage ?? null;
         header.annotatedImage = undefined;
       }
 
