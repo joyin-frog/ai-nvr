@@ -109,6 +109,8 @@ interface RuntimeSettings {
     motionCooldown?: number
     detectFps?: number
     inputWidth?: number
+    aiThreshold?: number
+    aiInterval?: number
   }>
   webhook: {
     urls: string[]
@@ -254,7 +256,7 @@ async function loadCameras() {
 }
 
 /** 设置摄像头级别覆盖参数 */
-function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps', rawValue: string) {
+function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps' | 'aiThreshold' | 'aiInterval', rawValue: string) {
   if (!settings.value) return
   if (!settings.value.cameraOverrides[cameraId]) {
     settings.value.cameraOverrides[cameraId] = {}
@@ -366,6 +368,14 @@ onMounted(() => {
             <label class="field compact">
               <span class="field-label small">{{ t('settings.inputWidth') }}</span>
               <input type="number" :value="settings.cameraOverrides[cam.id]?.inputWidth ?? ''" @input="setCameraOverride(cam.id, 'inputWidth', ($event.target as HTMLInputElement).value)" step="64" min="0" max="3840" class="input small" :placeholder="String(settings.ai.inputWidth)" />
+            </label>
+            <label class="field compact">
+              <span class="field-label small">{{ t('settings.aiThreshold') }}</span>
+              <input type="number" :value="settings.cameraOverrides[cam.id]?.aiThreshold ?? ''" @input="setCameraOverride(cam.id, 'aiThreshold', ($event.target as HTMLInputElement).value)" step="0.05" min="0" max="1" class="input small" :placeholder="String(settings.ai.threshold)" />
+            </label>
+            <label class="field compact">
+              <span class="field-label small">{{ t('settings.aiInterval') }}</span>
+              <input type="number" :value="settings.cameraOverrides[cam.id]?.aiInterval ?? ''" @input="setCameraOverride(cam.id, 'aiInterval', ($event.target as HTMLInputElement).value)" step="100" min="200" max="60000" class="input small" :placeholder="String(settings.ai.interval)" />
             </label>
           </div>
         </div>

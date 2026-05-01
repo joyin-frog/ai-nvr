@@ -219,7 +219,7 @@ export class AiDetector {
           jpeg,
           timestamp,
           inputWidth: this.runtimeConfig.getAiInputWidth(cameraId),
-          threshold: aiConfig.threshold,
+          threshold: this.runtimeConfig.getAiThreshold(cameraId),
           maxDetections: aiConfig.maxDetections,
         },
       });

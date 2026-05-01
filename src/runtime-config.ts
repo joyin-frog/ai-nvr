@@ -11,6 +11,10 @@ export interface CameraOverride {
   detectFps?: number;
   /** AI 推理分辨率覆盖（0=使用全局配置） */
   inputWidth?: number;
+  /** AI 置信度阈值覆盖（0-1） */
+  aiThreshold?: number;
+  /** AI 连续检测间隔覆盖（ms） */
+  aiInterval?: number;
 }
 
 /** Webhook 通知配置 */
@@ -318,6 +322,20 @@ export class RuntimeConfig {
     const override = this.settings.cameraOverrides[cameraId];
     if (override?.inputWidth) return override.inputWidth;
     return this.settings.ai.inputWidth;
+  }
+
+  /** 获取某个摄像头的有效 AI 置信度阈值（考虑覆盖） */
+  getAiThreshold(cameraId: string): number {
+    const override = this.settings.cameraOverrides[cameraId];
+    if (override?.aiThreshold !== undefined) return override.aiThreshold;
+    return this.settings.ai.threshold;
+  }
+
+  /** 获取某个摄像头的有效 AI 检测间隔（考虑覆盖） */
+  getAiInterval(cameraId: string): number {
+    const override = this.settings.cameraOverrides[cameraId];
+    if (override?.aiInterval !== undefined) return override.aiInterval;
+    return this.settings.ai.interval;
   }
 
   /** 重置某个摄像头的覆盖 */
