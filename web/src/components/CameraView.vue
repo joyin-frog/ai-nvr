@@ -144,10 +144,6 @@ function drawOverlayOnce() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
 
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.clearRect(0, 0, w, h)
-
   /** poll 检测结果 */
   const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
   if (detectResult) {
@@ -863,7 +859,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   for (const s of suggestions) {
     if (s.matches.length > 0) {
       const best = s.matches[0]!
-      const pct = ((64 - best.distance) / 64 * 100).toFixed(0)
+      const pct = ((1 - best.distance) * 100).toFixed(0)
       suggestMap.set(s.trackId, `${best.customName} ${pct}%`)
     }
   }
