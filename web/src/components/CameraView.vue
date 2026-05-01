@@ -280,7 +280,7 @@ function getColor(label: string, trackId?: number): { stroke: string; fill: stri
   return { stroke: hex, fill: hex + '1F' }
 }
 
-/** Canvas overlay 绘制 OSD（摄像头名称 + 时钟） */
+/** Canvas overlay 绘制 OSD（摄像头名称 + 时钟 + FPS/延迟/AI指标） */
 function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
   ctx.save()
 
@@ -308,6 +308,51 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
     ctx.fillRect(4, y - 18, tm.width + pad * 2, 18)
     ctx.fillStyle = '#fff'
     ctx.fillText(clockText.value, 4 + pad, y - 4)
+  }
+
+  /** 右下角：FPS + 延迟 + AI耗时 + 分辨率 指标栏 */
+  const stats: Array<{ text: string; color: string }> = []
+  const fps = props.fps ?? 0
+  if (fps > 0) {
+    const fpsColor = fps >= 10 ? '#4CAF50' : fps >= 5 ? '#FFC107' : '#F44336'
+    stats.push({ text: `${fps.toFixed(0)}fps`, color: fpsColor })
+  }
+  const latency = props.latency ?? 0
+  if (latency > 0) {
+    const latColor = latency <= 200 ? '#4CAF50' : latency <= 500 ? '#FFC107' : '#F44336'
+    const latText = latency < 1000 ? `${latency.toFixed(0)}ms` : `${(latency / 1000).toFixed(1)}s`
+    stats.push({ text: latText, color: latColor })
+  }
+  if (localInferMs.value > 0) {
+    stats.push({ text: `AI ${localInferMs.value.toFixed(0)}ms`, color: '#9C27B0' })
+  }
+  const w = frameSize.value.width
+  const h = frameSize.value.height
+  if (w > 0 && h > 0) {
+    stats.push({ text: `${w}x${h}`, color: '#888' })
+  }
+
+  if (stats.length > 0) {
+    ctx.font = '10px monospace'
+    ctx.textBaseline = 'bottom'
+    const pad = 4
+    let totalWidth = 0
+    for (const s of stats) {
+      totalWidth += ctx.measureText(s.text).width + pad * 2 + 4
+    }
+    totalWidth -= 4
+    const boxX = width - totalWidth - 4
+    const boxY = height - 4
+
+    let x = boxX
+    for (const s of stats) {
+      const tw = ctx.measureText(s.text).width + pad * 2
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(x, boxY - 16, tw, 16)
+      ctx.fillStyle = s.color
+      ctx.fillText(s.text, x + pad, boxY - 3)
+      x += tw + 4
+    }
   }
 
   ctx.restore()
@@ -682,8 +727,8 @@ onUnmounted(() => {
       <span v-if="recording" class="rec-indicator" :title="`REC ${recordingDuration}`">
         <span class="rec-dot" />{{ recordingDuration }}
       </span>
-      <span v-if="showBoxes && online && detections.length > 0" class="detection-count">
-        {{ detections.length }}
+      <span v-if="showBoxes && online && detectCount > 0" class="detection-count">
+        {{ detectCount }}
       </span>
       <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
