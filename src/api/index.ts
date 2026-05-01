@@ -107,6 +107,7 @@ export function startServer(
             "PATCH /api/settings",
             "GET /api/events/history?type=&cameraId=&since=&until=&limit=&offset=",
             "GET /api/recordings?cameraId=",
+            "GET /api/recordings/search?label=",
             "GET /api/recordings/:cameraId/:filename",
             "GET /api/detection/annotated/:cameraId",
             "WS  /api/events",
@@ -412,6 +413,46 @@ export function startServer(
         const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
         const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
         return Response.json(recorder.listRecordings(cameraId, since, until));
+      }
+
+      /** 录像智能搜索：按 AI 检测标签查找包含特定目标的录像 */
+      if (url.pathname === "/api/recordings/search" && req.method === "GET") {
+        const label = url.searchParams.get("label") ?? "";
+        const cameraId = url.searchParams.get("cameraId") ?? undefined;
+        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
+        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        if (!label) return Response.json({ error: "label is required" }, { status: 400 });
+
+        /** 搜索 detect 事件的 detail 中包含该 label 的记录 */
+        const events = eventStorage.query({
+          type: "detect",
+          cameraId,
+          since,
+          until,
+          search: `"label":"${label}"`,
+          limit: 500,
+        });
+
+        /** 按 cameraId + timestamp 映射到录像文件 */
+        const matchedCameraIds = new Set(events.map(e => e.camera_id));
+        const result: Array<{ filename: string; cameraId: string; startTime: number; endTime: number; size: number; matchCount: number }> = [];
+        for (const camId of matchedCameraIds) {
+          const timestamps = events.filter(e => e.camera_id === camId).map(e => e.timestamp);
+          const minTs = Math.min(...timestamps);
+          const maxTs = Math.max(...timestamps);
+          /** 查找覆盖这个时间范围的录像 */
+          const recs = recorder.listRecordings(camId, since ?? minTs - 60000, until ?? maxTs + 60000);
+          for (const rec of recs) {
+            const matchEvents = events.filter(e =>
+              e.camera_id === rec.cameraId && e.timestamp >= rec.startTime && e.timestamp <= rec.endTime
+            );
+            if (matchEvents.length > 0) {
+              result.push({ ...rec, matchCount: matchEvents.length });
+            }
+          }
+        }
+        result.sort((a, b) => b.startTime - a.startTime);
+        return Response.json(result);
       }
 
       /** 录像文件播放 */

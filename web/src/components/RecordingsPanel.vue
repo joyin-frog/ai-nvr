@@ -29,6 +29,9 @@ const filterCamera = ref(localStorage.getItem('nvr-rec-filter-camera') ?? '')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
 const loading = ref(false)
+/** AI 目标搜索关键词 */
+const searchLabel = ref('')
+const isSearching = ref(false)
 
 /** 录像列表定时刷新定时器 */
 let refreshTimer: ReturnType<typeof setInterval> | null = null
@@ -503,7 +506,40 @@ function setSortMode(mode: SortMode) {
 }
 
 /** 按日期和收藏过滤后的录像列表 */
+/** 搜索结果（有值时替代 filteredRecordings） */
+const searchResults = ref<Array<Recording & { matchCount?: number }> | null>(null)
+
+/** 执行 AI 目标搜索 */
+async function searchByLabel() {
+  const label = searchLabel.value.trim()
+  if (!label) {
+    searchResults.value = null
+    return
+  }
+  isSearching.value = true
+  const params = new URLSearchParams({ label })
+  if (filterCamera.value) params.set('cameraId', filterCamera.value)
+  if (filterDate.value) {
+    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+    params.set('since', String(since))
+    params.set('until', String(since + 86_400_000))
+  }
+  const res = await authFetch(`/api/recordings/search?${params}`)
+  if (res.ok) {
+    searchResults.value = await res.json()
+  }
+  isSearching.value = false
+}
+
+/** 清除搜索 */
+function clearSearch() {
+  searchLabel.value = ''
+  searchResults.value = null
+}
+
 const filteredRecordings = computed(() => {
+  /** 搜索模式下直接返回搜索结果 */
+  if (searchResults.value) return searchResults.value
   let list = recordings.value
   if (filterStarred.value) {
     list = list.filter(r => starredFiles.value.has(r.filename))
@@ -1239,6 +1275,11 @@ defineExpose({ loadRecordings, playAtTime })
         <input v-model="searchTimeInput" :placeholder="t('recording.searchTime')" class="time-search-input" @keydown.enter="jumpToTime" />
         <button class="time-search-btn" @click="jumpToTime" :title="t('recording.jumpToTime')">&#x2315;</button>
       </div>
+      <div class="ai-search">
+        <input v-model="searchLabel" :placeholder="t('recording.searchLabel', '搜索目标...')" class="ai-search-input" @keydown.enter="searchByLabel" />
+        <button v-if="searchLabel" class="ai-search-clear" @click="clearSearch" title="清除">✕</button>
+        <button class="ai-search-btn" @click="searchByLabel" :disabled="isSearching || !searchLabel.trim()" :title="t('recording.searchLabel', '搜索目标')">&#x1F50D;</button>
+      </div>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
       <button class="sort-btn" @click="setSortMode(sortMode === 'newest' ? 'oldest' : sortMode === 'oldest' ? 'largest' : 'newest')" :title="sortMode === 'newest' ? '↓ Newest' : sortMode === 'oldest' ? '↑ Oldest' : '◎ Size'">
         {{ sortMode === 'newest' ? '↓' : sortMode === 'oldest' ? '↑' : '◎' }}
@@ -1247,6 +1288,12 @@ defineExpose({ loadRecordings, playAtTime })
       <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred" :title="t('recording.filterStarred')">
         {{ filterStarred ? '★' : '☆' }}
       </button>
+    </div>
+
+    <!-- 搜索结果指示 -->
+    <div v-if="searchResults" class="search-indicator">
+      {{ t('recording.searchResult', '搜索结果') }}: "{{ searchLabel }}" — {{ searchResults.length }} {{ t('recording.segments', '段') }}
+      <button class="search-clear-btn" @click="clearSearch">{{ t('manage.cancel') }}</button>
     </div>
 
     <!-- 时间轴视图切换 -->
@@ -1309,6 +1356,9 @@ defineExpose({ loadRecordings, playAtTime })
           </span>
           <span v-if="recordingEventCounts.get(rec.filename)" class="rec-event-count" :title="recordingEventCounts.get(rec.filename) + ' detections'">
             AI {{ recordingEventCounts.get(rec.filename) }}
+          </span>
+          <span v-if="(rec as any).matchCount" class="rec-match-count" :title="'匹配 ' + (rec as any).matchCount + ' 次'">
+            ⚡{{ (rec as any).matchCount }}
           </span>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>
           <button :class="['rec-star', { starred: starredFiles.has(rec.filename) }]" @click.stop="toggleRecStar(rec.filename)" :title="t('recording.toggleStar')">
@@ -1679,6 +1729,83 @@ defineExpose({ loadRecordings, playAtTime })
   border-radius: 3px;
   margin-top: 2px;
 }
+
+.rec-match-count {
+  display: inline-block;
+  font-size: 10px;
+  color: #FFD93D;
+  background: #FFD93D20;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-top: 2px;
+}
+
+.ai-search {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.ai-search-input {
+  background: #0a0a1a;
+  border: 1px solid #2a2a4a;
+  color: #e0e0e0;
+  border-radius: 3px 0 0 3px;
+  padding: 2px 20px 2px 6px;
+  font-size: 11px;
+  width: 100px;
+  outline: none;
+}
+
+.ai-search-input:focus { border-color: #FFD93D; }
+
+.ai-search-clear {
+  position: absolute;
+  right: 28px;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 2px;
+}
+
+.ai-search-btn {
+  background: #2a2a4a;
+  color: #FFD93D;
+  border: 1px solid #2a2a4a;
+  border-left: none;
+  border-radius: 0 3px 3px 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ai-search-btn:hover { background: #3a3a5a; }
+.ai-search-btn:disabled { opacity: 0.5; }
+
+.search-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: #FFD93D15;
+  color: #FFD93D;
+  font-size: 11px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.search-clear-btn {
+  background: none;
+  border: 1px solid #FFD93D;
+  color: #FFD93D;
+  border-radius: 3px;
+  padding: 0 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.search-clear-btn:hover { background: #FFD93D20; }
 
 .rec-delete {
   background: none;

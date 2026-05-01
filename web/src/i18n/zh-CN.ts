@@ -123,6 +123,8 @@ export default {
     starSelected: '收藏选中',
     searchTime: '搜索时间',
     jumpToTime: '跳转',
+    searchLabel: '搜索目标...',
+    searchResult: '搜索结果',
     helpPlayPause: '播放/暂停',
     helpSeek: '快退/快进 5 秒',
     helpFrame: '逐帧步进',
