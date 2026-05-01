@@ -309,3 +309,4 @@ RTSP → ffmpeg(-fflags nobuffer) → JpegFrameSplitter → EventBus("frame")
 - AI 推理分辨率默认值：inputWidth 从 0（原始分辨率）改为 640，1080p/4K 摄像头推理速度大幅提升
 - AI 推理跳过 JPEG 重编码：detect-worker 中 sharp resize 后直接输出 RGB 像素给 RawImage，省约 15-25ms JPEG 编解码开销
 - 右键命名坐标修复：onCanvasContext 使用平滑后的检测框坐标匹配点击位置
+- 语义化行为分析（BehaviorAnalyzer）：订阅 detect 事件，维护追踪目标与 ROI 区域的关系，产出 track:enter-zone（进入区域）、track:leave-zone（离开区域，含 dwellMs）、track:dwell（停留超 3 秒后每 5 秒触发），射线法判断多边形包含，告警引擎支持新事件类型含 ROI 过滤，前端事件面板/告警面板完整支持
