@@ -37,6 +37,9 @@ export class AlertEngine {
     this.eventBus.on("camera:offline", (payload) => {
       this.onEvent("camera:offline", payload.cameraId, Date.now());
     });
+    this.eventBus.on("camera:lowfps", (payload) => {
+      this.onEvent("camera:lowfps", payload.cameraId, Date.now(), `FPS: ${payload.fps}`);
+    });
     console.log("[AlertEngine] 告警引擎已启动");
   }
 
@@ -48,14 +51,15 @@ export class AlertEngine {
     this.rulesCacheTime = now;
   }
 
-  /** 处理通用事件（motion / camera:offline） */
-  private onEvent(eventType: string, cameraId: string, timestamp: number, extra?: number): void {
+  /** 处理通用事件（motion / camera:offline / camera:lowfps） */
+  private onEvent(eventType: string, cameraId: string, timestamp: number, extra?: string | number): void {
     this.refreshRules();
 
     for (const rule of this.rules) {
       if (rule.eventType !== eventType) continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
-      this.checkRule(rule, cameraId, timestamp, extra !== undefined ? JSON.stringify({ ratio: extra }) : undefined);
+      const detail = typeof extra === 'string' ? extra : extra !== undefined ? JSON.stringify({ ratio: extra }) : undefined;
+      this.checkRule(rule, cameraId, timestamp, detail);
     }
   }
 

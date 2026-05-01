@@ -571,6 +571,12 @@ function setupEventListeners() {
     flashTitle(t('notify.cameraOffline', { name: cam?.name ?? payload.cameraId }), 10000)
   })
 
+  client.on('camera:lowfps', (payload) => {
+    const cam = cameras.value.find(c => c.id === payload.cameraId)
+    eventPanel.value?.addEvent('camera:lowfps', payload.cameraId, `FPS: ${payload.fps.toFixed(1)}`)
+    notify(t('notify.cameraLowFps', { name: cam?.name ?? payload.cameraId }), `FPS: ${payload.fps.toFixed(1)}`, payload.cameraId)
+  })
+
   client.on('alert', (payload) => {
     eventPanel.value?.addEvent('alert', payload.cameraId, `${t('notify.alertPrefix')}: ${payload.ruleName}`)
     alertPanel.value?.addAlert(payload)

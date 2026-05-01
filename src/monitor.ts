@@ -62,8 +62,21 @@ export class SystemMonitor {
   private cameraLastFrame = new Map<string, number>();
   /** FPS 统计窗口（秒） */
   private fpsWindow = 5;
+  /** 低帧率检测：每个摄像头连续低 FPS 的检查周期数 */
+  private lowFpsStreaks = new Map<string, number>();
+  /** 低帧率阈值（FPS） */
+  private static readonly LOW_FPS_THRESHOLD = 3;
+  /** 连续低帧率检查次数达到此值时触发事件 */
+  private static readonly LOW_FPS_TRIGGER_COUNT = 3;
+  /** 低帧率检查间隔（秒） */
+  private static readonly LOW_FPS_CHECK_INTERVAL = 10;
+  /** 低帧率检查定时器 */
+  private lowFpsTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(eventBus: EventBus) {
+  constructor(
+    private eventBus: EventBus,
+  ) {
+    void this.lowFpsTimer;
     /** 帧事件 → 更新 FPS 和在线状态 */
     eventBus.on("frame", ({ cameraId, timestamp }) => {
       this.cameraOnline.set(cameraId, true);
@@ -107,7 +120,36 @@ export class SystemMonitor {
     });
     eventBus.on("camera:offline", ({ cameraId }) => {
       this.cameraOnline.set(cameraId, false);
+      this.lowFpsStreaks.delete(cameraId);
     });
+
+    /** 低帧率检查定时器 */
+    this.lowFpsTimer = setInterval(() => this.checkLowFps(), SystemMonitor.LOW_FPS_CHECK_INTERVAL * 1000);
+  }
+
+  /** 检查所有在线摄像头的帧率，连续低帧率时发出事件 */
+  private checkLowFps(): void {
+    for (const [cameraId, online] of this.cameraOnline) {
+      if (!online) {
+        this.lowFpsStreaks.delete(cameraId);
+        continue;
+      }
+      const counter = this.fpsCounters.get(cameraId);
+      /** 没有帧计数器或窗口内无数据则跳过 */
+      if (!counter || counter.frames === 0) continue;
+
+      const streak = this.lowFpsStreaks.get(cameraId) ?? 0;
+      if (counter.fps < SystemMonitor.LOW_FPS_THRESHOLD) {
+        this.lowFpsStreaks.set(cameraId, streak + 1);
+        if (streak + 1 >= SystemMonitor.LOW_FPS_TRIGGER_COUNT) {
+          this.eventBus.emit("camera:lowfps", { cameraId, fps: counter.fps });
+          /** 触发后重置，避免重复 */
+          this.lowFpsStreaks.set(cameraId, 0);
+        }
+      } else {
+        this.lowFpsStreaks.set(cameraId, 0);
+      }
+    }
   }
 
   /** 获取系统指标 */

@@ -46,6 +46,13 @@ export interface EventPayloads {
     cameraId: string;
   };
 
+  /** 摄像头帧率不足（低于阈值） */
+  "camera:lowfps": {
+    cameraId: string;
+    /** 当前帧率 */
+    fps: number;
+  };
+
   /** 告警触发：规则匹配时产生 */
   alert: {
     /** 触发的规则 ID */

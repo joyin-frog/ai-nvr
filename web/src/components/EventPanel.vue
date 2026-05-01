@@ -143,6 +143,7 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   detect: { labelKey: 'event.detect', bg: '#4ECDC4', color: '#333' },
   'camera:online': { labelKey: 'event.online', bg: '#4CAF50', color: '#fff' },
   'camera:offline': { labelKey: 'event.offline', bg: '#F44336', color: '#fff' },
+  'camera:lowfps': { labelKey: 'event.lowfps', bg: '#FF9800', color: '#fff' },
   alert: { labelKey: 'event.alert', bg: '#FFD93D', color: '#333' },
 }
 
@@ -425,6 +426,7 @@ defineExpose({ addEvent, loadHistory })
         <button :class="['type-chip', 'motion', { active: filterType === 'motion' }]" @click="filterType = 'motion'; onFilterChange('type')">{{ t('event.motion') }}</button>
         <button :class="['type-chip', 'detect', { active: filterType === 'detect' }]" @click="filterType = 'detect'; onFilterChange('type')">{{ t('event.detect') }}</button>
         <button :class="['type-chip', 'offline', { active: filterType === 'camera:offline' }]" @click="filterType = 'camera:offline'; onFilterChange('type')">{{ t('event.offline') }}</button>
+        <button :class="['type-chip', 'lowfps', { active: filterType === 'camera:lowfps' }]" @click="filterType = 'camera:lowfps'; onFilterChange('type')">{{ t('event.lowfps') }}</button>
       </div>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}
@@ -635,6 +637,11 @@ defineExpose({ addEvent, loadHistory })
 
 .type-chip.offline.active {
   background: #e74c3c;
+  color: #fff;
+}
+
+.type-chip.lowfps.active {
+  background: #FF9800;
   color: #fff;
 }
 

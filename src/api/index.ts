@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 const wsClients = new Set<import("bun").ServerWebSocket>();
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "alert"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert"];
 
 /**
  * 启动 HTTP + WebSocket 服务
