@@ -470,9 +470,9 @@ export class MotionRecorder {
     state.recording = false;
   }
 
-  /** 清理过期录像 */
-  private purgeOldRecordings(): void {
-    const retentionDays = this.runtimeConfig.get().recording.retentionDays;
+  /** 清理过期录像（可传入自定义保留天数，用于磁盘感知加速清理） */
+  purgeOldRecordings(overrideRetentionDays?: number): void {
+    const retentionDays = overrideRetentionDays ?? this.runtimeConfig.get().recording.retentionDays;
     const cutoff = Date.now() - retentionDays * 86400_000;
 
     try {
