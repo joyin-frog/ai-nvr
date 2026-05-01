@@ -42,6 +42,8 @@ const HEVC_NAL_PPS = 34;
 class VideoToFmp4Muxer {
   /** 未处理的缓冲区 */
   private buffer = Buffer.alloc(0);
+  /** 待合并的数据块（延迟 flatten，减少 feed 热路径 GC 压力） */
+  private pendingChunks: Buffer[] = [];
   /** 已提取但未分组的 NAL 单元 */
   private pendingNals: Buffer[] = [];
   /** 上一个 VCL NAL 的类型（用于检测 access unit 边界） */
@@ -92,8 +94,22 @@ class VideoToFmp4Muxer {
   private segmentHasIdr = false;
 
   feed(data: Buffer, eventBus: EventBus, cameraId: string): void {
-    this.buffer = Buffer.concat([this.buffer, data]);
+    /** 延迟合并：只在解析前 flatten，减少 feed 热路径上的 Buffer.concat 开销 */
+    if (this.pendingChunks.length === 0 && this.buffer.length === 0) {
+      this.buffer = Buffer.from(data);
+    } else {
+      this.pendingChunks.push(data);
+    }
+    this.flattenIfNeeded();
     this.extractNals(eventBus, cameraId);
+  }
+
+  /** 将 pending chunks 合并到 this.buffer（仅在解析前执行一次） */
+  private flattenIfNeeded(): void {
+    if (this.pendingChunks.length === 0) return;
+    this.pendingChunks.unshift(this.buffer);
+    this.buffer = Buffer.concat(this.pendingChunks);
+    this.pendingChunks = [];
   }
 
   get fps(): number { return this.currentFps; }
