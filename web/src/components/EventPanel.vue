@@ -550,6 +550,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         <button :class="['type-chip', { active: filterType === 'track:enter-zone' }]" @click="filterType = 'track:enter-zone'; onFilterChange('type')">{{ t('event.trackEnterZone', '进入区域') }}</button>
         <button :class="['type-chip', { active: filterType === 'track:leave-zone' }]" @click="filterType = 'track:leave-zone'; onFilterChange('type')">{{ t('event.trackLeaveZone', '离开区域') }}</button>
         <button :class="['type-chip', { active: filterType === 'track:dwell' }]" @click="filterType = 'track:dwell'; onFilterChange('type')">{{ t('event.trackDwell', '停留') }}</button>
+        <button :class="['type-chip', { active: filterType === 'track:speed' }]" @click="filterType = 'track:speed'; onFilterChange('type')">{{ t('event.trackSpeed', '高速') }}</button>
       </div>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}
