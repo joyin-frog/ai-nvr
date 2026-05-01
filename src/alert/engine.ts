@@ -1,6 +1,7 @@
 import { type EventBus } from "@/event-bus";
 import { type AlertStorage, type AlertRule } from "@/alert/storage";
 import { type TrackLabelStorage } from "@/storage/track-labels";
+import { type RoiStorage } from "@/storage/roi";
 
 /** 每个规则的滑动窗口事件时间戳 */
 interface RuleWindow {
@@ -36,6 +37,7 @@ export class AlertEngine {
     private eventBus: EventBus,
     private storage: AlertStorage,
     private trackLabelStorage?: TrackLabelStorage,
+    private roiStorage?: RoiStorage,
   ) {}
 
   /** 启动引擎 */
@@ -86,8 +88,8 @@ export class AlertEngine {
     }
   }
 
-  /** 处理 detect 事件（需要标签过滤 + 数量条件 + 命名匹配） */
-  private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number; trackId?: number }>): void {
+  /** 处理 detect 事件（需要标签过滤 + 数量条件 + 命名匹配 + ROI 过滤） */
+  private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number; trackId?: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number } }>): void {
     this.refreshRules();
     this.refreshTrackNames(cameraId);
 
@@ -114,6 +116,21 @@ export class AlertEngine {
         if (matchedDetections.length === 0) continue;
       }
 
+      /** ROI 区域过滤：只保留检测框中心在 ROI 多边形内的目标 */
+      if (rule.roiId > 0 && this.roiStorage) {
+        const roi = this.roiStorage.getById(rule.roiId);
+        if (roi && roi.points) {
+          const polygon = JSON.parse(roi.points) as Array<{ x: number; y: number }>;
+          matchedDetections = matchedDetections.filter(d => {
+            if (!d.box) return false;
+            const cx = (d.box.xmin + d.box.xmax) / 2;
+            const cy = (d.box.ymin + d.box.ymax) / 2;
+            return this.pointInPolygon(cx, cy, polygon);
+          });
+          if (matchedDetections.length === 0) continue;
+        }
+      }
+
       /** 数量条件：匹配标签的目标数必须 >= minCount */
       if (rule.minCount > 0 && matchedDetections.length < rule.minCount) continue;
 
@@ -127,6 +144,19 @@ export class AlertEngine {
         : JSON.stringify({ detections: labels });
       this.checkRule(rule, cameraId, timestamp, detail);
     }
+  }
+
+  /** 判断点 (x, y) 是否在多边形内（射线法） */
+  private pointInPolygon(x: number, y: number, polygon: Array<{ x: number; y: number }>): boolean {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i]!.x, yi = polygon[i]!.y;
+      const xj = polygon[j]!.x, yj = polygon[j]!.y;
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
   }
 
   /** 刷新追踪标签缓存（30秒 TTL） */

@@ -47,6 +47,20 @@ export class RoiStorage {
     ).all(cameraId) as RegionOfInterest[];
   }
 
+  /** 获取所有 ROI */
+  listAll(): RegionOfInterest[] {
+    return this.db.query(
+      "SELECT id, camera_id as cameraId, name, points, enabled FROM roi ORDER BY id"
+    ).all() as RegionOfInterest[];
+  }
+
+  /** 按 ID 获取 ROI */
+  getById(id: number): { id: number; cameraId: string; name: string; points: string; enabled: boolean } | undefined {
+    return this.db.query(
+      "SELECT id, camera_id as cameraId, name, points, enabled FROM roi WHERE id = ?"
+    ).get(id) as { id: number; cameraId: string; name: string; points: string; enabled: boolean } | undefined;
+  }
+
   /** 添加 ROI */
   add(cameraId: string, name: string, points: string): number {
     const result = this.db.query(

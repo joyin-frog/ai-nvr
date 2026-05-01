@@ -716,7 +716,12 @@ export function startServer(
         return Response.json(meta);
       }
 
-      /** ROI 列表 */
+      /** ROI 列表（全部） */
+      if (url.pathname === "/api/roi" && req.method === "GET") {
+        return Response.json(roiStorage.listAll());
+      }
+
+      /** ROI 列表（按摄像头） */
       const roiListMatch = url.pathname.match(/^\/api\/roi\/([^/]+)$/);
       if (roiListMatch && req.method === "GET") {
         const cameraId = roiListMatch[1]!;
@@ -782,6 +787,7 @@ export function startServer(
             silentStart: (obj.silentStart as string) ?? "",
             silentEnd: (obj.silentEnd as string) ?? "",
             minCount: (obj.minCount as number) ?? 0,
+            roiId: (obj.roiId as number) ?? 0,
           });
           return Response.json({ id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
@@ -794,7 +800,7 @@ export function startServer(
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "eventType", "cameraId", "labels", "trackNames", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "minCount"]) {
+          for (const key of ["name", "eventType", "cameraId", "labels", "trackNames", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "minCount", "roiId"]) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
           alertStorage.updateRule(ruleId, updates as never);

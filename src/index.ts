@@ -112,7 +112,7 @@ snapshotStorage.start();
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
 const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
-const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage);
+const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage);
 alertEngine.start();
 
 /** 录像缩略图生成器 */

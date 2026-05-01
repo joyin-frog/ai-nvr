@@ -4,6 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 
 /** 告警规则 */
+/** ROI 区域 */
+interface RoiItem {
+  id: number
+  cameraId: string
+  name: string
+  points: string
+  enabled: boolean
+}
+
 interface AlertRule {
   id: number
   name: string
@@ -18,6 +27,7 @@ interface AlertRule {
   silentStart: string
   silentEnd: string
   minCount: number
+  roiId: number
 }
 
 /** 告警记录 */
@@ -72,6 +82,9 @@ const cameraNameMap = computed(() => {
 const showAddForm = ref(false)
 /** 正在编辑的规则 ID（null 为新增模式） */
 const editingRuleId = ref<number | null>(null)
+/** ROI 区域列表缓存 */
+const roiList = ref<RoiItem[]>([])
+
 const form = ref({
   name: '',
   eventType: 'detect',
@@ -84,12 +97,13 @@ const form = ref({
   silentStart: '',
   silentEnd: '',
   minCount: 0,
+  roiId: 0,
 })
 
 const emptyForm = {
   name: '', eventType: 'detect', cameraId: '', labels: '', trackNames: '',
   windowSeconds: 60, threshold: 3, cooldownSeconds: 300,
-  silentStart: '', silentEnd: '', minCount: 0,
+  silentStart: '', silentEnd: '', minCount: 0, roiId: 0,
 }
 
 /** 事件类型选项 */
@@ -99,6 +113,22 @@ const eventTypes = computed(() => [
   { value: 'camera:offline', label: t('alert.eventTypeOffline') },
   { value: 'camera:lowfps', label: t('alert.eventTypeLowfps') },
 ])
+
+/** 加载 ROI 列表 */
+async function loadRoiList() {
+  try {
+    const res = await authFetch('/api/roi')
+    if (res.ok) roiList.value = await res.json()
+  } catch {
+    // ignore
+  }
+}
+
+/** 当前选中摄像头对应的 ROI 列表 */
+const cameraRoiOptions = computed(() => {
+  if (!form.value.cameraId) return roiList.value
+  return roiList.value.filter(r => r.cameraId === form.value.cameraId)
+})
 
 /** 加载规则列表 */
 async function loadRules() {
@@ -182,6 +212,7 @@ function startEdit(rule: AlertRule) {
     silentStart: rule.silentStart,
     silentEnd: rule.silentEnd,
     minCount: rule.minCount ?? 0,
+    roiId: rule.roiId ?? 0,
   }
 }
 
@@ -319,6 +350,7 @@ async function exportCsv() {
 onMounted(() => {
   loadRules()
   loadAlerts()
+  loadRoiList()
 })
 
 defineExpose({ loadAlerts, addAlert })
@@ -355,6 +387,13 @@ defineExpose({ loadAlerts, addAlert })
       <div class="form-field" v-if="form.eventType === 'detect'">
         <label>{{ t('alert.trackNameFilter') }}</label>
         <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
+      </div>
+      <div class="form-field" v-if="form.eventType === 'detect' && cameraRoiOptions.length > 0">
+        <label>ROI</label>
+        <select v-model.number="form.roiId" class="input">
+          <option :value="0">{{ t('alert.allRegions', '全部区域') }}</option>
+          <option v-for="roi in cameraRoiOptions" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }} ({{ roi.cameraId }})</option>
+        </select>
       </div>
       <div class="form-row">
         <div class="form-field half">
@@ -424,6 +463,13 @@ defineExpose({ loadAlerts, addAlert })
               <label>{{ t('alert.trackNameFilter') }}</label>
               <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
             </div>
+            <div class="form-field" v-if="form.eventType === 'detect' && cameraRoiOptions.length > 0">
+              <label>ROI</label>
+              <select v-model.number="form.roiId" class="input">
+                <option :value="0">{{ t('alert.allRegions', '全部区域') }}</option>
+                <option v-for="roi in cameraRoiOptions" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }} ({{ roi.cameraId }})</option>
+              </select>
+            </div>
             <div class="form-row">
               <div class="form-field half">
                 <label>{{ t('alert.windowSeconds') }}</label>
@@ -476,6 +522,7 @@ defineExpose({ loadAlerts, addAlert })
             <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
             <span v-if="rule.trackNames" class="meta-tag track-name">{{ rule.trackNames }}</span>
             <span v-if="rule.minCount > 0" class="meta-tag count">≥{{ rule.minCount }}</span>
+            <span v-if="rule.roiId > 0" class="meta-tag roi">ROI #{{ rule.roiId }}</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
           </div>
@@ -769,6 +816,7 @@ select.input {
 .meta-tag.track-name { color: #FF6B6B; }
 .meta-tag.silent { color: #e74c3c; }
 .meta-tag.count { color: #FF9800; }
+.meta-tag.roi { color: #9C27B0; }
 
 .meta-info {
   font-size: 11px;
