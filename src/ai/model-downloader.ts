@@ -70,7 +70,12 @@ function downloadWithResume(url: string, tmpPath: string, finalPath: string, max
         /** 处理重定向 */
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           req.destroy();
-          downloadWithResume(res.headers.location, tmpPath, finalPath, maxRetries - attempt + 1)
+          /** 重定向可能是相对路径，需要拼接完整 URL */
+          let redirectUrl = res.headers.location;
+          if (redirectUrl.startsWith("/")) {
+            redirectUrl = `${parsedUrl.protocol}//${parsedUrl.host}${redirectUrl}`;
+          }
+          downloadWithResume(redirectUrl, tmpPath, finalPath, maxRetries - attempt + 1)
             .then(resolve)
             .catch(reject);
           return;
