@@ -89,6 +89,7 @@ export default {
     export: 'Export',
     merge: 'Merge',
     exportMp4: 'Export MP4',
+    exportAll: 'All',
     exportGif: 'Export GIF',
     merging: 'Merging...',
     exporting: 'Exporting...',

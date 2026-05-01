@@ -665,6 +665,20 @@ function openExport() {
   gifFilename.value = ''
 }
 
+/** 应用导出时长预设（0 = 全部） */
+function applyExportPreset(sec: number) {
+  if (!playerRef.value) return
+  const duration = totalDurationSec.value
+  if (sec === 0) {
+    exportStartSec.value = 0
+    exportEndSec.value = duration
+  } else {
+    const cur = Math.round(playerRef.value.currentTime)
+    exportStartSec.value = Math.max(0, cur - Math.floor(sec / 2))
+    exportEndSec.value = Math.min(duration, exportStartSec.value + sec)
+  }
+}
+
 /** 执行导出 */
 async function doExport() {
   if (!selectedRecording.value) return
@@ -971,6 +985,12 @@ defineExpose({ loadRecordings, playAtTime })
             <span class="export-time">{{ formatSec(exportEndSec) }}</span>
           </div>
           <div class="export-actions">
+            <div class="export-presets">
+              <button class="preset-btn" @click="applyExportPreset(30)">30s</button>
+              <button class="preset-btn" @click="applyExportPreset(60)">1m</button>
+              <button class="preset-btn" @click="applyExportPreset(300)">5m</button>
+              <button class="preset-btn" @click="applyExportPreset(0)">{{ t('recording.exportAll') }}</button>
+            </div>
             <span class="export-duration">{{ exportDurationText }}</span>
             <button v-if="!exportFilename && !gifFilename" class="export-btn" @click="doExport" :disabled="exporting || exportEndSec <= exportStartSec">
               {{ exporting ? t('recording.exporting') : t('recording.exportMp4') }}
@@ -1916,6 +1936,27 @@ defineExpose({ loadRecordings, playAtTime })
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.export-presets {
+  display: flex;
+  gap: 4px;
+}
+
+.preset-btn {
+  background: #2a2a4a;
+  color: #aaa;
+  border: 1px solid #3a3a5a;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.preset-btn:hover {
+  background: #3a3a5a;
+  color: #4ECDC4;
 }
 
 .export-duration {

@@ -89,6 +89,7 @@ export default {
     export: '导出',
     merge: '合并',
     exportMp4: '导出 MP4',
+    exportAll: '全部',
     exportGif: '导出 GIF',
     merging: '合并中...',
     exporting: '导出中...',
