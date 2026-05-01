@@ -23,10 +23,14 @@ const EVENT_LABELS: Record<string, string> = {
   alert: "告警触发",
   "track:appeared": "目标出现",
   "track:disappeared": "目标消失",
+  "track:enter-zone": "进入区域",
+  "track:leave-zone": "离开区域",
+  "track:dwell": "区域停留",
+  "track:speed": "高速移动",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
 /**
  * 钉钉机器人通知推送
@@ -98,6 +102,29 @@ export class DingTalkNotifier {
       const trackId = payload.trackId as number | undefined;
       const displayName = trackName ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"}`;
+    } else if (event === "track:enter-zone" || event === "track:leave-zone") {
+      const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const zoneName = payload.zoneName as string | undefined;
+      const displayName = trackName ?? trackLabel ?? "目标";
+      const arrow = event === "track:enter-zone" ? "→" : "←";
+      body = `${displayName} #${trackId ?? "?"} ${arrow} ${zoneName ?? "?"}`;
+    } else if (event === "track:dwell") {
+      const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const zoneName = payload.zoneName as string | undefined;
+      const dwellMs = payload.dwellMs as number | undefined;
+      const displayName = trackName ?? trackLabel ?? "目标";
+      body = `${displayName} #${trackId ?? "?"} 在 ${zoneName ?? "?"} 停留 ${dwellMs ? `${(dwellMs / 1000).toFixed(0)}s` : "?"}`;
+    } else if (event === "track:speed") {
+      const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
+      const trackId = payload.trackId as number | undefined;
+      const speed = payload.speed as number | undefined;
+      const displayName = trackName ?? trackLabel ?? "目标";
+      body = `${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)`;
     }
 
     const title = `JK NVR - ${label}`;

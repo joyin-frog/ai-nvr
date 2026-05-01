@@ -19,7 +19,7 @@ interface WebhookPayload {
  */
 export class WebhookNotifier {
   /** 要推送的事件类型 */
-  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared"];
+  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -77,6 +77,25 @@ export class WebhookNotifier {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
       detail.trackName = payload.trackName;
+    } else if (event === "track:enter-zone" || event === "track:leave-zone") {
+      detail.label = payload.label;
+      detail.trackId = payload.trackId;
+      detail.trackName = payload.trackName;
+      detail.zoneId = payload.zoneId;
+      detail.zoneName = payload.zoneName;
+      if (payload.dwellMs !== undefined) detail.dwellMs = payload.dwellMs;
+    } else if (event === "track:dwell") {
+      detail.label = payload.label;
+      detail.trackId = payload.trackId;
+      detail.trackName = payload.trackName;
+      detail.zoneId = payload.zoneId;
+      detail.zoneName = payload.zoneName;
+      detail.dwellMs = payload.dwellMs;
+    } else if (event === "track:speed") {
+      detail.label = payload.label;
+      detail.trackId = payload.trackId;
+      detail.trackName = payload.trackName;
+      detail.speed = payload.speed;
     }
 
     return { event, cameraId, timestamp, detail };
