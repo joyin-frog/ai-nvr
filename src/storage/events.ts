@@ -71,6 +71,11 @@ export class EventStorage {
     return result.count;
   }
 
+  /** 根据 ID 获取单条事件 */
+  getById(id: number): EventRecord | null {
+    return this.db.query("SELECT * FROM events WHERE id = ?").get(id) as EventRecord | null;
+  }
+
   /** 切换事件收藏状态 */
   toggleStar(id: number): boolean {
     const row = this.db.query("SELECT starred FROM events WHERE id = ?").get(id) as { starred: number } | null;
@@ -176,4 +181,5 @@ export interface EventRecord {
   camera_id: string;
   timestamp: number;
   detail: string | null;
+  starred?: number;
 }

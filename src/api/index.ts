@@ -343,16 +343,52 @@ export function startServer(
           search: queryOpts.search,
           starred: queryOpts.starred,
         });
-        /** 给 detect 事件关联快照 URL 和检测结果 */
+
+        /**
+         * 轻量化响应：从 detail JSON 中提取摘要字段，不返回原始大 detail
+         * detect 事件：提取标签摘要（如 "person ×2, car ×1"）
+         * motion 事件：提取 ratio
+         * 快照 URL 按需生成，不逐条查文件系统
+         */
         const events = rawEvents.map(ev => {
-          if (ev.type !== "detect") return ev;
-          const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
-          if (!snapPath) return ev;
-          const meta = snapshotStorage.getSnapshotMeta(snapPath);
+          let summary: string | null = null;
+          let snapshotUrl: string | null = null;
+          let detections: unknown = null;
+
+          if (ev.type === "detect" && ev.detail) {
+            const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+            if (snapPath) {
+              snapshotUrl = `/api/snapshots/${snapPath}`;
+              const meta = snapshotStorage.getSnapshotMeta(snapPath);
+              if (meta?.detections) detections = meta.detections;
+            }
+            /** 从 detail 提取标签摘要 */
+            const detailObj = JSON.parse(ev.detail);
+            const dets = detailObj?.detections;
+            if (Array.isArray(dets)) {
+              const labelCounts = new Map<string, number>();
+              for (const d of dets) {
+                const name = d.trackName ?? d.label;
+                labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1);
+              }
+              summary = [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
+            }
+          } else if (ev.type === "motion" && ev.detail) {
+            const detailObj = JSON.parse(ev.detail);
+            if (typeof detailObj?.ratio === "number") {
+              summary = `变动 ${(detailObj.ratio * 100).toFixed(1)}%`;
+            }
+          }
+
           return {
-            ...ev,
-            snapshotUrl: `/api/snapshots/${snapPath}`,
-            snapshotDetections: meta?.detections ?? null,
+            id: ev.id,
+            type: ev.type,
+            camera_id: ev.camera_id,
+            timestamp: ev.timestamp,
+            summary,
+            snapshotUrl,
+            detections,
+            starred: ev.starred,
           };
         });
         return Response.json({ events, total });
@@ -369,6 +405,21 @@ export function startServer(
           byCamera: eventStorage.countByCamera(opts),
           byLabel: eventStorage.countByDetectionLabel(opts),
         });
+      }
+
+      /** 单个事件完整详情（按需加载，避免列表返回大 detail） */
+      const eventDetailMatch = url.pathname.match(/^\/api\/events\/(\d+)$/);
+      if (eventDetailMatch && req.method === "GET") {
+        const id = Number(eventDetailMatch[1]);
+        const ev = eventStorage.getById(id);
+        if (!ev) return new Response("Not Found", { status: 404 });
+        /** 关联快照 */
+        let snapshotUrl: string | null = null;
+        if (ev.type === "detect") {
+          const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+          if (snapPath) snapshotUrl = `/api/snapshots/${snapPath}`;
+        }
+        return Response.json({ ...ev, snapshotUrl });
       }
 
       /** 切换事件收藏状态 */
