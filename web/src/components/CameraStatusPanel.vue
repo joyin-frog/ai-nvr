@@ -46,6 +46,7 @@ const todayStats = ref<{
   alertCount: number
   byCamera: Array<{ cameraId: string; count: number }>
   byHour: Array<{ hour: number; count: number; type: string }>
+  byLabel: Array<{ label: string; count: number }>
 } | null>(null)
 
 /** 7天趋势数据 */
@@ -279,6 +280,7 @@ async function loadTodayStats() {
         count: c.count,
       })),
       byHour: data.byHour as Array<{ hour: number; count: number; type: string }>,
+      byLabel: (data.byLabel ?? []) as Array<{ label: string; count: number }>,
     }
   } catch {
     // ignore
@@ -407,6 +409,20 @@ onUnmounted(() => {
           <div class="donut-center">
             <span class="donut-total">{{ todayStats.motionCount + todayStats.detectCount + todayStats.alertCount }}</span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 检测目标类型分布 -->
+    <div v-if="todayStats?.byLabel?.length" class="label-section">
+      <span class="stats-title">{{ t('status.detectLabels') }}</span>
+      <div class="label-bars">
+        <div v-for="item in todayStats.byLabel" :key="item.label" class="label-row">
+          <span class="label-name">{{ item.label }}</span>
+          <div class="label-bar-bg">
+            <div class="label-bar-fill" :style="{ width: `${(item.count / todayStats!.byLabel![0]!.count) * 100}%` }" />
+          </div>
+          <span class="label-count">{{ item.count }}</span>
         </div>
       </div>
     </div>
@@ -935,6 +951,51 @@ onUnmounted(() => {
 .chart-section {
   padding: 8px 12px;
   border-bottom: 1px solid #2a2a4a;
+}
+
+.label-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.label-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.label-name {
+  font-size: 11px;
+  color: #ccc;
+  min-width: 50px;
+  text-align: right;
+}
+
+.label-bar-bg {
+  flex: 1;
+  height: 8px;
+  background: #2a2a4a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.label-bar-fill {
+  height: 100%;
+  background: #4ECDC4;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+.label-count {
+  font-size: 10px;
+  color: #888;
+  min-width: 20px;
 }
 
 .hourly-chart {

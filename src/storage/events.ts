@@ -100,6 +100,19 @@ export class EventStorage {
     return result;
   }
 
+  /** 按检测目标标签统计（从 detect 事件的 detail JSON 中提取） */
+  countByDetectionLabel(options: { since?: number; until?: number } = {}): Array<{ label: string; count: number }> {
+    const { conditions, params } = this.buildConditions({ ...options, type: "detect" });
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    try {
+      return this.db.query(
+        `SELECT json_extract(j.value, '$.label') as label, COUNT(*) as count FROM events, json_each(json_extract(detail, '$.detections')) AS j ${where} GROUP BY label ORDER BY count DESC LIMIT 20`
+      ).all(...params) as Array<{ label: string; count: number }>;
+    } catch {
+      return [];
+    }
+  }
+
   /** 按小时统计事件数量（用于时间线图表） */
   countByHour(options: { since?: number; until?: number } = {}): Array<{ hour: number; count: number; type: string }> {
     const { conditions, params } = this.buildConditions(options);

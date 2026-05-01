@@ -253,6 +253,7 @@ export function startServer(
           byType: eventStorage.countByType(opts),
           byHour: eventStorage.countByHour(opts),
           byCamera: eventStorage.countByCamera(opts),
+          byLabel: eventStorage.countByDetectionLabel(opts),
         });
       }
 

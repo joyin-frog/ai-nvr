@@ -151,6 +151,7 @@ export default {
     todayAlerts: '告警',
     todayOffline: '离线',
     eventTrend: '事件趋势',
+    detectLabels: '检测目标分布',
     today: '今日',
     days: '天',
     diskUsage: '磁盘用量',

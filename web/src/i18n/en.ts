@@ -151,6 +151,7 @@ export default {
     todayAlerts: 'Alerts',
     todayOffline: 'Offline',
     eventTrend: 'Event Trend',
+    detectLabels: 'Detection Labels',
     today: 'Today',
     days: 'd',
     diskUsage: 'Disk Usage',
