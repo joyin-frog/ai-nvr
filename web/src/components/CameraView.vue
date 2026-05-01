@@ -3,6 +3,8 @@ import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch, authUrl } from '../services/auth'
+import { useCanvasRenderer } from '../composables/useCanvasRenderer'
+import { useMjpegStream } from '../composables/useMjpegStream'
 import PtzControl from './PtzControl.vue'
 
 const { t } = useI18n()
@@ -42,6 +44,10 @@ const emit = defineEmits<{
   trackLabelUpdated: []
 }>()
 
+/** Canvas 渲染器（替代 <img> Blob URL） */
+const canvasRenderer = useCanvasRenderer()
+const mjpegStream = useMjpegStream()
+
 /** 实时时钟 */
 const clockText = ref('')
 let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
@@ -68,12 +74,6 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
 
 /** 标注图片 URL（仅用于截图下载） */
 const annotatedUrl = ref<string>('')
-
-/** MJPEG 流地址（带时间戳确保每次挂载都是新连接） */
-const streamKey = ref(Date.now())
-const streamUrl = computed(() => authUrl(`/api/stream/${props.cameraId}?_t=${streamKey.value}`))
-/** img 元素引用 */
-const imgEl = ref<HTMLImageElement | null>(null)
 
 /** 检测框列表（按置信度排序） */
 const sortedDetections = computed(() =>
@@ -107,14 +107,27 @@ function checkFrozen() {
 }
 watch(() => props.online, (on) => {
   if (on) {
-    /** 摄像头重新上线时刷新 MJPEG 流连接 */
-    streamKey.value = Date.now()
+    /** 启动 Canvas 渲染循环 + MJPEG fetch 流 */
+    canvasRenderer.startLoop()
+    const url = authUrl(`/api/stream/${props.cameraId}`)
+    mjpegStream.startFetch(url, (jpeg) => {
+      canvasRenderer.feedFrame(jpeg)
+      /** 更新帧尺寸 */
+      const size = canvasRenderer.getFrameSize()
+      if (size.width > 0 && size.height > 0) {
+        frameSize.value = size
+      }
+    })
     frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
   }
-  else { frozen.value = false; if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null } }
+  else {
+    mjpegStream.stopFetch()
+    canvasRenderer.stopLoop()
+    frozen.value = false
+    if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null }
+  }
 }, { immediate: true })
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
-onUnmounted(() => { if (frozenTimer) clearInterval(frozenTimer) })
 
 /** 画面比例：优先用帧实际尺寸，回退到 props */
 const frameSize = ref({ width: 0, height: 0 })
@@ -126,14 +139,6 @@ const cameraBodyStyle = computed(() => {
   }
   return { 'aspect-ratio': '16 / 9' }
 })
-
-/** 监听 img 加载，获取实际帧分辨率 */
-function onImageLoad() {
-  const img = imgEl.value
-  if (img) {
-    frameSize.value = { width: img.naturalWidth, height: img.naturalHeight }
-  }
-}
 
 /** 分辨率文本 */
 const resolutionText = computed(() => {
@@ -303,23 +308,13 @@ async function takeScreenshot() {
     link.click()
     return
   }
-  /** 从 img 元素截图 */
-  const img = imgEl.value
-  if (img) {
-    const canvas = document.createElement('canvas')
-    canvas.width = img.naturalWidth || img.width
-    canvas.height = img.naturalHeight || img.height
-    const ctx = canvas.getContext('2d')
-    if (ctx) {
-      ctx.drawImage(img, 0, 0)
-      canvas.toBlob((blob) => {
-        if (!blob) return
-        const url = URL.createObjectURL(blob)
-        link.href = url
-        link.click()
-        URL.revokeObjectURL(url)
-      }, 'image/jpeg', 0.92)
-    }
+  /** 从 Canvas 截图 */
+  const blob = await canvasRenderer.captureJpeg()
+  if (blob) {
+    const url = URL.createObjectURL(blob)
+    link.href = url
+    link.click()
+    URL.revokeObjectURL(url)
   }
 }
 
@@ -403,8 +398,8 @@ function resetZoom() {
 }
 
 onUnmounted(() => {
-  /** 显式断开 MJPEG 流连接 */
-  if (imgEl.value) imgEl.value.src = ''
+  mjpegStream.stopFetch()
+  canvasRenderer.stopLoop()
   if (annotatedUrl.value) URL.revokeObjectURL(annotatedUrl.value)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)
@@ -443,13 +438,11 @@ onUnmounted(() => {
       @mouseleave="onPanEnd"
     >
       <div class="camera-content" :style="{ transform: zoomTransform }">
-        <img
+        <canvas
           v-if="online"
-          ref="imgEl"
-          :src="streamUrl"
+          :ref="canvasRenderer.setCanvas"
           class="camera-image"
           :style="{ filter: imageFilter }"
-          @load="onImageLoad"
         />
         <div v-else class="camera-placeholder">
           <div v-if="online" class="placeholder-icon">&#9679;</div>
@@ -723,6 +716,7 @@ onUnmounted(() => {
   height: 100%;
   display: block;
   object-fit: contain;
+  image-rendering: auto;
 }
 
 .zoom-badge {
