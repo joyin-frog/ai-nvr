@@ -141,6 +141,7 @@ export default {
     helpSpeed: '倍速加减',
     helpPip: '画中画切换',
     pip: '画中画',
+    matchCountTip: '匹配 {count} 次',
   },
   timeline: {
     today: '今天',

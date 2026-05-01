@@ -1631,7 +1631,7 @@ defineExpose({ loadRecordings, playAtTime })
             AI {{ recordingEventStats.get(rec.filename)!.count }}
             <span v-if="recordingEventStats.get(rec.filename)!.labels.length" class="rec-event-labels">{{ recordingEventStats.get(rec.filename)!.labels.join(' ') }}</span>
           </span>
-          <span v-if="rec.matchCount" class="rec-match-count" :title="'匹配 ' + rec.matchCount + ' 次'">
+          <span v-if="rec.matchCount" class="rec-match-count" :title="t('recording.matchCountTip', { count: rec.matchCount })">
             ⚡{{ rec.matchCount }}
           </span>
           <span class="rec-size">{{ formatSize(rec.size) }}</span>

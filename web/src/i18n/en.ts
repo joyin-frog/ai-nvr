@@ -141,6 +141,7 @@ export default {
     helpSpeed: 'Speed up/down',
     helpPip: 'Toggle PiP',
     pip: 'PiP',
+    matchCountTip: '{count} matches',
   },
   timeline: {
     today: 'Today',
