@@ -25,7 +25,10 @@ import { DiskUsage } from "@/storage/disk-usage";
 import { RecordingExporter } from "@/storage/export";
 import { PtzController } from "@/ptz";
 
-/** 设置 Hugging Face 镜像（国内网络加速模型下载） */
+/**
+ * 设置 Hugging Face 镜像（国内网络加速模型下载）
+ * 注意：HF_ENDPOINT 仅对 Python SDK 生效，JS 库需要设置 env.remoteHost（在 detector.ts 中处理）
+ */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 
 /** 全局事件总线 */

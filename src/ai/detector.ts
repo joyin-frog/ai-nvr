@@ -1,4 +1,13 @@
-import { pipeline, type ObjectDetectionPipeline } from "@huggingface/transformers";
+import { pipeline, env as transformersEnv, type ObjectDetectionPipeline } from "@huggingface/transformers";
+
+/** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
+const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
+transformersEnv.remoteHost = `${hfEndpoint}/`;
+
+/** 模型加载最大重试次数 */
+const MAX_RETRIES = 3;
+/** 重试基础延迟（毫秒） */
+const RETRY_BASE_DELAY = 5000;
 import { type Detection } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
@@ -43,17 +52,37 @@ export class AiDetector {
     });
   }
 
-  /** 加载指定模型 */
+  /** 加载指定模型（带重试） */
   private async loadModel(modelName: string): Promise<void> {
     console.log(`[AiDetector] 正在加载模型: ${modelName}...`);
     this.loading = true;
-    this.detector = await pipeline("object-detection", modelName, {
-      device: "cpu",
-    });
-    this.currentModel = modelName;
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`[AiDetector] 第 ${attempt}/${MAX_RETRIES} 次尝试加载...`);
+        this.detector = await pipeline("object-detection", modelName, {
+          device: "cpu",
+        });
+        this.currentModel = modelName;
+        this.loading = false;
+        this.initialized = true;
+        console.log(`[AiDetector] 模型加载完成: ${modelName}`);
+        return;
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[AiDetector] 第 ${attempt} 次加载失败: ${msg}`);
+        if (attempt < MAX_RETRIES) {
+          const delay = RETRY_BASE_DELAY * attempt;
+          console.log(`[AiDetector] ${delay / 1000}s 后重试...`);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+    }
+
     this.loading = false;
-    this.initialized = true;
-    console.log(`[AiDetector] 模型加载完成: ${modelName}`);
+    throw lastError;
   }
 
   /** 运行时切换模型（先销毁旧 pipeline 再加载新的） */
@@ -106,7 +135,7 @@ export class AiDetector {
 
     this.detecting = true;
     try {
-      const raw = await this.detector(jpeg, {
+      const raw = await this.detector(new Blob([jpeg]), {
         threshold: aiConfig.threshold,
       });
 
