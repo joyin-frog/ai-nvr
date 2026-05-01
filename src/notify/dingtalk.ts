@@ -87,13 +87,17 @@ export class DingTalkNotifier {
       body = "摄像头已断开连接";
     } else if (event === "track:appeared") {
       const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const score = payload.score as number | undefined;
-      body = `${trackLabel ?? "目标"} #${trackId ?? "?"}${score ? ` (${(score * 100).toFixed(0)}%)` : ""}`;
+      const displayName = trackName ?? trackLabel ?? "目标";
+      body = `${displayName} #${trackId ?? "?"}${score ? ` (${(score * 100).toFixed(0)}%)` : ""}`;
     } else if (event === "track:disappeared") {
       const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
       const trackId = payload.trackId as number | undefined;
-      body = `${trackLabel ?? "目标"} #${trackId ?? "?"}`;
+      const displayName = trackName ?? trackLabel ?? "目标";
+      body = `${displayName} #${trackId ?? "?"}`;
     }
 
     const title = `JK NVR - ${label}`;

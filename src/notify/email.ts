@@ -88,13 +88,17 @@ export class EmailNotifier {
       detailHtml = `<tr><td>状态</td><td style="color:#d9534f">已断开连接</td></tr>`;
     } else if (event === "track:appeared") {
       const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const score = payload.score as number | undefined;
-      detailHtml = `<tr><td>目标</td><td><strong>${trackLabel ?? "未知"} #${trackId ?? "?"}</strong>${score ? ` (${(score * 100).toFixed(0)}%)` : ""}</td></tr>`;
+      const displayName = trackName ?? trackLabel ?? "未知";
+      detailHtml = `<tr><td>目标</td><td><strong>${displayName} #${trackId ?? "?"}</strong>${score ? ` (${(score * 100).toFixed(0)}%)` : ""}</td></tr>`;
     } else if (event === "track:disappeared") {
       const trackLabel = payload.label as string | undefined;
+      const trackName = payload.trackName as string | undefined;
       const trackId = payload.trackId as number | undefined;
-      detailHtml = `<tr><td>目标</td><td>${trackLabel ?? "未知"} #${trackId ?? "?"}</td></tr>`;
+      const displayName = trackName ?? trackLabel ?? "未知";
+      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"}</td></tr>`;
     }
 
     const subject = `[JK NVR] ${label} - ${cameraId}`;

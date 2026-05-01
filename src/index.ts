@@ -86,6 +86,7 @@ recorder.start();
 /** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
 const annotator = new Annotator();
 const trackStorage = new TrackStorage(join(dataDir, "tracks"));
+const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
 const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage);
 
 /** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
@@ -128,7 +129,6 @@ snapshotStorage.start();
 
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
-const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
 const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage);
 alertEngine.start();
 

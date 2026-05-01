@@ -94,6 +94,8 @@ export interface EventPayloads {
     label: string;
     /** 置信度 */
     score: number;
+    /** 用户自定义名称 */
+    trackName?: string;
   };
 
   /** 追踪目标消失 */
@@ -106,6 +108,8 @@ export interface EventPayloads {
     trackId: number;
     /** 目标标签 */
     label: string;
+    /** 用户自定义名称 */
+    trackName?: string;
   };
 
   /** 追踪目标标签更新（广播给其他客户端） */

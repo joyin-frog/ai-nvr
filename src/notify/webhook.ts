@@ -72,9 +72,11 @@ export class WebhookNotifier {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
       detail.score = payload.score;
+      detail.trackName = payload.trackName;
     } else if (event === "track:disappeared") {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
+      detail.trackName = payload.trackName;
     }
 
     return { event, cameraId, timestamp, detail };

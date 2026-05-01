@@ -400,20 +400,24 @@ export class AiDetector {
 
       /** 发射追踪目标出现/消失事件 */
       for (const target of trackResult.appeared) {
+        const trackName = this.trackLabelStorage?.findByTrack(cameraId, target.trackId)?.name;
         this.eventBus.emit("track:appeared", {
           cameraId,
           timestamp,
           trackId: target.trackId,
           label: target.label,
           score: target.score,
+          trackName: trackName || undefined,
         });
       }
       for (const target of trackResult.disappeared) {
+        const trackName = this.trackLabelStorage?.findByTrack(cameraId, target.trackId)?.name;
         this.eventBus.emit("track:disappeared", {
           cameraId,
           timestamp,
           trackId: target.trackId,
           label: target.label,
+          trackName: trackName || undefined,
         });
       }
 
