@@ -15,8 +15,17 @@ interface TrackInfo {
   hitCount: number
   cameraIds: string[]
   snapshotFile?: string
+  /** 主色调名称 */
+  dominantColor?: string
   /** 当前是否活跃（前端计算） */
   _active?: boolean
+}
+
+/** 主色调名称 → 显示颜色 */
+const COLOR_MAP: Record<string, string> = {
+  red: '#e74c3c', orange: '#e67e22', yellow: '#f1c40f', lime: '#2ecc71',
+  green: '#27ae60', cyan: '#1abc9c', blue: '#3498db', purple: '#9b59b6',
+  pink: '#e91e63', gray: '#95a5a6',
 }
 
 const tracks = ref<TrackInfo[]>([])
@@ -359,6 +368,12 @@ onUnmounted(() => {
           </div>
           <div class="track-meta">
             <span class="track-id">#{{ track.trackId }}</span>
+            <span
+              v-if="track.dominantColor && COLOR_MAP[track.dominantColor]"
+              class="color-dot"
+              :style="{ background: COLOR_MAP[track.dominantColor] }"
+              :title="track.dominantColor"
+            ></span>
             <span v-if="isTrackActive(track)" class="track-active" :title="t('tracks.active', '活跃中')">●</span>
             <span class="track-count">{{ track.hitCount }}次</span>
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
@@ -649,6 +664,15 @@ onUnmounted(() => {
 }
 
 .track-id { color: #4ECDC4; }
+
+.color-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
 .track-count { color: #aaa; }
 .track-time { color: #666; }
 .track-active {
