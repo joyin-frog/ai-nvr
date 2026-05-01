@@ -605,13 +605,6 @@ function notify(title: string, body: string, cameraId?: string) {
 }
 
 
-/** 页面可见性优化：切到后台时跳过帧渲染 */
-const pageVisible = ref(!document.hidden)
-function onVisibilityChange() {
-  pageVisible.value = !document.hidden
-}
-document.addEventListener('visibilitychange', onVisibilityChange)
-
 /** 注册事件监听器 */
 function setupEventListeners() {
   /** 首次用户交互时请求通知权限（需要用户手势） */
@@ -801,7 +794,6 @@ onMounted(async () => {
 onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
-  document.removeEventListener('visibilitychange', onVisibilityChange)
   stopPatrol()
   if (diskCheckTimer) clearInterval(diskCheckTimer)
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
