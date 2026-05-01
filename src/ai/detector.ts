@@ -349,6 +349,16 @@ export class AiDetector {
           ).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
         }
       }
+      /** 更新已有活跃目标的 lastSeen/hitCount */
+      if (this.trackStorage && trackResult.detections.length > 0) {
+        const appearedIds = new Set(trackResult.appeared.map(a => a.trackId));
+        const existing = trackResult.detections
+          .filter(d => d.trackId != null && !appearedIds.has(d.trackId))
+          .map(d => ({ trackId: d.trackId!, cameraId }));
+        if (existing.length > 0) {
+          this.trackStorage.touchSeen(existing, timestamp);
+        }
+      }
 
       const totalMs = performance.now() - t0;
 

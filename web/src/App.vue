@@ -436,9 +436,10 @@ async function loadShowBoxes() {
   }
 }
 
-/** 加载所有摄像头的追踪标签 */
+/** 加载所有摄像头的追踪标签（合并 TrackLabelStorage + TrackStorage customName） */
 async function loadTrackLabels() {
   const map: Record<string, Record<number, string>> = {}
+  /** 1) TrackLabelStorage 手动标签 */
   for (const cam of cameras.value) {
     try {
       const res = await authFetch(`/api/track-labels?cameraId=${cam.id}`)
@@ -452,6 +453,23 @@ async function loadTrackLabels() {
       }
     } catch { /* ignore */ }
   }
+  /** 2) TrackStorage 自动快照目标的 customName */
+  try {
+    const res = await authFetch('/api/tracks')
+    if (res.ok) {
+      const tracks = await res.json() as Array<{ trackId: number; customName?: string; cameraIds: string[] }>
+      for (const track of tracks) {
+        if (!track.customName) continue
+        for (const camId of track.cameraIds) {
+          if (!map[camId]) map[camId] = {}
+          /** TrackLabelStorage 的手动标签优先 */
+          if (!map[camId][track.trackId]) {
+            map[camId][track.trackId] = track.customName
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
   trackLabelsMap.value = map
 }
 

@@ -92,6 +92,28 @@ export class TrackStorage {
     this.scheduleSave();
   }
 
+  /**
+   * 批量更新已追踪目标的 lastSeen 和 cameraIds（轻量级，无图片处理）
+   * 用于每帧活跃目标的元数据更新
+   */
+  touchSeen(
+    items: Array<{ trackId: number; cameraId: string }>,
+    timestamp: number,
+  ): void {
+    let changed = false;
+    for (const item of items) {
+      const record = this.tracks.get(item.trackId);
+      if (!record) continue;
+      record.lastSeen = timestamp;
+      record.hitCount++;
+      if (!record.cameraIds.includes(item.cameraId)) {
+        record.cameraIds.push(item.cameraId);
+      }
+      changed = true;
+    }
+    if (changed) this.scheduleSave();
+  }
+
   /** 设置自定义名称 */
   setCustomName(trackId: number, name: string): void {
     const record = this.tracks.get(trackId);

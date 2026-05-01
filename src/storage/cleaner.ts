@@ -4,6 +4,7 @@ import { type AlertStorage } from "@/alert/storage";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type RecordingExporter } from "@/storage/export";
+import { type TrackStorage } from "@/storage/tracks";
 
 /**
  * 统一存储清理管理器
@@ -19,6 +20,7 @@ export class StorageCleaner {
     private snapshotStorage: SnapshotStorage,
     private thumbnailGenerator: ThumbnailGenerator,
     private exporter: RecordingExporter,
+    private trackStorage?: TrackStorage,
   ) {}
 
   /** 启动定时清理（每小时执行一次） */
@@ -41,7 +43,7 @@ export class StorageCleaner {
   runCleanup(): CleanupReport {
     const cleanup = this.runtimeConfig.get().cleanup;
     const now = Date.now();
-    const report: CleanupReport = { events: 0, alerts: 0, snapshots: 0, thumbnails: 0, exports: 0 };
+    const report: CleanupReport = { events: 0, alerts: 0, snapshots: 0, thumbnails: 0, exports: 0, tracks: 0 };
 
     /** 清理事件历史 */
     const eventsCutoff = now - cleanup.eventsRetentionDays * 86_400_000;
@@ -60,9 +62,14 @@ export class StorageCleaner {
     /** 清理导出临时文件（24小时后过期） */
     report.exports = this.exporter.purge(24);
 
-    const total = report.events + report.alerts + report.snapshots + report.exports;
+    /** 清理过期追踪目标（默认 30 天） */
+    if (this.trackStorage) {
+      report.tracks = this.trackStorage.cleanup(cleanup.snapshotsRetentionDays);
+    }
+
+    const total = report.events + report.alerts + report.snapshots + report.exports + report.tracks;
     if (total > 0) {
-      console.log(`[Cleaner] 清理完成: ${report.events} 事件, ${report.alerts} 告警, ${report.snapshots} 快照, ${report.exports} 导出`);
+      console.log(`[Cleaner] 清理完成: ${report.events} 事件, ${report.alerts} 告警, ${report.snapshots} 快照, ${report.exports} 导出, ${report.tracks} 追踪目标`);
     }
 
     return report;
@@ -88,6 +95,7 @@ export interface CleanupReport {
   snapshots: number;
   thumbnails: number;
   exports: number;
+  tracks: number;
 }
 
 /** 存储统计 */
