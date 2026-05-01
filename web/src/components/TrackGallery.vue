@@ -554,7 +554,7 @@ onUnmounted(() => {
                 @click.stop="applySuggestion(track.trackId)"
                 :title="t('tracks.applySuggestion', '点击应用建议名称')"
               >
-                ≈ {{ suggestions.get(track.trackId)!.name }} ({{ ((64 - suggestions.get(track.trackId)!.distance) / 64 * 100).toFixed(0) }}%)
+                ≈ {{ suggestions.get(track.trackId)!.name }} ({{ ((1 - suggestions.get(track.trackId)!.distance) * 100).toFixed(0) }}%)
               </button>
             </template>
           </div>

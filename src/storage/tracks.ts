@@ -25,6 +25,15 @@ export interface TrackInfo {
   dominantColor?: string;
 }
 
+/** 备选指纹（每个目标最多保留 2 个备选 + 1 个主指纹） */
+interface AltFingerprint {
+  dhash: string;
+  colorHist?: number[];
+  lbpHist?: number[];
+  /** 质量分数 */
+  score: number;
+}
+
 interface TrackRecord {
   trackId: number;
   label: string;
@@ -42,6 +51,8 @@ interface TrackRecord {
   colorHist?: number[];
   /** LBP 纹理直方图（uniform 模式 59 bins，量化为 uint8[]） */
   lbpHist?: number[];
+  /** 备选指纹列表（最多 2 个，不同角度/姿态的快照指纹） */
+  altFingerprints?: AltFingerprint[];
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -78,23 +89,36 @@ export class TrackStorage {
   ): Promise<void> {
     const snapshotScore = this.calcSnapshotScore(box, score ?? 0.5);
 
-    let record = this.tracks.get(trackId);
-    if (record) {
-      record.lastSeen = timestamp;
-      record.hitCount++;
-      if (!record.cameraIds.includes(cameraId)) {
-        record.cameraIds.push(cameraId);
+    const existingRecord = this.tracks.get(trackId);
+    if (existingRecord) {
+      existingRecord.lastSeen = timestamp;
+      existingRecord.hitCount++;
+      if (!existingRecord.cameraIds.includes(cameraId)) {
+        existingRecord.cameraIds.push(cameraId);
       }
       /** 质量分数超过当前最佳 20% 时更新快照 */
-      if (box && snapshotScore > record.bestSnapshotScore * 1.2) {
+      if (box && snapshotScore > existingRecord.bestSnapshotScore * 1.2) {
         const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
         if (snapshotFile) {
-          record.snapshotFile = snapshotFile;
-          record.bestSnapshotScore = snapshotScore;
+          /** 旧指纹移入备选列表（保留多角度信息） */
+          if (existingRecord.dhash) {
+            const alt: AltFingerprint = { dhash: existingRecord.dhash, colorHist: existingRecord.colorHist, lbpHist: existingRecord.lbpHist, score: existingRecord.bestSnapshotScore };
+            if (!existingRecord.altFingerprints) existingRecord.altFingerprints = [];
+            /** 跳过与现有备选 dHash 相同的（避免重复） */
+            const isDuplicate = existingRecord.altFingerprints.some(a => a.dhash === existingRecord.dhash);
+            if (!isDuplicate) {
+              existingRecord.altFingerprints.push(alt);
+              /** 最多保留 2 个备选（按质量降序） */
+              existingRecord.altFingerprints.sort((a, b) => b.score - a.score);
+              if (existingRecord.altFingerprints.length > 2) existingRecord.altFingerprints.length = 2;
+            }
+          }
+          existingRecord.snapshotFile = snapshotFile;
+          existingRecord.bestSnapshotScore = snapshotScore;
           /** 更新 dHash 和颜色直方图 */
-          record.dhash = await this.computeDHash(frameImage, box);
-          record.colorHist = await this.computeColorHist(frameImage, box);
-          record.lbpHist = await this.computeLBP(frameImage, box);
+          existingRecord.dhash = await this.computeDHash(frameImage, box);
+          existingRecord.colorHist = await this.computeColorHist(frameImage, box);
+          existingRecord.lbpHist = await this.computeLBP(frameImage, box);
         }
       }
       this.scheduleSave();
@@ -108,7 +132,7 @@ export class TrackStorage {
     const colorHist = box ? await this.computeColorHist(frameImage, box) : undefined;
     const lbpHist = box ? await this.computeLBP(frameImage, box) : undefined;
 
-    record = {
+    const newRecord: TrackRecord = {
       trackId,
       label,
       firstSeen: timestamp,
@@ -121,7 +145,7 @@ export class TrackStorage {
       colorHist,
       lbpHist,
     };
-    this.tracks.set(trackId, record);
+    this.tracks.set(trackId, newRecord);
     this.scheduleSave();
   }
 
@@ -207,15 +231,13 @@ export class TrackStorage {
   /**
    * 批量获取未命名目标的匹配建议
    * 对每个未命名且有 dhash 的目标，查找同标签已命名目标中最相似的
-   * 综合使用 dHash + 颜色直方图
+   * 使用多快照指纹匹配（主指纹 + 备选指纹取最优距离）
    */
   getSuggestions(): Array<{ trackId: number; label: string; suggestedName: string; distance: number }> {
     /** 收集所有已命名目标（有 dhash） */
-    const named: Array<{ trackId: number; label: string; customName: string; dhash: string; colorHist?: number[]; lbpHist?: number[] }> = [];
+    const named: TrackRecord[] = [];
     for (const r of this.tracks.values()) {
-      if (r.customName && r.dhash) {
-        named.push({ trackId: r.trackId, label: r.label, customName: r.customName, dhash: r.dhash, colorHist: r.colorHist, lbpHist: r.lbpHist });
-      }
+      if (r.customName && r.dhash) named.push(r);
     }
     if (named.length === 0) return [];
 
@@ -225,15 +247,13 @@ export class TrackStorage {
       let bestDist = Infinity;
       let bestName = "";
       for (const n of named) {
-        const combinedDist = TrackStorage.computeAppearanceDistance(
-          r.dhash, n.dhash, r.colorHist, n.colorHist, r.lbpHist, n.lbpHist,
-        );
+        const combinedDist = TrackStorage.computeBestDistance(r, n);
 
         /** 同标签直接比较；跨标签需要更近距离才接受 */
         const threshold = n.label === r.label ? 0.4 : 0.3;
         if (combinedDist < bestDist && combinedDist <= threshold) {
           bestDist = combinedDist;
-          bestName = n.customName;
+          bestName = n.customName!;
         }
       }
       if (bestName) {
@@ -293,6 +313,20 @@ export class TrackStorage {
     if (!target.snapshotFile && source.snapshotFile) {
       target.snapshotFile = source.snapshotFile;
       target.bestSnapshotScore = source.bestSnapshotScore;
+    }
+
+    /** 合并备选指纹 */
+    const sourceFps: AltFingerprint[] = [];
+    if (source.dhash) sourceFps.push({ dhash: source.dhash, colorHist: source.colorHist, lbpHist: source.lbpHist, score: source.bestSnapshotScore });
+    if (source.altFingerprints) sourceFps.push(...source.altFingerprints);
+    if (sourceFps.length > 0) {
+      if (!target.altFingerprints) target.altFingerprints = [];
+      for (const fp of sourceFps) {
+        const isDup = target.altFingerprints.some(a => a.dhash === fp.dhash) || fp.dhash === target.dhash;
+        if (!isDup) target.altFingerprints.push(fp);
+      }
+      target.altFingerprints.sort((a, b) => b.score - a.score);
+      if (target.altFingerprints.length > 2) target.altFingerprints.length = 2;
     }
 
     /** 删除源目标（不删快照，因为可能已转移给 target） */
@@ -630,6 +664,39 @@ export class TrackStorage {
   }
 
   /**
+   * 计算两个目标之间的最优距离（主指纹 + 备选指纹取最小值）
+   * 每个目标最多 3 个指纹（1 主 + 2 备选），取所有组合中的最小距离
+   */
+  static computeBestDistance(
+    recA: { dhash?: string; colorHist?: number[]; lbpHist?: number[]; altFingerprints?: AltFingerprint[] },
+    recB: { dhash?: string; colorHist?: number[]; lbpHist?: number[]; altFingerprints?: AltFingerprint[] },
+  ): number {
+    if (!recA.dhash || !recB.dhash) return 1;
+    let best = TrackStorage.computeAppearanceDistance(
+      recA.dhash, recB.dhash, recA.colorHist, recB.colorHist, recA.lbpHist, recB.lbpHist,
+    );
+    /** 将 B 的备选指纹与 A 的主指纹比较 */
+    if (recB.altFingerprints) {
+      for (const alt of recB.altFingerprints) {
+        const d = TrackStorage.computeAppearanceDistance(
+          recA.dhash, alt.dhash, recA.colorHist, alt.colorHist, recA.lbpHist, alt.lbpHist,
+        );
+        if (d < best) best = d;
+      }
+    }
+    /** 将 A 的备选指纹与 B 的主指纹比较 */
+    if (recA.altFingerprints) {
+      for (const alt of recA.altFingerprints) {
+        const d = TrackStorage.computeAppearanceDistance(
+          alt.dhash, recB.dhash!, alt.colorHist, recB.colorHist, alt.lbpHist, recB.lbpHist,
+        );
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  /**
    * HSV 色相范围 → 颜色名称
    * H 在 HSV 空间中范围是 0-1，对应 0°-360°
    */
@@ -708,6 +775,9 @@ export class TrackStorage {
   ): Array<{ trackId: number; customName: string; distance: number }> {
     if (!dhash) return [];
 
+    /** 当前查询目标的完整指纹 */
+    const queryRec = { dhash, colorHist, lbpHist };
+
     /** 同标签匹配结果 + 跨标签匹配结果 */
     const sameLabel: Array<{ trackId: number; customName: string; distance: number }> = [];
     const crossLabel: Array<{ trackId: number; customName: string; distance: number }> = [];
@@ -716,30 +786,25 @@ export class TrackStorage {
       if (record.trackId === trackId) continue;
       if (!record.customName || !record.dhash) continue;
 
-      const combinedDist = TrackStorage.computeAppearanceDistance(
-        dhash, record.dhash, colorHist, record.colorHist, lbpHist, record.lbpHist,
-      );
+      /** 使用最优距离（主指纹 + 备选指纹） */
+      const combinedDist = TrackStorage.computeBestDistance(queryRec, record);
 
       if (record.label === label) {
-        /** 同标签：使用原始阈值 */
         if (combinedDist <= maxDistance) {
           sameLabel.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
         }
       } else {
-        /** 跨标签：放宽阈值（×1.2），因为不同标签的外观差异可能更大 */
         if (combinedDist <= maxDistance * 1.2) {
           crossLabel.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
         }
       }
     }
 
-    /** 同标签匹配优先 */
     if (sameLabel.length > 0) {
       sameLabel.sort((a, b) => a.distance - b.distance);
       return sameLabel;
     }
 
-    /** 无同标签匹配时返回跨标签结果 */
     crossLabel.sort((a, b) => a.distance - b.distance);
     return crossLabel;
   }

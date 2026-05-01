@@ -484,6 +484,7 @@ export default {
     applyAllSuggestions: '一键应用所有匹配建议',
     deleteUnnamed: '删除所有未命名目标',
     quickName: '关联...',
+    matchScore: '相似度 {score}%',
     applySuggestion: '点击应用建议名称',
     eventCount: '行为事件',
     viewLive: '实时',

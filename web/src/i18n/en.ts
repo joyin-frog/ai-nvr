@@ -482,6 +482,7 @@ export default {
     applyAllSuggestions: 'Apply all match suggestions',
     deleteUnnamed: 'Delete all unnamed targets',
     quickName: 'Link...',
+    matchScore: '{score}% match',
     applySuggestion: 'Click to apply suggested name',
     eventCount: 'Behavior events',
     viewLive: 'Live',
