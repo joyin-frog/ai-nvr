@@ -64,8 +64,9 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
 /** 标注图片 URL（仅用于截图下载） */
 const annotatedUrl = ref<string>('')
 
-/** MJPEG 流地址 */
-const streamUrl = computed(() => authUrl(`/api/stream/${props.cameraId}`))
+/** MJPEG 流地址（带时间戳确保每次挂载都是新连接） */
+const streamKey = ref(Date.now())
+const streamUrl = computed(() => authUrl(`/api/stream/${props.cameraId}?_t=${streamKey.value}`))
 /** img 元素引用 */
 const imgEl = ref<HTMLImageElement | null>(null)
 
@@ -100,7 +101,11 @@ function checkFrozen() {
   frozen.value = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
 }
 watch(() => props.online, (on) => {
-  if (on) { frozenTimer = setInterval(checkFrozen, 3000); checkFrozen() }
+  if (on) {
+    /** 摄像头重新上线时刷新 MJPEG 流连接 */
+    streamKey.value = Date.now()
+    frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
+  }
   else { frozen.value = false; if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null } }
 }, { immediate: true })
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })

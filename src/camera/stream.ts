@@ -167,8 +167,6 @@ export class FrameExtractor {
 
     this.proc = spawn(this.ffmpegPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      /** 新进程组，避免 bun --watch 重启时残留僵尸 */
-      detached: false,
     });
 
     const stdout = this.proc.stdout;

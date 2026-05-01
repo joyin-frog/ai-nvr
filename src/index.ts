@@ -35,10 +35,15 @@ process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 /** 全局事件总线 */
 const eventBus = new EventBus();
 
-/** 启动前清理残留的 ffmpeg 孤儿/僵尸进程（bun --watch 重启后残留） */
+/** 启动前清理残留 ffmpeg 进程 */
 try {
-  /** kill -9 + wait 回收僵尸 */
-  execSync("pkill -9 -f ffmpeg 2>/dev/null; sleep 0.1; wait $(pgrep -f ffmpeg 2>/dev/null) 2>/dev/null; true", { encoding: "utf-8", timeout: 3000 });
+  const pids = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8" }).trim();
+  if (pids) {
+    const list = pids.split("\n").filter(Boolean);
+    console.log(`[App] 清理 ${list.length} 个残留 ffmpeg 进程: ${list.join(", ")}`);
+    /** SIGKILL 所有 ffmpeg 进程 */
+    execSync(`kill -9 ${list.join(" ")} 2>/dev/null || true`, { timeout: 3000 });
+  }
 } catch {
   // ignore
 }
