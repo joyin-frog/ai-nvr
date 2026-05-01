@@ -17,6 +17,18 @@ function saveBackendUrl() {
   location.reload()
 }
 
+/** 预设 AI 模型列表 */
+const PRESET_MODELS = [
+  { id: 'onnx-community/yolo26m-ONNX', name: 'YOLO26m (推荐)', desc: '中等体量，速度/精度平衡' },
+  { id: 'onnx-community/yolo26l-ONNX', name: 'YOLO26l', desc: '大体量，精度更高' },
+  { id: 'onnx-community/yolo26x-ONNX', name: 'YOLO26x', desc: '超大体量，最高精度' },
+  { id: 'onnx-community/yolo26s-ONNX', name: 'YOLO26s', desc: '小体量，推理更快' },
+  { id: 'onnx-community/yolo26n-ONNX', name: 'YOLO26n', desc: '最小体量，速度最快' },
+  { id: 'Xenova/yolos-small', name: 'YOLOS-small', desc: 'DETR架构，较老模型' },
+  { id: 'Xenova/yolos-tiny', name: 'YOLOS-tiny', desc: 'DETR架构，极小模型' },
+  { id: 'Xenova/detr-resnet-50', name: 'DETR-R50', desc: '经典DETR模型' },
+]
+
 /** 声音提醒设置（localStorage 持久化，纯前端） */
 const SOUND_KEY = 'nvr-sound-alert'
 const SOUND_VOLUME_KEY = 'nvr-sound-volume'
@@ -317,6 +329,15 @@ onMounted(() => {
         </label>
         <div class="field field-col">
           <span class="field-label">{{ t('settings.aiModel') }}</span>
+          <div class="model-presets">
+            <button
+              v-for="m in PRESET_MODELS"
+              :key="m.id"
+              :class="['preset-btn', { active: settings.ai.model === m.id }]"
+              @click="settings.ai.model = m.id"
+              :title="m.desc"
+            >{{ m.name }}</button>
+          </div>
           <div class="model-row">
             <input
               type="text"
@@ -761,6 +782,37 @@ onMounted(() => {
   font-size: 11px;
   color: #666;
   margin-top: 2px;
+}
+
+.model-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.preset-btn {
+  background: #16213e;
+  color: #aaa;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.preset-btn:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.preset-btn.active {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border-color: #4ECDC4;
+  font-weight: 600;
 }
 
 .smtp-row {
