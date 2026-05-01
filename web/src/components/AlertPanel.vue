@@ -112,7 +112,16 @@ const eventTypes = computed(() => [
   { value: 'motion', label: t('alert.eventTypeMotion') },
   { value: 'camera:offline', label: t('alert.eventTypeOffline') },
   { value: 'camera:lowfps', label: t('alert.eventTypeLowfps') },
+  { value: 'track:appeared', label: t('alert.eventTypeTrackAppeared', '目标出现') },
+  { value: 'track:disappeared', label: t('alert.eventTypeTrackDisappeared', '目标消失') },
 ])
+
+/** 是否显示标签/命名过滤字段（detect 和 track 事件类型都适用） */
+const showLabelFields = computed(() =>
+  form.value.eventType === 'detect'
+  || form.value.eventType === 'track:appeared'
+  || form.value.eventType === 'track:disappeared',
+)
 
 /** 加载 ROI 列表 */
 async function loadRoiList() {
@@ -380,15 +389,15 @@ defineExpose({ loadAlerts, addAlert })
         <label>{{ t('alert.cameraFilter') }}</label>
         <input v-model="form.cameraId" :placeholder="t('alert.cameraPlaceholder')" class="input" />
       </div>
-      <div class="form-field" v-if="form.eventType === 'detect'">
+      <div class="form-field" v-if="showLabelFields">
         <label>{{ t('alert.labelFilter') }}</label>
         <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholder')" class="input" />
       </div>
-      <div class="form-field" v-if="form.eventType === 'detect'">
+      <div class="form-field" v-if="showLabelFields">
         <label>{{ t('alert.trackNameFilter') }}</label>
         <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
       </div>
-      <div class="form-field" v-if="form.eventType === 'detect' && cameraRoiOptions.length > 0">
+      <div class="form-field" v-if="showLabelFields && cameraRoiOptions.length > 0">
         <label>ROI</label>
         <select v-model.number="form.roiId" class="input">
           <option :value="0">{{ t('alert.allRegions', '全部区域') }}</option>
@@ -455,15 +464,15 @@ defineExpose({ loadAlerts, addAlert })
               <label>{{ t('alert.cameraFilter') }}</label>
               <input v-model="form.cameraId" :placeholder="t('alert.cameraPlaceholder')" class="input" />
             </div>
-            <div class="form-field" v-if="form.eventType === 'detect'">
+            <div class="form-field" v-if="showLabelFields">
               <label>{{ t('alert.labelFilter') }}</label>
               <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholderShort')" class="input" />
             </div>
-            <div class="form-field" v-if="form.eventType === 'detect'">
+            <div class="form-field" v-if="showLabelFields">
               <label>{{ t('alert.trackNameFilter') }}</label>
               <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
             </div>
-            <div class="form-field" v-if="form.eventType === 'detect' && cameraRoiOptions.length > 0">
+            <div class="form-field" v-if="showLabelFields && cameraRoiOptions.length > 0">
               <label>ROI</label>
               <select v-model.number="form.roiId" class="input">
                 <option :value="0">{{ t('alert.allRegions', '全部区域') }}</option>

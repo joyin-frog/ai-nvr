@@ -81,6 +81,32 @@ export interface EventPayloads {
     detail: string;
   };
 
+  /** 追踪目标出现 */
+  "track:appeared": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 追踪 ID */
+    trackId: number;
+    /** 目标标签 */
+    label: string;
+    /** 置信度 */
+    score: number;
+  };
+
+  /** 追踪目标消失 */
+  "track:disappeared": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 追踪 ID */
+    trackId: number;
+    /** 目标标签 */
+    label: string;
+  };
+
 }
 
 /** 事件名类型 */

@@ -52,6 +52,12 @@ export class AlertEngine {
       this.eventBus.on("camera:lowfps", (payload) => {
         this.onEvent("camera:lowfps", payload.cameraId, Date.now(), `FPS: ${payload.fps}`);
       }),
+      this.eventBus.on("track:appeared", (payload) => {
+        this.onTrackEvent("track:appeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label, payload.score);
+      }),
+      this.eventBus.on("track:disappeared", (payload) => {
+        this.onTrackEvent("track:disappeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label);
+      }),
     );
     console.log("[AlertEngine] 告警引擎已启动");
   }
@@ -84,6 +90,38 @@ export class AlertEngine {
       if (rule.eventType !== eventType) continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
       const detail = typeof extra === 'string' ? extra : extra !== undefined ? JSON.stringify({ ratio: extra }) : undefined;
+      this.checkRule(rule, cameraId, timestamp, detail);
+    }
+  }
+
+  /** 处理追踪目标事件（track:appeared / track:disappeared） */
+  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number): void {
+    this.refreshRules();
+    this.refreshTrackNames(cameraId);
+
+    const trackName = this.trackNameCache.get(`${cameraId}:${trackId}`);
+
+    for (const rule of this.rules) {
+      if (rule.eventType !== eventType) continue;
+      if (rule.cameraId && rule.cameraId !== cameraId) continue;
+
+      /** 标签过滤 */
+      if (rule.labels) {
+        const requiredLabels = new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()));
+        if (!requiredLabels.has(label.toLowerCase())) continue;
+      }
+
+      /** 命名匹配 */
+      if (rule.trackNames) {
+        const requiredNames = new Set(rule.trackNames.split(",").map(n => n.trim()));
+        if (!trackName || !requiredNames.has(trackName)) continue;
+      }
+
+      const nameTag = trackName ? ` (${trackName})` : "";
+      const scoreTag = score ? ` ${(score * 100).toFixed(0)}%` : "";
+      const detail = JSON.stringify({ trackId, label, trackName, eventType: eventType === "track:appeared" ? "出现" : "消失" });
+      void nameTag;
+      void scoreTag;
       this.checkRule(rule, cameraId, timestamp, detail);
     }
   }

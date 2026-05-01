@@ -376,6 +376,25 @@ export class AiDetector {
       /** 缓存最新帧和检测结果（用于按需生成标注图） */
       this.annotator.setLatestFrame(cameraId, jpeg, trackResult.detections);
 
+      /** 发射追踪目标出现/消失事件 */
+      for (const target of trackResult.appeared) {
+        this.eventBus.emit("track:appeared", {
+          cameraId,
+          timestamp,
+          trackId: target.trackId,
+          label: target.label,
+          score: target.score,
+        });
+      }
+      for (const target of trackResult.disappeared) {
+        this.eventBus.emit("track:disappeared", {
+          cameraId,
+          timestamp,
+          trackId: target.trackId,
+          label: target.label,
+        });
+      }
+
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
