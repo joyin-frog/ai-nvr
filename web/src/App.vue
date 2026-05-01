@@ -774,6 +774,13 @@ function setupEventListeners() {
     eventPanel.value?.addEvent('track:speed', payload.cameraId, `${displayName} 高速移动 (${payload.speed.toFixed(3)}/帧)`)
   })
 
+  client.on('track:line-cross', (payload) => {
+    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const displayName = customName ? `${customName} (${payload.label})` : `${payload.label} #${payload.trackId}`
+    eventPanel.value?.addEvent('track:line-cross', payload.cameraId, `${displayName} 越线 ${payload.lineName} (${payload.direction})`)
+    pushZoneNotification(payload.cameraId, { type: 'line-cross', name: customName || payload.label, zoneName: payload.lineName, timestamp: payload.timestamp, direction: payload.direction })
+  })
+
   client.on('track:match-suggest', (payload) => {
     const best = payload.matches[0]
     if (!best) return
