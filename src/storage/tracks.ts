@@ -220,8 +220,6 @@ export class TrackStorage {
       let bestDist = Infinity;
       let bestName = "";
       for (const n of named) {
-        if (n.label !== r.label) continue;
-
         const dhashDist = TrackStorage.hammingDistance(r.dhash, n.dhash) / 64;
         let colorDist = 0.5;
         if (r.colorHist && n.colorHist) {
@@ -231,13 +229,14 @@ export class TrackStorage {
           ? dhashDist * 0.5 + colorDist * 0.5
           : dhashDist;
 
-        if (combinedDist < bestDist) {
+        /** 同标签直接比较；跨标签需要更近距离才接受 */
+        const threshold = n.label === r.label ? 0.4 : 0.3;
+        if (combinedDist < bestDist && combinedDist <= threshold) {
           bestDist = combinedDist;
           bestName = n.customName;
         }
       }
-      /** 综合距离 <= 0.4（40% 差异阈值）才返回 */
-      if (bestName && bestDist <= 0.4) {
+      if (bestName) {
         results.push({ trackId: r.trackId, label: r.label, suggestedName: bestName, distance: bestDist });
       }
     }
@@ -560,17 +559,20 @@ export class TrackStorage {
     colorHist?: number[],
   ): Array<{ trackId: number; customName: string; distance: number }> {
     if (!dhash) return [];
-    const results: Array<{ trackId: number; customName: string; distance: number }> = [];
+
+    /** 同标签匹配结果 + 跨标签匹配结果 */
+    const sameLabel: Array<{ trackId: number; customName: string; distance: number }> = [];
+    const crossLabel: Array<{ trackId: number; customName: string; distance: number }> = [];
+
     for (const record of this.tracks.values()) {
       if (record.trackId === trackId) continue;
       if (!record.customName || !record.dhash) continue;
-      if (record.label !== label) continue;
 
       /** dHash 结构距离（归一化到 0-1） */
       const dhashDist = TrackStorage.hammingDistance(dhash, record.dhash) / 64;
 
       /** 颜色直方图距离 */
-      let colorDist = 0.5; /** 无颜色信息时使用中间值 */
+      let colorDist = 0.5;
       if (colorHist && record.colorHist) {
         colorDist = TrackStorage.colorHistDistance(colorHist, record.colorHist);
       }
@@ -580,12 +582,28 @@ export class TrackStorage {
         ? dhashDist * 0.5 + colorDist * 0.5
         : dhashDist;
 
-      if (combinedDist <= maxDistance) {
-        results.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
+      if (record.label === label) {
+        /** 同标签：使用原始阈值 */
+        if (combinedDist <= maxDistance) {
+          sameLabel.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
+        }
+      } else {
+        /** 跨标签：放宽阈值（×1.2），因为不同标签的外观差异可能更大 */
+        if (combinedDist <= maxDistance * 1.2) {
+          crossLabel.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
+        }
       }
     }
-    results.sort((a, b) => a.distance - b.distance);
-    return results;
+
+    /** 同标签匹配优先 */
+    if (sameLabel.length > 0) {
+      sameLabel.sort((a, b) => a.distance - b.distance);
+      return sameLabel;
+    }
+
+    /** 无同标签匹配时返回跨标签结果 */
+    crossLabel.sort((a, b) => a.distance - b.distance);
+    return crossLabel;
   }
 
   /** 从帧中裁剪目标区域并保存为快照 */
