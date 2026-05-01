@@ -218,8 +218,12 @@ function updatePlaybackDetections() {
     if (playbackEvents.value[i]!.timestamp <= t) best = i
     else break
   }
-  /** 只显示 3 秒内的检测 */
-  if (best >= 0 && t - playbackEvents.value[best]!.timestamp < 3000) {
+  /** 动态超时窗口：取前一个事件的间隔 × 1.5，最小 3 秒，最大 10 秒 */
+  const eventTs = playbackEvents.value[best]!.timestamp
+  const prevIdx = best > 0 ? best - 1 : undefined
+  const gap = prevIdx !== undefined ? eventTs - playbackEvents.value[prevIdx]!.timestamp : 3000
+  const threshold = Math.max(3000, Math.min(10_000, gap * 1.5))
+  if (best >= 0 && t - eventTs < threshold) {
     playbackDetections.value = playbackEvents.value[best]!.detections
   } else {
     playbackDetections.value = []
