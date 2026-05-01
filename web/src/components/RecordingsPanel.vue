@@ -694,6 +694,12 @@ function shiftDate(delta: number) {
   loadRecordings()
 }
 
+/** 跳转到今天 */
+function goToday() {
+  filterDate.value = new Date().toISOString().slice(0, 10)
+  loadRecordings()
+}
+
 /** 时间搜索 */
 const searchTimeInput = ref('')
 /** 高亮的录像文件名 */
@@ -1284,6 +1290,7 @@ defineExpose({ loadRecordings, playAtTime })
       <input type="date" v-model="filterDate" class="filter-date" :title="t('recording.filterDate')" />
       <button class="date-nav-btn" @click="shiftDate(-1)" :title="t('recording.prevDay')" :disabled="!filterDate">◀</button>
       <button class="date-nav-btn" @click="shiftDate(1)" :title="t('recording.nextDay')" :disabled="!filterDate">▶</button>
+      <button class="today-btn" @click="goToday" :title="t('timeline.now')">{{ t('timeline.now') }}</button>
       <select v-model="filterCamera" @change="onCameraFilterChange" class="filter-select">
         <option value="">{{ t("recording.allCameras") }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
@@ -1506,6 +1513,19 @@ defineExpose({ loadRecordings, playAtTime })
   color: #4ECDC4;
   background: #3a3a5a;
 }
+
+.today-btn {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.today-btn:hover { background: #3ad4c8; }
 
 .date-nav-btn:disabled {
   opacity: 0.3;
