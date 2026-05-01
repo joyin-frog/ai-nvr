@@ -39,19 +39,15 @@ export interface TrackUpdateResult {
   disappeared: Array<{ trackId: number; label: string }>;
 }
 
-/** 消失的追踪目标元数据（用于外观恢复） */
+/** 消失的追踪目标元数据（用于位置恢复） */
 interface GhostTrack {
   trackId: number;
   label: string;
   /** 消失时的帧序号 */
   lostFrame: number;
+  /** 消失时的最后位置 */
+  lastBox: { xmin: number; ymin: number; xmax: number; ymax: number };
 }
-
-/**
- * 外观恢复回调：检查消失的 track 是否应该恢复
- * 返回匹配的 trackId，0 表示不匹配
- */
-export type RecoverCheckFn = (lostTrackId: number) => number;
 
 let nextTrackId = 1;
 
@@ -87,8 +83,6 @@ export class ObjectTracker {
   private ghostTracks: GhostTrack[] = [];
   /** ghost tracks 保留帧数 */
   private ghostTtl: number;
-  /** 外观恢复回调 */
-  private onRecoverCheck: RecoverCheckFn | null;
 
   constructor(options?: {
     maxLost?: number;
@@ -96,14 +90,11 @@ export class ObjectTracker {
     newTrackThreshold?: number;
     /** ghost tracks 保留帧数（默认 120，约 16 秒） */
     ghostTtl?: number;
-    /** 外观恢复回调 */
-    onRecoverCheck?: RecoverCheckFn;
   }) {
     this.maxLost = options?.maxLost ?? 15;
     this.iouThreshold = options?.iouThreshold ?? 0.2;
     this.newTrackThreshold = options?.newTrackThreshold ?? 0.5;
     this.ghostTtl = options?.ghostTtl ?? 120;
-    this.onRecoverCheck = options?.onRecoverCheck ?? null;
   }
 
   /**
@@ -232,17 +223,29 @@ export class ObjectTracker {
       const det = highDets[di]!;
       let recoveredId = 0;
 
-      /** 尝试外观恢复：查找同标签的 ghost track */
-      if (this.onRecoverCheck && this.ghostTracks.length > 0) {
+      /** 尝试从 ghost tracks 恢复：同标签 + 位置最近优先 */
+      if (this.ghostTracks.length > 0) {
         const candidates = this.ghostTracks.filter(g => g.label === det.label);
+        let bestGhost: GhostTrack | null = null;
+        let bestDist = Infinity;
+
         for (const ghost of candidates) {
-          const matchId = this.onRecoverCheck(ghost.trackId);
-          if (matchId > 0) {
-            recoveredId = matchId;
-            /** 从 ghost 列表中移除已恢复的 */
-            this.ghostTracks = this.ghostTracks.filter(g => g.trackId !== recoveredId);
-            break;
+          /** 位置距离：新检测中心到 ghost 最后位置中心的欧氏距离（归一化坐标） */
+          const gcx = (ghost.lastBox.xmin + ghost.lastBox.xmax) / 2;
+          const gcy = (ghost.lastBox.ymin + ghost.lastBox.ymax) / 2;
+          const dcx = (det.box.xmin + det.box.xmax) / 2;
+          const dcy = (det.box.ymin + det.box.ymax) / 2;
+          const posDist = Math.sqrt((gcx - dcx) ** 2 + (gcy - dcy) ** 2);
+          /** 距离越近越好，但不超过 0.5（归一化坐标） */
+          if (posDist < bestDist && posDist < 0.5) {
+            bestGhost = ghost;
+            bestDist = posDist;
           }
+        }
+
+        if (bestGhost) {
+          recoveredId = bestGhost.trackId;
+          this.ghostTracks = this.ghostTracks.filter(g => g.trackId !== recoveredId);
         }
       }
 
@@ -272,8 +275,11 @@ export class ObjectTracker {
         /** 只记录之前活跃的追踪消失 */
         if (prevActiveIds.has(t.trackId)) {
           disappeared.push({ trackId: t.trackId, label: t.label });
-          /** 移入 ghost tracks 用于外观恢复 */
-          this.ghostTracks.push({ trackId: t.trackId, label: t.label, lostFrame: this.frameIndex });
+          /** 移入 ghost tracks 用于位置恢复 */
+          this.ghostTracks.push({
+            trackId: t.trackId, label: t.label, lostFrame: this.frameIndex,
+            lastBox: { ...t.box },
+          });
         }
         return false;
       }

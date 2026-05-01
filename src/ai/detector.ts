@@ -369,15 +369,7 @@ export class AiDetector {
       /** 目标追踪：跨帧保持同一 ID */
       let tracker = this.trackers.get(cameraId);
       if (!tracker) {
-        tracker = new ObjectTracker({
-          onRecoverCheck: this.trackStorage
-            ? (lostTrackId: number): number => {
-                /** 已命名目标 ID 恢复：消失后重新出现时保持同一 trackId */
-                const lostRecord = this.trackStorage!.getRecord(lostTrackId);
-                return lostRecord?.customName ? lostTrackId : 0;
-              }
-            : undefined,
-        });
+        tracker = new ObjectTracker();
         this.trackers.set(cameraId, tracker);
       }
       const trackResult = tracker.update(detections);
