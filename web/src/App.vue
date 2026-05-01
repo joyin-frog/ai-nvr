@@ -725,6 +725,22 @@ onMounted(async () => {
 
   /** 键盘快捷键 */
   useKeyboardShortcuts()
+
+  /** 下载 Blob 文件 */
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  /** ISO 时间戳（用于文件名） */
+  function ts() {
+    return new Date().toISOString().replace(/[:.]/g, '-')
+  }
+
   registerShortcut({ key: '1', description: t('shortcuts.switchTab'), handler: () => switchTab('events') })
   registerShortcut({ key: '2', description: t('shortcuts.switchTab'), handler: () => switchTab('recordings') })
   registerShortcut({ key: '3', description: t('shortcuts.switchTab'), handler: () => switchTab('status') })
@@ -742,19 +758,25 @@ onMounted(async () => {
   registerShortcut({ key: '?', description: t('shortcuts.help'), handler: () => { showShortcuts.value = !showShortcuts.value }})
   registerShortcut({ key: 'p', description: t('shortcuts.patrol'), handler: () => { togglePatrol() }})
   registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: async () => {
-    const targetCam = fullscreenCamera.value ?? visibleCameras.value[0]?.id
-    if (!targetCam) return
-    try {
-      const res = await authFetch(`/api/snapshot/${targetCam}?quality=hd`)
-      if (!res.ok) return
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `screenshot_${targetCam}_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch { /* ignore */ }
+    /** 全屏模式：截当前摄像头；网格模式：Shift+S 截所有，否则截第一个 */
+    if (fullscreenCamera.value) {
+      const res = await authFetch(`/api/snapshot/${fullscreenCamera.value}?quality=hd`)
+      if (res.ok) downloadBlob(await res.blob(), `screenshot_${fullscreenCamera.value}_${ts()}.jpg`)
+    } else if (visibleCameras.value.length === 1) {
+      const cam = visibleCameras.value[0]!
+      const res = await authFetch(`/api/snapshot/${cam.id}?quality=hd`)
+      if (res.ok) downloadBlob(await res.blob(), `screenshot_${cam.id}_${ts()}.jpg`)
+    } else {
+      /** 多路模式：并行截取所有在线摄像头 */
+      const onlineIds = visibleCameras.value.filter(c => c.online).map(c => c.id)
+      const blobs = await Promise.all(onlineIds.map(async id => {
+        const res = await authFetch(`/api/snapshot/${id}?quality=hd`)
+        return res.ok ? { id, blob: await res.blob() } : null
+      }))
+      for (const item of blobs) {
+        if (item) downloadBlob(item.blob, `screenshot_${item.id}_${ts()}.jpg`)
+      }
+    }
   }})
 })
 
