@@ -167,6 +167,20 @@ const trackLabelsMap = ref<Record<string, Record<number, string>>>({})
 const frameLatency = ref<Record<string, number>>({})
 /** 每个摄像头的 WS 帧版本号（用于触发 CameraView 更新） */
 const wsFrameVersions = ref<Record<string, number>>({})
+/** ROI 区域数据（按摄像头分组） */
+const roiDataMap = ref<Record<string, Array<{ id: number; name: string; points: string }>>>({})
+/** 摄像头 ID → 解析后的 ROI 列表（归一化坐标） */
+const parsedRoiMap = computed(() => {
+  const result: Record<string, Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>> = {}
+  for (const [camId, regions] of Object.entries(roiDataMap.value)) {
+    result[camId] = regions.map(r => ({
+      id: r.id,
+      name: r.name,
+      points: JSON.parse(r.points) as Array<{ x: number; y: number }>,
+    }))
+  }
+  return result
+})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
@@ -287,8 +301,26 @@ async function loadCameras() {
       detectFps: c.detectFps ?? 0,
     }))
     updateTitle()
+    loadRoiData()
   } catch {
     // retry later
+  }
+}
+
+/** 加载 ROI 区域数据 */
+async function loadRoiData() {
+  try {
+    const res = await authFetch('/api/roi')
+    if (!res.ok) return
+    const allRois = await res.json() as Array<{ id: number; cameraId: string; name: string; points: string }>
+    const grouped: Record<string, Array<{ id: number; name: string; points: string }>> = {}
+    for (const r of allRois) {
+      if (!grouped[r.cameraId]) grouped[r.cameraId] = []
+      grouped[r.cameraId]!.push({ id: r.id, name: r.name, points: r.points })
+    }
+    roiDataMap.value = grouped
+  } catch {
+    // ignore
   }
 }
 
@@ -802,6 +834,7 @@ onUnmounted(() => {
                 :ws-frame-version="wsFrameVersions[cam.id] ?? 0"
                 :dual-stream="cam.dualStream"
                 :detect-fps="cam.detectFps"
+                :roi-regions="parsedRoiMap[cam.id]"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
                 @track-label-updated="loadTrackLabels"

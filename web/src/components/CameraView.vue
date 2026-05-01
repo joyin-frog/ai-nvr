@@ -43,6 +43,8 @@ const props = defineProps<{
   dualStream?: boolean
   /** 检测流帧率 */
   detectFps?: number
+  /** ROI 区域列表（归一化坐标多边形） */
+  roiRegions?: Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>
 }>()
 
 const emit = defineEmits<{
@@ -277,6 +279,39 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.fillStyle = '#1a1a2e'
     ctx.fillText(text, x + 4, labelY - 3)
   }
+
+  /** 绘制 ROI 区域 */
+  if (props.roiRegions && props.roiRegions.length > 0) {
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([6, 4])
+    for (const roi of props.roiRegions) {
+      if (roi.points.length < 3) continue
+      ctx.strokeStyle = 'rgba(156, 39, 176, 0.7)'
+      ctx.fillStyle = 'rgba(156, 39, 176, 0.08)'
+      ctx.beginPath()
+      ctx.moveTo(roi.points[0]!.x * width, roi.points[0]!.y * height)
+      for (let i = 1; i < roi.points.length; i++) {
+        ctx.lineTo(roi.points[i]!.x * width, roi.points[i]!.y * height)
+      }
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+      /** ROI 名称 */
+      if (roi.name) {
+        const cx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * width
+        const cy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * height
+        ctx.setLineDash([])
+        ctx.font = 'bold 10px sans-serif'
+        ctx.fillStyle = 'rgba(156, 39, 176, 0.9)'
+        ctx.textAlign = 'center'
+        ctx.fillText(roi.name, cx, cy)
+        ctx.textAlign = 'start'
+        ctx.setLineDash([6, 4])
+      }
+    }
+    ctx.setLineDash([])
+  }
+
   ctx.restore()
 }
 
