@@ -2,7 +2,6 @@ import { type AppConfig, type CameraConfig } from "@/config";
 import { type EventBus } from "@/event-bus";
 import { type MotionRecorder } from "@/storage/recorder";
 import { FrameExtractor } from "./stream";
-import { Fmp4Extractor } from "./fmp4-stream";
 import { H264Fmp4Extractor } from "./h264-fmp4-muxer";
 
 /**
@@ -14,8 +13,6 @@ import { H264Fmp4Extractor } from "./h264-fmp4-muxer";
  *   SD 流：FrameExtractor（decode → MJPEG）→ AI 检测 + 录像 + Canvas 备用显示
  *
  * 单流模式：只有一个码流时，FrameExtractor 同时用于显示和检测
- *
- * 兼容模式：仍然支持旧的 Fmp4Extractor（使用独立 ffmpeg 进程）
  */
 export class CameraManager {
   /** 摄像头 ID → 显示流提取器（MJPEG，用于 Canvas 备用显示 + 录像） */
@@ -23,7 +20,7 @@ export class CameraManager {
   /** 摄像头 ID → 检测流提取器（双流模式专用，SD 码流） */
   private detectExtractors = new Map<string, FrameExtractor>();
   /** 摄像头 ID → fMP4 流提取器（高分辨率零转码） */
-  private fmp4Extractors = new Map<string, Fmp4Extractor | H264Fmp4Extractor>();
+  private fmp4Extractors = new Map<string, H264Fmp4Extractor>();
   /** 摄像头 ID → 是否使用双流模式 */
   private dualStreamFlags = new Map<string, boolean>();
   /** 摄像头 ID → 最新一帧（显示流，高清） */
@@ -66,7 +63,7 @@ export class CameraManager {
   }
 
   /** 获取 fMP4 提取器 */
-  getFmp4Extractor(cameraId: string): Fmp4Extractor | H264Fmp4Extractor | undefined {
+  getFmp4Extractor(cameraId: string): H264Fmp4Extractor | undefined {
     return this.fmp4Extractors.get(cameraId);
   }
 

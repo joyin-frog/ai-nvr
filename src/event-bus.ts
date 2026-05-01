@@ -1,5 +1,5 @@
 import { type Detection } from "@/ai/types";
-import { type Fmp4InitSegment } from "@/camera/fmp4-stream";
+import { type Fmp4InitSegment } from "@/camera/h264-fmp4-muxer";
 
 /** 事件载荷类型定义 */
 export interface EventPayloads {
