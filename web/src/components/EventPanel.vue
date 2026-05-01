@@ -431,6 +431,13 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       if (obj.ruleName) items.push({ label: t('event.rule'), value: obj.ruleName })
       if (obj.detail) items.push({ label: t('event.detail'), value: obj.detail })
     }
+    /** 行为事件详情 */
+    if (e.type === 'track:enter-zone' || e.type === 'track:leave-zone' || e.type === 'track:dwell') {
+      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName) })
+      if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
+      if (obj.zoneName) items.push({ label: t('event.zone', '区域'), value: String(obj.zoneName) })
+      if (obj.dwellMs !== undefined) items.push({ label: t('event.dwellTime', '停留时长'), value: `${(obj.dwellMs / 1000).toFixed(1)}s` })
+    }
   } catch {
     if (e.rawDetail) items.push({ label: t('event.detail'), value: e.rawDetail })
   }
@@ -640,7 +647,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
           </div>
           <div class="expand-actions">
             <button
-              v-if="e.type === 'motion' || e.type === 'detect'"
+              v-if="e.type === 'motion' || e.type === 'detect' || e.type.startsWith('track:')"
               class="play-btn"
               @click.stop="emit('play-recording', e.cameraId, e.timestamp)"
             >{{ t('event.viewRecording') }}</button>
