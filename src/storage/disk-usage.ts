@@ -25,16 +25,26 @@ export interface DiskInfo {
 
 /**
  * 存储磁盘用量统计
+ * 带缓存，避免每次请求递归扫描文件系统
  */
 export class DiskUsage {
   private dataRoot: string;
+  /** 缓存的磁盘信息 */
+  private cachedInfo: DiskInfo | null = null;
+  /** 缓存过期时间 */
+  private cacheExpiry = 0;
+  /** 缓存 TTL（60 秒） */
+  private static readonly CACHE_TTL = 60_000;
 
   constructor(dataRoot: string) {
     this.dataRoot = dataRoot;
   }
 
-  /** 获取完整磁盘信息 */
+  /** 获取完整磁盘信息（带缓存） */
   getInfo(): DiskInfo {
+    const now = Date.now();
+    if (this.cachedInfo && now < this.cacheExpiry) return this.cachedInfo;
+
     const directories: DirUsage[] = [];
     let totalBytes = 0;
 
@@ -53,12 +63,20 @@ export class DiskUsage {
     }
 
     const disk = this.getDiskSpace();
-    return {
+    this.cachedInfo = {
       directories,
       totalBytes,
       diskFreeBytes: disk?.free ?? 0,
       diskTotalBytes: disk?.total ?? 0,
     };
+    this.cacheExpiry = now + DiskUsage.CACHE_TTL;
+    return this.cachedInfo;
+  }
+
+  /** 使缓存失效（文件增删后调用） */
+  invalidate(): void {
+    this.cachedInfo = null;
+    this.cacheExpiry = 0;
   }
 
   /** 计算目录大小 */
