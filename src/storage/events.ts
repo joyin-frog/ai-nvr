@@ -22,6 +22,10 @@ export class EventStorage {
     this.db.run("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_events_camera ON events(camera_id)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)");
+    /** 复合索引：优化按摄像头+时间范围查询 */
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_events_camera_time ON events(camera_id, timestamp)");
+    /** 复合索引：优化按类型+时间范围查询 */
+    this.db.run("CREATE INDEX IF NOT EXISTS idx_events_type_time ON events(type, timestamp)");
     /** 迁移：添加 starred 列 */
     const cols = this.db.query("PRAGMA table_info(events)").all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === "starred")) {
