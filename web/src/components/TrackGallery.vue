@@ -56,6 +56,20 @@ function snapshotUrl(filename: string | undefined): string {
   return authUrl(`/api/tracks/snapshot/${filename}`)
 }
 
+/** 所有已命名的目标名称（去重，用于快速关联下拉） */
+const existingNames = computed(() => {
+  const names = new Set<string>()
+  for (const t of tracks.value) {
+    if (t.customName) names.add(t.customName)
+  }
+  return [...names].sort()
+})
+
+/** 快速应用已有名称 */
+function applyExistingName(name: string) {
+  editName.value = name
+}
+
 /** 开始编辑名称 */
 function startEdit(track: TrackInfo) {
   editingId.value = track.trackId
@@ -202,16 +216,28 @@ onUnmounted(() => {
         <div class="track-info">
           <div class="track-name-row">
             <template v-if="editingId === track.trackId">
-              <input
-                v-model="editName"
-                class="name-input"
-                :placeholder="track.label"
-                @keydown.enter="saveName(track.trackId)"
-                @keydown.escape="cancelEdit"
-                autofocus
-              />
-              <button class="save-btn" @click="saveName(track.trackId)">✓</button>
-              <button class="cancel-btn" @click="cancelEdit">✗</button>
+              <div class="name-edit-group">
+                <input
+                  v-model="editName"
+                  class="name-input"
+                  :placeholder="track.label"
+                  @keydown.enter="saveName(track.trackId)"
+                  @keydown.escape="cancelEdit"
+                  autofocus
+                />
+                <button class="save-btn" @click="saveName(track.trackId)">✓</button>
+                <button class="cancel-btn" @click="cancelEdit">✗</button>
+                <!-- 快速关联已有名称下拉 -->
+                <select
+                  v-if="existingNames.length > 0"
+                  class="name-preset"
+                  @change="applyExistingName(($event.target as HTMLSelectElement).value)"
+                  :title="t('tracks.quickName', '快速关联')"
+                >
+                  <option value="">{{ t('tracks.quickName', '关联...') }}</option>
+                  <option v-for="name in existingNames" :key="name" :value="name">{{ name }}</option>
+                </select>
+              </div>
             </template>
             <template v-else>
               <span class="track-label" @dblclick="startEdit(track)">
@@ -409,6 +435,30 @@ onUnmounted(() => {
   font-size: 11px;
   width: 80px;
   outline: none;
+}
+
+.name-edit-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.name-preset {
+  background: #1a1a2e;
+  border: 1px solid #444;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 1px 2px;
+  font-size: 10px;
+  cursor: pointer;
+  outline: none;
+  max-width: 90px;
+}
+
+.name-preset:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
 }
 
 .save-btn, .cancel-btn {
