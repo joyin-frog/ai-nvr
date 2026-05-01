@@ -1,5 +1,6 @@
 import { pipeline, env as transformersEnv, type ObjectDetectionPipeline } from "@huggingface/transformers";
 import sharp from "sharp";
+import { ensureModelCached } from "./model-downloader";
 
 /** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
 const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -48,6 +49,9 @@ export class AiDetector {
       console.log("[AiDetector] AI 检测已禁用");
       return;
     }
+
+    /** 预下载模型文件（支持断点续传），确保缓存完整后再加载 */
+    await ensureModelCached(config.model, transformersEnv.cacheDir!, hfEndpoint);
 
     await this.loadModel(config.model);
 
@@ -108,6 +112,7 @@ export class AiDetector {
 
     this.initialized = false;
     try {
+      await ensureModelCached(target, transformersEnv.cacheDir!, hfEndpoint);
       await this.loadModel(target);
       /** 更新 RuntimeConfig 中的模型名称 */
       const ai = this.runtimeConfig.get().ai;
