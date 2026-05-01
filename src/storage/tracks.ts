@@ -204,6 +204,38 @@ export class TrackStorage {
     return max;
   }
 
+  /** 合并两个追踪目标（将 source 合并到 target） */
+  merge(sourceId: number, targetId: number): boolean {
+    const source = this.tracks.get(sourceId);
+    const target = this.tracks.get(targetId);
+    if (!source || !target || sourceId === targetId) return false;
+
+    /** 合并摄像头列表 */
+    for (const camId of source.cameraIds) {
+      if (!target.cameraIds.includes(camId)) {
+        target.cameraIds.push(camId);
+      }
+    }
+
+    /** 累加出现次数 */
+    target.hitCount += source.hitCount;
+
+    /** 更新时间范围 */
+    target.firstSeen = Math.min(target.firstSeen, source.firstSeen);
+    target.lastSeen = Math.max(target.lastSeen, source.lastSeen);
+
+    /** 如果目标没有快照但源有，使用源的快照 */
+    if (!target.snapshotFile && source.snapshotFile) {
+      target.snapshotFile = source.snapshotFile;
+      target.bestSnapshotScore = source.bestSnapshotScore;
+    }
+
+    /** 删除源目标（不删快照，因为可能已转移给 target） */
+    this.tracks.delete(sourceId);
+    this.scheduleSave();
+    return true;
+  }
+
   /** 删除单个追踪目标（包括快照文件） */
   remove(trackId: number): boolean {
     const record = this.tracks.get(trackId);

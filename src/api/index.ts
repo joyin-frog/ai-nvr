@@ -1244,6 +1244,28 @@ export function startServer(
       }
 
       /** 删除追踪目标 */
+      /** 合并追踪目标 */
+      if (url.pathname === "/api/tracks/merge" && req.method === "POST") {
+        const body = await req.json() as { sourceId?: number; targetId?: number };
+        if (!body.sourceId || !body.targetId) {
+          return Response.json({ error: "sourceId and targetId required" }, { status: 400 });
+        }
+        const ok = trackStorage.merge(body.sourceId, body.targetId);
+        if (!ok) return Response.json({ error: "merge failed" }, { status: 400 });
+        /** 广播更新 */
+        const updated = trackStorage.getTrack(body.targetId);
+        if (updated?.customName) {
+          for (const cameraId of updated.cameraIds) {
+            eventBus.emit("track:label-updated", {
+              cameraId,
+              trackId: body.targetId,
+              name: updated.customName,
+            });
+          }
+        }
+        return Response.json({ ok: true, track: updated });
+      }
+
       const trackDeleteMatch = url.pathname.match(/^\/api\/tracks\/(\d+)$/);
       if (trackDeleteMatch && req.method === "DELETE") {
         const trackId = parseInt(trackDeleteMatch[1]!);

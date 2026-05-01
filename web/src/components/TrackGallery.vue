@@ -82,16 +82,63 @@ function startEdit(track: TrackInfo) {
   editName.value = track.customName ?? ''
 }
 
+/** 合并确认状态 */
+const mergeConfirm = ref<{ sourceId: number; targetId: number; name: string } | null>(null)
+
+/** 查找使用指定名称的其他目标 */
+function findTrackByName(name: string, excludeId: number): TrackInfo | undefined {
+  return tracks.value.find(t => t.customName === name && t.trackId !== excludeId)
+}
+
 /** 保存名称 */
 async function saveName(trackId: number) {
   const name = editName.value.trim()
+  /** 检查是否有同名目标 → 触发合并确认 */
+  const existing = findTrackByName(name, trackId)
+  if (existing) {
+    mergeConfirm.value = { sourceId: trackId, targetId: existing.trackId, name }
+    return
+  }
+  await doSaveName(trackId, name)
+}
+
+/** 仅命名（不合并） */
+async function doSaveName(trackId: number, name: string) {
   await authFetch(`/api/tracks/${trackId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ customName: name }),
   })
   editingId.value = null
+  mergeConfirm.value = null
   await loadTracks()
+}
+
+/** 确认合并 */
+async function confirmMerge() {
+  if (!mergeConfirm.value) return
+  const { sourceId, targetId, name } = mergeConfirm.value
+  /** 先合并，再给目标设置名称 */
+  await authFetch('/api/tracks/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceId, targetId }),
+  })
+  /** 确保目标名称正确 */
+  await authFetch(`/api/tracks/${targetId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customName: name }),
+  })
+  editingId.value = null
+  mergeConfirm.value = null
+  await loadTracks()
+}
+
+/** 取消合并，改为仅命名 */
+function cancelMerge() {
+  if (!mergeConfirm.value) return
+  doSaveName(mergeConfirm.value.sourceId, mergeConfirm.value.name)
 }
 
 /** 取消编辑 */
@@ -316,6 +363,19 @@ onUnmounted(() => {
               <button class="event-play" @click.stop="emit('jumpToRecording', ev.camera_id, ev.timestamp)">▶</button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 合并确认对话框 -->
+    <div v-if="mergeConfirm" class="merge-overlay" @click.self="mergeConfirm = null">
+      <div class="merge-dialog">
+        <p class="merge-text">{{ t('tracks.mergeConfirm', `名称「${mergeConfirm.name}」已被其他目标使用`) }}</p>
+        <p class="merge-hint">{{ t('tracks.mergeHint', '合并将把两个目标的记录整合到一起') }}</p>
+        <div class="merge-actions">
+          <button class="merge-yes-btn" @click="confirmMerge">{{ t('tracks.mergeAction', '合并') }}</button>
+          <button class="merge-no-btn" @click="cancelMerge">{{ t('tracks.justName', '仅命名') }}</button>
+          <button class="merge-cancel-btn" @click="mergeConfirm = null; editingId = null">{{ t('manage.cancel', '取消') }}</button>
         </div>
       </div>
     </div>
@@ -697,4 +757,75 @@ onUnmounted(() => {
 }
 
 .event-play:hover { color: #4ECDC4; }
+
+.merge-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.merge-dialog {
+  background: #1a1a3a;
+  border: 1px solid #4ECDC4;
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 340px;
+  width: 90%;
+}
+
+.merge-text {
+  color: #e0e0e0;
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.merge-hint {
+  color: #888;
+  font-size: 11px;
+  margin: 0 0 16px;
+}
+
+.merge-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.merge-yes-btn {
+  background: #4ECDC4;
+  color: #000;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.merge-no-btn {
+  background: #2a2a4a;
+  color: #4ECDC4;
+  border: 1px solid #4ECDC4;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.merge-cancel-btn {
+  background: none;
+  color: #888;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: auto;
+}
 </style>
