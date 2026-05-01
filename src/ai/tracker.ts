@@ -39,6 +39,20 @@ export interface TrackUpdateResult {
   disappeared: Array<{ trackId: number; label: string }>;
 }
 
+/** 消失的追踪目标元数据（用于外观恢复） */
+interface GhostTrack {
+  trackId: number;
+  label: string;
+  /** 消失时的帧序号 */
+  lostFrame: number;
+}
+
+/**
+ * 外观恢复回调：检查消失的 track 是否应该恢复
+ * 返回匹配的 trackId，0 表示不匹配
+ */
+export type RecoverCheckFn = (lostTrackId: number) => number;
+
 let nextTrackId = 1;
 
 /** 从持久化存储恢复 trackId 计数器，避免重启后 ID 重叠 */
@@ -69,15 +83,27 @@ export class ObjectTracker {
   private newTrackThreshold: number;
   /** 当前帧序号 */
   private frameIndex = 0;
+  /** 最近消失的 track 元数据（用于外观恢复） */
+  private ghostTracks: GhostTrack[] = [];
+  /** ghost tracks 保留帧数 */
+  private ghostTtl: number;
+  /** 外观恢复回调 */
+  private onRecoverCheck: RecoverCheckFn | null;
 
   constructor(options?: {
     maxLost?: number;
     iouThreshold?: number;
     newTrackThreshold?: number;
+    /** ghost tracks 保留帧数（默认 120，约 16 秒） */
+    ghostTtl?: number;
+    /** 外观恢复回调 */
+    onRecoverCheck?: RecoverCheckFn;
   }) {
     this.maxLost = options?.maxLost ?? 15;
     this.iouThreshold = options?.iouThreshold ?? 0.2;
     this.newTrackThreshold = options?.newTrackThreshold ?? 0.5;
+    this.ghostTtl = options?.ghostTtl ?? 120;
+    this.onRecoverCheck = options?.onRecoverCheck ?? null;
   }
 
   /**
@@ -201,13 +227,29 @@ export class ObjectTracker {
       });
     }
 
-    /** 未匹配的检测 → 新建追踪 */
+    /** 未匹配的检测 → 新建追踪（尝试从 ghost tracks 恢复） */
     for (const di of unmatchedDets) {
       const det = highDets[di]!;
+      let recoveredId = 0;
+
+      /** 尝试外观恢复：查找同标签的 ghost track */
+      if (this.onRecoverCheck && this.ghostTracks.length > 0) {
+        const candidates = this.ghostTracks.filter(g => g.label === det.label);
+        for (const ghost of candidates) {
+          const matchId = this.onRecoverCheck(ghost.trackId);
+          if (matchId > 0) {
+            recoveredId = matchId;
+            /** 从 ghost 列表中移除已恢复的 */
+            this.ghostTracks = this.ghostTracks.filter(g => g.trackId !== recoveredId);
+            break;
+          }
+        }
+      }
+
       const votes = new Map<string, number>();
       votes.set(det.label, 1);
       const track: TrackedObject = {
-        trackId: nextTrackId++,
+        trackId: recoveredId > 0 ? recoveredId : nextTrackId++,
         label: det.label,
         score: det.score,
         box: { ...det.box },
@@ -230,11 +272,16 @@ export class ObjectTracker {
         /** 只记录之前活跃的追踪消失 */
         if (prevActiveIds.has(t.trackId)) {
           disappeared.push({ trackId: t.trackId, label: t.label });
+          /** 移入 ghost tracks 用于外观恢复 */
+          this.ghostTracks.push({ trackId: t.trackId, label: t.label, lostFrame: this.frameIndex });
         }
         return false;
       }
       return true;
     });
+
+    /** 清理过期的 ghost tracks */
+    this.ghostTracks = this.ghostTracks.filter(g => this.frameIndex - g.lostFrame <= this.ghostTtl);
 
     return { detections: results, appeared, disappeared };
   }
@@ -247,6 +294,7 @@ export class ObjectTracker {
   /** 重置追踪器 */
   reset(): void {
     this.tracks = [];
+    this.ghostTracks = [];
     this.frameIndex = 0;
   }
 
