@@ -425,29 +425,29 @@ export class AiDetector {
           .filter(d => d.trackId != null && !appearedIds.has(d.trackId));
         if (existing.length > 0) {
           this.trackStorage.touchSeen(existing.map(d => ({ trackId: d.trackId!, cameraId })), timestamp);
-          /** 对置信度最高的已有目标尝试更新快照（每帧最多更新 1 个，避免性能开销） */
-          const best = existing.reduce((a, b) => (a.score > b.score ? a : b));
-          if (best.box) {
-            this.trackStorage.tryUpdateSnapshot(best.trackId!, cameraId, jpeg, best.box, best.score)
+          /** 对置信度最高的已有目标尝试更新快照（每帧最多 3 个，按置信度降序） */
+          existing.sort((a, b) => b.score - a.score);
+          const candidates = existing.filter(d => d.box).slice(0, 3);
+          for (const det of candidates) {
+            this.trackStorage.tryUpdateSnapshot(det.trackId!, cameraId, jpeg, det.box!, det.score)
               .then(updated => {
-                /** 快照更新成功后，如果目标未命名，尝试延迟重新匹配 */
                 if (!updated) return;
-                const rec = this.trackStorage!.getRecord(best.trackId!);
+                const rec = this.trackStorage!.getRecord(det.trackId!);
                 if (!rec || rec.customName || !rec.dhash) return;
-                const matches = this.trackStorage!.findSimilar(best.trackId!, cameraId, rec.label, rec.dhash, 0.4, rec.colorHist, rec.lbpHist);
+                const matches = this.trackStorage!.findSimilar(det.trackId!, cameraId, rec.label, rec.dhash, 0.4, rec.colorHist, rec.lbpHist);
                 if (matches.length === 0) return;
                 const top = matches[0]!;
                 const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
                 if (autoThreshold > 0 && top.distance < autoThreshold && this.trackLabelStorage) {
-                  this.trackLabelStorage.upsert(cameraId, best.trackId!, rec.label, top.customName);
-                  this.trackStorage!.setCustomName(best.trackId!, top.customName);
-                  this.trackNameCache.delete(`${cameraId}:${best.trackId}`);
+                  this.trackLabelStorage.upsert(cameraId, det.trackId!, rec.label, top.customName);
+                  this.trackStorage!.setCustomName(det.trackId!, top.customName);
+                  this.trackNameCache.delete(`${cameraId}:${det.trackId}`);
                   this.eventBus.emit("track:label-updated", {
                     cameraId,
-                    trackId: best.trackId,
+                    trackId: det.trackId,
                     name: top.customName,
                   });
-                  console.log(`[AiDetector] 延迟匹配: track#${best.trackId} → ${top.customName} (${(top.distance * 100).toFixed(0)}%)`);
+                  console.log(`[AiDetector] 延迟匹配: track#${det.trackId} → ${top.customName} (${(top.distance * 100).toFixed(0)}%)`);
                 }
               })
               .catch(() => { /* 快照更新失败不影响主流程 */ });
