@@ -175,6 +175,26 @@ export interface EventPayloads {
     velocity: { dx: number; dy: number };
   };
 
+  /** 追踪目标穿越检测线段 */
+  "track:line-cross": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 追踪 ID */
+    trackId: number;
+    /** 目标标签 */
+    label: string;
+    /** 用户自定义名称 */
+    trackName?: string;
+    /** 检测线段 ID */
+    lineId: number;
+    /** 检测线段名称 */
+    lineName: string;
+    /** 穿越方向：A→B 或 B→A（线段方向由起点到终点定义） */
+    direction: "A→B" | "B→A";
+  };
+
   /** 追踪目标外观匹配建议（与已命名目标相似时触发） */
   "track:match-suggest": {
     /** 摄像头 ID */

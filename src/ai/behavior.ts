@@ -1,5 +1,6 @@
 import { type EventBus } from "@/event-bus";
 import { type RoiStorage } from "@/storage/roi";
+import { type CrossLineStorage } from "@/storage/cross-lines";
 
 /** 追踪目标在区域内的状态 */
 interface ZoneOccupancy {
@@ -9,7 +10,7 @@ interface ZoneOccupancy {
   lastDwellAt: number;
 }
 
-/** 每个 trackId 在各摄像头上的区域占用状态 */
+/** 每个 trackId 在各摄像头上的状态 */
 interface TrackZoneState {
   /** trackId → { zoneId → ZoneOccupancy } */
   zones: Map<number, ZoneOccupancy>;
@@ -19,6 +20,11 @@ interface TrackZoneState {
   trackName?: string;
   /** 上次速度告警时间 */
   lastSpeedAlertAt: number;
+  /** 上一帧中心点位置（用于越线检测） */
+  prevCx?: number;
+  prevCy?: number;
+  /** 每条线段的穿越冷却时间（避免连续重复触发） */
+  lineCrossCooldown: Map<number, number>;
 }
 
 /** 停留事件触发间隔（毫秒） */
@@ -30,28 +36,35 @@ const DWELL_MIN_MS = 3000;
 /** 速度告警触发间隔（毫秒）— 同一目标在此期间不重复触发 */
 const SPEED_ALERT_INTERVAL_MS = 10000;
 
+/** 越线检测冷却时间（毫秒）— 同一目标对同一线段的触发间隔 */
+const LINE_CROSS_COOLDOWN_MS = 5000;
+
 /**
  * 行为分析器
  * 监听 detect 事件，维护追踪目标的位置与 ROI 区域的关系
- * 产出语义事件：track:enter-zone / track:leave-zone / track:dwell / track:speed
+ * 产出语义事件：track:enter-zone / track:leave-zone / track:dwell / track:speed / track:line-cross
  */
 export class BehaviorAnalyzer {
   private eventBus: EventBus;
   private roiStorage: RoiStorage;
+  private crossLineStorage?: CrossLineStorage;
   /** cameraId → trackId → TrackZoneState */
   private states = new Map<string, Map<number, TrackZoneState>>();
   /** cameraId → 解析后的 ROI 多边形（带缓存） */
   private roiCache = new Map<string, Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>>();
-  /** ROI 缓存过期时间 */
+  /** cameraId → 解析后的检测线段（带缓存） */
+  private lineCache = new Map<string, Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>>();
+  /** ROI/线段缓存过期时间 */
   private roiCacheExpiry = 0;
   /** 取消订阅函数 */
   private unsub: (() => void) | null = null;
   /** 定期清理过期状态 */
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(eventBus: EventBus, roiStorage: RoiStorage) {
+  constructor(eventBus: EventBus, roiStorage: RoiStorage, crossLineStorage?: CrossLineStorage) {
     this.eventBus = eventBus;
     this.roiStorage = roiStorage;
+    this.crossLineStorage = crossLineStorage;
   }
 
   /** 启动：订阅 detect 事件 */
@@ -89,6 +102,7 @@ export class BehaviorAnalyzer {
     }>,
   ): void {
     const zones = this.getZones(cameraId);
+    const lines = this.getLines(cameraId);
     const cameraStates = this.getOrCreateCameraStates(cameraId);
     /** 当前帧活跃的 trackId 集合 */
     const activeTrackIds = new Set<number>();
@@ -104,6 +118,38 @@ export class BehaviorAnalyzer {
       const trackState = this.getOrCreateTrackState(cameraStates, det.trackId, det.label);
       /** 同步最新的 trackName */
       if (det.trackName) trackState.trackName = det.trackName;
+
+      /** 越线检测（在区域检测之前，使用 prevCx/prevCy） */
+      if (lines.length > 0 && trackState.prevCx !== undefined && trackState.prevCy !== undefined) {
+        for (const line of lines) {
+          /** 冷却期检查 */
+          const lastCross = trackState.lineCrossCooldown.get(line.id) ?? 0;
+          if (timestamp - lastCross < LINE_CROSS_COOLDOWN_MS) continue;
+
+          /** 判断线段穿越：前一帧中心点 → 当前帧中心点的向量是否与检测线段相交 */
+          const crossResult = this.segmentCross(
+            trackState.prevCx, trackState.prevCy, cx, cy,
+            line.start.x, line.start.y, line.end.x, line.end.y,
+          );
+          if (crossResult) {
+            trackState.lineCrossCooldown.set(line.id, timestamp);
+            this.eventBus.emit("track:line-cross", {
+              cameraId,
+              timestamp,
+              trackId: det.trackId,
+              label: det.label,
+              trackName: trackState.trackName,
+              lineId: line.id,
+              lineName: line.name,
+              direction: crossResult,
+            });
+          }
+        }
+      }
+
+      /** 更新前一帧中心点 */
+      trackState.prevCx = cx;
+      trackState.prevCy = cy;
 
       /** 区域检测（仅在有 ROI 区域时执行） */
       if (zones.length === 0) continue;
@@ -210,17 +256,35 @@ export class BehaviorAnalyzer {
 
   /** 获取摄像头的 ROI 多边形（带缓存） */
   private getZones(cameraId: string): Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }> {
-    const now = Date.now();
-    if (now > this.roiCacheExpiry) {
-      this.roiCache.clear();
-      this.roiCacheExpiry = now + 30_000;
-    }
+    this.refreshGeoCache(cameraId);
     let zones = this.roiCache.get(cameraId);
     if (!zones) {
       zones = this.roiStorage.getEnabledPolygons(cameraId);
       this.roiCache.set(cameraId, zones);
     }
     return zones;
+  }
+
+  /** 获取摄像头的检测线段（带缓存） */
+  private getLines(cameraId: string): Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }> {
+    if (!this.crossLineStorage) return [];
+    this.refreshGeoCache(cameraId);
+    let lines = this.lineCache.get(cameraId);
+    if (!lines) {
+      lines = this.crossLineStorage.getEnabledLines(cameraId);
+      this.lineCache.set(cameraId, lines);
+    }
+    return lines;
+  }
+
+  /** 刷新几何缓存（ROI + 线段共享 TTL） */
+  private refreshGeoCache(cameraId: string): void {
+    const now = Date.now();
+    if (now > this.roiCacheExpiry) {
+      this.roiCache.clear();
+      this.lineCache.clear();
+      this.roiCacheExpiry = now + 30_000;
+    }
   }
 
   /** 获取或创建摄像头状态 Map */
@@ -237,10 +301,43 @@ export class BehaviorAnalyzer {
   private getOrCreateTrackState(cameraStates: Map<number, TrackZoneState>, trackId: number, label: string): TrackZoneState {
     let state = cameraStates.get(trackId);
     if (!state) {
-      state = { zones: new Map(), label, lastSpeedAlertAt: 0 };
+      state = { zones: new Map(), label, lastSpeedAlertAt: 0, lineCrossCooldown: new Map() };
       cameraStates.set(trackId, state);
     }
     return state;
+  }
+
+  /**
+   * 判断运动轨迹线段 (p1→p2) 是否穿越检测线段 (p3→p4)
+   * 返回穿越方向（A→B 或 B→A），未穿越返回 null
+   * 方向判定：运动向量与检测线段法向量的点积符号决定方向
+   */
+  private segmentCross(
+    p1x: number, p1y: number, p2x: number, p2y: number,
+    p3x: number, p3y: number, p4x: number, p4y: number,
+  ): "A→B" | "B→A" | null {
+    /** 运动向量和检测线段向量 */
+    const dx = p2x - p1x;
+    const dy = p2y - p1y;
+    const ex = p4x - p3x;
+    const ey = p4y - p3y;
+
+    /** 叉积 d × e */
+    const cross = dx * ey - dy * ex;
+    if (Math.abs(cross) < 1e-10) return null; // 平行或共线
+
+    /** 参数 t: 运动线段上的交点位置 */
+    const t = ((p3x - p1x) * ey - (p3y - p1y) * ex) / cross;
+    /** 参数 u: 检测线段上的交点位置 */
+    const u = ((p3x - p1x) * dy - (p3y - p1y) * dx) / cross;
+
+    /** 两条线段相交的条件：0 <= t <= 1 且 0 <= u <= 1 */
+    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+
+    /** 方向判定：运动向量与检测线段左侧法向量的点积 */
+    /** 法向量 = (-ey, ex)（检测线段左侧） */
+    const dotNormal = dx * (-ey) + dy * ex;
+    return dotNormal > 0 ? "A→B" : "B→A";
   }
 
   /** 清理空的摄像头状态 */

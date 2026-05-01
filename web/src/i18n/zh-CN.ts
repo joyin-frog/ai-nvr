@@ -66,6 +66,7 @@ export default {
     trackLeaveZone: '离开区域',
     trackDwell: '停留',
     trackSpeed: '高速移动',
+    trackLineCross: '越线',
     trackMatchSuggest: '外观匹配',
     ratio: '变动比例',
     targets: '检测目标',

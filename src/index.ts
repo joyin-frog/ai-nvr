@@ -27,6 +27,7 @@ import { PtzController } from "@/ptz";
 import { TrackLabelStorage } from "@/storage/track-labels";
 import { TrackStorage } from "@/storage/tracks";
 import { PreferencesStorage } from "@/storage/preferences";
+import { CrossLineStorage } from "@/storage/cross-lines";
 import { StorageFs } from "@/storage/storage-fs";
 
 /**
@@ -102,6 +103,9 @@ const cameraManager = new CameraManager(config, eventBus, recorder);
 /** ROI 检测区域存储（MotionDetector 需要） */
 const roiStorage = new RoiStorage(join(dataDir, "roi.db"));
 
+/** 越线检测线段存储 */
+const crossLineStorage = new CrossLineStorage(join(dataDir, "cross-lines.db"));
+
 /** 变动检测器（使用 RuntimeConfig + ROI 区域过滤） */
 const motionDetector = new MotionDetector(runtimeConfig, eventBus, roiStorage);
 
@@ -145,9 +149,9 @@ alertEngine.setSaveAlertSnapshot((cameraId, timestamp, jpeg) => {
 });
 alertEngine.start();
 
-/** 行为分析器（区域进入/离开/停留语义事件） */
+/** 行为分析器（区域进入/离开/停留/越线语义事件） */
 import { BehaviorAnalyzer } from "@/ai/behavior";
-const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage);
+const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage);
 behaviorAnalyzer.start();
 
 /** 用户偏好设置存储 */
@@ -188,10 +192,10 @@ for (const cam of config.cameras) {
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, storageFs, alertSnapshotStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage);
 
 /** 自动记录事件到 SQLite */
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -242,6 +246,7 @@ process.on("SIGINT", () => {
   cleaner.stop();
   eventStorage.close();
   roiStorage.close();
+  crossLineStorage.close();
   alertStorage.close();
   preferencesStorage.close();
   diskUsage.close();

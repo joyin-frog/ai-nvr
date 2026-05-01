@@ -66,6 +66,7 @@ export default {
     trackLeaveZone: 'Leave Zone',
     trackDwell: 'Dwell',
     trackSpeed: 'Speed',
+    trackLineCross: 'Line Cross',
     trackMatchSuggest: 'Match',
     ratio: 'Motion Ratio',
     targets: 'Targets',

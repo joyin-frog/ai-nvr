@@ -15,6 +15,7 @@ import { type RecordingExporter } from "@/storage/export";
 import { type AiDetector } from "@/ai/detector";
 import { type PtzController } from "@/ptz";
 import { type PreferencesStorage } from "@/storage/preferences";
+import { type CrossLineStorage } from "@/storage/cross-lines";
 import { type StorageFs } from "@/storage/storage-fs";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
@@ -69,7 +70,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:match-suggest"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:match-suggest"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -96,6 +97,7 @@ export function startServer(
   trackLabelStorage: import("@/storage/track-labels").TrackLabelStorage,
   trackStorage: import("@/storage/tracks").TrackStorage,
   preferencesStorage: PreferencesStorage,
+  crossLineStorage: CrossLineStorage,
   storageFs: StorageFs,
   alertSnapshotStorage?: SnapshotStorage,
 ): void {
@@ -1084,6 +1086,56 @@ export function startServer(
         const roiId = Number(roiIdMatch[1]!);
         roiStorage.remove(roiId);
         return Response.json({ ok: true });
+      }
+
+      /** ====== 越线检测线段 API ====== */
+
+      /** 越线检测线段列表（全部） */
+      if (url.pathname === "/api/cross-lines" && req.method === "GET") {
+        return Response.json(crossLineStorage.listAll());
+      }
+
+      /** 越线检测线段列表（按摄像头） */
+      const crossLineListMatch = url.pathname.match(/^\/api\/cross-lines\/([^/]+)$/);
+      if (crossLineListMatch && req.method === "GET" && !crossLineListMatch[1]!.match(/^\d+$/)) {
+        const cameraId = crossLineListMatch[1]!;
+        return Response.json(crossLineStorage.list(cameraId));
+      }
+
+      /** 越线检测线段添加 */
+      if (url.pathname === "/api/cross-lines" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const cameraId = obj.cameraId as string | undefined;
+          const name = obj.name as string | undefined;
+          const start = obj.start as { x: number; y: number } | undefined;
+          const end = obj.end as { x: number; y: number } | undefined;
+          if (!cameraId || !start || !end) return new Response("Missing cameraId, start, or end", { status: 400 });
+          const id = crossLineStorage.add(cameraId, name ?? "", start, end);
+          return Response.json({ id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 越线检测线段更新/删除 */
+      const crossLineItemMatch = url.pathname.match(/^\/api\/cross-lines\/(\d+)$/);
+      if (crossLineItemMatch) {
+        const lineId = Number(crossLineItemMatch[1]!);
+        if (req.method === "PATCH") {
+          return req.json().then((body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            const updates: { name?: string; start?: { x: number; y: number }; end?: { x: number; y: number }; enabled?: boolean } = {};
+            if (typeof obj.name === "string") updates.name = obj.name;
+            if (obj.start && typeof obj.start === "object") updates.start = obj.start as { x: number; y: number };
+            if (obj.end && typeof obj.end === "object") updates.end = obj.end as { x: number; y: number };
+            if (typeof obj.enabled === "boolean") updates.enabled = obj.enabled;
+            crossLineStorage.update(lineId, updates);
+            return Response.json({ ok: true });
+          }).catch(() => new Response("Invalid JSON", { status: 400 }));
+        }
+        if (req.method === "DELETE") {
+          crossLineStorage.remove(lineId);
+          return Response.json({ ok: true });
+        }
       }
 
       /** 告警规则列表 */
