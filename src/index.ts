@@ -52,7 +52,11 @@ for (const cam of config.cameras) {
 }
 recorder.start();
 
-/** 摄像头管理器（子码流预览/检测 + 主码流注册给录像器） */
+/** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
+const annotator = new Annotator();
+const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"));
+
+/** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder);
 
 /** ROI 检测区域存储（MotionDetector 需要） */
@@ -60,10 +64,6 @@ const roiStorage = new RoiStorage(join(dataDir, "roi.db"));
 
 /** 变动检测器（使用 RuntimeConfig + ROI 区域过滤） */
 const motionDetector = new MotionDetector(runtimeConfig, eventBus, roiStorage);
-
-/** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
-const annotator = new Annotator();
-const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator);
 
 /** 启动变动检测 */
 motionDetector.start();

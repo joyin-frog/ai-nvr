@@ -30,12 +30,16 @@ export class AiDetector {
   private currentModel = "";
   /** 模型是否正在加载中 */
   private loading = false;
-
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
     private annotator: Annotator,
-  ) {}
+    modelCacheDir: string,
+  ) {
+    /** 将模型缓存目录设置到 Hugging Face transformers 环境变量 */
+    transformersEnv.cacheDir = modelCacheDir;
+    console.log(`[AiDetector] 模型缓存目录: ${modelCacheDir}`);
+  }
 
   /** 异步初始化：加载模型 */
   async init(): Promise<void> {
