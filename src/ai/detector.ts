@@ -273,18 +273,19 @@ export class AiDetector {
 
       /** 始终标注图片（即使无检测结果也要更新，清空之前的标注） */
       const t3 = performance.now();
-      const annotatedImage = await this.annotator.annotate(jpeg, detections);
+      const annotatedImage = detections.length > 0
+        ? await this.annotator.annotate(jpeg, detections)
+        : jpeg;
       const annotateMs = performance.now() - t3;
       this.annotator.setLatest(cameraId, annotatedImage);
 
-      if (detections.length > 0) {
-        this.eventBus.emit("detect", {
-          cameraId,
-          timestamp,
-          detections,
-          annotatedImage,
-        });
-      }
+      /** 始终 emit detect 事件，让前端能清空旧检测框 */
+      this.eventBus.emit("detect", {
+        cameraId,
+        timestamp,
+        detections,
+        annotatedImage,
+      });
       console.log(`[Perf][AI][${cameraId}] ${detections.length} 目标, resize=${resizeMs.toFixed(0)}ms, infer=${inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);

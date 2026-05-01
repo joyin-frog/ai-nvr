@@ -33,6 +33,8 @@ export class SnapshotStorage {
   /** 启动：监听 detect 事件保存标注图和元数据 */
   start(): void {
     this.eventBus.on("detect", ({ cameraId, timestamp, annotatedImage, detections }) => {
+      /** 0 目标不保存快照 */
+      if (!detections || detections.length === 0) return;
       this.saveSnapshot(cameraId, timestamp, annotatedImage, detections);
     });
     console.log("[Snapshot] 快照存储已启动");
@@ -168,6 +170,19 @@ export class SnapshotStorage {
       // ignore
     }
     return count;
+  }
+
+  /** 根据 cameraId + timestamp 查找对应的快照相对路径 */
+  findSnapshotPath(cameraId: string, timestamp: number): string | null {
+    const dir = join(this.storagePath, cameraId);
+    const date = new Date(timestamp);
+    const dateStr = date.toISOString().slice(0, 10);
+    const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
+    const ms = String(date.getMilliseconds()).padStart(3, "0");
+    const filename = `${dateStr}_${timeStr}_${ms}.jpg`;
+    const filePath = join(dir, filename);
+    if (existsSync(filePath)) return `${cameraId}/${filename}`;
+    return null;
   }
 
   /** 从文件名解析时间戳 */

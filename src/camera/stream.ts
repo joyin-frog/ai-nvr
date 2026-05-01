@@ -152,6 +152,11 @@ export class FrameExtractor {
 
     const args: string[] = [
       "-rtsp_transport", "tcp",
+      /** 低延迟：减少缓冲和探测时间 */
+      "-fflags", "nobuffer",
+      "-flags", "low_delay",
+      "-analyzeduration", "1000000",
+      "-probesize", "500000",
       "-i", rtspUrl,
     ];
     if (vf) {
@@ -162,6 +167,8 @@ export class FrameExtractor {
       "-vcodec", "mjpeg",
       "-q:v", String(jpegQuality),
       "-an",
+      /** 线程数：利用多核加速编码 */
+      "-threads", "2",
       "pipe:1",
     );
 
