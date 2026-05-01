@@ -35,4 +35,6 @@ export interface AiConfig {
   threshold: number;
   /** 最大检测数量 */
   maxDetections: number;
+  /** AI 推理输入宽度（0 = 使用原始帧分辨率） */
+  inputWidth: number;
 }

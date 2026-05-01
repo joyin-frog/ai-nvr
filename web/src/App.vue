@@ -149,8 +149,10 @@ const cameras = ref<CameraStatus[]>([])
 const cameraOrder = ref<string[]>(JSON.parse(localStorage.getItem('nvr-camera-order') ?? '[]'))
 const detectionsMap = ref<Record<string, Detection[]>>({})
 const detectVersions = ref<Record<string, number>>({})
-/** 每个摄像头的最新帧 data URL */
-const frameImages = ref<Record<string, string>>({})
+/** 每个摄像头的最新帧 JPEG ArrayBuffer（Canvas 渲染用） */
+const frameImages = ref<Record<string, ArrayBuffer>>({})
+/** 空帧占位（模板中无法直接 new ArrayBuffer） */
+const EMPTY_FRAME = new ArrayBuffer(0)
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
 const frameLatency = ref<Record<string, number>>({})
 /** 每个摄像头最近检测事件的帧快照 */
@@ -510,14 +512,9 @@ function setupEventListeners() {
   })
 
   client.on('frame', (payload) => {
-    /** 页面不可见时跳过帧渲染，释放 blob 避免内存泄漏 */
-    if (!pageVisible.value) {
-      if (payload.image) URL.revokeObjectURL(payload.image)
-      return
-    }
-    const old = frameImages.value[payload.cameraId]
-    if (old) URL.revokeObjectURL(old)
-    frameImages.value[payload.cameraId] = payload.image
+    /** 页面不可见时跳过帧渲染 */
+    if (!pageVisible.value) return
+    frameImages.value[payload.cameraId] = payload.jpegData
     frameImages.value = { ...frameImages.value }
     /** 计算帧延迟（ms）：当前时间 - 服务端帧时间戳 */
     if (payload.timestamp) {
@@ -536,13 +533,8 @@ function setupEventListeners() {
     if (frame) {
       const oldSnap = detectSnapshots.value[payload.cameraId]
       if (oldSnap) URL.revokeObjectURL(oldSnap)
-      fetch(frame)
-        .then(r => r.blob())
-        .then(blob => {
-          detectSnapshots.value[payload.cameraId] = URL.createObjectURL(blob)
-          detectSnapshots.value = { ...detectSnapshots.value }
-        })
-        .catch(() => { /* ignore */ })
+      detectSnapshots.value[payload.cameraId] = URL.createObjectURL(new Blob([frame], { type: 'image/jpeg' }))
+      detectSnapshots.value = { ...detectSnapshots.value }
     }
     const labels = payload.detections.map((d) => d.label).join(', ')
     eventPanel.value?.addEvent('detect', payload.cameraId, labels)
@@ -636,12 +628,15 @@ onMounted(async () => {
   registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: () => {
     const targetCam = fullscreenCamera.value ?? visibleCameras.value[0]?.id
     if (!targetCam) return
-    const imageUrl = frameImages.value[targetCam]
-    if (!imageUrl) return
+    const frameData = frameImages.value[targetCam]
+    if (!frameData) return
+    const blob = new Blob([frameData], { type: 'image/jpeg' })
+    const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-    link.href = imageUrl
+    link.href = url
     link.download = `screenshot_${targetCam}_${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`
     link.click()
+    URL.revokeObjectURL(url)
   }})
 })
 
@@ -654,10 +649,6 @@ onUnmounted(() => {
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
   /** 释放所有检测快照 blob URL */
   for (const url of Object.values(detectSnapshots.value)) {
-    URL.revokeObjectURL(url)
-  }
-  /** 释放所有帧 blob URL */
-  for (const url of Object.values(frameImages.value)) {
     URL.revokeObjectURL(url)
   }
 })
@@ -750,7 +741,7 @@ onUnmounted(() => {
                 :last-frame-at="cam.lastFrameAt"
                 :detections="detectionsMap[cam.id] ?? []"
                 :detect-version="detectVersions[cam.id] ?? 0"
-                :frame-image="frameImages[cam.id] ?? ''"
+                :frame-image="frameImages[cam.id] ?? EMPTY_FRAME"
                 :ptz="cam.ptz"
                 :video-width="cam.width"
                 :video-height="cam.height"

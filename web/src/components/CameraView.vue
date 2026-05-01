@@ -3,6 +3,7 @@ import { ref, computed, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
+import { useCanvasRenderer } from '../composables/useCanvasRenderer'
 import PtzControl from './PtzControl.vue'
 
 const { t } = useI18n()
@@ -14,8 +15,8 @@ const props = defineProps<{
   lastFrameAt: number
   detections: Detection[]
   detectVersion: number
-  /** WebSocket 推送的实时帧 data URL */
-  frameImage: string
+  /** WebSocket 推送的实时帧 JPEG ArrayBuffer */
+  frameImage: ArrayBuffer
   /** 是否支持 PTZ 云台控制 */
   ptz?: boolean
   /** 视频宽度（用于计算画面比例） */
@@ -64,6 +65,22 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
 /** 标注图片 URL（仅用于截图下载） */
 const annotatedUrl = ref<string>('')
 
+/** Canvas 渲染器（替代 img + Blob URL） */
+const renderer = useCanvasRenderer()
+const canvasEl = ref<HTMLCanvasElement | null>(null)
+
+/** Canvas 元素变化时绑定到渲染器 */
+watch(canvasEl, (el) => {
+  renderer.setCanvas(el)
+  if (el) renderer.startLoop()
+  else renderer.stopLoop()
+})
+
+/** 帧到达时喂入 Canvas 渲染器 */
+watch(() => props.frameImage, (buf: ArrayBuffer) => {
+  if (buf) renderer.feedFrame(buf)
+})
+
 /** 检测框列表（按置信度排序） */
 const sortedDetections = computed(() =>
   [...props.detections].sort((a, b) => b.score - a.score)
@@ -84,8 +101,8 @@ watch(() => props.detectVersion, async (v: number) => {
   }
 })
 
-/** 始终显示实时帧，检测框通过叠加层渲染 */
-const displayUrl = computed(() => props.frameImage)
+/** 是否有帧数据（用于控制叠加层显示） */
+const hasFrame = computed(() => props.frameImage && props.frameImage.byteLength > 0)
 
 /** 帧冻结检测：在线但超过 10 秒无新帧 */
 const frozen = ref(false)
@@ -168,16 +185,24 @@ watch(() => props.recording, (on) => {
   else { recordingDuration.value = '' }
 }, { immediate: true })
 
-/** 截图下载当前画面（优先标注图） */
-function takeScreenshot() {
-  const src = annotatedUrl.value || displayUrl.value
-  if (!src) return
-  const link = document.createElement('a')
+/** 截图下载当前画面（优先标注图，否则 Canvas 截图） */
+async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+  const link = document.createElement('a')
   link.download = `${props.name}_${ts}.jpg`
-  link.href = src
+
+  if (annotatedUrl.value) {
+    link.href = annotatedUrl.value
+    link.click()
+    return
+  }
+  const blob = await renderer.captureJpeg()
+  if (!blob) return
+  const url = URL.createObjectURL(blob)
+  link.href = url
   link.click()
+  URL.revokeObjectURL(url)
 }
 
 /** 画面调节面板 */
@@ -297,12 +322,11 @@ onUnmounted(() => {
       @mouseup="onPanEnd"
       @mouseleave="onPanEnd"
     >
-      <img
-        v-if="displayUrl"
-        :src="displayUrl"
+      <canvas
+        v-if="hasFrame"
+        ref="canvasEl"
         class="camera-image"
         :style="{ filter: imageFilter, transform: zoomTransform }"
-        alt=""
       />
       <div v-else class="camera-placeholder">
         <div v-if="online" class="placeholder-icon">&#9679;</div>
@@ -312,7 +336,7 @@ onUnmounted(() => {
       </div>
 
       <!-- 检测框叠加层 -->
-      <div v-if="displayUrl && detectionBoxes.length > 0" class="detection-overlay">
+      <div v-if="hasFrame && detectionBoxes.length > 0" class="detection-overlay">
         <div
           v-for="(box, i) in detectionBoxes"
           :key="i"
@@ -324,21 +348,21 @@ onUnmounted(() => {
       </div>
 
       <!-- 摄像头名称叠加 -->
-      <div v-if="displayUrl" class="name-overlay">
+      <div v-if="hasFrame" class="name-overlay">
         <span class="name-text">{{ name }}</span>
       </div>
 
       <!-- 数字时钟叠加 -->
-      <div v-if="online && displayUrl" class="clock-overlay">
+      <div v-if="online && hasFrame" class="clock-overlay">
         <span class="clock-text">{{ clockText }}</span>
       </div>
 
       <!-- FPS 质量指示 -->
-      <div v-if="online && displayUrl && (fps ?? 0) > 0" :class="['fps-badge', fpsQuality]">
+      <div v-if="online && hasFrame && (fps ?? 0) > 0" :class="['fps-badge', fpsQuality]">
         {{ (fps ?? 0).toFixed(0) }} fps
       </div>
       <!-- 帧延迟指示 -->
-      <div v-if="online && displayUrl && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
+      <div v-if="online && hasFrame && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
         {{ latency! < 1000 ? `${latency!.toFixed(0)}ms` : `${(latency! / 1000).toFixed(1)}s` }}
       </div>
     </div>
@@ -535,8 +559,8 @@ onUnmounted(() => {
 .camera-image {
   width: 100%;
   height: 100%;
-  object-fit: contain;
   display: block;
+  object-fit: contain;
   transform-origin: center center;
   transition: transform 0.15s ease-out;
 }

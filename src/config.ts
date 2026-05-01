@@ -177,6 +177,7 @@ export function loadConfig(configPath?: string): AppConfig {
       model: (aiNode?.model as string) ?? "Xenova/detr-resnet-50",
       threshold: (aiNode?.threshold as number) ?? 0.5,
       maxDetections: (aiNode?.max_detections as number) ?? 20,
+      inputWidth: (aiNode?.input_width as number) ?? 0,
     },
     auth: {
       token: (authNode?.token as string) ?? "",

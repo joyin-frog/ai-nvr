@@ -147,12 +147,19 @@ export class FrameExtractor {
 
   /** 启动 ffmpeg 子进程 */
   private spawnFfmpeg(): void {
-    const { detectFps, stream } = this.config;
+    const { detectFps, detectWidth, stream } = this.config;
+
+    /** fps 滤镜控制帧率；scale 仅在配置了低于原始的宽度时才缩放 */
+    const vfParts = [`fps=${detectFps}`];
+    if (detectWidth > 0) {
+      vfParts.push(`scale=${detectWidth}:-4`);
+    }
+    const vf = vfParts.join(",");
 
     const args = [
       "-rtsp_transport", "tcp",
       "-i", stream.sd,
-      "-vf", `fps=${detectFps},scale=640:-4`,
+      "-vf", vf,
       "-f", "image2pipe",
       "-vcodec", "mjpeg",
       "-q:v", "2",

@@ -190,6 +190,7 @@ export class RuntimeConfig {
       if (typeof a.model === "string") this.settings.ai.model = a.model;
       if (typeof a.threshold === "number") this.settings.ai.threshold = a.threshold;
       if (typeof a.maxDetections === "number") this.settings.ai.maxDetections = a.maxDetections;
+      if (typeof a.inputWidth === "number") this.settings.ai.inputWidth = a.inputWidth;
     }
 
     if (obj.recording && typeof obj.recording === "object") {

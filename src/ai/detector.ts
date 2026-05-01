@@ -1,4 +1,5 @@
 import { pipeline, env as transformersEnv, type ObjectDetectionPipeline } from "@huggingface/transformers";
+import sharp from "sharp";
 
 /** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
 const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
@@ -135,7 +136,19 @@ export class AiDetector {
 
     this.detecting = true;
     try {
-      const raw = await this.detector(new Blob([jpeg]), {
+      /** 根据 inputWidth 配置决定推理输入分辨率 */
+      let inferenceInput: Blob;
+      if (aiConfig.inputWidth > 0) {
+        const resized = await sharp(jpeg)
+          .resize(aiConfig.inputWidth)
+          .jpeg({ quality: 85 })
+          .toBuffer();
+        inferenceInput = new Blob([resized]);
+      } else {
+        inferenceInput = new Blob([jpeg]);
+      }
+
+      const raw = await this.detector(inferenceInput, {
         threshold: aiConfig.threshold,
       });
 

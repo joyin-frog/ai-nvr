@@ -7,7 +7,7 @@ export interface Detection {
 
 /** 事件载荷类型 */
 export interface EventMap {
-  frame: { cameraId: string; timestamp: number; image: string }
+  frame: { cameraId: string; timestamp: number; jpegData: ArrayBuffer }
   motion: { cameraId: string; ratio: number; timestamp: number }
   detect: { cameraId: string; timestamp: number; detections: Detection[] }
   'camera:online': { cameraId: string }
@@ -130,11 +130,10 @@ export class EventClient {
     const payload: Record<string, unknown> = { ...header }
     delete payload.event
 
-    /** frame 事件：提取二进制 JPEG，转为 data URL */
+    /** frame 事件：传递原始 JPEG ArrayBuffer（由 Canvas 渲染器消费） */
     if (event === 'frame' && buf.length > 4 + headerLen) {
       const jpegBytes = buf.slice(4 + headerLen)
-      const blob = new Blob([jpegBytes], { type: 'image/jpeg' })
-      payload.image = URL.createObjectURL(blob)
+      payload.jpegData = jpegBytes.buffer as ArrayBuffer
     }
 
     this.dispatch(event, payload)
