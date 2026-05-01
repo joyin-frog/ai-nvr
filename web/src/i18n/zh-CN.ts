@@ -114,6 +114,12 @@ export default {
     starSelected: '收藏选中',
     searchTime: '搜索时间',
     jumpToTime: '跳转',
+    helpPlayPause: '播放/暂停',
+    helpSeek: '快退/快进 5 秒',
+    helpFrame: '逐帧步进',
+    helpLoop: '循环播放',
+    helpMute: '静音切换',
+    helpFullscreen: '全屏',
   },
   timeline: {
     today: '今天',

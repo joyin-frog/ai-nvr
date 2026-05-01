@@ -588,6 +588,9 @@ function onRecordingHover(rec: Recording) {
   }
 }
 
+/** 播放器快捷键帮助显示 */
+const showPlayerHelp = ref(false)
+
 /** 关闭播放器 */
 function closePlayer() {
   selectedRecording.value = null
@@ -885,7 +888,21 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
           <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
+          <button class="player-help-btn" @click="showPlayerHelp = !showPlayerHelp" :title="t('header.help')">?</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
+        </div>
+        <!-- 快捷键帮助浮层 -->
+        <div v-if="showPlayerHelp" class="player-help-overlay" @click="showPlayerHelp = false">
+          <div class="player-help-content" @click.stop>
+            <div class="help-row"><kbd>Space</kbd> {{ t('recording.helpPlayPause') }}</div>
+            <div class="help-row"><kbd>←</kbd><kbd>→</kbd> {{ t('recording.helpSeek') }}</div>
+            <div class="help-row"><kbd>Shift+←</kbd><kbd>Shift+→</kbd> ±30s</div>
+            <div class="help-row"><kbd>,</kbd><kbd>.</kbd> {{ t('recording.helpFrame') }}</div>
+            <div class="help-row"><kbd>[</kbd> A <kbd>]</kbd> B <kbd>\</kbd> {{ t('recording.helpLoop') }}</div>
+            <div class="help-row"><kbd>M</kbd> {{ t('recording.helpMute') }}</div>
+            <div class="help-row"><kbd>F</kbd> {{ t('recording.helpFullscreen') }}</div>
+          </div>
+        </div>
         </div>
         <video
           ref="playerRef"
@@ -1530,6 +1547,61 @@ defineExpose({ loadRecordings, playAtTime })
 }
 
 .download-raw-btn:hover {
+  color: #4ECDC4;
+}
+
+.player-help-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.player-help-btn:hover {
+  color: #4ECDC4;
+  border-color: #4ECDC4;
+}
+
+.player-help-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.player-help-content {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 16px 24px;
+  min-width: 260px;
+}
+
+.help-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.help-row kbd {
+  background: #2a2a4a;
+  border: 1px solid #3a3a5a;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-family: inherit;
   color: #4ECDC4;
 }
 

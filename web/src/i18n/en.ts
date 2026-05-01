@@ -114,6 +114,12 @@ export default {
     starSelected: 'Star selected',
     searchTime: 'Search time',
     jumpToTime: 'Jump',
+    helpPlayPause: 'Play/Pause',
+    helpSeek: 'Seek ±5s',
+    helpFrame: 'Frame step',
+    helpLoop: 'A-B loop',
+    helpMute: 'Mute toggle',
+    helpFullscreen: 'Fullscreen',
   },
   timeline: {
     today: 'Today',
