@@ -1121,10 +1121,10 @@ defineExpose({ loadRecordings, playAtTime })
             @pause="onPause"
           />
           <!-- 回放检测框叠加 -->
-          <div v-if="showPlaybackBoxes && playbackDetections.length > 0" class="playback-detection-overlay">
+          <div v-if="showPlaybackBoxes" class="playback-detection-overlay">
             <div
-              v-for="(d, i) in playbackDetections"
-              :key="i"
+              v-for="d in playbackDetections"
+              :key="d.trackId ?? `${d.label}-${Math.round(d.box.xmin * 100)}`"
               class="playback-detect-box"
               :style="{
                 left: (d.box.xmin * 100) + '%',
@@ -1928,6 +1928,7 @@ defineExpose({ loadRecordings, playAtTime })
   border: 2px solid #5bc0de;
   border-radius: 2px;
   opacity: 0.85;
+  transition: left 0.15s ease, top 0.15s ease, width 0.15s ease, height 0.15s ease;
 }
 
 .playback-detect-label {
