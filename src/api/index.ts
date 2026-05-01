@@ -1750,12 +1750,13 @@ export function startServer(
 
   /**
    * 根据活跃摄像头数量动态计算帧推送节流间隔
-   * 1-2 路: 30fps (33ms)，3-4 路: 20fps (50ms)，5+ 路: 15fps (67ms)
+   * 1-2 路: 30fps (33ms)，3-4 路: 25fps (40ms)，5-8 路: 20fps (50ms)，9+ 路: 15fps (67ms)
    */
   function getThrottleMs(): number {
     const camCount = latestFrameByCamera.size;
     if (camCount <= 2) return 33;
-    if (camCount <= 4) return 50;
+    if (camCount <= 4) return 40;
+    if (camCount <= 8) return 50;
     return 67;
   }
 
@@ -1769,7 +1770,7 @@ export function startServer(
 
     const now = Date.now();
     for (const [cameraId, frame] of latestFrameByCamera) {
-      /** 节流：每路摄像头不超过 30fps */
+      /** 节流：根据活跃摄像头数量限制帧率 */
       const lastPush = lastPushTimeByCamera.get(cameraId) ?? 0;
       if (now - lastPush < getThrottleMs()) continue;
 

@@ -104,9 +104,9 @@ function startOverlayLoop() {
     }
     overlayVfcId = video.requestVideoFrameCallback(onVideoFrame)
   } else {
-    /** 降级：rAF 循环，~30fps */
+    /** 降级：rAF 循环，~60fps */
     let lastDraw = 0
-    const INTERVAL = 33
+    const INTERVAL = 16
     const draw = () => {
       overlayRafId = requestAnimationFrame(draw)
       const now = performance.now()
