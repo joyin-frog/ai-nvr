@@ -8,8 +8,10 @@ export interface TrackedObject {
   label: string;
   /** 置信度 */
   score: number;
-  /** 边界框（归一化坐标 0-1） */
+  /** 平滑后的边界框（用于输出） */
   box: { xmin: number; ymin: number; xmax: number; ymax: number };
+  /** 上一次匹配的原始检测框（用于下一帧 IoU 匹配） */
+  rawBox: { xmin: number; ymin: number; xmax: number; ymax: number };
   /** 连续追踪帧数 */
   age: number;
   /** 上次匹配到的帧 */
@@ -96,6 +98,7 @@ export class ObjectTracker {
           label: det.label,
           score: det.score,
           box: { ...det.box },
+          rawBox: { ...det.box },
           age: 1,
           lastMatched: this.frameIndex,
           labelVotes: votes,
@@ -106,7 +109,7 @@ export class ObjectTracker {
       return { detections: results, appeared, disappeared };
     }
 
-    /** 计算 IoU 矩阵：tracks × detections */
+    /** 计算 IoU 矩阵：用 rawBox（原始检测位置）匹配，避免 EMA 平滑导致的 IoU 下降 */
     const costMatrix = this.buildCostMatrix(this.tracks, highDets);
 
     /** 匈牙利匹配（贪心近似，足够快） */
@@ -116,13 +119,16 @@ export class ObjectTracker {
       highDets.length,
     );
 
-    /** EMA 平滑系数（0.3 = 30% 新值 + 70% 旧值） */
-    const smoothAlpha = 0.3;
+    /** EMA 平滑系数（0.5 = 50% 新值 + 50% 旧值，跟随更快） */
+    const smoothAlpha = 0.5;
 
     /** 更新匹配到的追踪（框位置 EMA 平滑） */
     for (const [ti, di] of matchedTracks) {
       const track = this.tracks[ti]!;
       const det = highDets[di]!;
+      /** 先更新 rawBox 为当前检测位置（下一帧匹配用） */
+      track.rawBox = { ...det.box };
+      /** box 做平滑用于显示 */
       const prev = track.box;
       const curr = det.box;
       track.box = {
@@ -158,6 +164,7 @@ export class ObjectTracker {
         label: det.label,
         score: det.score,
         box: { ...det.box },
+        rawBox: { ...det.box },
         age: 1,
         lastMatched: this.frameIndex,
         labelVotes: votes,
@@ -194,13 +201,13 @@ export class ObjectTracker {
     this.frameIndex = 0;
   }
 
-  /** 构建 IoU 代价矩阵（负 IoU，因为贪心算法求最小代价） */
+  /** 构建 IoU 代价矩阵（用 rawBox 匹配，避免 EMA 平滑导致 IoU 下降） */
   private buildCostMatrix(tracks: TrackedObject[], dets: Detection[]): number[][] {
     const matrix: number[][] = [];
     for (let i = 0; i < tracks.length; i++) {
       matrix[i] = [];
       for (let j = 0; j < dets.length; j++) {
-        const iou = this.computeIou(tracks[i]!.box, dets[j]!.box);
+        const iou = this.computeIou(tracks[i]!.rawBox, dets[j]!.box);
         /** 同标签优先匹配，不同标签加惩罚 */
         const labelPenalty = tracks[i]!.label !== dets[j]!.label ? 0.3 : 0;
         matrix[i]![j] = 1 - iou + labelPenalty;
