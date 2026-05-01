@@ -313,3 +313,10 @@ RTSP → ffmpeg(-fflags nobuffer) → JpegFrameSplitter → EventBus("frame")
 - 行为事件持久化：track:appeared/disappeared/enter-zone/leave-zone 存入 SQLite，track:dwell 仅停留超 30 秒时持久化（减少高频写入），事件面板历史查询可检索
 - 行为事件展开详情：事件面板展开行为事件显示名称、标签、区域名称、停留时长，支持跳转录像
 - trackName 实时同步：BehaviorAnalyzer 每帧从 detect 事件同步最新 trackName 到行为事件载荷
+- fMP4 段大小优化：MAX_SEGMENT_FRAMES 从 10 降为 5，25fps 下每 200ms 发送一个段（之前 400ms），减少 MSE appendBuffer 单次处理负担，非 IDR 段超过 10 帧强制发送防止延迟堆积
+- 检测框标签简化：有自定义名称时仅显示「名称 置信度」，无名称时显示完整信息（trackId + 类别 + 置信度）
+- 检测框视觉区分已命名/未命名目标：已命名目标粗实线边框+饱满颜色，未命名目标细虚线边框+脉冲闪烁动画提示用户命名
+- fMP4 首帧快速显示：H264Fmp4Extractor 和 Fmp4Extractor 缓存最近 media segment，新客户端连接时立即发送 init + media segment，无需等待下一个 GOP，首屏延迟从 0.5-4s 降到几乎瞬时
+- MSE FPS 统计修正：从基于 segment 到达频率（严重低估）改为 requestVideoFrameCallback API 精确测量实际视频帧率
+- 区域事件浮动通知：目标进入/离开/停留 ROI 区域时画面上方显示带渐隐效果的浮动通知（进入青色→、离开紫色←、停留橙色⏳），通过 ws-detect-cache 的 ZoneNotification 缓存传递
+- MSE 缓冲区管理优化：BUFFER_RETAIN_SECONDS 从 2 提升到 4，pruneBuffer 仅在已播放缓冲区超过 8 秒时才执行清理，减少 remove 调用频率避免阻塞 append
