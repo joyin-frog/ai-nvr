@@ -10,15 +10,16 @@ transformersEnv.remoteHost = `${hfEndpoint}/`;
 const MAX_RETRIES = 3;
 /** 重试基础延迟（毫秒） */
 const RETRY_BASE_DELAY = 5000;
-import { type Detection } from "./types";
+import { type Detection, type DetectMode } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
 
 /**
  * AI 目标检测器
- * 监听变动事件，对触发变动的帧执行目标检测
- * 使用 RuntimeConfig 获取实时配置（支持 API 热修改）
+ * 支持两种模式：
+ * - motion：变动事件触发检测（节省资源）
+ * - continuous：按固定间隔连续检测（更及时，不漏检）
  */
 export class AiDetector {
   /** Hugging Face 目标检测 pipeline */
@@ -31,6 +32,13 @@ export class AiDetector {
   private currentModel = "";
   /** 模型是否正在加载中 */
   private loading = false;
+  /** 连续检测定时器 */
+  private continuousTimer: ReturnType<typeof setInterval> | null = null;
+  /** 每个摄像头最新帧缓存（用于连续检测） */
+  private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
+  /** 帧事件取消订阅函数 */
+  private unsubFrame: (() => void) | null = null;
+
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
@@ -55,10 +63,54 @@ export class AiDetector {
 
     await this.loadModel(config.model);
 
-    /** 监听变动事件 */
-    this.eventBus.on("motion", ({ cameraId, data, timestamp }) => {
-      this.detect(cameraId, data, timestamp);
-    });
+    /** 启动检测模式 */
+    this.startDetection();
+  }
+
+  /** 根据配置启动检测模式 */
+  private startDetection(): void {
+    const config = this.runtimeConfig.get().ai;
+
+    if (config.mode === "continuous") {
+      /** 连续模式：订阅帧事件缓存最新帧，定时器驱动检测 */
+      this.unsubFrame = this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
+        this.latestFrames.set(cameraId, { data, timestamp });
+      });
+
+      this.startContinuousLoop(config.interval);
+      console.log(`[AiDetector] 连续检测模式，间隔 ${config.interval}ms`);
+    } else {
+      /** 变动触发模式：监听 motion 事件 */
+      this.eventBus.on("motion", ({ cameraId, data, timestamp }) => {
+        this.detect(cameraId, data, timestamp);
+      });
+      console.log("[AiDetector] 变动触发检测模式");
+    }
+  }
+
+  /** 启动连续检测循环 */
+  private startContinuousLoop(interval: number): void {
+    if (this.continuousTimer) clearInterval(this.continuousTimer);
+    this.continuousTimer = setInterval(() => {
+      for (const [cameraId, frame] of this.latestFrames) {
+        /** 避免使用过旧的帧（超过间隔 3 倍） */
+        if (Date.now() - frame.timestamp > interval * 3) continue;
+        this.detect(cameraId, frame.data, frame.timestamp);
+      }
+    }, interval);
+  }
+
+  /** 停止连续检测 */
+  private stopContinuousLoop(): void {
+    if (this.continuousTimer) {
+      clearInterval(this.continuousTimer);
+      this.continuousTimer = null;
+    }
+    if (this.unsubFrame) {
+      this.unsubFrame();
+      this.unsubFrame = null;
+    }
+    this.latestFrames.clear();
   }
 
   /** 加载指定模型（带重试） */
@@ -130,6 +182,22 @@ export class AiDetector {
     }
   }
 
+  /** 运行时切换检测模式 */
+  setMode(mode: DetectMode, interval?: number): void {
+    const ai = this.runtimeConfig.get().ai;
+    if (ai.mode === mode && (mode === "motion" || ai.interval === interval)) return;
+
+    /** 停止旧模式 */
+    this.stopContinuousLoop();
+
+    /** 更新配置 */
+    const updatedInterval = interval ?? ai.interval;
+    this.runtimeConfig.patch({ ai: { ...ai, mode, interval: updatedInterval } });
+
+    /** 启动新模式 */
+    this.startDetection();
+  }
+
   /** 获取当前模型信息 */
   getModelInfo(): { model: string; loading: boolean; initialized: boolean } {
     return { model: this.currentModel, loading: this.loading, initialized: this.initialized };
@@ -182,24 +250,36 @@ export class AiDetector {
         }));
 
       const totalMs = performance.now() - t0;
-      if (detections.length > 0) {
-        const t3 = performance.now();
-        const annotatedImage = await this.annotator.annotate(jpeg, detections);
-        const annotateMs = performance.now() - t3;
-        this.annotator.setLatest(cameraId, annotatedImage);
 
+      /** 始终标注图片（即使无检测结果也要更新，清空之前的标注） */
+      const t3 = performance.now();
+      const annotatedImage = await this.annotator.annotate(jpeg, detections);
+      const annotateMs = performance.now() - t3;
+      this.annotator.setLatest(cameraId, annotatedImage);
+
+      if (detections.length > 0) {
         this.eventBus.emit("detect", {
           cameraId,
           timestamp,
           detections,
           annotatedImage,
         });
-        console.log(`[Perf][AI][${cameraId}] 检测到 ${detections.length} 个目标, resize=${resizeMs.toFixed(0)}ms, infer=${inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
       }
+      console.log(`[Perf][AI][${cameraId}] ${detections.length} 目标, resize=${resizeMs.toFixed(0)}ms, infer=${inferMs.toFixed(0)}ms, annotate=${annotateMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
     } finally {
       this.detecting = false;
     }
+  }
+
+  /** 销毁检测器（停止连续检测 + 释放模型） */
+  dispose(): void {
+    this.stopContinuousLoop();
+    if (this.detector) {
+      this.detector.dispose?.();
+      this.detector = null;
+    }
+    this.initialized = false;
   }
 }

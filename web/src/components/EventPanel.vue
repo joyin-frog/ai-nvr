@@ -801,6 +801,14 @@ defineExpose({ addEvent, loadHistory })
   min-width: 60px;
 }
 
+.event-thumb {
+  width: 48px;
+  height: 27px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
 .event-detail {
   overflow: hidden;
   text-overflow: ellipsis;

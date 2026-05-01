@@ -25,6 +25,9 @@ export interface DetectionPayload {
   annotatedImage: Buffer;
 }
 
+/** 检测模式：motion = 变动触发，continuous = 连续检测 */
+export type DetectMode = "motion" | "continuous";
+
 /** AI 配置 */
 export interface AiConfig {
   /** 是否启用 AI 检测 */
@@ -39,4 +42,8 @@ export interface AiConfig {
   inputWidth: number;
   /** 是否在画面上显示检测框（默认 true） */
   showBoxes: boolean;
+  /** 检测模式：motion = 变动触发，continuous = 连续检测（默认 motion） */
+  mode: DetectMode;
+  /** 连续检测间隔（毫秒，仅 continuous 模式，默认 1000） */
+  interval: number;
 }

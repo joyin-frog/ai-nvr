@@ -1,6 +1,4 @@
-import { mkdirSync } from "node:fs";
 import { execSync } from "node:child_process";
-import sharp from "sharp";
 import { join } from "node:path";
 import { loadConfig, watchConfig } from "@/config";
 import { EventBus } from "@/event-bus";
@@ -225,26 +223,3 @@ eventBus.on("alert", ({ ruleName, cameraId, timestamp, detail }) => {
   console.log(`[Alert] ${time} | ${cameraId} | ${ruleName}${detail ? ` | ${detail}` : ""}`);
 });
 
-/** 启动后保存前几帧截图到 data/snapshots 供验证 */
-const SNAP_DIR = join(dataDir, "snapshots");
-mkdirSync(SNAP_DIR, { recursive: true });
-const snapCounts = new Map<string, number>();
-const MAX_SNAPS = 3;
-const unsub = eventBus.on("frame", ({ cameraId, data }) => {
-  const count = (snapCounts.get(cameraId) ?? 0) + 1;
-  snapCounts.set(cameraId, count);
-  if (count > MAX_SNAPS) return;
-  const filename = `${cameraId}_frame_${count}.webp`;
-  /** JPEG → WebP 转码保存，体积更小 */
-  sharp(data).webp({ quality: 80 }).toFile(join(SNAP_DIR, filename)).then(() => {
-    console.log(`[Snapshot] 已保存: ${filename}`);
-  });
-  /** 所有摄像头都保存够了就取消订阅 */
-  if (snapCounts.size >= config.cameras.length) {
-    let allDone = true;
-    for (const [, c] of snapCounts) {
-      if (c < MAX_SNAPS) { allDone = false; break; }
-    }
-    if (allDone) unsub();
-  }
-});

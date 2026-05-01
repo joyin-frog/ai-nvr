@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, watchFile } from "node:fs";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
-import { type AiConfig } from "@/ai/types";
+import { type AiConfig, type DetectMode } from "@/ai/types";
 
 /** RTSP 流地址来源（直接连摄像机） */
 export interface StreamSource {
@@ -182,6 +182,8 @@ export function loadConfig(configPath?: string): AppConfig {
       maxDetections: (aiNode?.max_detections as number) ?? 20,
       inputWidth: (aiNode?.input_width as number) ?? 0,
       showBoxes: (aiNode?.show_boxes as boolean) ?? true,
+      mode: (aiNode?.mode === "continuous" ? "continuous" : "motion") as DetectMode,
+      interval: (aiNode?.interval as number) ?? 1000,
     },
     auth: {
       token: (authNode?.token as string) ?? "",

@@ -122,6 +122,22 @@ const cameraBodyStyle = computed(() => {
   return { 'aspect-ratio': '16 / 9' }
 })
 
+/** 监听 img 加载，获取实际帧分辨率 */
+function onImageLoad() {
+  const img = imgEl.value
+  if (img) {
+    frameSize.value = { width: img.naturalWidth, height: img.naturalHeight }
+  }
+}
+
+/** 分辨率文本 */
+const resolutionText = computed(() => {
+  const w = frameSize.value.width
+  const h = frameSize.value.height
+  if (w > 0 && h > 0) return `${w}x${h}`
+  return ''
+})
+
 /** 检测框叠加在画面上的样式 */
 const detectionBoxes = computed(() => {
   if (!sortedDetections.value.length) return []
@@ -358,6 +374,7 @@ onUnmounted(() => {
           :src="streamUrl"
           class="camera-image"
           :style="{ filter: imageFilter }"
+          @load="onImageLoad"
         />
         <div v-else class="camera-placeholder">
           <div v-if="online" class="placeholder-icon">&#9679;</div>
@@ -390,8 +407,9 @@ onUnmounted(() => {
       </div>
 
       <!-- FPS 质量指示 -->
-      <div v-if="online && hasFrame && (fps ?? 0) > 0" :class="['fps-badge', fpsQuality]">
-        {{ (fps ?? 0).toFixed(0) }} fps
+      <div v-if="online && hasFrame && ((fps ?? 0) > 0 || resolutionText)" :class="['fps-badge', (fps ?? 0) > 0 ? fpsQuality : 'good']">
+        <template v-if="(fps ?? 0) > 0">{{ (fps ?? 0).toFixed(0) }} fps</template>
+        <template v-if="resolutionText"><template v-if="(fps ?? 0) > 0"> · </template>{{ resolutionText }}</template>
       </div>
       <!-- 帧延迟指示 -->
       <div v-if="online && hasFrame && (latency ?? 0) > 0" :class="['latency-badge', latencyQuality]">
