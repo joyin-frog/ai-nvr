@@ -241,6 +241,22 @@ function eventTypeLabel(type: string): string {
   return eventTypes.value.find(e => e.value === type)?.label ?? type
 }
 
+/** 格式化告警详情 JSON 为可读文本 */
+function formatDetail(detail: string): string {
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(detail)
+  } catch {
+    return detail
+  }
+  const parts: string[] = []
+  if (typeof obj.detections === 'string') parts.push(obj.detections)
+  if (typeof obj.ratio === 'number') parts.push(`${t('event.motionRatio', { ratio: (obj.ratio * 100).toFixed(1) })}`)
+  if (typeof obj.count === 'number') parts.push(`×${obj.count}`)
+  if (typeof obj.fps === 'number') parts.push(`FPS: ${obj.fps}`)
+  return parts.length > 0 ? parts.join(' · ') : detail
+}
+
 /** 实时追加告警（WebSocket 推送时调用，替代全量刷新） */
 function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }) {
   /** 如果当前筛选不匹配则忽略 */
@@ -473,7 +489,7 @@ defineExpose({ loadAlerts, addAlert })
           <span class="alert-rule">{{ alert.ruleName }}</span>
           <span class="alert-cam">{{ cameraNameMap[alert.cameraId] ?? alert.cameraId }}</span>
         </div>
-        <div v-if="alert.detail" class="alert-detail">{{ alert.detail }}</div>
+        <div v-if="alert.detail" class="alert-detail">{{ formatDetail(alert.detail) }}</div>
       </div>
       <button v-if="hasMore" class="load-more-btn" @click="loadMoreAlerts">{{ t('alert.loadMore') }}</button>
     </div>
