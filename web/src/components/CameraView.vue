@@ -557,12 +557,10 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     /** 绘制标签背景和文字 */
     const tid = d.trackId
     const customName = tid ? props.trackLabels?.[tid] : undefined
-    const parts: string[] = []
-    if (customName) parts.push(customName)
-    if (tid) parts.push(`#${tid}`)
-    parts.push(d.label)
-    parts.push(`${(d.score * 100).toFixed(0)}%`)
-    const text = parts.join(' ')
+    /** 有自定义名称时简化显示（名称 + 置信度），无名称时显示完整信息 */
+    const text = customName
+      ? `${customName} ${(d.score * 100).toFixed(0)}%`
+      : `${tid ? `#${tid} ` : ''}${d.label} ${(d.score * 100).toFixed(0)}%`
 
     const textMetrics = ctx.measureText(text)
     const labelH = 18
