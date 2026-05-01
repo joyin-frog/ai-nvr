@@ -1336,13 +1336,22 @@ export function startServer(
       if (trackEventsMatch && req.method === "GET") {
         const trackId = parseInt(trackEventsMatch[1]!);
         const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
-        /** 搜索 detail 中包含该 trackId 的 detect 事件 */
-        const events = eventStorage.query({
-          type: "detect",
-          search: `"trackId":${trackId}`,
-          limit,
-        });
-        return Response.json(events);
+        /** 搜索所有包含该 trackId 的事件（detect + track:* 行为事件） */
+        const searchStr = `"trackId":${trackId}`;
+        const detectEvents = eventStorage.query({ type: "detect", search: searchStr, limit });
+        const trackEvents = eventStorage.query({ search: searchStr, limit });
+        /** 合并去重（按 id） */
+        const seen = new Set(detectEvents.map((e: { id: number }) => e.id));
+        const merged = [...detectEvents];
+        for (const ev of trackEvents) {
+          if (!seen.has((ev as { id: number }).id)) {
+            seen.add((ev as { id: number }).id);
+            merged.push(ev);
+          }
+        }
+        /** 按时间倒序 */
+        merged.sort((a: { timestamp: number }, b: { timestamp: number }) => b.timestamp - a.timestamp);
+        return Response.json(merged.slice(0, limit));
       }
 
       /** 追踪目标快照图片 */
