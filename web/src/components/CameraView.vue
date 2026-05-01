@@ -81,12 +81,14 @@ watch(() => fmp4.failed.value, (failed) => {
     useMse.value = false
     stopOverlayLoop()
     fmp4.disconnect()
-    /** 如果摄像头在线，启动 Canvas 渲染 */
-    if (props.online) {
-      startLoop()
-      const url = authUrl(`/api/stream/${props.cameraId}`)
-      mjpegStream.startFetch(url, onFrameDecoded)
-    }
+    /** 等待 Vue 渲染 Canvas 元素后再启动渲染循环 */
+    nextTick(() => {
+      if (props.online) {
+        startLoop()
+        const url = authUrl(`/api/stream/${props.cameraId}`)
+        mjpegStream.startFetch(url, onFrameDecoded)
+      }
+    })
   }
 })
 
