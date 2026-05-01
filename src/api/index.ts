@@ -1093,15 +1093,56 @@ export function startServer(
         wsClients.delete(ws);
         console.log(`[WS] 客户端断开，当前 ${wsClients.size} 个`);
       },
-      message() {
-        /** 暂不处理客户端发来的消息 */
+      message(ws, raw) {
+        /** 处理客户端订阅消息：{"type":"subscribe","cameraIds":["cam1","cam2"]} */
+        if (typeof raw !== "string") return;
+        let msg: { type: string; cameraIds?: string[] };
+        try { msg = JSON.parse(raw); } catch { return; }
+        if (msg.type === "subscribe" && Array.isArray(msg.cameraIds)) {
+          (ws as unknown as { subscribedCameras: Set<string> }).subscribedCameras = new Set(msg.cameraIds);
+        } else if (msg.type === "unsubscribe") {
+          (ws as unknown as { subscribedCameras?: Set<string> }).subscribedCameras = undefined;
+        }
       },
     },
   });
 
-  /** 帧推送节流：每个摄像头至少间隔 50ms 推送一帧（~20fps） */
-  const lastFrameSent = new Map<string, number>();
-  const FRAME_THROTTLE_MS = 50;
+  /**
+   * 帧推送：最新帧优先策略
+   * 缓存每路摄像头最新帧，由定时器按固定间隔推送最新帧
+   * 避免"丢弃中间帧后推送旧帧"的延迟问题
+   */
+
+  /** 每路摄像头最新帧缓存 */
+  const latestFrameByCamera = new Map<string, { data: Buffer; timestamp: number }>();
+
+  /** 推送间隔（ms），默认 33ms（~30fps） */
+  const FRAME_PUSH_INTERVAL_MS = 33;
+
+  /** 帧推送定时器 */
+  setInterval(() => {
+    if (wsClients.size === 0 || latestFrameByCamera.size === 0) return;
+
+    for (const [cameraId, frame] of latestFrameByCamera) {
+      latestFrameByCamera.delete(cameraId);
+
+      const header = { event: "frame", cameraId, timestamp: frame.timestamp };
+      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
+      headerLenView.setUint32(0, headerBuf.length, true);
+
+      const message = new Uint8Array(4 + headerBuf.length + frame.data.length);
+      message.set(headerLenBuf, 0);
+      message.set(headerBuf, 4);
+      message.set(frame.data, 4 + headerBuf.length);
+
+      for (const ws of wsClients) {
+        /** 客户端订阅过滤：只推送给订阅了该摄像头的客户端 */
+        const subscribed = (ws as unknown as { subscribedCameras?: Set<string> }).subscribedCameras;
+        if (subscribed && !subscribed.has(cameraId)) continue;
+        ws.send(message);
+      }
+    }
+  }, FRAME_PUSH_INTERVAL_MS);
 
   /** 预分配 header 长度 buffer（4 字节复用） */
   const headerLenBuf = new Uint8Array(4);
@@ -1110,22 +1151,17 @@ export function startServer(
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
-      let frameData: Buffer | null = null;
+      if (event === "frame") {
+        /** 帧事件：缓存最新帧，由定时器统一推送 */
+        const { cameraId, timestamp, data } = payload as { cameraId: string; timestamp: number; data: Buffer };
+        latestFrameByCamera.set(cameraId, { data, timestamp });
+        return;
+      }
 
-      /** 构建 JSON 头（只保留事件类型和元数据，不含二进制） */
+      /** 非帧事件：立即推送 */
       let header: Record<string, unknown>;
 
-      if (event === "frame") {
-        /** 帧事件：轻量 header */
-        const { cameraId, timestamp } = payload as { cameraId: string; timestamp: number; data: Buffer };
-        frameData = (payload as { data: Buffer }).data;
-        header = { event, cameraId, timestamp };
-        /** 帧节流 */
-        const now = Date.now();
-        const lastSent = lastFrameSent.get(cameraId) ?? 0;
-        if (now - lastSent < FRAME_THROTTLE_MS) return;
-        lastFrameSent.set(cameraId, now);
-      } else if (event === "detect") {
+      if (event === "detect") {
         const detectPayload = payload as { cameraId: string; timestamp: number; detections: Array<{ label: string; score: number; box: unknown; trackId?: number }>; changed?: boolean; inferMs?: number };
         /** 只推送 importantLabels 中的检测结果给前端，减少 WS 带宽 */
         const importantLabels = runtimeConfig.get().ai.importantLabels;
@@ -1140,17 +1176,13 @@ export function startServer(
 
       if (wsClients.size === 0) return;
 
-      /** 二进制协议：[4字节头长度 LE uint32][JSON头][可选二进制帧] */
+      /** 二进制协议：[4字节头长度 LE uint32][JSON头] */
       const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
       headerLenView.setUint32(0, headerBuf.length, true);
 
-      /** 使用 Uint8Array.set 避免 Buffer.concat 的大内存拷贝 */
-      const message = new Uint8Array(4 + headerBuf.length + (frameData?.length ?? 0));
+      const message = new Uint8Array(4 + headerBuf.length);
       message.set(headerLenBuf, 0);
       message.set(headerBuf, 4);
-      if (frameData) {
-        message.set(frameData, 4 + headerBuf.length);
-      }
 
       for (const ws of wsClients) {
         ws.send(message);
