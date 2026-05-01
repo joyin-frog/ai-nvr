@@ -12,6 +12,10 @@ export interface TrackedObject {
   box: { xmin: number; ymin: number; xmax: number; ymax: number };
   /** 上一次匹配的原始检测框（用于下一帧 IoU 匹配） */
   rawBox: { xmin: number; ymin: number; xmax: number; ymax: number };
+  /** 线性运动预测框（基于速度外推） */
+  predictedBox: { xmin: number; ymin: number; xmax: number; ymax: number };
+  /** 速度向量（dx, dy per frame），用于运动预测 */
+  velocity: { dx: number; dy: number };
   /** 连续追踪帧数 */
   age: number;
   /** 上次匹配到的帧 */
@@ -99,6 +103,8 @@ export class ObjectTracker {
           score: det.score,
           box: { ...det.box },
           rawBox: { ...det.box },
+          predictedBox: { ...det.box },
+          velocity: { dx: 0, dy: 0 },
           age: 1,
           lastMatched: this.frameIndex,
           labelVotes: votes,
@@ -109,7 +115,20 @@ export class ObjectTracker {
       return { detections: results, appeared, disappeared };
     }
 
-    /** 计算 IoU 矩阵：用 rawBox（原始检测位置）匹配，避免 EMA 平滑导致的 IoU 下降 */
+    /** 未匹配追踪的运动预测外推：按速度继续推进 predictedBox */
+    for (const track of this.tracks) {
+      const lost = this.frameIndex - track.lastMatched;
+      if (lost > 0 && (track.velocity.dx !== 0 || track.velocity.dy !== 0)) {
+        track.predictedBox = {
+          xmin: track.predictedBox.xmin + track.velocity.dx,
+          ymin: track.predictedBox.ymin + track.velocity.dy,
+          xmax: track.predictedBox.xmax + track.velocity.dx,
+          ymax: track.predictedBox.ymax + track.velocity.dy,
+        };
+      }
+    }
+
+    /** 计算 IoU 矩阵：用 predictedBox（运动预测位置）匹配 */
     const costMatrix = this.buildCostMatrix(this.tracks, highDets);
 
     /** 匈牙利匹配（贪心近似，足够快） */
@@ -122,12 +141,27 @@ export class ObjectTracker {
     /** EMA 平滑系数（0.5 = 50% 新值 + 50% 旧值，跟随更快） */
     const smoothAlpha = 0.5;
 
-    /** 更新匹配到的追踪（框位置 EMA 平滑） */
+    /** 更新匹配到的追踪（框位置 EMA 平滑 + 速度更新 + 运动预测） */
     for (const [ti, di] of matchedTracks) {
       const track = this.tracks[ti]!;
       const det = highDets[di]!;
-      /** 先更新 rawBox 为当前检测位置（下一帧匹配用） */
+      /** 速度 = 新位置 - 旧位置 */
+      const dx = det.box.xmin - track.rawBox.xmin;
+      const dy = det.box.ymin - track.rawBox.ymin;
+      /** 先更新 rawBox 为当前检测位置 */
       track.rawBox = { ...det.box };
+      /** 更新速度（EMA 平滑，减少抖动） */
+      track.velocity = {
+        dx: track.velocity.dx * 0.5 + dx * 0.5,
+        dy: track.velocity.dy * 0.5 + dy * 0.5,
+      };
+      /** 预测下一帧位置 = 当前位置 + 平滑速度 */
+      track.predictedBox = {
+        xmin: det.box.xmin + track.velocity.dx,
+        ymin: det.box.ymin + track.velocity.dy,
+        xmax: det.box.xmax + track.velocity.dx,
+        ymax: det.box.ymax + track.velocity.dy,
+      };
       /** box 做平滑用于显示 */
       const prev = track.box;
       const curr = det.box;
@@ -165,6 +199,8 @@ export class ObjectTracker {
         score: det.score,
         box: { ...det.box },
         rawBox: { ...det.box },
+        predictedBox: { ...det.box },
+        velocity: { dx: 0, dy: 0 },
         age: 1,
         lastMatched: this.frameIndex,
         labelVotes: votes,
@@ -201,13 +237,13 @@ export class ObjectTracker {
     this.frameIndex = 0;
   }
 
-  /** 构建 IoU 代价矩阵（用 rawBox 匹配，避免 EMA 平滑导致 IoU 下降） */
+  /** 构建 IoU 代价矩阵（用 predictedBox 匹配，运动预测补偿快速移动目标） */
   private buildCostMatrix(tracks: TrackedObject[], dets: Detection[]): number[][] {
     const matrix: number[][] = [];
     for (let i = 0; i < tracks.length; i++) {
       matrix[i] = [];
       for (let j = 0; j < dets.length; j++) {
-        const iou = this.computeIou(tracks[i]!.rawBox, dets[j]!.box);
+        const iou = this.computeIou(tracks[i]!.predictedBox, dets[j]!.box);
         /** 同标签优先匹配，不同标签加惩罚 */
         const labelPenalty = tracks[i]!.label !== dets[j]!.label ? 0.3 : 0;
         matrix[i]![j] = 1 - iou + labelPenalty;
