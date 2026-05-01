@@ -82,6 +82,38 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
 /** 标注图片 URL（仅用于截图下载） */
 const annotatedUrl = ref<string>('')
 
+/**
+ * 追踪目标轨迹缓存
+ * 记录每个 trackId 最近的中心点坐标（归一化），用于在 overlay 上绘制轨迹线
+ * 最大保留 30 个点（约 60 秒的轨迹，AI interval = 2s）
+ */
+const MAX_TRAIL_POINTS = 30
+const trackTrails = new Map<number, Array<{ x: number; y: number }>>()
+
+/** 记录当前帧中所有检测目标的中心点到轨迹缓存 */
+function recordTrails() {
+  for (const d of props.detections) {
+    if (d.trackId == null) continue
+    const cx = (d.box.xmin + d.box.xmax) / 2
+    const cy = (d.box.ymin + d.box.ymax) / 2
+    let trail = trackTrails.get(d.trackId)
+    if (!trail) {
+      trail = []
+      trackTrails.set(d.trackId, trail)
+    }
+    trail.push({ x: cx, y: cy })
+    if (trail.length > MAX_TRAIL_POINTS) trail.shift()
+  }
+}
+
+/** 清理不再活跃的轨迹（超过 MAX_TRAIL_POINTS 帧未更新的） */
+function cleanupTrails() {
+  const activeIds = new Set(props.detections.filter(d => d.trackId != null).map(d => d.trackId!))
+  for (const id of trackTrails.keys()) {
+    if (!activeIds.has(id)) trackTrails.delete(id)
+  }
+}
+
 /** 检测框列表（按置信度排序） */
 const sortedDetections = computed(() =>
   [...props.detections].sort((a, b) => b.score - a.score)
@@ -248,7 +280,16 @@ function getColor(label: string, trackId?: number): { stroke: string; fill: stri
 
 /** Canvas overlay 绘制检测框（替代 HTML TransitionGroup，减少 DOM 操作开销） */
 function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  if (!props.showBoxes || !hasFrame.value || sortedDetections.value.length === 0) return
+  if (!props.showBoxes || !hasFrame.value) {
+    trackTrails.clear()
+    return
+  }
+
+  /** 记录轨迹 + 清理失效轨迹 */
+  recordTrails()
+  cleanupTrails()
+
+  if (sortedDetections.value.length === 0) return
 
   ctx.save()
   ctx.font = 'bold 12px monospace'
@@ -312,6 +353,40 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.fillText(text, x + 5, labelY - 4)
+  }
+
+  /** 绘制追踪轨迹线（贝塞尔平滑曲线） */
+  if (trackTrails.size > 0) {
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([])
+    for (const [trackId, points] of trackTrails) {
+      if (points.length < 2) continue
+      const color = getColor('', trackId)
+      ctx.strokeStyle = color.stroke
+      ctx.globalAlpha = 0.5
+      ctx.beginPath()
+      const p0 = points[0]!
+      ctx.moveTo(p0.x * width, p0.y * height)
+      /** 使用二次贝塞尔曲线平滑连接 */
+      if (points.length === 2) {
+        ctx.lineTo(points[1]!.x * width, points[1]!.y * height)
+      } else {
+        for (let i = 1; i < points.length - 1; i++) {
+          const curr = points[i]!
+          const next = points[i + 1]!
+          const cpx = curr.x * width
+          const cpy = curr.y * height
+          const endx = ((curr.x + next.x) / 2) * width
+          const endy = ((curr.y + next.y) / 2) * height
+          ctx.quadraticCurveTo(cpx, cpy, endx, endy)
+        }
+        /** 最后一个点 */
+        const last = points[points.length - 1]!
+        ctx.lineTo(last.x * width, last.y * height)
+      }
+      ctx.stroke()
+      ctx.globalAlpha = 1
+    }
   }
 
   /** 绘制 ROI 区域 */
