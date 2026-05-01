@@ -174,6 +174,12 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
+/** bun --watch 重启时不发 SIGINT，用 beforeExit 清理 ffmpeg 子进程 */
+process.on("beforeExit", () => {
+  cameraManager.stop();
+  recorder.stop();
+});
+
 /** 控制台日志：打印帧接收情况（每 5 秒一次统计） */
 const frameCounts = new Map<string, number>();
 eventBus.on("frame", ({ cameraId }) => {

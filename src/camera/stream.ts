@@ -240,12 +240,16 @@ export class FrameExtractor {
     }, delay);
   }
 
-  /** 杀死 ffmpeg 进程 */
+  /** 杀死 ffmpeg 进程并清理管道 */
   private killProcess(): void {
     if (this.proc) {
-      this.proc.kill("SIGKILL");
-      this.proc.unref();
+      const proc = this.proc;
       this.proc = null;
+      /** 先关闭管道，避免阻塞 */
+      proc.stdout?.destroy();
+      proc.stderr?.destroy();
+      proc.kill("SIGKILL");
+      proc.unref();
     }
   }
 }
