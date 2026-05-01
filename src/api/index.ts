@@ -23,6 +23,21 @@ import { spawnSync } from "node:child_process";
 /** WebSocket 客户端集合 */
 const wsClients = new Set<import("bun").ServerWebSocket>();
 
+/** CORS 响应头 */
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+/** 为 Response 添加 CORS 头 */
+function corsify(res: Response): Response {
+  for (const [k, v] of Object.entries(CORS_HEADERS)) {
+    res.headers.set(k, v);
+  }
+  return res;
+}
+
 /** 要推送给前端的事件列表 */
 const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert"];
 
@@ -49,25 +64,16 @@ export function startServer(
   authConfig: AuthConfig,
   ptzController: PtzController,
 ): void {
-  Bun.serve({
-    port,
-    fetch(req, server) {
-      const url = new URL(req.url);
+  /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
+  async function handleRequest(req: Request): Promise<Response | undefined> {
+    const url = new URL(req.url);
 
-      /** WebSocket 升级（精确匹配，避免与 /api/events/history 冲突） */
-      if (url.pathname === "/api/events" && req.headers.get("upgrade") === "websocket") {
-        if (!checkAuth(authConfig, req)) return new Response("Unauthorized", { status: 401 });
-        if (server.upgrade(req)) return;
-        return new Response("WebSocket upgrade failed", { status: 500 });
-      }
+    if (url.pathname === "/api/auth/check") {
+      return Response.json({ enabled: !!authConfig.token });
+    }
 
-      /** 认证检查：是否启用认证 */
-      if (url.pathname === "/api/auth/check") {
-        return Response.json({ enabled: !!authConfig.token });
-      }
-
-      /** 登录端点：验证 token */
-      if (url.pathname === "/api/auth/login" && req.method === "POST") {
+    /** 登录端点：验证 token */
+    if (url.pathname === "/api/auth/login" && req.method === "POST") {
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const token = obj.token as string | undefined;
@@ -771,6 +777,31 @@ export function startServer(
 
       /** 静态文件服务：服务前端构建产物 */
       return serveStatic(url.pathname);
+    }
+
+  Bun.serve({
+    port,
+    async fetch(req, server) {
+      /** CORS 预检请求 */
+      if (req.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: { ...CORS_HEADERS, "Access-Control-Max-Age": "86400" },
+        });
+      }
+
+      /** WebSocket 升级 */
+      if (req.headers.get("upgrade") === "websocket") {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/events") {
+          server.upgrade(req);
+          return;
+        }
+      }
+
+      const res = await handleRequest(req);
+      if (res) return corsify(res);
+      return corsify(new Response("Not Found", { status: 404 }));
     },
     websocket: {
       open(ws) {
