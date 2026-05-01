@@ -170,8 +170,8 @@ export class FrameExtractor {
     const width = this.widthOverride ?? detectWidth;
 
     const vfParts: string[] = [];
-    if (fps > 0 && this.purpose === "detect") {
-      /** 检测流限制帧率，显示流不限制以获得最高帧率 */
+    if (fps > 0 && this.purpose === "detect" && this.rtspOverride) {
+      /** 双流模式的检测流限制帧率；单流模式不限制 fps，由 AI detector interval 控制 */
       vfParts.push(`fps=${fps}:round=zero`);
     }
     if (width > 0) {
