@@ -50,6 +50,15 @@ const todayStats = ref<{
   byLabel: Array<{ label: string; count: number }>
 } | null>(null)
 
+/** 追踪目标统计 */
+const trackStats = ref<{
+  total: number
+  named: number
+  unnamed: number
+  active: number
+  byLabel: Record<string, number>
+} | null>(null)
+
 /** 7天趋势数据 */
 const weekStats = ref<Array<{ date: string; motion: number; detect: number; alert: number }>>([])
 
@@ -344,10 +353,19 @@ async function loadWeekStats() {
   weekStats.value = result
 }
 
+/** 加载追踪目标统计 */
+async function loadTrackStats() {
+  try {
+    const res = await authFetch('/api/tracks/stats')
+    if (res.ok) trackStats.value = await res.json()
+  } catch { /* ignore */ }
+}
+
 onMounted(() => {
   loadMetrics()
   loadTodayStats()
   loadWeekStats()
+  loadTrackStats()
   timer = setInterval(loadMetrics, 5000)
   statsTimer = setInterval(loadTodayStats, 30000)
 })
@@ -451,6 +469,38 @@ onUnmounted(() => {
             <div class="label-bar-fill" :style="{ width: `${(item.count / todayStats!.byLabel![0]!.count) * 100}%` }" />
           </div>
           <span class="label-count">{{ item.count }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 追踪目标统计 -->
+    <div v-if="trackStats && trackStats.total > 0" class="track-section">
+      <div class="stats-title">{{ t('status.trackStats') }}</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-num track-total">{{ trackStats.total }}</span>
+          <span class="stat-desc">{{ t('status.trackTotal') }}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num track-named">{{ trackStats.named }}</span>
+          <span class="stat-desc">{{ t('status.trackNamed') }}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num track-unnamed">{{ trackStats.unnamed }}</span>
+          <span class="stat-desc">{{ t('status.trackUnnamed') }}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-num track-active">{{ trackStats.active }}</span>
+          <span class="stat-desc">{{ t('status.trackActive') }}</span>
+        </div>
+      </div>
+      <div v-if="Object.keys(trackStats.byLabel).length" class="label-bars" style="margin-top: 6px;">
+        <div v-for="[label, count] in Object.entries(trackStats.byLabel).sort((a, b) => b[1] - a[1])" :key="label" class="label-row">
+          <span class="label-name">{{ label }}</span>
+          <div class="label-bar-bg">
+            <div class="label-bar-fill track-bar" :style="{ width: `${(count / Math.max(...Object.values(trackStats.byLabel))) * 100}%` }" />
+          </div>
+          <span class="label-count">{{ count }}</span>
         </div>
       </div>
     </div>
@@ -947,6 +997,19 @@ onUnmounted(() => {
   padding: 8px 12px;
   border-bottom: 1px solid #2a2a4a;
 }
+
+/* 追踪统计 */
+.track-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.stat-num.track-total { color: #74b9ff; }
+.stat-num.track-named { color: #00cec9; }
+.stat-num.track-unnamed { color: #fdcb6e; }
+.stat-num.track-active { color: #55efc4; }
+
+.label-bar-fill.track-bar { background: #74b9ff; }
 
 .disk-bar-wrap {
   margin-bottom: 8px;
