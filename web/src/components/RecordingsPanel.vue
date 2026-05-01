@@ -506,6 +506,21 @@ function onPlayerKeydown(e: KeyboardEvent) {
       e.preventDefault()
       clearLoop()
       break
+    case '+':
+    case '=':
+      e.preventDefault()
+      changeSpeed(Math.min(8, [0.5, 1, 1.5, 2, 4, 8].find(s => s > playbackSpeed.value) ?? 8))
+      break
+    case '-':
+    case '_':
+      e.preventDefault()
+      changeSpeed(Math.max(0.5, [0.5, 1, 1.5, 2, 4, 8].reverse().find(s => s < playbackSpeed.value) ?? 0.5))
+      break
+    case 'p':
+    case 'P':
+      e.preventDefault()
+      togglePip()
+      break
   }
 }
 
@@ -1339,6 +1354,8 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="help-row"><kbd>[</kbd> A <kbd>]</kbd> B <kbd>\</kbd> {{ t('recording.helpLoop') }}</div>
             <div class="help-row"><kbd>M</kbd> {{ t('recording.helpMute') }}</div>
             <div class="help-row"><kbd>F</kbd> {{ t('recording.helpFullscreen') }}</div>
+            <div class="help-row"><kbd>+</kbd><kbd>-</kbd> {{ t('recording.helpSpeed', '倍速') }}</div>
+            <div class="help-row"><kbd>P</kbd> {{ t('recording.helpPip', '画中画') }}</div>
           </div>
         </div>
         <div class="player-video-wrapper">

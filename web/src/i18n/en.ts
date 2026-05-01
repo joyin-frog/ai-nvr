@@ -132,6 +132,8 @@ export default {
     helpLoop: 'A-B loop',
     helpMute: 'Mute toggle',
     helpFullscreen: 'Fullscreen',
+    helpSpeed: 'Speed up/down',
+    helpPip: 'Toggle PiP',
     pip: 'PiP',
   },
   timeline: {

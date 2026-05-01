@@ -132,6 +132,8 @@ export default {
     helpLoop: '循环播放',
     helpMute: '静音切换',
     helpFullscreen: '全屏',
+    helpSpeed: '倍速加减',
+    helpPip: '画中画切换',
     pip: '画中画',
   },
   timeline: {
