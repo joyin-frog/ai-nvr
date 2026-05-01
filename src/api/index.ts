@@ -993,6 +993,20 @@ export function startServer(
         return Response.json(updated);
       }
 
+      /** 追踪目标检测事件历史 */
+      const trackEventsMatch = url.pathname.match(/^\/api\/tracks\/(\d+)\/events$/);
+      if (trackEventsMatch && req.method === "GET") {
+        const trackId = parseInt(trackEventsMatch[1]!);
+        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
+        /** 搜索 detail 中包含该 trackId 的 detect 事件 */
+        const events = eventStorage.query({
+          type: "detect",
+          search: `"trackId":${trackId}`,
+          limit,
+        });
+        return Response.json(events);
+      }
+
       /** 追踪目标快照图片 */
       if (url.pathname.startsWith("/api/tracks/snapshot/") && req.method === "GET") {
         const filename = url.pathname.slice("/api/tracks/snapshot/".length);

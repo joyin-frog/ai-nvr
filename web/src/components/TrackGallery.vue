@@ -24,6 +24,12 @@ const editingId = ref<number | null>(null)
 const editName = ref('')
 /** 标签筛选 */
 const filterLabel = ref('')
+/** 展开事件历史的 trackId */
+const expandedTrackId = ref<number | null>(null)
+/** trackId → 事件历史列表 */
+const trackEvents = ref<Record<number, Array<{ id: number; camera_id: string; timestamp: number; detail: string }>>>({})
+/** 事件历史加载中 */
+const loadingEvents = ref(false)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const emit = defineEmits<{
@@ -67,6 +73,22 @@ async function saveName(trackId: number) {
 /** 取消编辑 */
 function cancelEdit() {
   editingId.value = null
+}
+
+/** 加载追踪目标的检测事件历史 */
+async function loadTrackEvents(trackId: number) {
+  if (expandedTrackId.value === trackId) {
+    expandedTrackId.value = null
+    return
+  }
+  expandedTrackId.value = trackId
+  if (trackEvents.value[trackId]) return
+  loadingEvents.value = true
+  const res = await authFetch(`/api/tracks/${trackId}/events?limit=20`)
+  if (res.ok) {
+    trackEvents.value = { ...trackEvents.value, [trackId]: await res.json() }
+  }
+  loadingEvents.value = false
 }
 
 /** 格式化时间 */
@@ -171,6 +193,21 @@ onUnmounted(() => {
           <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
             ▶ {{ t('tracks.playRecording', '查看录像') }}
           </button>
+          <button class="history-btn" @click="loadTrackEvents(track.trackId)">
+            {{ expandedTrackId === track.trackId ? '▲' : '▼' }} {{ t('tracks.history', '事件历史') }}
+          </button>
+          <!-- 事件历史列表 -->
+          <div v-if="expandedTrackId === track.trackId && trackEvents[track.trackId]" class="event-list">
+            <div v-if="trackEvents[track.trackId].length === 0" class="event-empty">
+              {{ t('tracks.noEvents', '暂无事件') }}
+            </div>
+            <div v-for="ev in trackEvents[track.trackId]" :key="ev.id" class="event-item"
+              @click="emit('jumpToRecording', ev.camera_id, ev.timestamp)">
+              <span class="event-time">{{ new Date(ev.timestamp).toLocaleString() }}</span>
+              <span class="event-cam">{{ ev.camera_id }}</span>
+              <button class="event-play" @click.stop="emit('jumpToRecording', ev.camera_id, ev.timestamp)">▶</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -359,4 +396,69 @@ onUnmounted(() => {
 .play-btn:hover {
   background: #4ECDC420;
 }
+
+.history-btn {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  background: transparent;
+  color: #888;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 0;
+  font-size: 10px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.history-btn:hover { color: #4ECDC4; }
+
+.event-list {
+  margin-top: 6px;
+  border-top: 1px solid #2a2a4a;
+  padding-top: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.event-empty {
+  color: #555;
+  font-size: 11px;
+  text-align: center;
+  padding: 6px;
+}
+
+.event-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.event-item:hover {
+  background: #2a2a4a;
+}
+
+.event-time {
+  color: #aaa;
+  flex: 1;
+}
+
+.event-cam {
+  color: #4ECDC4;
+}
+
+.event-play {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.event-play:hover { color: #4ECDC4; }
 </style>
