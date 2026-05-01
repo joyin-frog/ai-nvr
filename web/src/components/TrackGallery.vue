@@ -26,6 +26,8 @@ const editName = ref('')
 const filterLabel = ref('')
 /** 摄像头筛选 */
 const filterCamera = ref('')
+/** 名称/标签搜索 */
+const searchText = ref('')
 /** 展开事件历史的 trackId */
 const expandedTrackId = ref<number | null>(null)
 /** trackId → 事件历史列表 */
@@ -129,11 +131,19 @@ const allCameras = computed(() => {
   return [...set].sort()
 })
 
-/** 按标签 + 摄像头筛选后的列表 */
+/** 按标签 + 摄像头 + 搜索筛选后的列表 */
 const filteredTracks = computed(() => {
   let list = tracks.value
   if (filterLabel.value) list = list.filter(t => t.label === filterLabel.value)
   if (filterCamera.value) list = list.filter(t => t.cameraIds.includes(filterCamera.value))
+  if (searchText.value) {
+    const q = searchText.value.toLowerCase()
+    list = list.filter(t =>
+      (t.customName && t.customName.toLowerCase().includes(q))
+      || t.label.toLowerCase().includes(q)
+      || String(t.trackId).includes(q)
+    )
+  }
   return list
 })
 
@@ -152,6 +162,11 @@ onUnmounted(() => {
   <div class="track-gallery">
     <div class="gallery-header">
       <h3>{{ t('tracks.title') }} <span class="track-total">{{ filteredTracks.length }}</span></h3>
+      <input
+        v-model="searchText"
+        class="search-input"
+        :placeholder="t('tracks.search', '搜索名称/标签...')"
+      />
       <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
         <option value="">{{ t('tracks.all') }}</option>
         <option v-for="label in allLabels" :key="label" :value="label">{{ label }}</option>
@@ -267,6 +282,21 @@ onUnmounted(() => {
   color: #4ECDC4;
   font-size: 12px;
 }
+
+.search-input {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  outline: none;
+  flex: 1;
+  min-width: 80px;
+}
+
+.search-input:focus { border-color: #4ECDC4; }
+.search-input::placeholder { color: #555; }
 
 .label-filter {
   background: #2a2a4a;
