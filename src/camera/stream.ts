@@ -243,6 +243,7 @@ export class FrameExtractor {
           };
           if (this.purpose === "display") {
             this.eventBus.emit("frame", payload);
+            this.eventBus.emit("detect:frame", payload);
           } else if (this.purpose === "detect" && this.rtspOverride) {
             /** 双流模式的检测流只发 detect:frame */
             this.eventBus.emit("detect:frame", payload);

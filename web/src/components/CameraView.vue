@@ -59,11 +59,10 @@ const fmp4CameraId = computed(() => props.cameraId)
 const fmp4 = useFmp4Stream(fmp4CameraId)
 
 /**
- * 渲染模式：默认 Canvas/MJPEG（稳定可靠）
- * MSE/fMP4 作为可选增强（受限于摄像头 RTSP 连接数可能不可用）
- * MSE 失败后自动降级到 Canvas
+ * 渲染模式：默认 MSE/fMP4（零转码 GPU 硬件解码，高帧率高分辨率）
+ * MSE 失败后自动降级到 Canvas/MJPEG
  */
-const useMse = ref(false)
+const useMse = ref(true)
 const mjpegStream = useMjpegStream()
 
 /** MSE 连续失败时自动回退到 Canvas 模式 */

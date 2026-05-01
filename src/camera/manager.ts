@@ -3,26 +3,27 @@ import { type EventBus } from "@/event-bus";
 import { type MotionRecorder } from "@/storage/recorder";
 import { FrameExtractor } from "./stream";
 import { Fmp4Extractor } from "./fmp4-stream";
+import { H264Fmp4Extractor } from "./h264-fmp4-muxer";
 
 /**
  * 摄像头管理器
  * 为每个启用的摄像头创建并管理帧提取器实例
  *
- * 双流模式：当 HD 和 SD 码流都配置时
- *   - HD 流（display）：高帧率、原始分辨率 → 用于前端显示和录像
- *   - SD 流（detect）：低帧率、可缩放 → 用于 AI 检测和变动检测
- * 单流模式：只有一个码流时，显示和检测共用同一流
+ * 架构（优化 RTSP 连接数）：
+ *   HD 流：H264Fmp4Extractor（零转码 copy → fMP4）→ 前端 MSE GPU 解码显示
+ *   SD 流：FrameExtractor（decode → MJPEG）→ AI 检测 + 录像 + Canvas 备用显示
  *
- * fMP4 零转码流（可选）：使用 HD 码流，前端 MSE GPU 解码
- * 注意：受限于摄像头 RTSP 连接数，fMP4 可能无法连接
+ * 单流模式：只有一个码流时，FrameExtractor 同时用于显示和检测
+ *
+ * 兼容模式：仍然支持旧的 Fmp4Extractor（使用独立 ffmpeg 进程）
  */
 export class CameraManager {
-  /** 摄像头 ID → 显示流提取器 */
+  /** 摄像头 ID → 显示流提取器（MJPEG，用于 Canvas 备用显示 + 录像） */
   private displayExtractors = new Map<string, FrameExtractor>();
-  /** 摄像头 ID → 检测流提取器（双流模式专用） */
+  /** 摄像头 ID → 检测流提取器（双流模式专用，SD 码流） */
   private detectExtractors = new Map<string, FrameExtractor>();
   /** 摄像头 ID → fMP4 流提取器（高分辨率零转码） */
-  private fmp4Extractors = new Map<string, Fmp4Extractor>();
+  private fmp4Extractors = new Map<string, Fmp4Extractor | H264Fmp4Extractor>();
   /** 摄像头 ID → 是否使用双流模式 */
   private dualStreamFlags = new Map<string, boolean>();
   /** 摄像头 ID → 最新一帧（显示流，高清） */
@@ -65,7 +66,7 @@ export class CameraManager {
   }
 
   /** 获取 fMP4 提取器 */
-  getFmp4Extractor(cameraId: string): Fmp4Extractor | undefined {
+  getFmp4Extractor(cameraId: string): Fmp4Extractor | H264Fmp4Extractor | undefined {
     return this.fmp4Extractors.get(cameraId);
   }
 
@@ -80,7 +81,7 @@ export class CameraManager {
       result.push({
         id: cam.id,
         name: cam.friendlyName,
-        online: display?.isOnline ?? false,
+        online: display?.isOnline ?? fmp4?.isOnline ?? false,
         lastFrameAt: display?.lastFrameAt ?? 0,
         group: cam.group,
         ptz: cam.ptz?.enabled === true,
@@ -146,34 +147,36 @@ export class CameraManager {
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
     const hasDual = !!(cam.stream.hd && cam.stream.sd);
-    /** fMP4 零转码流使用 HD 码流 */
-    const fmp4Url = cam.stream.hd || cam.stream.sd;
 
     if (hasDual) {
-      /** 双流模式：HD 显示 + SD 检测 */
+      /**
+       * 双流模式（优化版，仅 2 个 RTSP 连接）：
+       * HD 流：H264Fmp4Extractor（零转码 copy → fMP4）→ 前端 MSE GPU 解码
+       * SD 流：FrameExtractor（decode → MJPEG）→ AI 检测 + 录像 + Canvas 备用显示
+       *   （display 模式同时发 frame 和 detect:frame 事件）
+       */
       this.dualStreamFlags.set(cam.id, true);
 
+      /** SD 流：同时用于检测 + 录像 + Canvas 备用显示 */
       const displayExtractor = new FrameExtractor(
         cam, this.config.ffmpegPath, this.eventBus,
         "display",
-        cam.stream.hd,
+        cam.stream.sd,
         0,
         0,
       );
       this.displayExtractors.set(cam.id, displayExtractor);
       displayExtractor.start();
 
-      const detectExtractor = new FrameExtractor(
+      /** HD 流：零转码 H.264 → fMP4（前端 MSE 解码，CPU 开销极低） */
+      const fmp4Extractor = new H264Fmp4Extractor(
         cam, this.config.ffmpegPath, this.eventBus,
-        "detect",
-        cam.stream.sd,
-        cam.detectFps,
-        cam.detectWidth,
+        cam.stream.hd!,
       );
-      this.detectExtractors.set(cam.id, detectExtractor);
-      detectExtractor.start();
+      this.fmp4Extractors.set(cam.id, fmp4Extractor);
+      fmp4Extractor.start();
 
-      console.log(`[CameraManager] 双流模式: ${cam.friendlyName} (HD=显示, SD=检测)`);
+      console.log(`[CameraManager] 双流模式(2连接): ${cam.friendlyName} (HD=H264→fMP4, SD=检测+录像)`);
     } else {
       /** 单流模式：显示和检测共用，行为与之前完全一致 */
       this.dualStreamFlags.set(cam.id, false);
@@ -182,14 +185,18 @@ export class CameraManager {
       this.displayExtractors.set(cam.id, extractor);
       extractor.start();
 
-      console.log(`[CameraManager] 单流模式: ${cam.friendlyName} (${cam.id})`);
-    }
+      /** 单流时也启动 fMP4 流（如果只有一个码流） */
+      const url = cam.stream.hd || cam.stream.sd;
+      if (url) {
+        const fmp4Extractor = new H264Fmp4Extractor(
+          cam, this.config.ffmpegPath, this.eventBus,
+          url,
+        );
+        this.fmp4Extractors.set(cam.id, fmp4Extractor);
+        fmp4Extractor.start();
+      }
 
-    /** fMP4 零转码流（高清，前端 MSE 解码） */
-    if (fmp4Url) {
-      const fmp4Extractor = new Fmp4Extractor(cam, this.config.ffmpegPath, this.eventBus, fmp4Url);
-      this.fmp4Extractors.set(cam.id, fmp4Extractor);
-      fmp4Extractor.start();
+      console.log(`[CameraManager] 单流模式: ${cam.friendlyName} (${cam.id})`);
     }
 
     this.recorder.registerCameraName(cam.id, cam.friendlyName);
