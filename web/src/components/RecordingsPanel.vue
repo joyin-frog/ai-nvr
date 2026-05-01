@@ -425,7 +425,7 @@ function togglePlayerFullscreen() {
   }
 }
 
-/** 截取当前视频帧并下载 */
+/** 截取当前视频帧并下载（叠加检测框） */
 function takePlayerScreenshot() {
   if (!playerRef.value || !selectedRecording.value) return
   const video = playerRef.value
@@ -435,6 +435,28 @@ function takePlayerScreenshot() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  /** 叠加检测框 */
+  if (showPlaybackBoxes.value && playbackDetections.value.length > 0) {
+    const w = canvas.width
+    const h = canvas.height
+    ctx.font = 'bold 14px monospace'
+    ctx.textBaseline = 'bottom'
+    for (const d of playbackDetections.value) {
+      const x = d.box.xmin * w
+      const y = d.box.ymin * h
+      const bw = (d.box.xmax - d.box.xmin) * w
+      const bh = (d.box.ymax - d.box.ymin) * h
+      ctx.strokeStyle = '#5bc0de'
+      ctx.lineWidth = 2
+      ctx.strokeRect(x, y, bw, bh)
+      const label = getPlaybackDetectLabel(selectedRecording.value.cameraId, d)
+      const metrics = ctx.measureText(label)
+      ctx.fillStyle = 'rgba(91, 192, 222, 0.8)'
+      ctx.fillRect(x, y - 20, metrics.width + 8, 20)
+      ctx.fillStyle = '#fff'
+      ctx.fillText(label, x + 4, y - 4)
+    }
+  }
   const link = document.createElement('a')
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
