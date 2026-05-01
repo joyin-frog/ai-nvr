@@ -143,8 +143,12 @@ export class CameraManager {
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
     const hasDual = !!(cam.stream.hd && cam.stream.sd);
-    /** fMP4 零转码流使用的 RTSP URL */
-    const fmp4Url = cam.stream.hd || cam.stream.sd;
+    /**
+     * fMP4 零转码流使用的 RTSP URL
+     * 双流模式：用 SD 码流（避免和 display FrameExtractor 争抢 HD 码流的 RTSP 连接）
+     * 单流模式：用唯一可用的码流
+     */
+    const fmp4Url = hasDual ? (cam.stream.sd || cam.stream.hd) : (cam.stream.hd || cam.stream.sd);
 
     if (hasDual) {
       /** 双流模式：HD 显示 + SD 检测 */
