@@ -85,6 +85,8 @@ export default {
     exportCsv: 'Export CSV',
     search: 'Search',
     searchPlaceholder: 'Search events...',
+    direction: 'Direction',
+    speed: 'Speed',
     sortNewest: 'Newest first',
     sortOldest: 'Oldest first',
     viewEvents: 'Event list',

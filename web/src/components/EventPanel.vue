@@ -441,6 +441,17 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       if (obj.zoneName) items.push({ label: t('event.zone', '区域'), value: String(obj.zoneName) })
       if (obj.dwellMs !== undefined) items.push({ label: t('event.dwellTime', '停留时长'), value: `${(obj.dwellMs / 1000).toFixed(1)}s` })
     }
+    if (e.type === 'track:line-cross') {
+      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName) })
+      if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
+      if (obj.lineName) items.push({ label: t('event.zone', '区域'), value: String(obj.lineName) })
+      if (obj.direction) items.push({ label: t('event.direction', '方向'), value: String(obj.direction) })
+    }
+    if (e.type === 'track:speed') {
+      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName) })
+      if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
+      if (obj.speed !== undefined) items.push({ label: t('event.speed', '速度'), value: String(obj.speed) })
+    }
   } catch {
     if (e.rawDetail) items.push({ label: t('event.detail'), value: e.rawDetail })
   }

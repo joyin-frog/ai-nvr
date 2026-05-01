@@ -85,6 +85,8 @@ export default {
     exportCsv: '导出 CSV',
     search: '搜索',
     searchPlaceholder: '搜索事件...',
+    direction: '方向',
+    speed: '速度',
     sortNewest: '最新在前',
     sortOldest: '最早在前',
     viewEvents: '事件列表',
