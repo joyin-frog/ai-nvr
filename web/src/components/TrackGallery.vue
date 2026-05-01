@@ -24,6 +24,10 @@ const editingId = ref<number | null>(null)
 const editName = ref('')
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
+const emit = defineEmits<{
+  jumpToRecording: [cameraId: string, timestamp: number]
+}>()
+
 /** 加载追踪目标列表 */
 async function loadTracks() {
   loading.value = true
@@ -145,6 +149,9 @@ onUnmounted(() => {
           <div class="track-cameras">
             {{ track.cameraIds.join(', ') }}
           </div>
+          <button class="play-btn" @click="emit('jumpToRecording', track.cameraIds[0], track.lastSeen)">
+            ▶ {{ t('tracks.playRecording', '查看录像') }}
+          </button>
         </div>
       </div>
     </div>
@@ -295,5 +302,23 @@ onUnmounted(() => {
   font-size: 10px;
   color: #555;
   margin-top: 2px;
+}
+
+.play-btn {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: #2a2a4a;
+  color: #4ECDC4;
+  border: 1px solid #4ECDC4;
+  border-radius: 3px;
+  padding: 3px 0;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.play-btn:hover {
+  background: #4ECDC420;
 }
 </style>

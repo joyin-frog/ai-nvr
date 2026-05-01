@@ -849,7 +849,7 @@ onUnmounted(() => {
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-          <TrackGallery v-if="activeTab === 'tracks'" />
+          <TrackGallery v-if="activeTab === 'tracks'" @jump-to-recording="onPlayRecording" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
@@ -903,7 +903,7 @@ onUnmounted(() => {
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-        <TrackGallery v-if="activeTab === 'tracks'" />
+        <TrackGallery v-if="activeTab === 'tracks'" @jump-to-recording="onPlayRecording" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

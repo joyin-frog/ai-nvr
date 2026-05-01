@@ -923,6 +923,10 @@ export function startServer(
           return Response.json({ error: "cameraId, trackId, name required" }, { status: 400 });
         }
         const result = trackLabelStorage.upsert(body.cameraId, body.trackId, body.label, body.name, body.snapshotPath);
+        /** 同步 customName 到 TrackStorage */
+        if (body.trackId && body.name) {
+          trackStorage.setCustomName(body.trackId, body.name);
+        }
         return Response.json(result);
       }
 
