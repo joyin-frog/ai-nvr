@@ -6,6 +6,7 @@ import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './servic
 import { putFrame } from './services/ws-frame-cache'
 import { putDetections } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
+import { useToast } from './composables/useToast'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
@@ -19,6 +20,7 @@ import LoginView from './components/LoginView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const { t, locale } = useI18n()
+const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, success: toastSuccess, warning: toastWarning } = useToast()
 
 /** 切换语言 */
 function toggleLocale() {
@@ -315,7 +317,7 @@ async function loadCameras() {
     /** 订阅当前摄像头的帧推送，减少无关帧带宽 */
     client.subscribe(cameras.value.map(c => c.id))
   } catch {
-    // retry later
+    toastError(t('app.loadFailed'))
   }
 }
 
@@ -332,7 +334,7 @@ async function loadRoiData() {
     }
     roiDataMap.value = grouped
   } catch {
-    // ignore
+    toastWarning('ROI ' + t('app.loadFailed'))
   }
 }
 
@@ -504,7 +506,7 @@ async function loadTrackLabels() {
         }
         if (Object.keys(entries).length > 0) map[cam.id] = entries
       }
-    } catch { /* ignore */ }
+    } catch { /* non-critical */ }
   }
   /** 2) TrackStorage 自动快照目标的 customName */
   try {
@@ -515,14 +517,13 @@ async function loadTrackLabels() {
         if (!track.customName) continue
         for (const camId of track.cameraIds) {
           if (!map[camId]) map[camId] = {}
-          /** TrackLabelStorage 的手动标签优先 */
           if (!map[camId][track.trackId]) {
             map[camId][track.trackId] = track.customName
           }
         }
       }
     }
-  } catch { /* ignore */ }
+  } catch { /* non-critical */ }
   trackLabelsMap.value = map
 }
 
@@ -1034,6 +1035,15 @@ onUnmounted(() => {
     </div>
   </div>
   <ConfirmDialog />
+  <!-- Toast 通知容器 -->
+  <div class="toast-container">
+    <TransitionGroup name="toast">
+      <div v-for="t in toastToasts" :key="t.id" :class="['toast-item', `toast-${t.type}`]" @click="toastDismiss(t.id)">
+        <span class="toast-icon">{{ t.type === 'error' ? '✕' : t.type === 'warning' ? '⚠' : t.type === 'success' ? '✓' : 'ℹ' }}</span>
+        <span class="toast-msg">{{ t.message }}</span>
+      </div>
+    </TransitionGroup>
+  </div>
 </template>
 
 <style scoped>
@@ -1504,5 +1514,54 @@ kbd {
   background: transparent;
   color: #888;
   border: 1px solid #2a2a4a;
+}
+
+/* Toast 通知 */
+.toast-container {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  max-width: 360px;
+}
+
+.toast-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #e0e0e0;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+.toast-icon { font-size: 14px; flex-shrink: 0; }
+.toast-msg { flex: 1; line-height: 1.4; }
+
+.toast-error { background: rgba(231, 76, 60, 0.9); }
+.toast-warning { background: rgba(243, 156, 18, 0.9); color: #1a1a2e; }
+.toast-success { background: rgba(46, 204, 113, 0.9); color: #1a1a2e; }
+.toast-info { background: rgba(78, 205, 196, 0.9); color: #1a1a2e; }
+
+.toast-enter-active { transition: all 0.25s ease-out; }
+.toast-leave-active { transition: all 0.2s ease-in; }
+.toast-enter-from { opacity: 0; transform: translateX(40px); }
+.toast-leave-to { opacity: 0; transform: translateX(40px); }
+.toast-move { transition: transform 0.25s ease; }
+
+@media (max-width: 768px) {
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
 }
 </style>

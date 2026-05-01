@@ -2,6 +2,7 @@ export default {
   app: {
     title: 'JK NVR',
     loading: 'Loading...',
+    loadFailed: 'Data load failed',
   },
   header: {
     patrol: 'Patrol',

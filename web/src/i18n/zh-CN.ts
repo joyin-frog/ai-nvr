@@ -2,6 +2,7 @@ export default {
   app: {
     title: 'JK NVR',
     loading: '加载中...',
+    loadFailed: '数据加载失败',
   },
   header: {
     patrol: '轮巡',
