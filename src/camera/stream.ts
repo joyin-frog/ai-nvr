@@ -143,7 +143,8 @@ export class FrameExtractor {
     const rtspUrl = stream.hd || stream.sd;
     const vfParts: string[] = [];
     if (detectFps > 0) {
-      vfParts.push(`fps=${detectFps}`);
+      /** round=zero 减少帧缓冲延迟，输出时间戳更接近实际时间 */
+      vfParts.push(`fps=${detectFps}:round=zero`);
     }
     if (detectWidth > 0) {
       vfParts.push(`scale=${detectWidth}:-4`);
