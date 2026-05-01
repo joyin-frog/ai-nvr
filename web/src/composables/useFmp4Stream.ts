@@ -54,6 +54,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let fpsStartTime = 0
   /** video 元素事件处理器引用（用于清理） */
   let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
+  /** 解码检测定时器：连接后一段时间内 videoWidth=0 则判定为解码失败 */
+  let decodeCheckTimer: ReturnType<typeof setTimeout> | null = null
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
@@ -168,6 +170,16 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ws.onopen = () => {
       connected.value = true
       retryCount = 0
+      /** 启动解码检测：5 秒后如果 video 仍无解码输出，判定为不支持 */
+      if (decodeCheckTimer) clearTimeout(decodeCheckTimer)
+      decodeCheckTimer = setTimeout(() => {
+        if (!videoRef.value) return
+        /** videoWidth > 0 说明解码成功 */
+        if (videoRef.value.videoWidth > 0) return
+        /** 有数据但无法解码 — 可能是浏览器不支持该 codec */
+        console.warn('[fMP4] 5秒内未检测到解码输出，codec 可能不被支持，回退到 Canvas')
+        failed.value = true
+      }, 5000)
     }
 
     ws.onmessage = (event) => {
@@ -351,6 +363,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
+    }
+    if (decodeCheckTimer) {
+      clearTimeout(decodeCheckTimer)
+      decodeCheckTimer = null
     }
     if (pruneTimer) {
       clearInterval(pruneTimer)
