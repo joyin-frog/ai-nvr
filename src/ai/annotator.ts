@@ -52,12 +52,15 @@ export class Annotator {
     for (const det of detections) {
       const { xmin, ymin, xmax, ymax } = det.box;
       const color = LABEL_COLORS[det.label] ?? DEFAULT_COLOR;
-      const boxWidth = xmax - xmin;
-      const boxHeight = ymax - ymin;
+      /** 归一化坐标 (0-1) 转为像素坐标 */
+      const px = xmin * width;
+      const py = ymin * height;
+      const pw = (xmax - xmin) * width;
+      const ph = (ymax - ymin) * height;
 
       /** 检测框 */
       svgElements.push(
-        `<rect x="${xmin}" y="${ymin}" width="${boxWidth}" height="${boxHeight}" fill="none" stroke="${color}" stroke-width="3"/>`,
+        `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="none" stroke="${color}" stroke-width="3"/>`,
       );
 
       /** 标签背景 + 文字 */
@@ -71,13 +74,13 @@ export class Annotator {
       const textWidth = charWidthSum * fontSize + 8;
       const textHeight = fontSize + 6;
       /** 标签在框上方，如果太靠近顶部则放到框内下方 */
-      const labelY = ymin > textHeight + 2 ? ymin - textHeight : ymax;
+      const labelY = py > textHeight + 2 ? py - textHeight : py + ph;
 
       svgElements.push(
-        `<rect x="${xmin}" y="${labelY}" width="${textWidth}" height="${textHeight}" fill="${color}" opacity="0.85"/>`,
+        `<rect x="${px}" y="${labelY}" width="${textWidth}" height="${textHeight}" fill="${color}" opacity="0.85"/>`,
       );
       svgElements.push(
-        `<text x="${xmin + 4}" y="${labelY + fontSize + 1}" fill="white" font-size="${fontSize}" font-family="sans-serif" font-weight="bold">${labelText}</text>`,
+        `<text x="${px + 4}" y="${labelY + fontSize + 1}" fill="white" font-size="${fontSize}" font-family="sans-serif" font-weight="bold">${labelText}</text>`,
       );
     }
 

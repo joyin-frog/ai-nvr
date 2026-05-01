@@ -150,6 +150,7 @@ export class AiDetector {
 
       const raw = await this.detector(inferenceInput, {
         threshold: aiConfig.threshold,
+        percentage: true,
       });
 
       /** 提取前 maxDetections 个结果 */
