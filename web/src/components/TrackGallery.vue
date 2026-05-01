@@ -24,6 +24,8 @@ const editingId = ref<number | null>(null)
 const editName = ref('')
 /** 标签筛选 */
 const filterLabel = ref('')
+/** 摄像头筛选 */
+const filterCamera = ref('')
 /** 展开事件历史的 trackId */
 const expandedTrackId = ref<number | null>(null)
 /** trackId → 事件历史列表 */
@@ -112,10 +114,19 @@ const allLabels = computed(() => {
   return [...set].sort()
 })
 
-/** 按标签筛选后的列表 */
+/** 所有出现过的摄像头 */
+const allCameras = computed(() => {
+  const set = new Set<string>()
+  for (const t of tracks.value) for (const c of t.cameraIds) set.add(c)
+  return [...set].sort()
+})
+
+/** 按标签 + 摄像头筛选后的列表 */
 const filteredTracks = computed(() => {
-  if (!filterLabel.value) return tracks.value
-  return tracks.value.filter(t => t.label === filterLabel.value)
+  let list = tracks.value
+  if (filterLabel.value) list = list.filter(t => t.label === filterLabel.value)
+  if (filterCamera.value) list = list.filter(t => t.cameraIds.includes(filterCamera.value))
+  return list
 })
 
 onMounted(() => {
@@ -136,6 +147,10 @@ onUnmounted(() => {
       <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
         <option value="">{{ t('tracks.all', '全部') }}</option>
         <option v-for="label in allLabels" :key="label" :value="label">{{ label }}</option>
+      </select>
+      <select v-if="allCameras.length > 1" v-model="filterCamera" class="label-filter">
+        <option value="">{{ t('tracks.all', '全部') }}</option>
+        <option v-for="cam in allCameras" :key="cam" :value="cam">{{ cam }}</option>
       </select>
       <button class="refresh-btn" @click="loadTracks" :disabled="loading">
         {{ loading ? '...' : '↻' }}
