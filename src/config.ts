@@ -154,7 +154,7 @@ export function loadConfig(configPath?: string): AppConfig {
       detectWidth: ((cam.detect as Record<string, unknown>)?.width as number) ?? 0,
       detectHeight: ((cam.detect as Record<string, unknown>)?.height as number) ?? 0,
       detectFps: (cam.detect as Record<string, unknown>)?.fps as number ?? 5,
-      jpegQuality: ((cam.detect as Record<string, unknown>)?.jpeg_quality as number) ?? 5,
+      jpegQuality: ((cam.detect as Record<string, unknown>)?.jpeg_quality as number) ?? 10,
       group: (cam.group as string) ?? "",
       ptz: parsePtzConfig(cam),
     });

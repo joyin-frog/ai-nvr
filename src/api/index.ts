@@ -856,6 +856,10 @@ export function startServer(
     },
   });
 
+  /** 帧推送节流：每个摄像头至少间隔 150ms 推送一帧（~7fps） */
+  const lastFrameSent = new Map<string, number>();
+  const FRAME_THROTTLE_MS = 150;
+
   /** 监听事件并推送给所有 WebSocket 客户端 */
   for (const event of PUSH_EVENTS) {
     eventBus.on(event, (payload) => {
@@ -868,6 +872,12 @@ export function startServer(
         /** 帧事件：提取二进制数据，头中不包含 */
         frameData = (payload as { data: Buffer }).data;
         header.data = undefined;
+        /** 帧节流：跳过距离上次推送不到 80ms 的帧 */
+        const cameraId = (payload as { cameraId: string }).cameraId;
+        const now = Date.now();
+        const lastSent = lastFrameSent.get(cameraId) ?? 0;
+        if (now - lastSent < FRAME_THROTTLE_MS) return;
+        lastFrameSent.set(cameraId, now);
       }
       if (event === "detect") {
         /** 检测事件：将标注图作为二进制帧推送，头中只保留 detections */

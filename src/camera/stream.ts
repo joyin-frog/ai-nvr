@@ -151,8 +151,13 @@ export class FrameExtractor {
 
     /** 主码流提供最高清画面 */
     const rtspUrl = stream.hd || stream.sd;
-    /** fps 滤镜控制帧率；scale 仅在配置了宽度时才缩放 */
-    const vfParts = [`fps=${detectFps}`];
+    /**
+     * 高分辨率时限制 fps 上限，避免 stdout 数据量过大阻塞 JS 事件循环
+     * 原始分辨率(w=0)时限制 8fps，保持全高清画质
+     */
+    const maxFps = (detectWidth === 0 || detectWidth > 1280) ? 8 : detectFps;
+    const outputFps = Math.min(detectFps, maxFps);
+    const vfParts = [`fps=${outputFps}`];
     if (detectWidth > 0) {
       vfParts.push(`scale=${detectWidth}:-4`);
     }
