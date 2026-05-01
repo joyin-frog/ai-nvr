@@ -160,10 +160,6 @@ export class FrameExtractor {
 
     const args = [
       "-rtsp_transport", "tcp",
-      "-stimeout", "5000000",
-      "-reconnect", "1",
-      "-reconnect_streamed", "1",
-      "-reconnect_delay_max", "5",
       "-i", rtspUrl,
       "-vf", vf,
       "-f", "image2pipe",
