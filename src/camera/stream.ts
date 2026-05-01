@@ -155,6 +155,8 @@ export class FrameExtractor {
       /** 低延迟：减少缓冲和探测时间 */
       "-fflags", "nobuffer",
       "-flags", "low_delay",
+      "-max_delay", "0",
+      "-reorder_queue_size", "0",
       "-analyzeduration", "1000000",
       "-probesize", "500000",
       "-i", rtspUrl,
