@@ -112,6 +112,8 @@ export default {
     filterStarred: 'Starred only',
     toggleStar: 'Star/unstar',
     starSelected: 'Star selected',
+    searchTime: 'Search time',
+    jumpToTime: 'Jump',
   },
   timeline: {
     today: 'Today',

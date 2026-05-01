@@ -483,6 +483,45 @@ function onCameraFilterChange() {
   loadRecordings()
 }
 
+/** 时间搜索 */
+const searchTimeInput = ref('')
+/** 高亮的录像文件名 */
+const highlightFilename = ref('')
+let highlightTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 跳转到指定时间的录像 */
+function jumpToTime() {
+  if (!searchTimeInput.value.trim()) return
+  /** 解析输入：支持 HH:MM、HH:MM:SS、YYYY-MM-DD HH:MM 等格式 */
+  const input = searchTimeInput.value.trim()
+  let targetTs: number
+  /** 如果只输入了时间 (HH:MM 或 HH:MM:SS) */
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(input)) {
+    const date = filterDate.value || new Date().toISOString().slice(0, 10)
+    targetTs = new Date(`${date}T${input}`).getTime()
+  } else {
+    targetTs = new Date(input).getTime()
+  }
+  if (isNaN(targetTs)) return
+  /** 在按当前排序排列的列表中找到最近的录像 */
+  const sorted = [...filteredRecordings.value].sort((a, b) => {
+    const distA = Math.abs(a.startTime - targetTs)
+    const distB = Math.abs(b.startTime - targetTs)
+    return distA - distB
+  })
+  const nearest = sorted[0]
+  if (!nearest) return
+  /** 高亮该录像 */
+  highlightFilename.value = nearest.filename
+  if (highlightTimer) clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => { highlightFilename.value = '' }, 3000)
+  /** 滚动到该录像元素 */
+  nextTick(() => {
+    const el = document.querySelector(`[data-rec="${nearest.filename}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
 /** 加载录像列表 */
 async function loadRecordings() {
   loading.value = true
@@ -925,6 +964,10 @@ defineExpose({ loadRecordings, playAtTime })
         <option value="">{{ t("recording.allCameras") }}</option>
         <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
       </select>
+      <div class="time-search">
+        <input v-model="searchTimeInput" :placeholder="t('recording.searchTime')" class="time-search-input" @keydown.enter="jumpToTime" />
+        <button class="time-search-btn" @click="jumpToTime" :title="t('recording.jumpToTime')">&#x2315;</button>
+      </div>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
       <button class="sort-btn" @click="setSortMode(sortMode === 'newest' ? 'oldest' : sortMode === 'oldest' ? 'largest' : 'newest')" :title="sortMode === 'newest' ? '↓ Newest' : sortMode === 'oldest' ? '↑ Oldest' : '◎ Size'">
         {{ sortMode === 'newest' ? '↓' : sortMode === 'oldest' ? '↑' : '◎' }}
@@ -967,7 +1010,8 @@ defineExpose({ loadRecordings, playAtTime })
       <div
         v-for="rec in filteredRecordings"
         :key="rec.filename"
-        :class="['recording-item', { selected: selectedFiles.has(rec.filename) }]"
+        :data-rec="rec.filename"
+        :class="['recording-item', { selected: selectedFiles.has(rec.filename), highlighted: highlightFilename === rec.filename }]"
         @click="multiSelectMode ? toggleFileSelect(rec.filename) : play(rec)"
         @mouseenter="onRecordingHover(rec)"
       >
@@ -1104,6 +1148,48 @@ defineExpose({ loadRecordings, playAtTime })
   filter: invert(0.7);
 }
 
+.time-search {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.time-search-input {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px 0 0 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  width: 100px;
+  outline: none;
+}
+
+.time-search-input:focus {
+  border-color: #4ECDC4;
+}
+
+.time-search-input::placeholder {
+  color: #444;
+}
+
+.time-search-btn {
+  background: #2a2a4a;
+  color: #888;
+  border: 1px solid #2a2a4a;
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  padding: 2px 6px;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.time-search-btn:hover {
+  color: #4ECDC4;
+  background: #3a3a5a;
+}
+
 .refresh-btn {
   background: #2a2a4a;
   color: #e0e0e0;
@@ -1207,6 +1293,15 @@ defineExpose({ loadRecordings, playAtTime })
 .recording-item.selected {
   background: #1a3a3a;
   border-left: 3px solid #4ECDC4;
+}
+
+.recording-item.highlighted {
+  animation: rec-highlight 3s ease-out;
+}
+
+@keyframes rec-highlight {
+  0% { background: #4ECDC440; }
+  100% { background: transparent; }
 }
 
 .rec-checkbox {

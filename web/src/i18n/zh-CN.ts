@@ -112,6 +112,8 @@ export default {
     filterStarred: '仅看收藏',
     toggleStar: '收藏/取消收藏',
     starSelected: '收藏选中',
+    searchTime: '搜索时间',
+    jumpToTime: '跳转',
   },
   timeline: {
     today: '今天',
