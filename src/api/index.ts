@@ -1799,48 +1799,13 @@ export function startServer(
     if (wsClients.size === 0 || latestFrameByCamera.size === 0) return;
 
     const now = Date.now();
-    /** 预编码帧（避免重复 JSON + Buffer 拼接） */
-    const encodedFrames = new Map<string, Uint8Array>();
     let hasThrottled = false;
 
     for (const [cameraId, frame] of latestFrameByCamera) {
       latestFrameByCamera.delete(cameraId);
 
-      /** 延迟编码：先检查是否有客户端能接收此帧 */
-      let needEncode = false;
-      for (const ws of wsClients) {
-        const wsData = ws as unknown as { subscribedCameras?: Set<string>; lastPushTimeByCamera?: Map<string, number> };
-        const subscribed = wsData.subscribedCameras;
-        if (subscribed && !subscribed.has(cameraId)) continue;
-        /** 按客户端订阅数量计算节流 */
-        const subCount = subscribed?.size ?? latestFrameByCamera.size;
-        const throttleMs = getThrottleMs(subCount);
-        if (!wsData.lastPushTimeByCamera) wsData.lastPushTimeByCamera = new Map();
-        const lastPush = wsData.lastPushTimeByCamera.get(cameraId) ?? 0;
-        if (now - lastPush < throttleMs) {
-          hasThrottled = true;
-          continue;
-        }
-        wsData.lastPushTimeByCamera.set(cameraId, now);
-        needEncode = true;
-      }
-
-      if (!needEncode) continue;
-
-      /** 编码帧 */
-      let message = encodedFrames.get(cameraId);
-      if (!message) {
-        const header = { event: "frame", cameraId, timestamp: frame.timestamp };
-        const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
-        headerLenView.setUint32(0, headerBuf.length, true);
-        message = new Uint8Array(4 + headerBuf.length + frame.data.length);
-        message.set(headerLenBuf, 0);
-        message.set(headerBuf, 4);
-        message.set(frame.data, 4 + headerBuf.length);
-        encodedFrames.set(cameraId, message);
-      }
-
-      /** 发送给允许通过的客户端 */
+      /** 先收集允许推送的客户端列表 */
+      const targets: Array<{ ws: typeof wsClients extends Set<infer T> ? T : never; throttleMs: number }> = [];
       for (const ws of wsClients) {
         const wsData = ws as unknown as { subscribedCameras?: Set<string>; lastPushTimeByCamera?: Map<string, number> };
         const subscribed = wsData.subscribedCameras;
@@ -1849,9 +1814,28 @@ export function startServer(
         const throttleMs = getThrottleMs(subCount);
         if (!wsData.lastPushTimeByCamera) wsData.lastPushTimeByCamera = new Map();
         const lastPush = wsData.lastPushTimeByCamera.get(cameraId) ?? 0;
-        if (now - lastPush < throttleMs) continue;
+        if (now - lastPush < throttleMs) {
+          hasThrottled = true;
+          continue;
+        }
+        wsData.lastPushTimeByCamera.set(cameraId, now);
+        targets.push({ ws, throttleMs });
+      }
+
+      if (targets.length === 0) continue;
+
+      /** 编码帧（仅在有目标时） */
+      const header = { event: "frame", cameraId, timestamp: frame.timestamp };
+      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
+      headerLenView.setUint32(0, headerBuf.length, true);
+      const message = new Uint8Array(4 + headerBuf.length + frame.data.length);
+      message.set(headerLenBuf, 0);
+      message.set(headerBuf, 4);
+      message.set(frame.data, 4 + headerBuf.length);
+
+      for (const { ws } of targets) {
         try {
-          ws.send(message!);
+          ws.send(message);
         } catch {
           /** 单个客户端发送失败不影响其他客户端 */
         }
