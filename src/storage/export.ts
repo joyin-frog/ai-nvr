@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, createWriteStream } from "node:fs";
 import { join, basename } from "node:path";
 import * as archiver from "archiver";
@@ -14,6 +14,7 @@ export interface ExportResult {
 /**
  * 录像导出器
  * 使用 ffmpeg 裁剪视频片段，输出到临时目录供下载
+ * 全部异步，不阻塞事件循环
  */
 export class RecordingExporter {
   private exportDir: string;
@@ -26,20 +27,19 @@ export class RecordingExporter {
   }
 
   /**
-   * 导出视频片段
+   * 异步导出视频片段
    * @param sourcePath 源 MP4 文件绝对路径
    * @param startTimeSec 起始时间（秒，相对于视频开始）
    * @param endTimeSec 结束时间（秒，相对于视频开始）
    * @param cameraId 摄像头 ID（用于文件命名）
    * @returns 导出结果
    */
-  export(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string): ExportResult | null {
+  async exportAsync(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string): Promise<ExportResult | null> {
     if (!existsSync(sourcePath)) return null;
 
     const duration = endTimeSec - startTimeSec;
     if (duration <= 0) return null;
 
-    /** 生成文件名：cameraId_导出时间戳.mp4 */
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
     const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
@@ -57,12 +57,8 @@ export class RecordingExporter {
       outputPath,
     ];
 
-    const result = spawnSync(this.ffmpegPath, args, {
-      timeout: 30_000,
-      stdio: "ignore",
-    });
-
-    if (result.status !== 0 || !existsSync(outputPath)) return null;
+    const ok = await this.runFfmpeg(args, 30_000);
+    if (!ok || !existsSync(outputPath)) return null;
 
     const stat = statSync(outputPath);
     return { filePath: outputPath, size: stat.size };
@@ -74,14 +70,12 @@ export class RecordingExporter {
   }
 
   /**
-   * 合并多个视频文件为一个
+   * 异步合并多个视频文件为一个
    * 使用 ffmpeg concat demuxer，要求输入文件编码参数一致
-   * @param sourcePaths 源 MP4 文件绝对路径列表（按顺序合并）
-   * @param cameraId 摄像头 ID（用于文件命名）
-   * @returns 导出结果
    */
-  merge(sourcePaths: string[], cameraId: string): ExportResult | null {
+  async mergeAsync(sourcePaths: string[], cameraId: string): Promise<ExportResult | null> {
     if (sourcePaths.length === 0) return null;
+
     /** 单文件直接复制 */
     if (sourcePaths.length === 1) {
       const src = sourcePaths[0]!;
@@ -92,8 +86,8 @@ export class RecordingExporter {
       const filename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
       const outputPath = join(this.exportDir, filename);
       const args = ["-i", src, "-c", "copy", "-movflags", "+faststart", "-y", outputPath];
-      const result = spawnSync(this.ffmpegPath, args, { timeout: 30_000, stdio: "ignore" });
-      if (result.status !== 0 || !existsSync(outputPath)) return null;
+      const ok = await this.runFfmpeg(args, 30_000);
+      if (!ok || !existsSync(outputPath)) return null;
       return { filePath: outputPath, size: statSync(outputPath).size };
     }
 
@@ -110,7 +104,6 @@ export class RecordingExporter {
     const outputPath = join(this.exportDir, outputFilename);
     const concatListPath = join(this.exportDir, `_concat_${dateStr}_${timeStr}.txt`);
 
-    /** ffmpeg concat demuxer 格式：file 'path' */
     const lines = sourcePaths.map(p => `file '${p}'`);
     writeFileSync(concatListPath, lines.join("\n"));
 
@@ -124,15 +117,12 @@ export class RecordingExporter {
       outputPath,
     ];
 
-    const result = spawnSync(this.ffmpegPath, args, {
-      timeout: 60_000,
-      stdio: "ignore",
-    });
+    const ok = await this.runFfmpeg(args, 60_000);
 
     /** 清理 concat 列表文件 */
     try { unlinkSync(concatListPath); } catch { /* ignore */ }
 
-    if (result.status !== 0 || !existsSync(outputPath)) return null;
+    if (!ok || !existsSync(outputPath)) return null;
 
     return { filePath: outputPath, size: statSync(outputPath).size };
   }
@@ -155,10 +145,10 @@ export class RecordingExporter {
   }
 
   /**
-   * 将视频片段导出为 GIF 动图
+   * 异步将视频片段导出为 GIF 动图
    * 使用 ffmpeg palettegen/paletteuse 双 pass 生成高质量调色板
    */
-  toGif(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string, maxWidth = 480): ExportResult | null {
+  async toGifAsync(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string, maxWidth = 480): Promise<ExportResult | null> {
     if (!existsSync(sourcePath)) return null;
 
     const duration = endTimeSec - startTimeSec;
@@ -180,8 +170,8 @@ export class RecordingExporter {
       "-y",
       palettePath,
     ];
-    const paletteResult = spawnSync(this.ffmpegPath, paletteArgs, { timeout: 30_000, stdio: "ignore" });
-    if (paletteResult.status !== 0 || !existsSync(palettePath)) return null;
+    const paletteOk = await this.runFfmpeg(paletteArgs, 30_000);
+    if (!paletteOk || !existsSync(palettePath)) return null;
 
     /** Pass 2: 使用调色板生成 GIF */
     const gifArgs = [
@@ -193,21 +183,18 @@ export class RecordingExporter {
       "-y",
       outputPath,
     ];
-    const gifResult = spawnSync(this.ffmpegPath, gifArgs, { timeout: 60_000, stdio: "ignore" });
+    const gifOk = await this.runFfmpeg(gifArgs, 60_000);
 
     /** 清理临时调色板 */
     try { unlinkSync(palettePath); } catch { /* ignore */ }
 
-    if (gifResult.status !== 0 || !existsSync(outputPath)) return null;
+    if (!gifOk || !existsSync(outputPath)) return null;
 
     return { filePath: outputPath, size: statSync(outputPath).size };
   }
 
   /**
    * 批量打包录像为 ZIP 文件
-   * @param sourcePaths 源 MP4 文件绝对路径列表
-   * @param cameraId 摄像头 ID（用于文件命名）
-   * @returns 导出结果
    */
   async zipBatch(sourcePaths: string[], cameraId: string): Promise<ExportResult | null> {
     if (sourcePaths.length === 0) return null;
@@ -266,5 +253,27 @@ export class RecordingExporter {
       // ignore
     }
     return removed;
+  }
+
+  /** 异步执行 ffmpeg 命令 */
+  private runFfmpeg(args: string[], timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const proc = spawn(this.ffmpegPath, args, { stdio: "ignore" });
+
+      const timer = setTimeout(() => {
+        proc.kill("SIGKILL");
+        resolve(false);
+      }, timeoutMs);
+
+      proc.on("exit", (code) => {
+        clearTimeout(timer);
+        resolve(code === 0);
+      });
+
+      proc.on("error", () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
   }
 }

@@ -861,7 +861,7 @@ export function startServer(
         const resolved = realpathSync(videoPath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
-        const thumbPath = thumbnailGenerator.getOrCreate(resolved, timeSec);
+        const thumbPath = await thumbnailGenerator.getOrCreateAsync(resolved, timeSec);
         if (!thumbPath) return new Response("Thumbnail generation failed", { status: 500 });
 
         const file = Bun.file(thumbPath);
@@ -872,7 +872,7 @@ export function startServer(
 
       /** 批量预生成缩略图 */
       if (url.pathname === "/api/recordings/thumb-preload" && req.method === "POST") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const obj = body as Record<string, unknown>
           const files = obj.files as Array<{ filename: string; durationSec: number }> | undefined
           if (!files || !Array.isArray(files)) return new Response("Invalid body", { status: 400 })
@@ -886,14 +886,15 @@ export function startServer(
             if (!resolved.startsWith(storageRoot)) continue
             tasks.push({ path: resolved, durationSec: f.durationSec })
           }
-          thumbnailGenerator.pregenerate(tasks)
+          /** 后台异步生成，不阻塞响应 */
+          thumbnailGenerator.pregenerateAsync(tasks).catch(() => {})
           return Response.json({ queued: tasks.length })
         })
       }
 
       /** 录像导出：裁剪视频片段 */
       if (url.pathname === "/api/recordings/export" && req.method === "POST") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const obj = body as Record<string, unknown>;
           const file = obj.file as string | undefined;
           const startSec = obj.startSec as number | undefined;
@@ -911,7 +912,7 @@ export function startServer(
           const resolved = realpathSync(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
-          const result = exporter.export(resolved, startSec, endSec, cameraId ?? "unknown");
+          const result = await exporter.exportAsync(resolved, startSec, endSec, cameraId ?? "unknown");
           if (!result) return new Response("Export failed", { status: 500 });
 
           const exportFilename = result.filePath.split("/").pop()!;
@@ -921,7 +922,7 @@ export function startServer(
 
       /** 录像合并导出：合并多个录像文件 */
       if (url.pathname === "/api/recordings/merge" && req.method === "POST") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const obj = body as Record<string, unknown>;
           const files = obj.files as string[] | undefined;
           const cameraId = obj.cameraId as string | undefined;
@@ -940,7 +941,7 @@ export function startServer(
             resolvedPaths.push(resolved);
           }
 
-          const result = exporter.merge(resolvedPaths, cameraId ?? "unknown");
+          const result = await exporter.mergeAsync(resolvedPaths, cameraId ?? "unknown");
           if (!result) return new Response("Merge failed", { status: 500 });
 
           const exportFilename = result.filePath.split("/").pop()!;
@@ -950,7 +951,7 @@ export function startServer(
 
       /** GIF 导出：将视频片段转为 GIF 动图 */
       if (url.pathname === "/api/recordings/gif" && req.method === "POST") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const obj = body as Record<string, unknown>;
           const file = obj.file as string | undefined;
           const startSec = obj.startSec as number | undefined;
@@ -967,7 +968,7 @@ export function startServer(
           const resolved = realpathSync(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
-          const result = exporter.toGif(resolved, startSec, endSec, cameraId ?? "unknown");
+          const result = await exporter.toGifAsync(resolved, startSec, endSec, cameraId ?? "unknown");
           if (!result) return new Response("GIF export failed", { status: 500 });
 
           const gifFilename = result.filePath.split("/").pop()!;
