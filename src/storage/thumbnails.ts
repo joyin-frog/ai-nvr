@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { type StorageFs } from "@/storage/storage-fs";
 
 /** 缩略图尺寸 */
 const THUMB_WIDTH = 320;
@@ -9,59 +8,67 @@ const THUMB_HEIGHT = 180;
 /**
  * 录像缩略图生成器
  * 使用 ffmpeg 从 MP4 提取指定时间点的帧，缓存到磁盘
- * 异步生成，不阻塞事件循环
+ * 通过 StorageFs 统一管理文件 I/O
  */
 export class ThumbnailGenerator {
-  private cacheDir: string;
   private ffmpegPath: string;
+  private storageFs: StorageFs;
   /** 正在生成中的缩略图（防止重复请求） */
   private pending = new Map<string, Promise<string | null>>();
+  private static readonly CATEGORY = "thumbnails";
 
-  constructor(cacheDir: string, ffmpegPath: string) {
-    this.cacheDir = cacheDir;
+  constructor(_cacheDir: string, ffmpegPath: string, storageFs: StorageFs) {
     this.ffmpegPath = ffmpegPath;
-    mkdirSync(cacheDir, { recursive: true });
+    this.storageFs = storageFs;
   }
 
   /**
    * 异步获取缩略图路径（如果不存在则生成）
-   * @param videoPath MP4 文件绝对路径
-   * @param timeSeconds 视频内时间点（秒）
-   * @returns 缩略图文件绝对路径，或 null 表示生成失败
    */
   async getOrCreateAsync(videoPath: string, timeSeconds: number): Promise<string | null> {
     const key = this.cacheKey(videoPath, timeSeconds);
-    const thumbPath = join(this.cacheDir, key);
-
-    if (existsSync(thumbPath)) return thumbPath;
+    const relativePath = `${ThumbnailGenerator.CATEGORY}/${key}`;
+    const exists = await this.storageFs.exists(relativePath);
+    if (exists) return this.storageFs.resolve(relativePath);
 
     /** 去重：如果同一个缩略图正在生成中，复用同一个 Promise */
-    const pendingKey = key;
-    const existing = this.pending.get(pendingKey);
+    const existing = this.pending.get(key);
     if (existing) return existing;
 
-    const promise = this.generateAsync(videoPath, timeSeconds, thumbPath)
-      .finally(() => { this.pending.delete(pendingKey); });
-    this.pending.set(pendingKey, promise);
+    const promise = this.generateAsync(videoPath, timeSeconds, relativePath)
+      .finally(() => { this.pending.delete(key); });
+    this.pending.set(key, promise);
     return promise;
   }
 
   /** 异步生成缩略图 */
-  private async generateAsync(videoPath: string, timeSeconds: number, outputPath: string): Promise<string | null> {
-    if (!existsSync(videoPath)) return null;
+  private async generateAsync(videoPath: string, timeSeconds: number, relativePath: string): Promise<string | null> {
+    await this.storageFs.ensureDir(relativePath);
 
-    mkdirSync(dirname(outputPath), { recursive: true });
-
-    const result = await this.runFfmpegAsync(videoPath, timeSeconds, outputPath);
-    if (result) return result;
+    const result = await this.runFfmpegAsync(videoPath, timeSeconds, relativePath);
+    if (result) {
+      /** 注册到索引 */
+      const fileInfo = await this.storageFs.stat(relativePath);
+      if (fileInfo) {
+        this.storageFs.fileIndex.registerFile({
+          category: ThumbnailGenerator.CATEGORY,
+          relativePath,
+          size: fileInfo.size,
+          mtimeMs: fileInfo.mtimeMs,
+          createdAt: fileInfo.mtimeMs,
+        });
+      }
+      return result;
+    }
 
     /** seek 超出视频时长时回退到开头 */
-    if (timeSeconds > 0) return this.runFfmpegAsync(videoPath, 0, outputPath);
+    if (timeSeconds > 0) return this.runFfmpegAsync(videoPath, 0, relativePath);
     return null;
   }
 
   /** 异步执行 ffmpeg 截帧 */
-  private runFfmpegAsync(videoPath: string, timeSeconds: number, outputPath: string): Promise<string | null> {
+  private runFfmpegAsync(videoPath: string, timeSeconds: number, relativePath: string): Promise<string | null> {
+    const outputPath = this.storageFs.resolve(relativePath);
     return new Promise((resolve) => {
       const args = [
         "-ss", String(Math.max(0, timeSeconds)),
@@ -81,10 +88,15 @@ export class ThumbnailGenerator {
         resolve(null);
       }, 5000);
 
-      proc.on("exit", (code) => {
+      proc.on("exit", async (code) => {
         clearTimeout(timer);
         proc.unref();
-        resolve(code === 0 && existsSync(outputPath) ? outputPath : null);
+        if (code === 0) {
+          const exists = await this.storageFs.exists(relativePath);
+          resolve(exists ? outputPath : null);
+        } else {
+          resolve(null);
+        }
       });
 
       proc.on("error", () => {
@@ -103,38 +115,19 @@ export class ThumbnailGenerator {
     return `${hash.toString(36)}_${Math.round(timeSeconds)}.jpg`;
   }
 
-  /** 删除所有缩略图缓存，返回删除的文件数量 */
-  purgeAll(): number {
-    let count = 0;
-    const files = readdirSync(this.cacheDir);
-    for (const file of files) {
-      const filePath = join(this.cacheDir, file);
-      unlinkSync(filePath);
-      count++;
-    }
-    return count;
+  /** 删除所有缩略图缓存 */
+  async purgeAll(): Promise<number> {
+    return this.storageFs.deleteAllFiles(ThumbnailGenerator.CATEGORY);
   }
 
   /** 清理过期缓存（超过 retentionDays 天的） */
-  purge(retentionDays: number): void {
+  async purge(retentionDays: number): Promise<number> {
     const cutoff = Date.now() - retentionDays * 86_400_000;
-    try {
-      const files = readdirSync(this.cacheDir);
-      for (const file of files) {
-        const filePath = join(this.cacheDir, file);
-        const stat = statSync(filePath);
-        if (stat.mtimeMs < cutoff) {
-          unlinkSync(filePath);
-        }
-      }
-    } catch {
-      // ignore
-    }
+    return this.storageFs.deleteExpiredFiles(ThumbnailGenerator.CATEGORY, cutoff);
   }
 
   /**
-   * 批量预生成缩略图（真正异步，不阻塞事件循环）
-   * 串行执行避免并发 ffmpeg 进程过多占用资源
+   * 批量预生成缩略图
    */
   async pregenerateAsync(videoPaths: Array<{ path: string; durationSec: number }>): Promise<void> {
     for (const { path, durationSec } of videoPaths) {

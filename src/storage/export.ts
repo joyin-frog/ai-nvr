@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, createWriteStream, rmSync } from "node:fs";
+import { createWriteStream } from "node:fs";
 import { join, basename } from "node:path";
 import * as archiver from "archiver";
+import { type StorageFs } from "@/storage/storage-fs";
 
 /** 导出任务结果 */
 export interface ExportResult {
@@ -14,28 +15,26 @@ export interface ExportResult {
 /**
  * 录像导出器
  * 使用 ffmpeg 裁剪视频片段，输出到临时目录供下载
- * 全部异步，不阻塞事件循环
+ * 通过 StorageFs 统一管理文件 I/O 和索引
  */
 export class RecordingExporter {
   private exportDir: string;
   private ffmpegPath: string;
+  private storageFs: StorageFs;
+  private static readonly CATEGORY = "exports";
 
-  constructor(exportDir: string, ffmpegPath: string) {
+  constructor(exportDir: string, ffmpegPath: string, storageFs: StorageFs) {
     this.exportDir = exportDir;
     this.ffmpegPath = ffmpegPath;
-    mkdirSync(exportDir, { recursive: true });
+    this.storageFs = storageFs;
   }
 
   /**
    * 异步导出视频片段
-   * @param sourcePath 源 MP4 文件绝对路径
-   * @param startTimeSec 起始时间（秒，相对于视频开始）
-   * @param endTimeSec 结束时间（秒，相对于视频开始）
-   * @param cameraId 摄像头 ID（用于文件命名）
-   * @returns 导出结果
    */
   async exportAsync(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string): Promise<ExportResult | null> {
-    if (!existsSync(sourcePath)) return null;
+    const sourceExists = await this.storageFs.exists(sourcePath.startsWith("/") ? sourcePath.replace(this.storageFs.root + "/", "") : sourcePath);
+    if (!sourceExists) return null;
 
     const duration = endTimeSec - startTimeSec;
     if (duration <= 0) return null;
@@ -46,7 +45,7 @@ export class RecordingExporter {
     const filename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
     const outputPath = join(this.exportDir, filename);
 
-    /** ffmpeg 精确裁剪：-ss 放在 -i 前面（快速 seek） */
+    /** ffmpeg 精确裁剪 */
     const args = [
       "-ss", String(Math.max(0, startTimeSec)),
       "-to", String(endTimeSec),
@@ -58,10 +57,13 @@ export class RecordingExporter {
     ];
 
     const ok = await this.runFfmpeg(args, 30_000);
-    if (!ok || !existsSync(outputPath)) return null;
+    if (!ok) return null;
 
-    const stat = statSync(outputPath);
-    return { filePath: outputPath, size: stat.size };
+    const fileInfo = await this.storageFs.stat(`${RecordingExporter.CATEGORY}/${filename}`);
+    if (!fileInfo) return null;
+
+    await this.registerExport(filename, cameraId, fileInfo.size, fileInfo.mtimeMs);
+    return { filePath: outputPath, size: fileInfo.size };
   }
 
   /** 获取导出文件路径（供下载服务使用） */
@@ -71,7 +73,6 @@ export class RecordingExporter {
 
   /**
    * 异步合并多个视频文件为一个
-   * 使用 ffmpeg concat demuxer，要求输入文件编码参数一致
    */
   async mergeAsync(sourcePaths: string[], cameraId: string): Promise<ExportResult | null> {
     if (sourcePaths.length === 0) return null;
@@ -79,7 +80,9 @@ export class RecordingExporter {
     /** 单文件直接复制 */
     if (sourcePaths.length === 1) {
       const src = sourcePaths[0]!;
-      if (!existsSync(src)) return null;
+      const srcExists = await this.storageFs.exists(src);
+      if (!srcExists) return null;
+
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10);
       const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
@@ -87,16 +90,21 @@ export class RecordingExporter {
       const outputPath = join(this.exportDir, filename);
       const args = ["-i", src, "-c", "copy", "-movflags", "+faststart", "-y", outputPath];
       const ok = await this.runFfmpeg(args, 30_000);
-      if (!ok || !existsSync(outputPath)) return null;
-      return { filePath: outputPath, size: statSync(outputPath).size };
+      if (!ok) return null;
+
+      const fileInfo = await this.storageFs.stat(`${RecordingExporter.CATEGORY}/${filename}`);
+      if (!fileInfo) return null;
+
+      await this.registerExport(filename, cameraId, fileInfo.size, fileInfo.mtimeMs);
+      return { filePath: outputPath, size: fileInfo.size };
     }
 
     /** 验证所有文件存在 */
     for (const p of sourcePaths) {
-      if (!existsSync(p)) return null;
+      const exists = await this.storageFs.exists(p);
+      if (!exists) return null;
     }
 
-    /** 生成 concat 列表文件 */
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
     const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
@@ -105,7 +113,11 @@ export class RecordingExporter {
     const concatListPath = join(this.exportDir, `_concat_${dateStr}_${timeStr}.txt`);
 
     const lines = sourcePaths.map(p => `file '${p}'`);
-    writeFileSync(concatListPath, lines.join("\n"));
+    await this.storageFs.writeFile(`${RecordingExporter.CATEGORY}/../_concat_${dateStr}_${timeStr}.txt`, lines.join("\n"));
+
+    /** 写 concat 文件（临时，不用索引） */
+    const { writeFile: writeFileSync, unlink: unlinkAsync } = await import("node:fs/promises");
+    await writeFileSync(concatListPath, lines.join("\n"));
 
     const args = [
       "-f", "concat",
@@ -120,36 +132,34 @@ export class RecordingExporter {
     const ok = await this.runFfmpeg(args, 60_000);
 
     /** 清理 concat 列表文件 */
-    try { unlinkSync(concatListPath); } catch { /* ignore */ }
+    try { await unlinkAsync(concatListPath); } catch { /* ignore */ }
 
-    if (!ok || !existsSync(outputPath)) return null;
+    if (!ok) return null;
 
-    return { filePath: outputPath, size: statSync(outputPath).size };
+    const fileInfo = await this.storageFs.stat(`${RecordingExporter.CATEGORY}/${outputFilename}`);
+    if (!fileInfo) return null;
+
+    await this.registerExport(outputFilename, cameraId, fileInfo.size, fileInfo.mtimeMs);
+    return { filePath: outputPath, size: fileInfo.size };
   }
 
-  /** 列出所有导出文件 */
+  /** 列出所有导出文件 — 从 SQLite 索引查询 */
   listExports(): Array<{ filename: string; size: number; createdAt: number }> {
-    const results: Array<{ filename: string; size: number; createdAt: number }> = [];
-    try {
-      const files = readdirSync(this.exportDir);
-      for (const file of files) {
-        if (!file.startsWith("export_") || !file.endsWith(".mp4")) continue;
-        const filePath = join(this.exportDir, file);
-        const stat = statSync(filePath);
-        results.push({ filename: file, size: stat.size, createdAt: stat.mtimeMs });
-      }
-    } catch {
-      // ignore
-    }
-    return results.sort((a, b) => b.createdAt - a.createdAt);
+    return this.storageFs.fileIndex.listFiles({ category: RecordingExporter.CATEGORY })
+      .map(e => ({
+        filename: e.relativePath,
+        size: e.size,
+        createdAt: e.createdAt ?? e.mtimeMs,
+      }))
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /**
    * 异步将视频片段导出为 GIF 动图
-   * 使用 ffmpeg palettegen/paletteuse 双 pass 生成高质量调色板
    */
   async toGifAsync(sourcePath: string, startTimeSec: number, endTimeSec: number, cameraId: string, maxWidth = 480): Promise<ExportResult | null> {
-    if (!existsSync(sourcePath)) return null;
+    const sourceExists = await this.storageFs.exists(sourcePath);
+    if (!sourceExists) return null;
 
     const duration = endTimeSec - startTimeSec;
     if (duration <= 0) return null;
@@ -171,7 +181,10 @@ export class RecordingExporter {
       palettePath,
     ];
     const paletteOk = await this.runFfmpeg(paletteArgs, 30_000);
-    if (!paletteOk || !existsSync(palettePath)) return null;
+    if (!paletteOk) return null;
+
+    const paletteExists = await this.storageFs.exists(palettePath);
+    if (!paletteExists) return null;
 
     /** Pass 2: 使用调色板生成 GIF */
     const gifArgs = [
@@ -186,11 +199,15 @@ export class RecordingExporter {
     const gifOk = await this.runFfmpeg(gifArgs, 60_000);
 
     /** 清理临时调色板 */
-    try { unlinkSync(palettePath); } catch { /* ignore */ }
+    try { const { unlink: ul } = await import("node:fs/promises"); await ul(palettePath); } catch { /* ignore */ }
 
-    if (!gifOk || !existsSync(outputPath)) return null;
+    if (!gifOk) return null;
 
-    return { filePath: outputPath, size: statSync(outputPath).size };
+    const fileInfo = await this.storageFs.stat(`${RecordingExporter.CATEGORY}/${filename}`);
+    if (!fileInfo) return null;
+
+    await this.registerExport(filename, cameraId, fileInfo.size, fileInfo.mtimeMs);
+    return { filePath: outputPath, size: fileInfo.size };
   }
 
   /**
@@ -200,7 +217,8 @@ export class RecordingExporter {
     if (sourcePaths.length === 0) return null;
 
     for (const p of sourcePaths) {
-      if (!existsSync(p)) return null;
+      const exists = await this.storageFs.exists(p);
+      if (!exists) return null;
     }
 
     const now = new Date();
@@ -213,14 +231,15 @@ export class RecordingExporter {
       const output = createWriteStream(outputPath);
       const archive = archiver.create("zip", { zlib: { level: 1 } });
 
-      output.on("close", () => {
-        if (!existsSync(outputPath)) { resolve(null); return; }
-        const stat = statSync(outputPath);
-        resolve({ filePath: outputPath, size: stat.size });
+      output.on("close", async () => {
+        const fileInfo = await this.storageFs.stat(`${RecordingExporter.CATEGORY}/${filename}`);
+        if (!fileInfo) { resolve(null); return; }
+        await this.registerExport(filename, cameraId, fileInfo.size, fileInfo.mtimeMs);
+        resolve({ filePath: outputPath, size: fileInfo.size });
       });
 
-      archive.on("error", () => {
-        try { unlinkSync(outputPath); } catch { /* ignore */ }
+      archive.on("error", async () => {
+        try { const { unlink: ul } = await import("node:fs/promises"); await ul(outputPath); } catch { /* ignore */ }
         resolve(null);
       });
 
@@ -235,41 +254,26 @@ export class RecordingExporter {
   }
 
   /** 删除所有导出文件，返回删除的文件数量 */
-  purgeAll(): number {
-    let count = 0;
-    const files = readdirSync(this.exportDir);
-    for (const file of files) {
-      const filePath = join(this.exportDir, file);
-      const stat = statSync(filePath);
-      if (stat.isDirectory()) {
-        rmSync(filePath, { recursive: true, force: true });
-      } else {
-        unlinkSync(filePath);
-      }
-      count++;
-    }
-    return count;
+  async purgeAll(): Promise<number> {
+    return this.storageFs.deleteAllFiles(RecordingExporter.CATEGORY);
   }
 
   /** 清理超过指定小时的导出文件 */
-  purge(maxAgeHours: number): number {
+  async purge(maxAgeHours: number): Promise<number> {
     const cutoff = Date.now() - maxAgeHours * 3600_000;
-    let removed = 0;
-    try {
-      const files = readdirSync(this.exportDir);
-      for (const file of files) {
-        if (!file.startsWith("export_")) continue;
-        const filePath = join(this.exportDir, file);
-        const stat = statSync(filePath);
-        if (stat.mtimeMs < cutoff) {
-          unlinkSync(filePath);
-          removed++;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return removed;
+    return this.storageFs.deleteExpiredFiles(RecordingExporter.CATEGORY, cutoff);
+  }
+
+  /** 注册导出文件到索引 */
+  private async registerExport(filename: string, cameraId: string, size: number, mtimeMs: number): Promise<void> {
+    this.storageFs.fileIndex.registerFile({
+      category: RecordingExporter.CATEGORY,
+      relativePath: filename,
+      cameraId,
+      size,
+      mtimeMs,
+      createdAt: mtimeMs,
+    });
   }
 
   /** 异步执行 ffmpeg 命令 */

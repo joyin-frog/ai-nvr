@@ -153,11 +153,21 @@ export class EventStorage {
     return result;
   }
 
-  /** 按检测目标标签统计（从 detect 事件的 detail JSON 中提取） */
+  /**
+   * 按检测目标标签统计（从 detect 事件的 detail JSON 中提取）
+   * 兼容新格式 {labels: {person: 2}} 和旧格式 {detections: [{label: "person"}, ...]}
+   */
   countByDetectionLabel(options: { since?: number; until?: number } = {}): Array<{ label: string; count: number }> {
     const { conditions, params } = this.buildConditions({ ...options, type: "detect" });
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     try {
+      /** 新格式：从 labels object 的 keys + values 汇总 */
+      const newRows = this.db.query(
+        `SELECT json_each.key as label, SUM(json_each.value) as count FROM events, json_each(json_extract(detail, '$.labels')) ${where} GROUP BY json_each.key ORDER BY count DESC LIMIT 20`
+      ).all(...params) as Array<{ label: string; count: number }>;
+      if (newRows.length > 0) return newRows;
+
+      /** 回退旧格式 */
       return this.db.query(
         `SELECT json_extract(j.value, '$.label') as label, COUNT(*) as count FROM events, json_each(json_extract(detail, '$.detections')) AS j ${where} GROUP BY label ORDER BY count DESC LIMIT 20`
       ).all(...params) as Array<{ label: string; count: number }>;

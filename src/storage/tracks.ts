@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, readdirSync } from "node:fs";
+import { mkdir, writeFile, readFile, unlink, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import { type Detection } from "@/ai/types";
@@ -79,7 +79,13 @@ export class TrackStorage {
 
   constructor(storagePath: string) {
     this.storagePath = storagePath;
-    mkdirSync(storagePath, { recursive: true });
+    /** 异步初始化：创建目录 + 加载数据，不阻塞启动 */
+    this.init();
+  }
+
+  /** 异步初始化 */
+  private async init(): Promise<void> {
+    await mkdir(this.storagePath, { recursive: true });
     this.loadFromDisk();
   }
 
@@ -405,7 +411,7 @@ export class TrackStorage {
     if (!record) return false;
     if (record.snapshotFile) {
       const path = join(this.storagePath, record.snapshotFile);
-      if (existsSync(path)) unlinkSync(path);
+      unlink(path).catch(() => {});
     }
     this.tracks.delete(trackId);
     this.scheduleSave();
@@ -415,14 +421,14 @@ export class TrackStorage {
   /**
    * 删除所有追踪数据（快照文件 + 元数据），返回删除的记录数量
    */
-  purgeAll(): number {
+  async purgeAll(): Promise<number> {
     const count = this.tracks.size;
     /** 删除所有快照文件（.jpg） */
-    const files = readdirSync(this.storagePath);
+    const files = await readdir(this.storagePath);
     for (const file of files) {
       if (file === TRACKS_META_FILE) continue;
       if (file.endsWith(".jpg")) {
-        unlinkSync(join(this.storagePath, file));
+        await unlink(join(this.storagePath, file));
       }
     }
     this.tracks.clear();
@@ -444,7 +450,7 @@ export class TrackStorage {
       if (record.lastSeen < threshold) {
         if (record.snapshotFile) {
           const path = join(this.storagePath, record.snapshotFile);
-          if (existsSync(path)) unlinkSync(path);
+          unlink(path).catch(() => {});
         }
         this.tracks.delete(id);
         removed++;
@@ -968,7 +974,7 @@ export class TrackStorage {
     this.saveTimer = setTimeout(() => this.saveNow(), 2000);
   }
 
-  /** 立即保存到磁盘 */
+  /** 立即保存到磁盘（异步，不阻塞调用方） */
   private saveNow(): void {
     if (!this.dirty) return;
     this.dirty = false;
@@ -977,18 +983,20 @@ export class TrackStorage {
       this.saveTimer = null;
     }
     const data = [...this.tracks.values()];
-    writeFileSync(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data, null, 2));
+    writeFile(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data, null, 2)).catch(() => {});
   }
 
   /** 从磁盘加载 */
-  private loadFromDisk(): void {
+  private async loadFromDisk(): Promise<void> {
     const metaPath = join(this.storagePath, TRACKS_META_FILE);
-    if (!existsSync(metaPath)) return;
-    const raw = JSON.parse(readFileSync(metaPath, "utf-8")) as TrackRecord[];
-    for (const r of raw) {
-      /** 兼容旧数据：没有 bestSnapshotScore 时设为 0（下次高质量帧会自动更新） */
-      if (r.bestSnapshotScore === undefined) r.bestSnapshotScore = 0;
-      this.tracks.set(r.trackId, r);
+    try {
+      const raw = JSON.parse(await readFile(metaPath, "utf-8")) as TrackRecord[];
+      for (const r of raw) {
+        if (r.bestSnapshotScore === undefined) r.bestSnapshotScore = 0;
+        this.tracks.set(r.trackId, r);
+      }
+    } catch {
+      /* 文件不存在或格式错误，从空数据开始 */
     }
   }
 }

@@ -76,7 +76,7 @@ export class StorageCleaner {
   }
 
   /** 执行一次全量清理（磁盘感知） */
-  runCleanup(): CleanupReport {
+  async runCleanup(): Promise<CleanupReport> {
     const cleanup = this.runtimeConfig.get().cleanup;
     const { pressure, usedPercent } = this.getDiskPressure();
     const now = Date.now();
@@ -102,18 +102,18 @@ export class StorageCleaner {
     report.alerts = this.alertStorage.purge(alertsCutoff);
 
     /** 清理检测快照 */
-    report.snapshots = this.snapshotStorage.purge(snapshotsDays);
+    report.snapshots = await this.snapshotStorage.purge(snapshotsDays);
 
     /** 清理告警快照（复用快照保留天数配置） */
     if (this.alertSnapshotStorage) {
-      this.alertSnapshotStorage.purge(snapshotsDays);
+      await this.alertSnapshotStorage.purge(snapshotsDays);
     }
 
     /** 清理缩略图缓存 */
-    this.thumbnailGenerator.purge(thumbnailsDays);
+    await this.thumbnailGenerator.purge(thumbnailsDays);
 
     /** 清理导出临时文件（24小时后过期，磁盘紧张时立即清理） */
-    report.exports = this.exporter.purge(pressure === "critical" ? 0 : 24);
+    report.exports = await this.exporter.purge(pressure === "critical" ? 0 : 24);
 
     /** 清理过期追踪目标 */
     if (this.trackStorage) {

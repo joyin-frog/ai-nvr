@@ -78,11 +78,12 @@ const dataDir = config.storage.dataDir;
 /** 运行时配置（支持 API 热修改，检测器实时读取） */
 const runtimeConfig = new RuntimeConfig(config);
 
-/** 磁盘用量统计（SQLite 持久化增量追踪） */
+/** 磁盘用量统计（SQLite 持久化增量追踪，启动时不扫描文件系统） */
 const diskUsage = new DiskUsage(dataDir);
-diskUsage.ensureCalibrated();
+/** 启动后台磁盘空间刷新（每 60 秒异步查询一次，API 只读缓存） */
+diskUsage.startBackgroundRefresh();
 
-/** 存储文件系统封装（统一文件操作 + 自动增量统计） */
+/** 存储文件系统封装（统一文件操作 + 自动增量统计 + 文件索引） */
 const storageFs = new StorageFs(dataDir, diskUsage);
 
 /** 录像器（通过 EventBus 接收帧，不单独拉 RTSP 流） */
@@ -91,7 +92,7 @@ const recorder = new MotionRecorder(join(dataDir, "recordings"), config.ffmpegPa
 for (const cam of config.cameras) {
   recorder.registerCameraName(cam.id, cam.friendlyName);
 }
-recorder.start();
+recorder.start().catch(err => console.error("[Recorder] 启动失败:", err));
 
 /** AI 检测器（VLM 模式，使用 RuntimeConfig） */
 const annotator = new Annotator();
@@ -157,11 +158,11 @@ const emailNotifier = new EmailNotifier(runtimeConfig, eventBus);
 emailNotifier.start();
 
 /** 检测快照存储（保存标注图到磁盘） */
-const snapshotStorage = new SnapshotStorage(join(dataDir, "detection-snapshots"), eventBus);
-snapshotStorage.start();
+const snapshotStorage = new SnapshotStorage(storageFs, eventBus, "snapshots", "detection-snapshots");
+snapshotStorage.start().catch(err => console.error("[Snapshot] 启动失败:", err));
 
 /** 告警快照存储（独立的目录，不监听 detect 事件） */
-const alertSnapshotStorage = new SnapshotStorage(join(dataDir, "alert-snapshots"), eventBus);
+const alertSnapshotStorage = new SnapshotStorage(storageFs, eventBus, "alert-snapshots", "alert-snapshots");
 
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
@@ -196,13 +197,13 @@ const preferencesStorage = new PreferencesStorage(join(dataDir, "preferences.db"
 }
 
 /** 录像缩略图生成器 */
-const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), config.ffmpegPath);
+const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), config.ffmpegPath, storageFs);
 
 /** 事件存储（cleaner 和 server 都需要） */
 const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 
 /** 录像导出器 */
-const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath);
+const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs);
 
 /** 统一存储清理管理器 */
 const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
@@ -244,7 +245,8 @@ function flushPendingEvents() {
   eventStorage.insertMany(batch);
 }
 
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "llm:scene"] as const;
+/** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
+const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "llm:scene"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -258,11 +260,16 @@ for (const eventType of RECORDED_EVENTS) {
       if (p.dwellMs < 30000) return;
     }
     let detail: string | undefined;
-    if (eventType === "motion") {
-      detail = JSON.stringify({ ratio: (payload as { ratio: number }).ratio });
-    } else if (eventType === "detect") {
-      const p = payload as { detections: Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number; trackName?: string; semanticLabel?: string }> };
-      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId, trackName: d.trackName, semanticLabel: d.semanticLabel })) });
+    if (eventType === "detect") {
+      /** 精简存储：只保留标签摘要 + 计数，不保留完整检测框数据 */
+      const p = payload as { detections: Array<{ label: string; score: number; trackId?: number; trackName?: string }> };
+      const labelCounts: Record<string, number> = {};
+      const trackIds: number[] = [];
+      for (const d of p.detections) {
+        labelCounts[d.label] = (labelCounts[d.label] ?? 0) + 1;
+        if (d.trackId) trackIds.push(d.trackId);
+      }
+      detail = JSON.stringify({ labels: labelCounts, count: p.detections.length, trackIds });
     } else if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });

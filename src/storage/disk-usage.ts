@@ -1,4 +1,4 @@
-import { existsSync, statSync, readdirSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 
@@ -27,18 +27,20 @@ export interface DiskInfo {
 /**
  * 存储磁盘用量统计
  * SQLite 持久化 + 增量追踪，重启后不丢失
- * 文件增删时实时更新，永不全量扫描（除非手动触发）
+ * 文件增删时通过 StorageFs 实时更新，永不全量扫描
  */
 export class DiskUsage {
   private dataRoot: string;
-  private db: Database;
+  /** 暴露给 FileIndex 共享连接 */
+  readonly db: Database;
   /** 内存缓存（避免每次查 SQLite） */
   private cache: Map<string, { bytes: number; fileCount: number }> = new Map();
   /** 缓存是否已加载 */
   private loaded = false;
-  /** 磁盘空间缓存（60 秒刷新） */
+  /** 磁盘空间缓存（后台定时刷新，API 只读缓存） */
   private diskSpaceCache: { total: number; free: number } | null = null;
-  private diskSpaceExpiry = 0;
+  /** 后台刷新定时器 */
+  private diskSpaceTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(dataRoot: string) {
     this.dataRoot = dataRoot;
@@ -75,12 +77,11 @@ export class DiskUsage {
       totalBytes += data.bytes;
     }
 
-    const disk = this.getDiskSpaceCached();
     return {
       directories,
       totalBytes,
-      diskFreeBytes: disk?.free ?? 0,
-      diskTotalBytes: disk?.total ?? 0,
+      diskFreeBytes: this.diskSpaceCache?.free ?? 0,
+      diskTotalBytes: this.diskSpaceCache?.total ?? 0,
     };
   }
 
@@ -108,20 +109,69 @@ export class DiskUsage {
     this.persist(dirName);
   }
 
-  /** 手动触发全量校准 */
-  calibrate(): void {
+  /**
+   * 启动后台磁盘空间刷新（每 60 秒异步查询一次）
+   * API 请求只读缓存，永不阻塞
+   */
+  startBackgroundRefresh(): void {
+    /** 首次延迟 10 秒执行，避免启动 IO 压力 */
+    setTimeout(() => this.refreshDiskSpace(), 10_000);
+    this.diskSpaceTimer = setInterval(() => this.refreshDiskSpace(), 60_000);
+  }
+
+  /** 后台异步刷新磁盘空间缓存 */
+  private async refreshDiskSpace(): Promise<void> {
+    try {
+      const proc = Bun.spawn(["df", "-B1", this.dataRoot], {
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) return;
+      const output = await new Response(proc.stdout).text();
+      const lines = output.trim().split("\n");
+      if (lines.length >= 2) {
+        const parts = lines[1]!.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          this.diskSpaceCache = {
+            total: Number(parts[1]),
+            free: Number(parts[3]),
+          };
+        }
+      }
+    } catch {
+      /* df 命令失败，保持旧缓存 */
+    }
+  }
+
+  /** 持久化单目录到 SQLite */
+  private persist(dirName: string): void {
+    const data = this.cache.get(dirName);
+    if (!data) return;
+    this.db.prepare(
+      "INSERT INTO dir_usage (name, bytes, file_count) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET bytes = excluded.bytes, file_count = excluded.file_count"
+    ).run(dirName, data.bytes, data.fileCount);
+  }
+
+  /**
+   * 手动全量校准（仅用户主动触发）
+   * 异步扫描文件系统，重建 SQLite 中的用量数据
+   */
+  async calibrateAsync(): Promise<void> {
     this.cache.clear();
 
-    if (!existsSync(this.dataRoot)) {
+    let entries;
+    try {
+      entries = await readdir(this.dataRoot, { withFileTypes: true });
+    } catch {
       this.loaded = true;
       return;
     }
 
-    const entries = readdirSync(this.dataRoot, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = join(this.dataRoot, entry.name);
       if (entry.isDirectory()) {
-        const usage = this.calcDirSize(entry.name, fullPath);
+        const fullPath = join(this.dataRoot, entry.name);
+        const usage = await this.calcDirSizeAsync(entry.name, fullPath);
         this.cache.set(usage.name, { bytes: usage.bytes, fileCount: usage.fileCount });
       }
     }
@@ -138,80 +188,44 @@ export class DiskUsage {
     tx();
   }
 
-  /** 持久化单目录到 SQLite */
-  private persist(dirName: string): void {
-    const data = this.cache.get(dirName);
-    if (!data) return;
-    this.db.prepare(
-      "INSERT INTO dir_usage (name, bytes, file_count) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET bytes = excluded.bytes, file_count = excluded.file_count"
-    ).run(dirName, data.bytes, data.fileCount);
-  }
-
-  /** 磁盘空间缓存（60 秒刷新） */
-  private getDiskSpaceCached(): { total: number; free: number } | null {
-    const now = Date.now();
-    if (this.diskSpaceCache && now < this.diskSpaceExpiry) return this.diskSpaceCache;
-    this.diskSpaceCache = this.getDiskSpace();
-    this.diskSpaceExpiry = now + 60_000;
-    return this.diskSpaceCache;
-  }
-
-  /** 计算目录大小（仅校准使用） */
-  private calcDirSize(name: string, dirPath: string): DirUsage {
+  /** 异步计算目录大小 */
+  private async calcDirSizeAsync(name: string, dirPath: string): Promise<DirUsage> {
     let bytes = 0;
     let fileCount = 0;
 
-    const scan = (path: string) => {
+    const scan = async (path: string) => {
+      let entries;
       try {
-        const entries = readdirSync(path, { withFileTypes: true });
-        for (const entry of entries) {
-          const full = join(path, entry.name);
-          if (entry.isDirectory()) {
-            scan(full);
-          } else if (entry.isFile()) {
-            try { bytes += statSync(full).size; fileCount++; } catch { /* */ }
+        entries = await readdir(path, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = join(path, entry.name);
+        if (entry.isDirectory()) {
+          await scan(full);
+        } else if (entry.isFile()) {
+          try {
+            const s = await stat(full);
+            bytes += s.size;
+            fileCount++;
+          } catch {
+            /* 文件可能正在写入 */
           }
         }
-      } catch { /* */ }
+      }
     };
 
-    scan(dirPath);
+    await scan(dirPath);
     return { name, bytes, fileCount };
   }
 
-  /** 获取磁盘空间 */
-  private getDiskSpace(): { total: number; free: number } | null {
-    try {
-      const proc = Bun.spawnSync(["df", "-B1", this.dataRoot], {
-        stdout: "pipe",
-        stderr: "ignore",
-      });
-      const output = new TextDecoder().decode(proc.stdout);
-      const lines = output.trim().split("\n");
-      if (lines.length >= 2) {
-        const parts = lines[1]!.trim().split(/\s+/);
-        if (parts.length >= 4) {
-          return {
-            total: Number(parts[1]),
-            free: Number(parts[3]),
-          };
-        }
-      }
-    } catch { /* */ }
-    return null;
-  }
-
-  /** 确保 SQLite 有基准数据（首次启动时全量扫描） */
-  ensureCalibrated(): void {
-    const count = (this.db.query("SELECT COUNT(*) as c FROM dir_usage").get() as { c: number }).c;
-    if (count === 0) {
-      console.log("[DiskUsage] 首次启动，全量校准...");
-      this.calibrate();
-    }
-  }
-
-  /** 关闭数据库 */
+  /** 关闭数据库 + 停止后台刷新 */
   close(): void {
+    if (this.diskSpaceTimer) {
+      clearInterval(this.diskSpaceTimer);
+      this.diskSpaceTimer = null;
+    }
     this.db.close();
   }
 }

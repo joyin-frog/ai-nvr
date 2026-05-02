@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
@@ -76,79 +75,6 @@ interface RecordingState {
   boostUntil: number;
 }
 
-/** MP4 时长解析缓存（filePath → durationMs），避免重复读文件） */
-const mp4DurationCache = new Map<string, number | null>();
-
-/**
- * 从 MP4 文件的 moov.mvhd atom 中解析视频时长（毫秒）
- * faststart 文件 moov 在文件头部，只需读前 64KB
- * 解析失败返回 null（调用方回退到 mtime）
- */
-function parseMp4DurationMs(filePath: string): number | null {
-  /** 优先查缓存 */
-  const cached = mp4DurationCache.get(filePath);
-  if (cached !== undefined) return cached;
-
-  let result: number | null = null;
-  try {
-    const stat = statSync(filePath);
-    /** 只读前 64KB，faststart 文件的 moov 在这个范围内 */
-    const readLen = Math.min(65536, stat.size);
-    const buf = Buffer.alloc(readLen);
-    const fd = openSync(filePath, "r");
-    readSync(fd, buf, 0, readLen, 0);
-    closeSync(fd);
-
-    /** 遍历顶层 atom 查找 moov */
-    let offset = 0;
-    while (offset + 8 <= buf.length) {
-      const atomSize = buf.readUInt32BE(offset);
-      const atomType = buf.toString("ascii", offset + 4, offset + 8);
-
-      if (atomType === "moov") {
-        /** 在 moov 内搜索 mvhd */
-        const moovEnd = Math.min(offset + atomSize, buf.length);
-        let inner = offset + 8;
-        while (inner + 8 <= moovEnd) {
-          const innerSize = buf.readUInt32BE(inner);
-          const innerType = buf.toString("ascii", inner + 4, inner + 8);
-
-          if (innerType === "mvhd" && inner + innerSize <= buf.length) {
-            const version = buf[inner + 8]!;
-            if (version === 0) {
-              /** version 0: timescale(u32) + duration(u32) */
-              const timescale = buf.readUInt32BE(inner + 20);
-              const duration = buf.readUInt32BE(inner + 24);
-              if (timescale > 0) { result = Math.round((duration / timescale) * 1000); break; }
-            } else if (version === 1) {
-              /** version 1: timescale(u32) + duration(u64) */
-              const timescale = buf.readUInt32BE(inner + 28);
-              const duration = Number(buf.readBigUInt64BE(inner + 32));
-              if (timescale > 0) { result = Math.round((duration / timescale) * 1000); break; }
-            }
-            break;
-          }
-          if (innerSize < 8) break;
-          inner += innerSize;
-        }
-        break;
-      }
-
-      if (atomSize < 8) break;
-      offset += atomSize;
-    }
-  } catch {
-    // 文件可能正在写入或损坏
-  }
-  mp4DurationCache.set(filePath, result);
-  /** 缓存上限保护 */
-  if (mp4DurationCache.size > 2000) {
-    const firstKey = mp4DurationCache.keys().next().value;
-    if (firstKey != null) mp4DurationCache.delete(firstKey);
-  }
-  return result;
-}
-
 /** drawtext 水印默认字体路径 */
 const DEFAULT_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
 
@@ -173,17 +99,16 @@ export class MotionRecorder {
   private unsubMotion: (() => void) | null = null;
   /** 过期录像清理定时器 */
   private purgeTimer: ReturnType<typeof setInterval> | null = null;
-  /** 存储文件系统（增量统计） */
-  private storageFs: StorageFs | null;
+  /** 存储文件系统 */
+  private storageFs: StorageFs;
   /** 每路摄像头的帧预缓冲区（motion 触发前保留 ~2 秒帧） */
   private preBuffers = new Map<string, FrameRingBuffer>();
 
-  constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig, storageFs?: StorageFs) {
+  constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig, storageFs: StorageFs) {
     this.storagePath = storagePath;
     this.ffmpegPath = ffmpegPath;
     this.runtimeConfig = runtimeConfig;
-    this.storageFs = storageFs ?? null;
-    mkdirSync(storagePath, { recursive: true });
+    this.storageFs = storageFs;
   }
 
   /** 注册摄像头名称（水印用） */
@@ -199,7 +124,10 @@ export class MotionRecorder {
   }
 
   /** 启动：订阅帧事件 + 根据模式初始化录制 */
-  start(): void {
+  async start(): Promise<void> {
+    /** 确保录像根目录存在 */
+    await this.storageFs.ensureDir("recordings/.keep");
+
     /** 订阅帧事件，写入正在录像的 ffmpeg 进程 */
     this.unsubFrame = this.eventBus.on("frame", ({ cameraId, data }) => {
       this.writeFrame(cameraId, data);
@@ -258,7 +186,6 @@ export class MotionRecorder {
     console.log(`[Recorder] 模式切换: ${mode}`);
 
     if (mode === "continuous") {
-      /** 切到持续录制 → 取消 motion 监听 */
       if (this.unsubMotion) {
         this.unsubMotion();
         this.unsubMotion = null;
@@ -274,7 +201,6 @@ export class MotionRecorder {
         this.startContinuous(cameraId);
       }
     } else {
-      /** 切到变动触发 → 取消持续录制，注册 motion 监听 */
       for (const [cameraId] of this.states) {
         const state = this.states.get(cameraId);
         if (state?.continuousTimer) {
@@ -314,7 +240,6 @@ export class MotionRecorder {
       case "libx264":
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"];
       default:
-        /** auto：尝试硬件加速，失败回退 libx264 */
         return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p"];
     }
   }
@@ -360,65 +285,53 @@ export class MotionRecorder {
     });
   }
 
-  /** 录像列表缓存（TTL 5 秒，避免频繁 stat 文件系统） */
+  /** 录像列表缓存 */
   private listCache = new Map<string, { data: RecordingInfo[]; expiry: number }>();
   private static readonly LIST_CACHE_TTL = 30_000;
 
-  /** 列出录像文件 */
+  /** 列出录像文件 — 从 SQLite 索引查询，不扫描文件系统 */
   listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
-    /** 检查缓存 */
     const cacheKey = `${cameraId ?? ""}:${since ?? 0}:${until ?? 0}`;
     const cached = this.listCache.get(cacheKey);
     if (cached && Date.now() < cached.expiry) return cached.data;
 
-    const results: RecordingInfo[] = [];
+    const entries = this.storageFs.fileIndex.listFiles({
+      category: "recordings",
+      cameraId: cameraId ?? undefined,
+      since: since ?? undefined,
+      until: until ?? undefined,
+    });
 
-    const scanDir = cameraId ? join(this.storagePath, cameraId) : this.storagePath;
-    let dirs: string[];
-
-    try {
-      if (cameraId) {
-        dirs = [scanDir];
-      } else {
-        dirs = readdirSync(this.storagePath)
-          .filter(f => statSync(join(this.storagePath, f)).isDirectory())
-          .map(f => join(this.storagePath, f));
+    const results: RecordingInfo[] = entries.map(e => {
+      const file = e.relativePath.includes("/") ? e.relativePath.split("/").pop()! : e.relativePath;
+      const camId = e.cameraId ?? (e.relativePath.includes("/") ? e.relativePath.split("/")[0]! : "");
+      const parsed = this.parseFilename(file);
+      let endTime = parsed.endTime;
+      if (!endTime) {
+        if (e.extra) {
+          try {
+            const ex = JSON.parse(e.extra) as { durationMs?: number };
+            if (ex.durationMs) endTime = parsed.startTime + ex.durationMs;
+          } catch { /* */ }
+        }
+        if (!endTime) endTime = e.mtimeMs;
       }
-    } catch {
-      return results;
-    }
+      return {
+        filename: `${camId}/${file}`,
+        cameraId: camId,
+        startTime: parsed.startTime,
+        endTime,
+        size: e.size,
+      };
+    });
 
-    for (const dir of dirs) {
-      const camId = cameraId ?? dir.split("/").pop()!;
-      let files: string[];
-      try {
-        files = readdirSync(dir);
-      } catch {
-        continue;
-      }
+    const filtered = results.filter(r => {
+      if (since && r.endTime < since) return false;
+      if (until && r.startTime > until) return false;
+      return true;
+    });
 
-      for (const file of files) {
-        if (!file.endsWith(".mp4")) continue;
-        const filePath = join(dir, file);
-        const stat = statSync(filePath);
-        const parsed = this.parseFilename(file);
-        const rec: RecordingInfo = {
-          filename: `${camId}/${file}`,
-          cameraId: camId,
-          startTime: parsed.startTime,
-          endTime: parsed.endTime ?? ((): number => {
-            const dur = parseMp4DurationMs(filePath);
-            return dur ? parsed.startTime + dur : stat.mtimeMs;
-          })(),
-          size: stat.size,
-        };
-        if (since && rec.endTime < since) continue;
-        if (until && rec.startTime > until) continue;
-        results.push(rec);
-      }
-    }
-
-    const sorted = results.sort((a, b) => b.startTime - a.startTime);
+    const sorted = filtered.sort((a, b) => b.startTime - a.startTime);
     this.listCache.set(cacheKey, { data: sorted, expiry: Date.now() + MotionRecorder.LIST_CACHE_TTL });
     return sorted;
   }
@@ -461,7 +374,7 @@ export class MotionRecorder {
   }
 
   /** 启动录像：通过 ffmpeg pipe 接收 JPEG 帧并编码为 MP4 */
-  private startRecordingInternal(cameraId: string, timestamp: number): void {
+  private async startRecordingInternal(cameraId: string, timestamp: number): Promise<void> {
     const state = this.getOrCreateState(cameraId);
 
     /** 防御性清理：如果旧 ffmpeg 进程还在运行，先 kill */
@@ -481,9 +394,10 @@ export class MotionRecorder {
     const dateStr = date.toISOString().slice(0, 10);
     const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
     const filename = `${dateStr}_${timeStr}.mp4`;
-    const dir = join(this.storagePath, cameraId);
-    mkdirSync(dir, { recursive: true });
-    const outputPath = join(dir, filename);
+
+    /** 确保录像目录存在 */
+    await this.storageFs.ensureDir(`recordings/${cameraId}/${filename}`);
+    const outputPath = join(this.storagePath, cameraId, filename);
 
     /** 构建 drawtext 水印滤镜 */
     const wm = this.runtimeConfig.get().recording.watermark;
@@ -552,46 +466,8 @@ export class MotionRecorder {
         state.recording = false;
       }
 
-      /** 清理空或异常小的录像文件（< 1KB 视为无效） */
-      try {
-        const stat = statSync(outputPath);
-        if (stat.size < 1024) {
-          if (this.storageFs) {
-            this.storageFs.deleteFile(`recordings/${cameraId}/${filename}`);
-          } else {
-            unlinkSync(outputPath);
-          }
-          console.warn(`[Recorder] ${cameraId} 清理无效录像: ${filename} (${stat.size} bytes)`);
-          this.listCache.clear();
-          return;
-        }
-      } catch {
-        // file may not exist
-      }
-
-      /** 记录有效录像文件增量 */
-      if (this.storageFs && code === 0) {
-        try {
-          const stat = statSync(outputPath);
-          if (stat.size >= 1024) {
-            this.storageFs.diskUsage.recordAdd("recordings", stat.size);
-          }
-        } catch { /* */ }
-      }
-
-      /** 连续录制模式下非正常退出：3 秒后自动重启（避免长时间无录像） */
-      if (code !== 0 && state.continuousTimer) {
-        /** 清理旧的分段定时器，避免与重启后的定时器冲突 */
-        clearTimeout(state.continuousTimer);
-        state.continuousTimer = null;
-        console.warn(`[Recorder] ${cameraId} ffmpeg 异常退出 (code=${code})，3 秒后重启连续录制`);
-        setTimeout(() => {
-          /** 确认仍然处于连续录制模式（用户未手动停止） */
-          if (!state.continuousTimer && !state.recording) {
-            this.startContinuous(cameraId);
-          }
-        }, 3000);
-      }
+      /** 异步处理录像完成后的注册/清理 */
+      this.handleRecordingExit(cameraId, filename, code, state);
     });
 
     state.recording = true;
@@ -608,6 +484,44 @@ export class MotionRecorder {
           proc.stdin?.write(frame.data);
         }
       }
+    }
+  }
+
+  /** ffmpeg 退出后异步处理：注册索引或清理无效文件 */
+  private async handleRecordingExit(cameraId: string, filename: string, code: number | null, state: RecordingState): Promise<void> {
+    const relativePath = `${cameraId}/${filename}`;
+    const fileInfo = await this.storageFs.stat(`recordings/${relativePath}`);
+
+    if (!fileInfo || fileInfo.size < 1024) {
+      /** 清理无效录像（< 1KB） */
+      if (fileInfo) {
+        await this.storageFs.deleteFile(`recordings/${relativePath}`, { category: "recordings" });
+      }
+      console.warn(`[Recorder] ${cameraId} 清理无效录像: ${filename} (${fileInfo?.size ?? 0} bytes)`);
+      this.listCache.clear();
+    } else if (code === 0) {
+      /** 有效录像 → 注册到文件索引 */
+      this.storageFs.fileIndex.registerFile({
+        category: "recordings",
+        relativePath,
+        cameraId,
+        size: fileInfo.size,
+        mtimeMs: fileInfo.mtimeMs,
+        createdAt: state.startTime,
+      });
+      this.listCache.clear();
+    }
+
+    /** 连续录制模式下非正常退出：3 秒后自动重启 */
+    if (code !== 0 && state.continuousTimer) {
+      clearTimeout(state.continuousTimer);
+      state.continuousTimer = null;
+      console.warn(`[Recorder] ${cameraId} ffmpeg 异常退出 (code=${code})，3 秒后重启连续录制`);
+      setTimeout(() => {
+        if (!state.continuousTimer && !state.recording) {
+          this.startContinuous(cameraId);
+        }
+      }, 3000);
     }
   }
 
@@ -654,53 +568,21 @@ export class MotionRecorder {
   }
 
   /** 删除所有录像文件，返回删除的文件数量 */
-  purgeAll(): number {
-    let count = 0;
-    const camDirs = readdirSync(this.storagePath);
-    for (const camDir of camDirs) {
-      const camPath = join(this.storagePath, camDir);
-      if (!statSync(camPath).isDirectory()) continue;
-      const files = readdirSync(camPath);
-      for (const file of files) {
-        if (!file.endsWith(".mp4")) continue;
-        unlinkSync(join(camPath, file));
-        count++;
-      }
-    }
+  async purgeAll(): Promise<number> {
+    const count = await this.storageFs.deleteAllFiles("recordings");
     this.listCache.clear();
     return count;
   }
 
-  /** 清理过期录像（可传入自定义保留天数，用于磁盘感知加速清理） */
-  purgeOldRecordings(overrideRetentionDays?: number): void {
+  /** 清理过期录像（通过索引查询，异步删除） */
+  async purgeOldRecordings(overrideRetentionDays?: number): Promise<void> {
     const retentionDays = overrideRetentionDays ?? this.runtimeConfig.get().recording.retentionDays;
     const cutoff = Date.now() - retentionDays * 86400_000;
 
-    try {
-      const camDirs = readdirSync(this.storagePath);
-      for (const camDir of camDirs) {
-        const camPath = join(this.storagePath, camDir);
-        if (!statSync(camPath).isDirectory()) continue;
-
-        const files = readdirSync(camPath);
-        for (const file of files) {
-          if (!file.endsWith(".mp4")) continue;
-          const filePath = join(camPath, file);
-          const stat = statSync(filePath);
-          if (stat.mtimeMs < cutoff) {
-            if (this.storageFs) {
-              this.storageFs.deleteFile(`recordings/${camDir}/${file}`);
-            } else {
-              unlinkSync(filePath);
-            }
-            console.log(`[Recorder] 清理过期录像: ${camDir}/${file}`);
-          }
-        }
-      }
-    } catch {
-      // ignore
+    const deleted = await this.storageFs.deleteExpiredFiles("recordings", cutoff);
+    if (deleted > 0) {
+      console.log(`[Recorder] 清理过期录像: ${deleted} 个文件`);
     }
-    /** 清理后使缓存失效 */
     this.listCache.clear();
   }
 

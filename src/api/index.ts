@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { type CameraManager } from "@/camera/manager";
 import { type EventBus, type EventName } from "@/event-bus";
 import { type Annotator } from "@/ai/annotator";
@@ -528,15 +529,15 @@ export function startServer(
             results.alerts = `已删除 ${count} 条告警`;
           }
           if (opts.snapshots) {
-            const count = snapshotStorage.purgeAll();
+            const count = await snapshotStorage.purgeAll();
             results.snapshots = `已删除 ${count} 个检测快照`;
           }
           if (opts.alertSnapshots && alertSnapshotStorage) {
-            const count = alertSnapshotStorage.purgeAll();
+            const count = await alertSnapshotStorage.purgeAll();
             results.alertSnapshots = `已删除 ${count} 个告警快照`;
           }
           if (opts.thumbnails) {
-            const count = thumbnailGenerator.purgeAll();
+            const count = await thumbnailGenerator.purgeAll();
             results.thumbnails = `已删除 ${count} 个缩略图`;
           }
           if (opts.tracks) {
@@ -550,11 +551,11 @@ export function startServer(
             results.trajectories = `已删除 ${count} 条轨迹`;
           }
           if (opts.exports) {
-            const count = exporter.purgeAll();
+            const count = await exporter.purgeAll();
             results.exports = `已删除 ${count} 个导出文件`;
           }
           if (opts.recordings) {
-            const count = recorder.purgeAll();
+            const count = await recorder.purgeAll();
             results.recordings = `已删除 ${count} 个录像文件`;
           }
 
@@ -594,15 +595,16 @@ export function startServer(
             const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
             if (snapPath) {
               snapshotUrl = `/api/snapshots/${snapPath}`;
-              const meta = snapshotStorage.getSnapshotMeta(snapPath);
-              if (meta?.detections) detections = meta.detections;
             }
-            /** 从 detail 提取标签摘要 */
+            /** 从 detail 提取标签摘要（兼容新旧格式） */
             const detailObj = JSON.parse(ev.detail);
-            const dets = detailObj?.detections;
-            if (Array.isArray(dets)) {
+            if (detailObj?.labels && typeof detailObj.labels === "object") {
+              /** 新格式：{labels: {person: 2, car: 1}, count: 3} */
+              summary = Object.entries(detailObj.labels as Record<string, number>).map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
+            } else if (Array.isArray(detailObj?.detections)) {
+              /** 旧格式：{detections: [...]} */
               const labelCounts = new Map<string, number>();
-              for (const d of dets) {
+              for (const d of detailObj.detections) {
                 const name = d.trackName ?? d.label;
                 labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1);
               }
@@ -1293,7 +1295,7 @@ export function startServer(
       if (snapMetaMatch) {
         const camId = snapMetaMatch[1]!;
         const filename = snapMetaMatch[2]!;
-        const meta = snapshotStorage.getSnapshotMeta(`${camId}/${filename}`);
+        const meta = await snapshotStorage.getSnapshotMeta(`${camId}/${filename}`);
         if (!meta) return new Response("Not Found", { status: 404 });
         return Response.json(meta);
       }
@@ -1509,7 +1511,7 @@ export function startServer(
 
       /** 手动触发清理 */
       if (url.pathname === "/api/cleanup/run" && req.method === "POST") {
-        const report = cleaner.runCleanup();
+        const report = await cleaner.runCleanup();
         return Response.json(report);
       }
 
@@ -1643,9 +1645,26 @@ export function startServer(
         return Response.json({ ok: true });
       }
 
-      /** 全量校准磁盘用量 */
+      /** 手动全量校准磁盘用量 + 文件索引（用户主动触发） */
       if (url.pathname === "/api/storage/calibrate" && req.method === "POST") {
-        diskUsage.calibrate();
+        const dataDir = storageFs.root;
+        await Promise.all([
+          diskUsage.calibrateAsync(),
+          storageFs.fileIndex.calibrate("recordings", join(dataDir, "recordings"), (relPath: string) => {
+            const parts = relPath.split("/");
+            return { cameraId: parts.length >= 2 ? parts[0] : undefined };
+          }),
+          storageFs.fileIndex.calibrate("snapshots", join(dataDir, "detection-snapshots"), (relPath: string) => {
+            const parts = relPath.split("/");
+            return { cameraId: parts.length >= 2 ? parts[0] : undefined };
+          }),
+          storageFs.fileIndex.calibrate("exports", join(dataDir, "exports"), () => ({})),
+          storageFs.fileIndex.calibrate("thumbnails", join(dataDir, "thumbnails"), () => ({})),
+          storageFs.fileIndex.calibrate("alert-snapshots", join(dataDir, "alert-snapshots"), (relPath: string) => {
+            const parts = relPath.split("/");
+            return { cameraId: parts.length >= 2 ? parts[0] : undefined };
+          }),
+        ]);
         return Response.json({ ok: true });
       }
 
