@@ -248,8 +248,14 @@ export function useFmp4Stream(cameraId: Ref<string>) {
             ws?.close()
             return
           }
+          /** 新 SourceBuffer：直接 append init segment */
+          doAppend(fmp4Data)
+        } else {
+          /** 同 codec：可能分辨率变化（如 ffmpeg 重启），仍需 append init */
+          /** 清空 pending 队列避免旧的 media segment 残留 */
+          pendingQueue = []
+          doAppend(fmp4Data)
         }
-        doAppend(fmp4Data)
       } else if (type === FMP4_TYPE_MEDIA) {
         /** slice 创建独立 ArrayBuffer，避免将 type 标记字节传入 MSE */
         const fmp4Data = raw.slice(1).buffer
