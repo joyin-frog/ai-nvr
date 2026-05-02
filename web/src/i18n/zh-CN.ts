@@ -446,6 +446,7 @@ export default {
     help: '显示/隐藏快捷键帮助',
     patrol: '轮巡切换',
     screenshot: '截图当前摄像头',
+    toggleBoxes: '切换检测框显示',
   },
   notify: {
     detectTarget: '{name} - 检测到目标',

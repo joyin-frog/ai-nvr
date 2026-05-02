@@ -444,6 +444,7 @@ export default {
     help: 'Toggle shortcut help',
     patrol: 'Patrol switch',
     screenshot: 'Screenshot current camera',
+    toggleBoxes: 'Toggle detection boxes',
   },
   notify: {
     detectTarget: '{name} - Target detected',

@@ -891,6 +891,7 @@ onMounted(async () => {
   }})
   registerShortcut({ key: '?', description: t('shortcuts.help'), handler: () => { showShortcuts.value = !showShortcuts.value }})
   registerShortcut({ key: 'p', description: t('shortcuts.patrol'), handler: () => { togglePatrol() }})
+  registerShortcut({ key: 'b', description: t('shortcuts.toggleBoxes', '切换检测框'), handler: () => { showBoxes.value = !showBoxes.value }})
   registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: async () => {
     /** 全屏模式：截当前摄像头；网格模式：Shift+S 截所有，否则截第一个 */
     if (fullscreenCamera.value) {
