@@ -13,6 +13,9 @@ import { authWsUrl } from '../services/auth'
 const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
+/** 全局 TextDecoder 单例（避免每次 init segment 创建新实例） */
+const textDecoder = new TextDecoder()
+
 /** 全局共享 prune 循环：避免每个 fMP4 实例独立 setInterval */
 const activeStreams = new Set<{ pruneBuffer: () => void; catchUpToLive: () => void }>()
 let sharedPruneTimer: ReturnType<typeof setInterval> | null = null
@@ -274,7 +277,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         if (raw.length < 3) return
         const codecLen = (raw[2]! << 8) | raw[1]!
         if (raw.length < 3 + codecLen) return
-        const codec = new TextDecoder().decode(raw.subarray(3, 3 + codecLen))
+        const codec = textDecoder.decode(raw.subarray(3, 3 + codecLen))
         /** slice 创建独立 ArrayBuffer，避免 subarray.buffer 指向完整原始 buffer */
         const fmp4Data = raw.slice(3 + codecLen).buffer
 
