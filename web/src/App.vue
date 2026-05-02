@@ -774,10 +774,12 @@ function setupEventListeners() {
   })
 
   client.on('detect', (payload) => {
+    /** unchanged 时无 detections 字段，跳过缓存更新 */
+    if (payload.changed === false || !payload.detections) return
     /** 存入非响应式缓存，CameraView 通过 rAF poll 消费 */
     putDetections(payload.cameraId, payload.detections, payload.inferMs)
-    /** 0 目标或重复检测时只更新 UI 状态，不记录事件/通知 */
-    if (payload.detections.length === 0 || payload.changed === false) return
+    /** 0 目标时只更新 UI 状态，不记录事件/通知 */
+    if (payload.detections.length === 0) return
 
     const labels = payload.detections.map((d) => d.label).join(', ')
     const detail = labels
