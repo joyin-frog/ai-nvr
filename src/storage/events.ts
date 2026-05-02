@@ -282,9 +282,9 @@ export class EventStorage {
       conditions.push("starred = 1");
     }
     if (options.trackId != null) {
-      /** 从 detail JSON 中提取 trackId（SQLite json_extract） */
-      conditions.push("(json_extract(detail, '$.trackId') = ? OR detail LIKE ?)");
-      params.push(options.trackId, `%"trackId":${options.trackId}%`);
+      /** 从 detail JSON 中提取 trackId（SQLite json_extract，精确匹配） */
+      conditions.push("json_extract(detail, '$.trackId') = ?");
+      params.push(options.trackId);
     }
 
     return { conditions, params };
