@@ -731,32 +731,62 @@ class VideoToFmp4Muxer {
   }
 
   private buildMvhd(): Buffer {
+    /**
+     * version 0 mvhd layout:
+     * 0:  version(1) + flags(3)
+     * 4:  creation_time(4)
+     * 8:  modification_time(4)
+     * 12: timescale(4)
+     * 16: duration(4)
+     * 20: rate(4) = 0x00010000 (1.0)
+     * 24: volume(2) = 0x0100 (1.0)
+     * 26: reserved(10)
+     * 36: matrix(36) = identity
+     * 72: pre_defined(24)
+     * 96: next_track_ID(4)
+     */
     const data = Buffer.alloc(100);
-    data.writeUInt32BE(1000, 8);
-    data.writeUInt32BE(0x00010000, 20);
-    data.writeUInt16BE(0x0100, 24);
+    data.writeUInt32BE(1000, 12);      /** timescale = 1000 */
+    data.writeUInt32BE(0x00010000, 20); /** rate = 1.0 */
+    data.writeUInt16BE(0x0100, 24);     /** volume = 1.0 */
+    /** identity matrix at offset 36 */
     data.writeUInt32BE(0x00010000, 36);
     data.writeUInt32BE(0x00010000, 52);
     data.writeUInt32BE(0x40000000, 68);
-    data.writeUInt32BE(2, 96);
+    data.writeUInt32BE(2, 96);          /** next_track_ID */
     return this.box("mvhd", data);
   }
 
   private buildTkhd(w: number, h: number): Buffer {
+    /**
+     * version 0 tkhd layout:
+     * 0:  version(1) + flags(3) — flags=1 (track enabled)
+     * 4:  creation_time(4)
+     * 8:  modification_time(4)
+     * 12: track_ID(4) = 1
+     * 16: reserved(4)
+     * 20: duration(4)
+     * 24: reserved(8)
+     * 32: layer(2) + alternate_group(2) + volume(2) + reserved(2)
+     * 40: matrix(36) — identity: [1,0,0, 0,1,0, 0,0,1] in 16.16/2.30
+     * 76: width(4) 16.16 fixed-point
+     * 80: height(4) 16.16 fixed-point
+     */
     const data = Buffer.alloc(84);
-    data.writeUInt32BE(1, 0);           /** flags=1 (track enabled) */
-    data.writeUInt32BE(1, 12);          /** track_id=1 */
-    data.writeUInt32BE(0x00010000, 36); /** matrix[0] */
-    data.writeUInt32BE(0x00010000, 52); /** matrix[4] */
-    data.writeUInt32BE(0x40000000, 68); /** matrix[8] */
-    data.writeUInt32BE(w << 16, 76);    /** width 16.16 */
-    data.writeUInt32BE(h << 16, 80);    /** height 16.16 */
+    data.writeUInt32BE(1, 0);            /** flags=1 (track enabled) */
+    data.writeUInt32BE(1, 12);           /** track_id=1 */
+    data.writeUInt32BE(0x00010000, 40);  /** matrix[0] = 1.0 */
+    data.writeUInt32BE(0x00010000, 56);  /** matrix[4] = 1.0 */
+    data.writeUInt32BE(0x40000000, 72);  /** matrix[8] = 1.0 (2.30) */
+    data.writeUInt32BE(w << 16, 76);     /** width 16.16 */
+    data.writeUInt32BE(h << 16, 80);     /** height 16.16 */
     return this.box("tkhd", data);
   }
 
   private buildMdhd(): Buffer {
-    const data = Buffer.alloc(20);
-    data.writeUInt32BE(90000, 4);
+    /** version 0 mdhd: version(1) + flags(3) + creation_time(4) + modification_time(4) + timescale(4) + duration(4) = 24 bytes */
+    const data = Buffer.alloc(24);
+    data.writeUInt32BE(90000, 12);
     return this.box("mdhd", data);
   }
 
