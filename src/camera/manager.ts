@@ -8,6 +8,7 @@ import { H264Fmp4Extractor } from "./h264-fmp4-muxer";
 /**
  * 摄像头管理器
  * 为每个启用的摄像头创建并管理帧提取器实例
+ * 是 camera:online / camera:offline 事件的唯一权威源
  *
  * 架构（优化 RTSP 连接数）：
  *   HD 流：H264Fmp4Extractor（零转码 copy → fMP4）→ 前端 MSE GPU 解码显示
@@ -28,6 +29,14 @@ export class CameraManager {
   private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 当前摄像头配置列表 */
   private cameraConfigs: CameraConfig[] = [];
+  /**
+   * 摄像头在线状态（去重用）
+   * 两个 extractor 可能各自发射 extractor:online/offline，
+   * 这里跟踪聚合后的状态，只在真正变化时才发射 camera:online/offline
+   */
+  private cameraOnlineState = new Map<string, boolean>();
+  /** 取消订阅 extractor 内部事件的函数 */
+  private unsubExtractors: (() => void)[] = [];
 
   constructor(
     private config: AppConfig,
@@ -44,6 +53,36 @@ export class CameraManager {
       this.latestFrames.set(cameraId, { data, timestamp });
     });
 
+    /** 监听 extractor 内部事件，去重后发射 camera:online / camera:offline */
+    this.unsubExtractors.push(
+      this.eventBus.on("extractor:online", ({ cameraId }) => {
+        const prev = this.cameraOnlineState.get(cameraId) ?? false;
+        if (!prev) {
+          this.cameraOnlineState.set(cameraId, true);
+          this.eventBus.emit("camera:online", { cameraId });
+          console.log(`[CameraManager] ${cameraId} 上线（聚合）`);
+        }
+      }),
+    );
+    this.unsubExtractors.push(
+      this.eventBus.on("extractor:offline", ({ cameraId, source }) => {
+        const prev = this.cameraOnlineState.get(cameraId) ?? false;
+        if (!prev) return;
+        /** 检查该摄像头的其他 extractor 是否还在线 */
+        const display = this.displayExtractors.get(cameraId);
+        const fmp4 = this.fmp4Extractors.get(cameraId);
+        /** 发出 offline 的 extractor 已将自己标记为 offline，检查另一个 */
+        const otherOnline = source === "frame"
+          ? (fmp4?.isOnline ?? false)
+          : (display?.isOnline ?? false);
+        if (!otherOnline) {
+          this.cameraOnlineState.set(cameraId, false);
+          this.eventBus.emit("camera:offline", { cameraId });
+          console.log(`[CameraManager] ${cameraId} 离线（聚合，所有 extractor 均已下线）`);
+        }
+      }),
+    );
+
     for (const cam of this.cameraConfigs) {
       this.startCamera(cam);
     }
@@ -59,6 +98,11 @@ export class CameraManager {
     this.fmp4Extractors.clear();
     this.dualStreamFlags.clear();
     this.latestFrames.clear();
+    this.cameraOnlineState.clear();
+    for (const unsub of this.unsubExtractors) {
+      unsub();
+    }
+    this.unsubExtractors = [];
   }
 
   /** 获取最新一帧数据（显示流） */
@@ -231,5 +275,11 @@ export class CameraManager {
     this.latestFrames.delete(id);
     this.dualStreamFlags.delete(id);
     this.recorder.unregisterStream(id);
+    /** 清理聚合状态，若之前在线则发射 offline */
+    const wasOnline = this.cameraOnlineState.get(id) ?? false;
+    this.cameraOnlineState.delete(id);
+    if (wasOnline) {
+      this.eventBus.emit("camera:offline", { cameraId: id });
+    }
   }
 }

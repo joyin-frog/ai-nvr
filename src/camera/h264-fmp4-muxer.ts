@@ -114,8 +114,8 @@ class Fmp4StreamParser {
         if (buf.length - offset < 16) break;
         const extSize = Number(buf.readBigUInt64BE(offset + 8));
         if (buf.length - offset < extSize) break;
-        const boxData = Buffer.from(buf.subarray(offset, offset + extSize));
-        this.handleBox(boxType, boxData, eventBus, cameraId);
+        /** 零拷贝：subarray 是引用而非拷贝 */
+        this.handleBox(boxType, buf.subarray(offset, offset + extSize), eventBus, cameraId);
         offset += extSize;
         continue;
       }
@@ -123,13 +123,13 @@ class Fmp4StreamParser {
       /** 数据不完整，等下次 */
       if (actualSize < 8 || buf.length - offset < actualSize) break;
 
-      const boxData = Buffer.from(buf.subarray(offset, offset + actualSize));
-      this.handleBox(boxType, boxData, eventBus, cameraId);
+      /** 零拷贝：subarray 是引用而非拷贝 */
+      this.handleBox(boxType, buf.subarray(offset, offset + actualSize), eventBus, cameraId);
       offset += actualSize;
     }
 
-    /** 保留未处理的数据 */
-    this.buffer = offset > 0 ? Buffer.from(buf.subarray(offset)) : buf;
+    /** 保留未处理的数据（零拷贝引用） */
+    this.buffer = offset > 0 ? buf.subarray(offset) : buf;
   }
 
   /** 处理一个完整 box */
@@ -153,7 +153,7 @@ class Fmp4StreamParser {
         this.cachedInit = init;
         eventBus.emit("fmp4:init", { cameraId, segment: init });
         this.initCollected = true;
-        this.completedBoxes = [];
+        this.completedBoxes.length = 0;
       }
     } else {
       /** 收集 media segment: moof + mdat */
@@ -167,7 +167,7 @@ class Fmp4StreamParser {
         this.lastMediaData = mediaData;
 
         eventBus.emit("fmp4:segment", { cameraId, data: mediaData });
-        this.completedBoxes = [];
+        this.completedBoxes.length = 0;
 
         /** FPS 统计 */
         this.segmentCount++;
@@ -341,7 +341,7 @@ export class H264Fmp4Extractor {
     }
     if (this.online) {
       this.online = false;
-      this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+      this.eventBus.emit("extractor:offline", { cameraId: this.config.id, source: "fmp4" });
     }
     this.killProcess();
   }
@@ -375,26 +375,26 @@ export class H264Fmp4Extractor {
     switch (encoder) {
       case "h264_v4l2m2m":
         return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
-          "-g", "4", "-keyint_min", "2"];
+          "-g", "2", "-keyint_min", "1"];
       case "h264_vaapi":
         return [
           "-vaapi_device", "/dev/dri/renderD128",
           "-c:v", "h264_vaapi",
           "-vf", "format=nv12,hwupload",
           "-qp", "23",
-          "-g", "4", "-keyint_min", "2",
+          "-g", "2", "-keyint_min", "1",
         ];
       case "h264_nvenc":
         return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
-          "-cq", "23", "-g", "4", "-keyint_min", "2"];
+          "-cq", "23", "-g", "2", "-keyint_min", "1"];
       default:
         return [
           "-c:v", "libx264",
           "-preset", "ultrafast",
           "-tune", "zerolatency",
           "-crf", "23",
-          "-g", "4",
-          "-keyint_min", "2",
+          "-g", "2",
+          "-keyint_min", "1",
           "-x264-params", "bframes=0:nal-hrd=cbr",
         ];
     }
@@ -403,11 +403,12 @@ export class H264Fmp4Extractor {
   private spawnFfmpeg(): void {
     /**
      * 使用 ffmpeg 直接输出 fMP4 格式
-     * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 4帧 ~160ms@25fps）
+     * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 2帧 ~80ms@25fps）
      * 兼容 H.264/HEVC 等任意摄像头编码
      */
     const args = [
       "-rtsp_transport", "tcp",
+      "-avioflags", "direct",
       "-fflags", "nobuffer+fastseek+genpts+discardcorrupt",
       "-flags", "low_delay",
       "-max_delay", "0",
@@ -430,8 +431,8 @@ export class H264Fmp4Extractor {
       "-an",
       "-f", "mp4",
       "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      /** 强制每 0.02 秒切割一个 fMP4 段（50 segments/sec），实现最低延迟 */
-      "-frag_duration", "0.02",
+      /** 立即刷新到管道，避免 mp4 muxer 内部缓冲延迟 */
+      "-flush_packets", "1",
       "pipe:1",
     );
 
@@ -451,7 +452,7 @@ export class H264Fmp4Extractor {
 
       if (!this.online) {
         this.online = true;
-        this.eventBus.emit("camera:online", { cameraId: this.config.id });
+        this.eventBus.emit("extractor:online", { cameraId: this.config.id, source: "fmp4" });
         console.log(`${this.logTag} 流上线 (codec=${this.parser.lastInitSegment?.codec ?? "unknown"}, ${this.parser.videoWidth}x${this.parser.videoHeight})`);
       }
       this.retryCount = 0;
@@ -478,7 +479,7 @@ export class H264Fmp4Extractor {
       }
       if (this.online) {
         this.online = false;
-        this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+        this.eventBus.emit("extractor:offline", { cameraId: this.config.id, source: "fmp4" });
       }
       this.scheduleReconnect();
     });

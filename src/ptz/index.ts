@@ -3,8 +3,21 @@
  * 支持 ONVIF 协议和 TP-Link 私有 HTTP API 两种驱动
  */
 
+import * as http from "node:http";
 import { Cam } from "onvif/promises";
 import { TplinkPtzDriver } from "./tplink-ptz";
+
+/**
+ * ONVIF 专用的 keep-alive HTTP Agent
+ * 复用 TCP 连接，消除每次 PTZ 命令的 TCP 握手开销（约 30-80ms）
+ */
+const onvifAgent = new http.Agent({
+  keepAlive: true,
+  /** 空闲连接保活 30 秒 */
+  keepAliveMsecs: 30000,
+  /** 每个目标主机最多缓存 2 条空闲连接 */
+  maxSockets: 2,
+});
 
 /** PTZ 驱动类型 */
 export type PtzDriver = "onvif" | "tplink";
@@ -180,12 +193,13 @@ export class PtzController {
       this.drivers.set(config.cameraId, driver);
       console.log(`[PTZ] ${config.cameraId} 已连接 (TP-Link)`);
     } else {
-      /** 默认 ONVIF 驱动 */
+      /** 默认 ONVIF 驱动，使用 keep-alive Agent 复用 TCP 连接 */
       const cam = new Cam({
         hostname: config.hostname,
         port: config.port,
         username: config.username,
         password: config.password,
+        agent: onvifAgent,
       });
 
       await cam.connect();

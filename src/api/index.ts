@@ -295,7 +295,12 @@ export function startServer(
           break;
         }
       }
-      if (!hasOther) fmp4ActiveCameras.delete(camId);
+      if (!hasOther) {
+        fmp4ActiveCameras.delete(camId);
+        /** 清理编码缓存，避免离线摄像头占用内存 */
+        cachedInitByCamera.delete(camId);
+        cachedMediaByCamera.delete(camId);
+      }
     }
     console.log(`[fMP4] 客户端断开`);
   }

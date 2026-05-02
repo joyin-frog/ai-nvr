@@ -30,6 +30,7 @@ export class TrackLabelStorage {
   constructor(dbPath: string) {
     this.db = new Database(dbPath, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA busy_timeout = 5000");
     this.db.exec("PRAGMA wal_autocheckpoint = 1000");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS track_labels (

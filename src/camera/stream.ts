@@ -153,10 +153,9 @@ export class FrameExtractor {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    /** 只有显示流负责在线状态事件 */
-    if (this.online && this.purpose === "display") {
+    if (this.online) {
       this.online = false;
-      this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+      this.eventBus.emit("extractor:offline", { cameraId: this.config.id, source: "frame" });
     }
     this.killProcess();
   }
@@ -200,6 +199,7 @@ export class FrameExtractor {
     const args: string[] = [
       "-rtsp_transport", "tcp",
       /** 低延迟：最小化缓冲和探测 */
+      "-avioflags", "direct",
       "-fflags", "nobuffer+fastseek+genpts+discardcorrupt",
       "-flags", "low_delay",
       "-max_delay", "0",
@@ -247,11 +247,8 @@ export class FrameExtractor {
           frameCount++;
           if (!this.online) {
             this.online = true;
-            /** 只有显示流触发在线/离线事件 */
-            if (this.purpose === "display") {
-              this.eventBus.emit("camera:online", { cameraId: this.config.id });
-              console.log(`${this.logTag} 摄像头上线`);
-            }
+            this.eventBus.emit("extractor:online", { cameraId: this.config.id, source: "frame" });
+            console.log(`${this.logTag} 摄像头上线`);
           }
           /** 显示流发 frame 事件，检测流发 detect:frame 事件 */
           /** 单流模式（默认 purpose=detect）同时发两个事件，兼容所有消费者 */
@@ -306,10 +303,8 @@ export class FrameExtractor {
       this.proc = null;
       if (this.online) {
         this.online = false;
-        if (this.purpose === "display") {
-          this.eventBus.emit("camera:offline", { cameraId: this.config.id });
-          console.log(`${this.logTag} 摄像头离线`);
-        }
+        this.eventBus.emit("extractor:offline", { cameraId: this.config.id, source: "frame" });
+        console.log(`${this.logTag} 摄像头离线`);
       }
       if (this.running) {
         this.scheduleReconnect();
@@ -357,7 +352,8 @@ export class FrameExtractor {
         console.warn(`${this.logTag} 连续 ${maxRetries} 次重连失败，降频为每 5 分钟检查一次`);
       }
     } else {
-      delay = Math.min(2000 * Math.pow(2, this.retryCount - 1), 60_000);
+      /** 首次 200ms 快速重连，与 fMP4 一致 */
+      delay = Math.min(200 * Math.pow(2, this.retryCount - 1), 60_000);
     }
     console.log(`${this.logTag} ${delay}ms 后重连... (第 ${this.retryCount} 次)`);
     this.retryTimer = setTimeout(() => {

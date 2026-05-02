@@ -29,7 +29,7 @@ function registerStream(stream: { pruneBuffer: () => void; catchUpToLive: () => 
       for (const s of activeStreams) {
         s.pruneBuffer()
       }
-    }, 100)
+    }, 300)
   }
 }
 
@@ -43,14 +43,14 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
   }
 }
 
-/** 保留当前播放位置前多少秒缓冲区（GOP=4 ~160ms，0.15s 足够且保持极低延迟） */
-const BUFFER_RETAIN_SECONDS = 0.15
+/** 保留当前播放位置前多少秒缓冲区（0.2s 约 2.5 个 GOP，减少 prune 频率同时保持低延迟） */
+const BUFFER_RETAIN_SECONDS = 0.2
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
 const LIVE_CATCHUP_THRESHOLD = 0.08
 
-/** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 0.3
+/** 延迟超过此值（秒）直接 seek 到最新（给渐进追赶留更多空间，减少跳帧） */
+const LIVE_SEEK_THRESHOLD = 0.5
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
 const MAX_PENDING_SEGMENTS = 8

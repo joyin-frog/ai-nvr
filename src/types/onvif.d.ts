@@ -1,9 +1,13 @@
 declare module "onvif/promises" {
+  /** 自定义 HTTP Agent（如 keep-alive Agent），复用 TCP 连接 */
+  type HttpAgent = import("node:http").Agent
+
   interface CamOptions {
     hostname: string
     port?: number
     username?: string
     password?: string
+    agent?: HttpAgent | false
   }
 
   interface MoveOptions {

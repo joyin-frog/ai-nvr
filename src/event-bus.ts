@@ -52,14 +52,28 @@ export interface EventPayloads {
     inferMs?: number;
   };
 
-  /** 摄像头上线 */
+  /** 摄像头上线（由 CameraManager 去重后统一发射） */
   "camera:online": {
     cameraId: string;
   };
 
-  /** 摄像头离线 */
+  /** 摄像头离线（由 CameraManager 去重后统一发射） */
   "camera:offline": {
     cameraId: string;
+  };
+
+  /** 内部事件：单个 extractor 上线（不对外，CameraManager 用于去重） */
+  "extractor:online": {
+    cameraId: string;
+    /** 上线的 extractor 类型 */
+    source: "frame" | "fmp4";
+  };
+
+  /** 内部事件：单个 extractor 离线（不对外，CameraManager 用于去重） */
+  "extractor:offline": {
+    cameraId: string;
+    /** 离线的 extractor 类型 */
+    source: "frame" | "fmp4";
   };
 
   /** 摄像头帧率不足（低于阈值） */
