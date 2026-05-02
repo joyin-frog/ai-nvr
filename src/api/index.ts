@@ -3,6 +3,7 @@ import { type EventBus, type EventName } from "@/event-bus";
 import { type Annotator } from "@/ai/annotator";
 import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
+import { TrackStorage } from "@/storage/tracks";
 import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
@@ -779,6 +780,98 @@ export function startServer(
         }
         result.sort((a, b) => b.startTime - a.startTime);
         return Response.json(result);
+      }
+
+      /** 语义化录像搜索：用自然语言描述查找录像片段 */
+      if (url.pathname === "/api/recordings/semantic-search" && req.method === "GET") {
+        const query = url.searchParams.get("q") ?? "";
+        const cameraId = url.searchParams.get("cameraId") ?? undefined;
+        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
+        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        /** 最大返回匹配目标数 */
+        const topK = Math.min(Number(url.searchParams.get("topK") ?? 10), 20);
+
+        if (!query) return Response.json({ error: "q is required" }, { status: 400 });
+        if (!clipService) return Response.json({ error: "CLIP service not available" }, { status: 503 });
+
+        /** 1. 获取查询文本的 CLIP 嵌入 */
+        const embedResult = await clipService.textEmbed([query]);
+        const queryEmbedding = embedResult.embeddings[0];
+        if (!queryEmbedding?.length) {
+          return Response.json({ error: "Failed to compute text embedding" }, { status: 500 });
+        }
+
+        /** 2. 遍历所有有 CLIP embedding 的 track，计算余弦相似度 */
+        const candidates: Array<{ trackId: number; label: string; customName?: string; semanticLabel?: string; cameraIds: string[]; similarity: number }> = [];
+        for (const track of trackStorage.listTracks()) {
+          const record = trackStorage.getRecord(track.trackId);
+          if (!record?.clipEmbedding?.length) continue;
+          /** 余弦距离 → 相似度 */
+          const dist = TrackStorage.clipEmbeddingDistance(queryEmbedding, record.clipEmbedding);
+          const similarity = 1 - dist;
+          if (similarity > 0.2) {
+            candidates.push({
+              trackId: track.trackId,
+              label: track.label,
+              customName: record.customName,
+              semanticLabel: record.semanticLabel,
+              cameraIds: track.cameraIds,
+              similarity,
+            });
+          }
+        }
+        candidates.sort((a, b) => b.similarity - a.similarity);
+        const topMatches = candidates.slice(0, topK);
+
+        /** 3. 匹配的 trackId → 查事件表获取时间戳 → 映射到录像文件 */
+        const allEvents: Array<{ camera_id: string; timestamp: number; trackId: number }> = [];
+        for (const match of topMatches) {
+          const events = eventStorage.query({
+            typeLike: "track:%",
+            cameraId,
+            since,
+            until,
+            trackId: match.trackId,
+            limit: 200,
+          });
+          for (const e of events) {
+            allEvents.push({ camera_id: e.camera_id, timestamp: e.timestamp, trackId: match.trackId });
+          }
+        }
+
+        /** 按 cameraId 分组映射到录像 */
+        const cameraEvents = new Map<string, Array<{ timestamp: number; trackId: number }>>();
+        for (const e of allEvents) {
+          let arr = cameraEvents.get(e.camera_id);
+          if (!arr) { arr = []; cameraEvents.set(e.camera_id, arr); }
+          arr.push({ timestamp: e.timestamp, trackId: e.trackId });
+        }
+
+        const result: Array<{
+          filename: string;
+          cameraId: string;
+          startTime: number;
+          endTime: number;
+          size: number;
+          matchCount: number;
+          matches: Array<{ trackId: number; label: string; customName?: string; semanticLabel?: string; similarity: number }>;
+        }> = [];
+        for (const [camId, events] of cameraEvents) {
+          const minTs = Math.min(...events.map(e => e.timestamp));
+          const maxTs = Math.max(...events.map(e => e.timestamp));
+          const recs = recorder.listRecordings(camId, since ?? minTs - 60000, until ?? maxTs + 60000);
+          for (const rec of recs) {
+            const matchEvents = events.filter(e => e.timestamp >= rec.startTime && e.timestamp <= rec.endTime);
+            if (matchEvents.length === 0) continue;
+            /** 合并匹配目标信息（去重） */
+            const matchTrackIds = new Set(matchEvents.map(e => e.trackId));
+            const matches = topMatches.filter(m => matchTrackIds.has(m.trackId));
+            result.push({ ...rec, matchCount: matchEvents.length, matches });
+          }
+        }
+        result.sort((a, b) => b.startTime - a.startTime);
+
+        return Response.json({ query, totalTracks: candidates.length, results: result });
       }
 
       /** 录像文件播放（支持 Range 请求，MP4 seek 必需） */

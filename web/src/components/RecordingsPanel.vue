@@ -796,9 +796,11 @@ function setSortMode(mode: SortMode) {
 
 /** 按日期和收藏过滤后的录像列表 */
 /** 搜索结果（有值时替代 filteredRecordings） */
-const searchResults = ref<Array<Recording & { matchCount?: number }> | null>(null)
+const searchResults = ref<Array<Recording & { matchCount?: number; matches?: Array<{ trackId: number; label: string; customName?: string; semanticLabel?: string; similarity: number }> }> | null>(null)
+/** 语义搜索模式（使用 CLIP embedding 匹配） */
+const semanticSearchMode = ref(false)
 
-/** 执行 AI 目标搜索 */
+/** 执行目标搜索（精确标签或语义搜索） */
 async function searchByLabel() {
   const label = searchLabel.value.trim()
   if (!label) {
@@ -806,16 +808,19 @@ async function searchByLabel() {
     return
   }
   isSearching.value = true
-  const params = new URLSearchParams({ label })
+  const params = new URLSearchParams(semanticSearchMode.value ? { q: label } : { label })
   if (filterCamera.value) params.set('cameraId', filterCamera.value)
   if (filterDate.value) {
     const since = new Date(`${filterDate.value}T00:00:00`).getTime()
     params.set('since', String(since))
     params.set('until', String(since + 86_400_000))
   }
-  const res = await authFetch(`/api/recordings/search?${params}`)
+  const endpoint = semanticSearchMode.value ? '/api/recordings/semantic-search' : '/api/recordings/search'
+  const res = await authFetch(`${endpoint}?${params}`)
   if (res.ok) {
-    searchResults.value = await res.json()
+    const data = await res.json()
+    /** 语义搜索返回 { results: [...] }，精确搜索直接返回数组 */
+    searchResults.value = semanticSearchMode.value ? data.results : data
   }
   isSearching.value = false
 }
@@ -1895,9 +1900,10 @@ defineExpose({ loadRecordings, playAtTime })
         <button class="time-search-btn" @click="jumpToTime" :title="t('recording.jumpToTime')">&#x2315;</button>
       </div>
       <div class="ai-search">
-        <input v-model="searchLabel" :placeholder="t('recording.searchLabel', '搜索目标...')" class="ai-search-input" @keydown.enter="searchByLabel" />
+        <button :class="['semantic-toggle-btn', { active: semanticSearchMode }]" @click="semanticSearchMode = !semanticSearchMode" :title="semanticSearchMode ? '语义搜索（CLIP）' : '精确标签搜索'" :aria-label="semanticSearchMode ? '语义搜索' : '标签搜索'">{{ semanticSearchMode ? '🧠' : '🏷️' }}</button>
+        <input v-model="searchLabel" :placeholder="semanticSearchMode ? '描述目标（如：穿红衣服的人）' : t('recording.searchLabel', '搜索目标...')" class="ai-search-input" @keydown.enter="searchByLabel" />
         <button v-if="searchLabel" class="ai-search-clear" @click="clearSearch" title="清除">✕</button>
-        <button class="ai-search-btn" @click="searchByLabel" :disabled="isSearching || !searchLabel.trim()" :title="t('recording.searchLabel', '搜索目标')">&#x1F50D;</button>
+        <button class="ai-search-btn" @click="searchByLabel" :disabled="isSearching || !searchLabel.trim()" :title="semanticSearchMode ? '语义搜索' : t('recording.searchLabel', '搜索目标')">&#x1F50D;</button>
       </div>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
       <button class="sort-btn" @click="setSortMode(sortMode === 'newest' ? 'oldest' : sortMode === 'oldest' ? 'largest' : 'newest')" :title="sortMode === 'newest' ? '↓ Newest' : sortMode === 'oldest' ? '↑ Oldest' : '◎ Size'">
@@ -1914,7 +1920,14 @@ defineExpose({ loadRecordings, playAtTime })
 
     <!-- 搜索结果指示 -->
     <div v-if="searchResults" class="search-indicator">
-      {{ t('recording.searchResult', '搜索结果') }}: "{{ searchLabel }}" — {{ searchResults.length }} {{ t('recording.segments', '段') }}
+      {{ semanticSearchMode ? '🧠 语义搜索' : t('recording.searchResult', '搜索结果') }}: "{{ searchLabel }}" — {{ searchResults.length }} {{ t('recording.segments', '段') }}
+      <template v-if="semanticSearchMode && searchResults.length > 0">
+        <span class="semantic-matches">
+          <template v-for="(m, idx) in [...new Map(searchResults.flatMap(r => r.matches ?? []).map(m => [m.trackId, m])).values()]" :key="m.trackId">
+            <span v-if="idx < 5" class="semantic-match-chip" :title="`相似度 ${(m.similarity * 100).toFixed(0)}%`">{{ m.customName || m.semanticLabel || m.label }} {{ (m.similarity * 100).toFixed(0) }}%</span>
+          </template>
+        </span>
+      </template>
       <button class="search-clear-btn" @click="clearSearch">{{ t('manage.cancel') }}</button>
     </div>
 
@@ -2480,6 +2493,32 @@ defineExpose({ loadRecordings, playAtTime })
 
 .ai-search-btn:hover { background: #3a3a5a; }
 .ai-search-btn:disabled { opacity: 0.5; }
+
+.semantic-toggle-btn {
+  background: #1a1a2e;
+  color: #888;
+  border: 1px solid #2a2a4a;
+  border-right: none;
+  border-radius: 3px 0 0 3px;
+  padding: 2px 5px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.semantic-toggle-btn.active { background: #2a1a3e; color: #c084fc; border-color: #7c3aed; }
+.semantic-toggle-btn:hover { background: #2a2a4a; }
+
+.ai-search-input.semantic-active { border-color: #7c3aed; }
+
+.semantic-match-chip {
+  display: inline-block;
+  background: #2a1a3e;
+  color: #c084fc;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  margin-left: 4px;
+}
 
 .search-indicator {
   display: flex;

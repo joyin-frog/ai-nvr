@@ -511,19 +511,19 @@ function updateSmoothedBoxes(detections: Detection[]) {
     }
   }
   /** 已消失的目标移入淡出队列 */
-  const now = Date.now()
+  const fadeNow = Date.now()
   for (const id of smoothedBoxes.keys()) {
     if (!activeIds.has(id)) {
       const box = smoothedBoxes.get(id)!
       const color = getColor('', id)
-      fadeOutBoxes.set(id, { box, color: color.stroke, startTime: now })
+      fadeOutBoxes.set(id, { box, color: color.stroke, startTime: fadeNow })
       smoothedBoxes.delete(id)
       trackVelocities.delete(id)
     }
   }
   /** 清理过期的淡出目标 */
   for (const [id, state] of fadeOutBoxes) {
-    if (now - state.startTime > FADE_OUT_DURATION) fadeOutBoxes.delete(id)
+    if (fadeNow - state.startTime > FADE_OUT_DURATION) fadeOutBoxes.delete(id)
   }
 }
 
@@ -2334,6 +2334,7 @@ onUnmounted(() => {
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 600;
+  animation: frozen-blink 1.5s ease-in-out infinite;
 }
 
 .reconnect-badge {
@@ -2349,10 +2350,6 @@ onUnmounted(() => {
 @keyframes pulse-badge {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
-}
-  font-size: 11px;
-  font-weight: 600;
-  animation: frozen-blink 1.5s ease-in-out infinite;
 }
 
 @keyframes frozen-blink {
