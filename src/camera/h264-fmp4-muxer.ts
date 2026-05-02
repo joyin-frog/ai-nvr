@@ -355,12 +355,12 @@ export class H264Fmp4Extractor {
     const isTranscode = this.lastCopyFailed;
     const args = [
       "-rtsp_transport", "tcp",
+      /** 两种模式都启用低延迟 */
+      "-fflags", "nobuffer",
+      "-flags", "low_delay",
+      "-max_delay", "0",
+      "-reorder_queue_size", "0",
     ];
-
-    /** copy 模式：最低延迟；转码模式：保留缓冲避免 HEVC 解码 POC 错误 */
-    if (!isTranscode) {
-      args.push("-fflags", "nobuffer", "-flags", "low_delay", "-max_delay", "0", "-reorder_queue_size", "0");
-    }
 
     args.push(
       "-analyzeduration", "1000000",
