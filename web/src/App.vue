@@ -967,9 +967,6 @@ onMounted(async () => {
     startApp()
   }
 
-  /** 键盘快捷键 */
-  useKeyboardShortcuts()
-
   /** 下载 Blob 文件 */
   function downloadBlob(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob)

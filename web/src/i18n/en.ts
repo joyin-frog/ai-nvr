@@ -53,6 +53,7 @@ export default {
     clearName: 'Clear',
     saveFailed: 'Save failed',
     doubleClickToName: 'Double-click to name',
+    buffering: 'Buffering...',
   },
   event: {
     title: 'Event Log',
@@ -420,6 +421,13 @@ export default {
     clipEnabled: 'Enabled',
     clipModel: 'Model',
     clipEmbeddingDim: 'Embedding Dimension',
+    llmApiUrl: 'LLM API URL',
+    llmModel: 'Model Name',
+    llmMaxTokens: 'Max Output Tokens',
+    llmImageWidth: 'Image Width (px)',
+    llmSystemPrompt: 'System Prompt',
+    purgeTitle: 'Purge Data',
+    purgeWarning: 'This action is irreversible. Please carefully select the data types to purge',
   },
   login: {
     title: 'JK NVR Login',

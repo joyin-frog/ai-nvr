@@ -53,6 +53,7 @@ export default {
     clearName: '清除',
     saveFailed: '保存失败',
     doubleClickToName: '双击命名',
+    buffering: '缓冲中...',
   },
   event: {
     title: '事件日志',
@@ -422,6 +423,13 @@ export default {
     clipEnabled: '启用',
     clipModel: '模型',
     clipEmbeddingDim: '嵌入维度',
+    llmApiUrl: 'LLM API 地址',
+    llmModel: '模型名称',
+    llmMaxTokens: '最大输出 Tokens',
+    llmImageWidth: '图片宽度 (px)',
+    llmSystemPrompt: '系统提示词',
+    purgeTitle: '清除数据',
+    purgeWarning: '此操作不可恢复，请谨慎选择要清除的数据类型',
   },
   login: {
     title: 'JK NVR 登录',
