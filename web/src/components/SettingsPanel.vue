@@ -395,6 +395,51 @@ async function loadCleanupStats() {
   }
 }
 
+/** 一键清除数据 */
+const purgeOpts = reactive({
+  events: false,
+  alerts: false,
+  snapshots: false,
+  alertSnapshots: false,
+  tracks: false,
+  trajectories: false,
+  thumbnails: false,
+  exports: false,
+  recordings: false,
+})
+const purgeBusy = ref(false)
+const purgeResult = ref('')
+const hasPurgeSelection = computed(() => Object.values(purgeOpts).some(v => v))
+
+async function purgeData() {
+  if (!hasPurgeSelection.value) return
+  const labels = Object.entries(purgeOpts).filter(([, v]) => v).map(([k]) => {
+    const map: Record<string, string> = { events: '事件', alerts: '告警', snapshots: '检测快照', alertSnapshots: '告警快照', tracks: '追踪目标', trajectories: '轨迹', thumbnails: '缩略图', exports: '导出文件', recordings: '录像' }
+    return map[k]
+  })
+  if (!confirm(`确定要删除：${labels.join('、')}？此操作不可恢复！`)) return
+
+  purgeBusy.value = true
+  purgeResult.value = ''
+  try {
+    const res = await authFetch('/api/data/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(purgeOpts),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      purgeResult.value = Object.values(data.results).join('；')
+      Object.keys(purgeOpts).forEach(k => { purgeOpts[k] = false })
+      loadCleanupStats()
+    }
+  } catch {
+    purgeResult.value = '清除失败'
+  } finally {
+    purgeBusy.value = false
+  }
+}
+
 onMounted(() => {
   loadSettings()
   loadModelInfo()
@@ -476,99 +521,17 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- AI 检测 -->
+      <!-- AI 视觉分析 -->
       <section class="section">
-        <h3>{{ t('settings.ai') }}</h3>
+        <h3>{{ t('settings.ai', 'AI 视觉分析') }}</h3>
+        <p class="section-desc">使用视觉语言模型（VLM）分析摄像头画面，检测目标并生成语义描述。</p>
         <label class="field">
           <span class="field-label">{{ t('settings.aiEnabled') }}</span>
           <input type="checkbox" v-model="settings.ai.enabled" class="checkbox" />
         </label>
-        <div class="field field-col">
-          <span class="field-label">{{ t('settings.aiModel') }}</span>
-          <div class="model-presets">
-            <button
-              v-for="m in PRESET_MODELS"
-              :key="m.id"
-              :class="['preset-btn', { active: settings.ai.model === m.id }]"
-              @click="settings.ai.model = m.id"
-              :title="t(m.descKey)"
-            >{{ m.name }}</button>
-          </div>
-          <div class="model-row">
-            <input
-              type="text"
-              v-model="settings.ai.model"
-              placeholder="Xenova/detr-resnet-50"
-              class="input-model"
-            />
-            <button class="reload-btn" @click="reloadModel" :disabled="modelReloading">
-              {{ modelReloading ? t('settings.aiModelLoading') : t('settings.aiModelReload') }}
-            </button>
-          </div>
-          <span v-if="modelInfo" class="model-status">
-            {{ modelInfo.loading ? t('settings.aiModelLoading') : modelInfo.initialized ? t('settings.aiModelCurrent', { model: modelInfo.model }) : t('settings.aiModelNotInit') }}
-          </span>
-        </div>
-        <label class="field">
-          <span class="field-label">{{ t('settings.aiThreshold') }}</span>
-          <input type="number" v-model.number="settings.ai.threshold" step="0.05" min="0.1" max="1" class="input" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.aiMaxDetections') }}</span>
-          <input type="number" v-model.number="settings.ai.maxDetections" step="1" min="1" max="100" class="input" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.aiInputWidth') }}</span>
-          <input type="number" v-model.number="settings.ai.inputWidth" step="64" min="0" max="3840" class="input" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.aiShowBoxes') }}</span>
-          <input type="checkbox" v-model="settings.ai.showBoxes" class="checkbox" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.autoMatchThreshold', '自动匹配阈值') }}</span>
-          <input type="number" v-model.number="settings.ai.autoMatchThreshold" step="0.05" min="0" max="0.5" class="input" />
-          <span class="field-hint">0 = 禁用, 0.25 = 默认</span>
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.speedThreshold', '速度告警阈值') }}</span>
-          <input type="number" v-model.number="settings.ai.speedThreshold" step="0.005" min="0" max="0.1" class="input" />
-          <span class="field-hint">0 = 禁用, 0.02 = 默认</span>
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.loiterThreshold', '徘徊检测阈值(秒)') }}</span>
-          <input type="number" v-model.number="settings.ai.loiterThreshold" step="5" min="0" max="600" class="input" />
-          <span class="field-hint">0 = 禁用</span>
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.importantLabels', '重要标签（逗号分隔）') }}</span>
-          <input type="text" :value="settings.ai.importantLabels?.join(', ') ?? ''" @change="settings.ai.importantLabels = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
-          <span class="field-hint">{{ t('settings.importantLabelsHint', '留空=全部推送') }}</span>
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.aiMode') }}</span>
-          <select v-model="settings.ai.mode" class="input">
-            <option value="motion">{{ t('settings.aiModeMotion') }}</option>
-            <option value="continuous">{{ t('settings.aiModeContinuous') }}</option>
-          </select>
-        </label>
-        <label v-if="settings.ai.mode === 'continuous'" class="field">
-          <span class="field-label">{{ t('settings.aiInterval') }}</span>
-          <input type="number" v-model.number="settings.ai.interval" step="100" min="200" max="60000" class="input" />
-        </label>
-      </section>
-
-      <!-- 多模态 LLM -->
-      <section class="section">
-        <h3>{{ t('settings.llmTitle', '多模态 LLM') }}</h3>
-        <p class="section-desc">{{ t('settings.llmDesc', '启用后，AI 检测到重要事件时会将关键帧发送给多模态 LLM 生成场景描述。') }}</p>
-        <label class="field">
-          <span class="field-label">{{ t('settings.llmEnabled', '启用') }}</span>
-          <input type="checkbox" v-model="settings.ai.llm.enabled" class="checkbox" />
-        </label>
-        <template v-if="settings.ai.llm.enabled">
+        <template v-if="settings.ai.enabled">
           <label class="field">
-            <span class="field-label">{{ t('settings.llmApiUrl', 'API 端点') }}</span>
+            <span class="field-label">{{ t('settings.llmApiUrl', 'VLM API 端点') }}</span>
             <input type="url" v-model="settings.ai.llm.apiUrl" placeholder="http://localhost:1234/v1/chat/completions" class="input" />
             <span class="field-hint">OpenAI 兼容格式（LM Studio / Ollama / vLLM）</span>
           </label>
@@ -577,82 +540,39 @@ onMounted(() => {
             <input type="text" v-model="settings.ai.llm.model" placeholder="qwen3.5-0.8b" class="input" />
           </label>
           <label class="field">
-            <span class="field-label">{{ t('settings.llmInterval', '分析间隔 (ms)') }}</span>
-            <input type="number" v-model.number="settings.ai.llm.interval" step="1000" min="3000" max="120000" class="input" />
-            <span class="field-hint">每个摄像头独立节流</span>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmImageWidth', '图片缩放宽度') }}</span>
-            <input type="number" v-model.number="settings.ai.llm.imageWidth" step="64" min="0" max="1920" class="input" />
-            <span class="field-hint">0=使用检测帧原始分辨率，建议 640</span>
-          </label>
-          <label class="field">
             <span class="field-label">{{ t('settings.llmMaxTokens', '最大 Token') }}</span>
             <input type="number" v-model.number="settings.ai.llm.maxTokens" step="10" min="30" max="1000" class="input" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.aiMode') }}</span>
+            <select v-model="settings.ai.mode" class="input">
+              <option value="motion">{{ t('settings.aiModeMotion') }}</option>
+              <option value="continuous">{{ t('settings.aiModeContinuous') }}</option>
+            </select>
+          </label>
+          <label v-if="settings.ai.mode === 'continuous'" class="field">
+            <span class="field-label">{{ t('settings.aiInterval') }}</span>
+            <input type="number" v-model.number="settings.ai.interval" step="500" min="1000" max="60000" class="input" />
+            <span class="field-hint">VLM 推理较慢，建议 ≥ 5000ms</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmImageWidth', '推理图片宽度') }}</span>
+            <input type="number" v-model.number="settings.ai.llm.imageWidth" step="64" min="0" max="1920" class="input" />
+            <span class="field-hint">0=原始分辨率，建议 640</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.aiShowBoxes') }}</span>
+            <input type="checkbox" v-model="settings.ai.showBoxes" class="checkbox" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.importantLabels', '检测目标（逗号分隔）') }}</span>
+            <input type="text" :value="settings.ai.importantLabels?.join(', ') ?? ''" @change="settings.ai.importantLabels = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
+            <span class="field-hint">{{ t('settings.importantLabelsHint', '留空=全部检测') }}</span>
           </label>
           <label class="field">
             <span class="field-label">{{ t('settings.llmSystemPrompt', '系统提示词') }}</span>
             <textarea v-model="settings.ai.llm.systemPrompt" class="input textarea" rows="3" :placeholder="'留空使用默认提示词'"></textarea>
           </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmTriggers', '触发事件') }}</span>
-            <input type="text" :value="settings.ai.llm.triggers?.join(', ') ?? ''" @change="settings.ai.llm.triggers = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
-            <span class="field-hint">track:appeared, track:enter-zone, track:loiter</span>
-          </label>
-        </template>
-      </section>
-
-      <!-- CLIP 零样本分类 -->
-      <section class="section">
-        <h3>{{ t('settings.clipTitle', 'CLIP 零样本分类') }}</h3>
-        <p class="section-desc">{{ t('settings.clipDesc', '使用 CLIP 模型对检测到的目标进行零样本语义分类，提供比 YOLO 标签更丰富的描述（如 "black dog"、"person walking"）。') }}</p>
-        <label class="field">
-          <span class="field-label">{{ t('settings.clipEnabled', '启用') }}</span>
-          <input type="checkbox" v-model="settings.ai.clip.enabled" class="checkbox" />
-        </label>
-        <template v-if="settings.ai.clip.enabled">
-          <label class="field">
-            <span class="field-label">{{ t('settings.clipModel', '模型') }}</span>
-            <select v-model="settings.ai.clip.model" class="input">
-              <option value="jinaai/jina-clip-v2">Jina CLIP v2 (推荐)</option>
-            </select>
-            <span class="field-hint">支持 Matryoshka 嵌入截断，GPU/CPU 均可</span>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.clipEmbeddingDim', '嵌入维度') }}</span>
-            <input type="number" v-model.number="settings.ai.clip.embeddingDim" step="64" min="64" max="1024" class="input" />
-            <span class="field-hint">Matryoshka 截断维度，越小越快但精度降低（默认 512）</span>
-          </label>
-          <!-- 候选标签管理 -->
-          <div class="clip-candidates" v-if="clipCandidatesLoaded">
-            <span class="field-label">{{ t('settings.clipCandidates', '候选标签') }}</span>
-            <span class="field-hint">{{ t('settings.clipCandidatesHint', '每个检测类别对应一组候选描述，CLIP 会为检测到的目标选择最匹配的描述。修改后需保存。') }}</span>
-            <div class="candidate-categories">
-              <div v-for="(texts, label) in clipCandidates" :key="label" class="candidate-category">
-                <div class="category-header">
-                  <span class="category-label">{{ label }}</span>
-                  <button class="btn-icon btn-danger" @click="removeCandidateCategory(label)" :title="t('settings.removeCategory', '删除类别')">×</button>
-                </div>
-                <div class="candidate-tags">
-                  <span v-for="(text, idx) in texts" :key="idx" class="candidate-tag">
-                    {{ text }}
-                    <button class="tag-remove" @click="removeCandidateText(label, idx)">×</button>
-                  </span>
-                </div>
-                <div class="add-candidate-row">
-                  <input type="text" v-model="newCandidateText" :placeholder="t('settings.newCandidatePlaceholder', '输入候选描述...')" class="input" @keydown.enter="addCandidateText(label)" />
-                  <button class="btn-sm" @click="addCandidateText(label)">{{ t('settings.addCandidate', '添加') }}</button>
-                </div>
-              </div>
-            </div>
-            <div class="add-category-row">
-              <input type="text" v-model="newCandidateLabel" :placeholder="t('settings.newCategoryPlaceholder', '新类别名（如 person、dog）')" class="input" @keydown.enter="addCandidateCategory" />
-              <button class="btn-sm" @click="addCandidateCategory">{{ t('settings.addCategory', '添加类别') }}</button>
-            </div>
-            <button class="btn-save-candidates" :disabled="clipCandidatesSaving" @click="saveClipCandidates">
-              {{ clipCandidatesSaving ? t('settings.saving', '保存中...') : t('settings.saveCandidates', '保存候选标签') }}
-            </button>
-          </div>
         </template>
       </section>
 
@@ -843,6 +763,27 @@ onMounted(() => {
           <input type="number" v-model.number="settings.cleanup.thumbnailsRetentionDays" step="1" min="1" max="30" class="input" />
         </label>
         <button class="add-btn" @click="runCleanup">{{ t('settings.runCleanup') }}</button>
+
+        <!-- 一键清除数据 -->
+        <div class="purge-section">
+          <h4>{{ t('settings.purgeTitle', '一键清除数据') }}</h4>
+          <p class="section-desc danger">{{ t('settings.purgeWarning', '以下操作不可恢复，请谨慎使用！') }}</p>
+          <div class="purge-options">
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.events" /> 事件历史</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.alerts" /> 告警记录</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.snapshots" /> 检测快照</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.alertSnapshots" /> 告警快照</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.tracks" /> 追踪目标</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.trajectories" /> 运动轨迹</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.thumbnails" /> 缩略图缓存</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.exports" /> 导出文件</label>
+            <label class="purge-check danger"><input type="checkbox" v-model="purgeOpts.recordings" /> 录像文件</label>
+          </div>
+          <button class="purge-btn" @click="purgeData" :disabled="purgeBusy || !hasPurgeSelection">
+            {{ purgeBusy ? '清除中...' : '清除选中数据' }}
+          </button>
+          <span v-if="purgeResult" class="purge-result">{{ purgeResult }}</span>
+        </div>
       </section>
 
       <!-- 声音提醒 -->
@@ -1464,5 +1405,71 @@ onMounted(() => {
 .btn-save-candidates:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.purge-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #2a2a4a;
+}
+
+.purge-section h4 {
+  color: #ff6b6b;
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+.purge-section .section-desc.danger {
+  color: #ff9999;
+  font-size: 11px;
+  margin: 0 0 8px;
+}
+
+.purge-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+}
+
+.purge-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #bbb;
+  cursor: pointer;
+}
+
+.purge-check.danger {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.purge-btn {
+  width: 100%;
+  padding: 6px;
+  background: #cc3333;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.purge-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.purge-btn:hover:not(:disabled) {
+  background: #dd4444;
+}
+
+.purge-result {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #4ade80;
 }
 </style>
