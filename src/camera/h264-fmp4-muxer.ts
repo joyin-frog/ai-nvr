@@ -889,18 +889,20 @@ class VideoToFmp4Muxer {
   }
 
   private doRemoveEmulationPrevention(nal: Buffer): Buffer {
-    const result: number[] = [];
+    const buf = Buffer.allocUnsafe(nal.length);
+    let writePos = 0;
     let i = 0;
     while (i < nal.length) {
       if (i + 2 < nal.length && nal[i] === 0 && nal[i + 1] === 0 && nal[i + 2] === 3) {
-        result.push(0, 0);
+        buf[writePos++] = 0;
+        buf[writePos++] = 0;
         i += 3;
       } else {
-        result.push(nal[i]!);
+        buf[writePos++] = nal[i]!;
         i++;
       }
     }
-    return Buffer.from(result);
+    return buf.subarray(0, writePos);
   }
 
   private expGolombRead(buf: Buffer, bitOffset: number): number {
