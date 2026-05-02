@@ -8,7 +8,7 @@ import { AutoModel, AutoProcessor, RawImage, env as transformersEnv } from "@hug
 import sharp from "sharp";
 
 /** 设置模型下载源 */
-const hfEndpoint = process.env.HF_ENDPOINT ?? "https://huggingface.co";
+const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 transformersEnv.remoteHost = `${hfEndpoint}/`;
 transformersEnv.cacheDir = (workerData as { cacheDir: string }).cacheDir;
 
@@ -81,7 +81,7 @@ async function loadModel(): Promise<void> {
   console.log(`[CLIP Worker] 加载模型: ${init.model}`);
   processor = await AutoProcessor.from_pretrained(init.model);
   model = await AutoModel.from_pretrained(init.model, {
-    dtype: "q4",
+    dtype: "int8",
   });
   console.log(`[CLIP Worker] 模型加载完成`);
   parentPort?.postMessage({ type: "ready" });
