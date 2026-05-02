@@ -1836,14 +1836,15 @@ function onOverlayMouseMove(e: MouseEvent) {
   mouseNormX = (e.clientX - rect.left) / rect.width
   mouseNormY = (e.clientY - rect.top) / rect.height
 
-  /** 检测鼠标是否在某个检测框内 */
+  /** 检测鼠标是否在某个检测框内（含 10px 扩展命中区域，方便小目标悬停） */
+  const padNorm = 10 / rect.width
   const sorted = getSortedDetections()
   let found: number | null = null
   let bestArea = Infinity
   for (const d of sorted) {
     if (d.trackId == null) continue
     const box = getSmoothedBox(d)
-    if (mouseNormX >= box.xmin && mouseNormX <= box.xmax && mouseNormY >= box.ymin && mouseNormY <= box.ymax) {
+    if (mouseNormX >= box.xmin - padNorm && mouseNormX <= box.xmax + padNorm && mouseNormY >= box.ymin - padNorm && mouseNormY <= box.ymax + padNorm) {
       const area = (box.xmax - box.xmin) * (box.ymax - box.ymin)
       if (area < bestArea) {
         found = d.trackId
