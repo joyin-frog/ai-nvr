@@ -62,20 +62,30 @@ export class MultimodalAnalyzer {
   private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 帧更新取消订阅 */
   private unsubFrame: (() => void) | null = null;
+  /** 是否已启动 */
+  private started = false;
 
   constructor(eventBus: EventBus, config: LlmConfig) {
     this.eventBus = eventBus;
     this.config = config;
   }
 
-  /** 更新配置 */
+  /** 更新配置（配置变化时自动重启） */
   updateConfig(config: LlmConfig): void {
-    const wasEnabled = this.config.enabled;
+    const changed = this.config.enabled !== config.enabled
+      || this.config.apiUrl !== config.apiUrl
+      || this.config.model !== config.model
+      || this.config.maxTokens !== config.maxTokens
+      || this.config.interval !== config.interval
+      || this.config.imageWidth !== config.imageWidth
+      || this.config.systemPrompt !== config.systemPrompt
+      || JSON.stringify(this.config.triggers) !== JSON.stringify(config.triggers);
     this.config = config;
-    if (!wasEnabled && config.enabled) {
-      this.start();
-    } else if (wasEnabled && !config.enabled) {
+    if (changed && this.started) {
       this.stop();
+      if (config.enabled) this.start();
+    } else if (!this.started && config.enabled) {
+      this.start();
     }
   }
 
@@ -83,6 +93,7 @@ export class MultimodalAnalyzer {
   start(): void {
     if (!this.config.enabled) return;
     this.stop();
+    this.started = true;
 
     /** 缓存检测帧（用于后续 LLM 分析时获取最新图像） */
     this.unsubFrame = this.eventBus.on("detect", (payload) => {
@@ -106,6 +117,7 @@ export class MultimodalAnalyzer {
 
   /** 停止分析器 */
   stop(): void {
+    this.started = false;
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
     if (this.unsubFrame) {

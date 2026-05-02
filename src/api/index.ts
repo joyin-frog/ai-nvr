@@ -101,6 +101,7 @@ export function startServer(
   storageFs: StorageFs,
   alertSnapshotStorage?: SnapshotStorage,
   trajectoryStorage?: import("@/storage/track-trajectory").TrackTrajectoryStorage,
+  multimodalAnalyzer?: import("@/ai/multimodal-analyzer").MultimodalAnalyzer,
 ): void {
   /** 登录速率限制：IP → { count, resetAt } */
   const loginRateLimits = new Map<string, { count: number; resetAt: number }>();
@@ -391,6 +392,10 @@ export function startServer(
           /** 录像模式变更时通知 recorder */
           if (updated.recording.mode !== oldMode) {
             recorder.reloadMode();
+          }
+          /** 通知组件配置已更新 */
+          if (multimodalAnalyzer) {
+            multimodalAnalyzer.updateConfig(updated.ai.llm);
           }
           return Response.json(updated);
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
