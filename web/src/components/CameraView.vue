@@ -976,10 +976,11 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
         const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
         if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
       }
-      /** 未命名目标显示匹配建议 */
+      /** 未命名目标显示匹配建议 + 命名提示 */
       if (!isNamed && tid) {
         const suggest = suggestMap.get(tid)
         if (suggest) lines.push(`≈ ${suggest}`)
+        lines.push(t('camera.doubleClickToName', '双击命名'))
       }
       const tipX = x + w + 4
       const tipY = y
@@ -1312,14 +1313,42 @@ const existingTrackNames = computed(() => {
 
 /** Canvas contextmenu 事件：根据点击位置匹配最近的检测框 */
 function onCanvasContext(e: MouseEvent) {
-  const sorted = getSortedDetections()
-  if (sorted.length === 0) return
-  const canvas = e.currentTarget as HTMLElement
-  const rect = canvas.getBoundingClientRect()
-  const nx = (e.clientX - rect.left) / rect.width
-  const ny = (e.clientY - rect.top) / rect.height
+  const result = findDetectionAt(e.clientX, e.clientY, e.currentTarget as HTMLElement)
+  if (!result) return
+  const { trackId, label, nx, ny } = result
+  const existing = props.trackLabels?.[trackId] ?? ''
+  namingBox.value = { trackId, label, x: nx * 100, y: ny * 100 }
+  namingName.value = existing
+  nextTick(() => namingInput.value?.focus())
+}
 
-  /** 找到包含点击位置且面积最小的检测框（最精确匹配） */
+/** Canvas dblclick 事件：双击检测框直接命名 */
+function onOverlayDblClick(e: MouseEvent) {
+  const result = findDetectionAt(e.clientX, e.clientY, e.currentTarget as HTMLElement)
+  if (result) {
+    e.stopPropagation()
+    const existing = props.trackLabels?.[result.trackId] ?? ''
+    namingBox.value = { trackId: result.trackId, label: result.label, x: result.nx * 100, y: result.ny * 100 }
+    namingName.value = existing
+    nextTick(() => namingInput.value?.focus())
+  }
+}
+
+/** camera-body 双击 → 全屏（如果不在 canvas overlay 上） */
+function onBodyDblClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (target.tagName === 'CANVAS' || target.tagName === 'VIDEO') return
+  emit('fullscreen', cameraId)
+}
+
+/** 查找点击位置对应的检测框 */
+function findDetectionAt(clientX: number, clientY: number, element: HTMLElement): { trackId: number; label: string; nx: number; ny: number } | null {
+  const sorted = getSortedDetections()
+  if (sorted.length === 0) return null
+  const rect = element.getBoundingClientRect()
+  const nx = (clientX - rect.left) / rect.width
+  const ny = (clientY - rect.top) / rect.height
+
   let best: { trackId?: number; label: string; box: Detection['box'] } | null = null
   let bestArea = Infinity
   for (const d of sorted) {
@@ -1332,13 +1361,8 @@ function onCanvasContext(e: MouseEvent) {
       }
     }
   }
-  if (!best || !best.trackId) return
-  const x = nx * 100
-  const y = ny * 100
-  const existing = props.trackLabels?.[best.trackId] ?? ''
-  namingBox.value = { trackId: best.trackId, label: best.label, x, y }
-  namingName.value = existing
-  nextTick(() => namingInput.value?.focus())
+  if (!best || !best.trackId) return null
+  return { trackId: best.trackId, label: best.label, nx, ny }
 }
 
 /** 触屏长按命名支持（移动端） */
@@ -1754,7 +1778,7 @@ onUnmounted(() => {
     <div
       class="camera-body"
       :style="cameraBodyStyle"
-      @dblclick="emit('fullscreen', cameraId)"
+      @dblclick="onBodyDblClick($event)"
       @wheel="onWheel"
       @mousedown="onPanStart"
       @mousemove="onPanMove"
@@ -1779,6 +1803,7 @@ onUnmounted(() => {
               ref="overlayCanvas"
               class="camera-overlay"
               @contextmenu.prevent="onCanvasContext"
+              @dblclick="onOverlayDblClick"
               @mousemove="onOverlayMouseMove"
               @mouseleave="onOverlayMouseLeave"
               @touchstart="onTouchStart"
