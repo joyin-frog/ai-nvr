@@ -72,6 +72,8 @@ interface RecordingState {
   writing: boolean;
   /** 上次写入帧的时间戳（用于帧率节流） */
   lastWriteTime: number;
+  /** 高帧率模式截止时间（motion 触发后 2 秒内 ~30fps，之后恢复 15fps） */
+  boostUntil: number;
 }
 
 /**
@@ -202,6 +204,8 @@ export class MotionRecorder {
       this.unsubMotion = this.eventBus.on("motion", ({ cameraId, timestamp }) => {
         const state = this.getOrCreateState(cameraId);
         state.lastMotionTime = timestamp;
+        /** motion 触发时进入 boost 模式（2 秒内 ~30fps，捕获关键时刻） */
+        state.boostUntil = timestamp + MotionRecorder.WRITE_BOOST_DURATION_MS;
 
         if (!state.recording) {
           this.startRecording(cameraId, timestamp);
@@ -303,6 +307,10 @@ export class MotionRecorder {
 
   /** 录像帧写入节流间隔（~15fps） */
   private static readonly WRITE_THROTTLE_MS = 67;
+  /** motion 触发后 boost 期间的节流间隔（~30fps） */
+  private static readonly WRITE_BOOST_THROTTLE_MS = 33;
+  /** motion 触发后 boost 持续时间 */
+  private static readonly WRITE_BOOST_DURATION_MS = 2000;
 
   /** 将帧数据写入录像进程 */
   private writeFrame(cameraId: string, jpegData: Buffer): void {
@@ -325,8 +333,11 @@ export class MotionRecorder {
       return;
     }
 
-    /** 帧率节流：避免双流模式下 HD 高帧率写入过多帧 */
-    if (now - state.lastWriteTime < MotionRecorder.WRITE_THROTTLE_MS) return;
+    /** 帧率节流：boost 期间 ~30fps，正常 ~15fps */
+    const throttle = now < state.boostUntil
+      ? MotionRecorder.WRITE_BOOST_THROTTLE_MS
+      : MotionRecorder.WRITE_THROTTLE_MS;
+    if (now - state.lastWriteTime < throttle) return;
     state.lastWriteTime = now;
 
     state.writing = true;
@@ -678,7 +689,7 @@ export class MotionRecorder {
     const existing = this.states.get(cameraId);
     if (existing) return existing;
 
-    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false, lastWriteTime: 0 };
+    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false, lastWriteTime: 0, boostUntil: 0 };
     this.states.set(cameraId, state);
     return state;
   }
