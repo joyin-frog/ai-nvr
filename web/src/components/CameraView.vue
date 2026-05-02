@@ -1003,6 +1003,41 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
   cleanupTrails()
 
   const sorted = getSortedDetections()
+
+  /** 绘制区域事件浮动通知（即使没有检测框也要显示） */
+  const notifications = takeZoneNotifications(props.cameraId)
+  if (notifications.length > 0) {
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const now = Date.now()
+    for (let i = 0; i < notifications.length; i++) {
+      const n = notifications[i]!
+      const age = now - n.timestamp
+      const alpha = Math.max(0, 1 - age / 3000)
+      if (alpha <= 0) continue
+      const nx = width / 2
+      const ny = height * 0.25 + i * 24
+      const arrow = n.type === 'enter' ? '→' : n.type === 'leave' ? '←' : n.type === 'line-cross' ? '⚡' : n.type === 'loiter' ? '↻' : '⏳'
+      const directionText = n.direction ? ` ${n.direction}` : ''
+      const dwellText = n.dwellMs ? ` ${(n.dwellMs / 1000).toFixed(0)}s` : ''
+      const text = `${arrow} ${n.name} ${n.zoneName}${directionText}${dwellText}`
+      ctx.font = 'bold 12px sans-serif'
+      const tm = ctx.measureText(text)
+      const pad = 6
+      ctx.globalAlpha = alpha * 0.85
+      ctx.fillStyle = n.type === 'enter' ? 'rgba(0, 150, 136, 0.9)' : n.type === 'leave' ? 'rgba(156, 39, 176, 0.9)' : n.type === 'line-cross' ? 'rgba(255, 111, 0, 0.9)' : n.type === 'loiter' ? 'rgba(121, 85, 72, 0.9)' : 'rgba(255, 152, 0, 0.9)'
+      ctx.beginPath()
+      ctx.roundRect(nx - tm.width / 2 - pad, ny - 10, tm.width + pad * 2, 20, 4)
+      ctx.fill()
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = '#fff'
+      ctx.fillText(text, nx, ny)
+      ctx.globalAlpha = 1
+    }
+    ctx.textAlign = 'start'
+    ctx.textBaseline = 'bottom'
+  }
+
   if (sorted.length === 0) return
 
   /** 动画脉冲因子（用于未命名目标边框闪烁），减少动画模式下不闪烁 */
@@ -1346,44 +1381,6 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
         }
       }
     }
-  }
-
-  /** 绘制区域事件浮动通知（渐隐效果） */
-  const notifications = takeZoneNotifications(props.cameraId)
-  if (notifications.length > 0) {
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    const now = Date.now()
-    for (let i = 0; i < notifications.length; i++) {
-      const n = notifications[i]!
-      const age = now - n.timestamp
-      const alpha = Math.max(0, 1 - age / 3000)
-      if (alpha <= 0) continue
-      /** 通知从画面上方 1/4 处开始，每个通知偏移 24px */
-      const nx = width / 2
-      const ny = height * 0.25 + i * 24
-      /** 通知文字 */
-      const arrow = n.type === 'enter' ? '→' : n.type === 'leave' ? '←' : n.type === 'line-cross' ? '⚡' : n.type === 'loiter' ? '↻' : '⏳'
-      const directionText = n.direction ? ` ${n.direction}` : ''
-      const dwellText = n.dwellMs ? ` ${(n.dwellMs / 1000).toFixed(0)}s` : ''
-      const text = `${arrow} ${n.name} ${n.zoneName}${directionText}${dwellText}`
-      /** 背景 */
-      ctx.font = 'bold 12px sans-serif'
-      const tm = ctx.measureText(text)
-      const pad = 6
-      ctx.globalAlpha = alpha * 0.85
-      ctx.fillStyle = n.type === 'enter' ? 'rgba(0, 150, 136, 0.9)' : n.type === 'leave' ? 'rgba(156, 39, 176, 0.9)' : n.type === 'line-cross' ? 'rgba(255, 111, 0, 0.9)' : n.type === 'loiter' ? 'rgba(121, 85, 72, 0.9)' : 'rgba(255, 152, 0, 0.9)'
-      ctx.beginPath()
-      ctx.roundRect(nx - tm.width / 2 - pad, ny - 10, tm.width + pad * 2, 20, 4)
-      ctx.fill()
-      /** 文字 */
-      ctx.globalAlpha = alpha
-      ctx.fillStyle = '#fff'
-      ctx.fillText(text, nx, ny)
-      ctx.globalAlpha = 1
-    }
-    ctx.textAlign = 'start'
-    ctx.textBaseline = 'bottom'
   }
 
   ctx.restore()
@@ -2266,6 +2263,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
+  will-change: contents;
 }
 
 .static-overlay {
