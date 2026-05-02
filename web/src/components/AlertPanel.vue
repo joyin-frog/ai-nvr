@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
+import { useToast } from '../composables/useToast'
 
 /** 告警规则 */
 /** ROI 区域 */
@@ -46,6 +47,7 @@ interface AlertRecord {
 }
 
 const { t, locale } = useI18n()
+const { error: toastError } = useToast()
 
 const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
@@ -215,13 +217,12 @@ async function addRule() {
       showAddForm.value = false
       form.value = { ...emptyForm }
       loadRules()
+    } else {
+      toastError(t('alert.saveFailed'))
     }
   } catch {
-    // ignore
+    toastError(t('alert.saveFailed'))
   }
-}
-
-/** 开始编辑规则 */
 function startEdit(rule: AlertRule) {
   editingRuleId.value = rule.id
   showAddForm.value = false
@@ -255,9 +256,11 @@ async function saveEdit() {
       editingRuleId.value = null
       form.value = { ...emptyForm }
       loadRules()
+    } else {
+      toastError(t('alert.saveFailed'))
     }
   } catch {
-    // ignore
+    toastError(t('alert.saveFailed'))
   }
 }
 
@@ -277,7 +280,7 @@ async function toggleRule(rule: AlertRule) {
     })
     loadRules()
   } catch {
-    // ignore
+    toastError(t('alert.saveFailed'))
   }
 }
 
@@ -287,7 +290,7 @@ async function deleteRule(id: number) {
     await authFetch(`/api/alerts/rules/${id}`, { method: 'DELETE' })
     loadRules()
   } catch {
-    // ignore
+    toastError(t('alert.deleteFailed'))
   }
 }
 
