@@ -120,6 +120,10 @@ class VideoToFmp4Muxer {
 
   get lastInitSegment(): Fmp4InitSegment | null { return this.lastInit; }
 
+  /** 视频分辨率（从 SPS 解析，未解析时为 0） */
+  get videoWidth(): number { return this.width; }
+  get videoHeight(): number { return this.height; }
+
   /** 最近一个 media segment（用于新客户端快速显示首帧） */
   private lastMediaData: Buffer | null = null;
   get lastMediaSegment(): Buffer | null { return this.lastMediaData; }
@@ -1017,6 +1021,10 @@ export class H264Fmp4Extractor {
   get lastMediaSegment(): Buffer | null { return this.muxer.lastMediaSegment; }
 
   get lastFrameAt(): number { return this.online ? Date.now() : 0; }
+
+  /** 视频分辨率（从 SPS 解析） */
+  get videoWidth(): number { return this.muxer.videoWidth; }
+  get videoHeight(): number { return this.muxer.videoHeight; }
 
   /** 检测到的码流类型（avc/hevc） */
   get detectedCodec(): CodecType | null { return this.muxer.detectedCodec; }

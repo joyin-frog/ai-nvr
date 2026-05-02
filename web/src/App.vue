@@ -51,6 +51,14 @@ interface CameraStatus {
   displayFps: number
   /** 检测流帧率 */
   detectFps: number
+  /** fMP4 流帧率 */
+  streamFps: number
+  /** fMP4 流 codec（avc/hevc） */
+  streamCodec: string | null
+  /** fMP4 流分辨率宽度（从 SPS 解析） */
+  streamWidth: number
+  /** fMP4 流分辨率高度（从 SPS 解析） */
+  streamHeight: number
 }
 
 /** 侧边栏激活的标签 */
@@ -370,6 +378,10 @@ async function loadCameras() {
       dualStream: c.dualStream ?? false,
       displayFps: c.displayFps ?? 0,
       detectFps: c.detectFps ?? 0,
+      streamFps: c.streamFps ?? 0,
+      streamCodec: c.streamCodec ?? null,
+      streamWidth: c.streamWidth ?? 0,
+      streamHeight: c.streamHeight ?? 0,
     }))
     updateTitle()
     loadRoiData()
