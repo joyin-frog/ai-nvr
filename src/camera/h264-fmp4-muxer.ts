@@ -408,7 +408,7 @@ export class H264Fmp4Extractor {
      */
     const args = [
       "-rtsp_transport", "tcp",
-      "-fflags", "nobuffer+fastseek",
+      "-fflags", "nobuffer+fastseek+genpts+discardcorrupt",
       "-flags", "low_delay",
       "-max_delay", "0",
       "-reorder_queue_size", "0",

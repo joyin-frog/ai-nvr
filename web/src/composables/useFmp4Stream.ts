@@ -43,14 +43,14 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
   }
 }
 
-/** 保留当前播放位置前多少秒缓冲区（GOP=4 帧 ~160ms，0.3s 缓冲足够） */
-const BUFFER_RETAIN_SECONDS = 0.3
+/** 保留当前播放位置前多少秒缓冲区（GOP=4 ~160ms，0.15s 足够且保持极低延迟） */
+const BUFFER_RETAIN_SECONDS = 0.15
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 0.15
+const LIVE_CATCHUP_THRESHOLD = 0.08
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 0.4
+const LIVE_SEEK_THRESHOLD = 0.3
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
 const MAX_PENDING_SEGMENTS = 8
@@ -456,8 +456,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       drainPending()
     }
 
-    /** append 完成后立即追赶直播（消除 100ms 定时器延迟） */
-    if (wasAppending) catchUpToLive()
+    /** append 完成后立即追赶直播 + 修剪旧缓冲（消除定时器延迟） */
+    if (wasAppending) {
+      catchUpToLive()
+      pruneBuffer()
+    }
 
     /** 确保 video 播放位置在有效缓冲区内 */
     if (wasAppending && videoRef.value && sourceBuffer && sourceBuffer.buffered.length > 0) {

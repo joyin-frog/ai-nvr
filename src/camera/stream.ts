@@ -200,11 +200,11 @@ export class FrameExtractor {
     const args: string[] = [
       "-rtsp_transport", "tcp",
       /** 低延迟：最小化缓冲和探测 */
-      "-fflags", "nobuffer+fastseek",
+      "-fflags", "nobuffer+fastseek+genpts+discardcorrupt",
       "-flags", "low_delay",
       "-max_delay", "0",
       "-reorder_queue_size", "0",
-      "-analyzeduration", "200000",
+      "-analyzeduration", "50000",
       "-probesize", "16384",
       "-i", rtspUrl,
     ];
