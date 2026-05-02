@@ -253,6 +253,8 @@ watch(() => props.online, (v) => {
 function recordTrails() {
   for (const d of localDetections) {
     if (d.trackId == null) continue
+    /** 跳过全图框（CLIP 模式无空间定位） */
+    if (d.box.xmax - d.box.xmin > 0.95 && d.box.ymax - d.box.ymin > 0.95) continue
     const cx = (d.box.xmin + d.box.xmax) / 2
     const cy = (d.box.ymin + d.box.ymax) / 2
     let trail = trackTrails.get(d.trackId)
@@ -804,6 +806,11 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
   }
 
   for (const d of sorted) {
+    /** CLIP 全图分类：box 覆盖 ≥95% 画面时不画框（仅右上角标签栏显示） */
+    const boxW = d.box.xmax - d.box.xmin
+    const boxH = d.box.ymax - d.box.ymin
+    if (boxW > 0.95 && boxH > 0.95) continue
+
     const tid = d.trackId
     const customName = tid ? props.trackLabels?.[tid] : undefined
     const isNamed = !!customName
