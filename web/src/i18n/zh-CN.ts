@@ -52,6 +52,7 @@ export default {
     jumpToRecording: '查看录像',
     clearName: '清除',
     saveFailed: '保存失败',
+    doubleClickToName: '双击命名',
   },
   event: {
     title: '事件日志',
@@ -72,6 +73,8 @@ export default {
     trackSpeed: '高速移动',
     trackLineCross: '越线',
     trackMatchSuggest: '外观匹配',
+    trackLoiter: '徘徊',
+    llmScene: 'AI分析',
     ratio: '变动比例',
     targets: '检测目标',
     confidence: '置信度',

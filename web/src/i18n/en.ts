@@ -52,6 +52,7 @@ export default {
     jumpToRecording: 'View recording',
     clearName: 'Clear',
     saveFailed: 'Save failed',
+    doubleClickToName: 'Double-click to name',
   },
   event: {
     title: 'Event Log',
@@ -72,6 +73,8 @@ export default {
     trackSpeed: 'Speed',
     trackLineCross: 'Line Cross',
     trackMatchSuggest: 'Match',
+    trackLoiter: 'Loiter',
+    llmScene: 'AI Analysis',
     ratio: 'Motion Ratio',
     targets: 'Targets',
     confidence: 'Confidence',

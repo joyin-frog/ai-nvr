@@ -218,6 +218,7 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'track:line-cross': { labelKey: 'event.trackLineCross', bg: '#FF6F00', color: '#fff' },
   'track:loiter': { labelKey: 'event.trackLoiter', bg: '#795548', color: '#fff' },
   'track:match-suggest': { labelKey: 'event.trackMatchSuggest', bg: '#9C27B0', color: '#fff' },
+  'llm:scene': { labelKey: 'event.llmScene', bg: '#7C4DFF', color: '#fff' },
 }
 
 /** 从 detail 文本中提取变动比例（如 "变动 15.3%" → 15.3） */
