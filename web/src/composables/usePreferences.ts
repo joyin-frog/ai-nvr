@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import { authFetch } from '../services/auth'
 
 /** 模块级单例状态 */
@@ -59,6 +59,32 @@ export async function getPref<T = unknown>(key: string, defaultValue?: T): Promi
   return defaultValue as T
 }
 
+/** 同步获取偏好值（仅用于已初始化后的场景，未初始化时返回默认值） */
+export function getPrefSync<T = unknown>(key: string, defaultValue: T): T {
+  if (key in cache.value) return cache.value[key] as T
+  return defaultValue
+}
+
+/**
+ * 创建响应式偏好 ref
+ * 初始化时从缓存读取，后续修改自动同步到后端
+ * 比 getPref().then() 更优雅的用法
+ */
+export function prefRef<T = unknown>(key: string, defaultValue: T) {
+  const r = ref(defaultValue) as Ref<T>
+  /** 加载完成后更新值 */
+  ensureLoaded().then(() => {
+    if (key in cache.value) r.value = cache.value[key] as T
+  })
+  /** 监听变化自动保存 */
+  watch(r, (val) => {
+    cache.value = { ...cache.value, [key]: val }
+    dirtyQueue.set(key, val)
+    scheduleFlush()
+  })
+  return r
+}
+
 /** 设置偏好值（乐观更新 + 防抖写入） */
 export async function setPref(key: string, value: unknown): Promise<void> {
   await ensureLoaded()
@@ -97,11 +123,15 @@ export function usePreferences() {
     initialized: initializedRef,
     /** 获取偏好值 */
     getPref,
+    /** 同步获取偏好值 */
+    getPrefSync,
     /** 设置偏好值 */
     setPref,
     /** 批量设置 */
     setMany,
     /** 绑定偏好 */
     bindPref,
+    /** 创建响应式偏好 ref */
+    prefRef,
   }
 }
