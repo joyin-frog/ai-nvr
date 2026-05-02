@@ -428,6 +428,38 @@ const fadeOutBoxes = new Map<number, { box: { xmin: number; ymin: number; xmax: 
 const FADE_OUT_DURATION = 500
 
 /**
+ * 目标快照缩略图缓存
+ * 悬停时按需从后端加载 trackId 对应的裁剪快照
+ * 最多缓存 50 张（LRU 淘汰），避免内存泄漏
+ */
+const MAX_SNAPSHOT_CACHE = 50
+const trackSnapshotCache = new Map<number, HTMLImageElement | null>()
+/** 正在加载中的 trackId 集合（防止重复请求） */
+const snapshotLoading = new Set<number>()
+
+/** 按需加载 trackId 的快照缩略图 */
+function loadTrackSnapshot(trackId: number) {
+  if (trackSnapshotCache.has(trackId) || snapshotLoading.has(trackId)) return
+  snapshotLoading.add(trackId)
+  const img = new Image()
+  img.onload = () => {
+    trackSnapshotCache.set(trackId, img)
+    snapshotLoading.delete(trackId)
+    /** LRU 淘汰 */
+    if (trackSnapshotCache.size > MAX_SNAPSHOT_CACHE) {
+      const firstKey = trackSnapshotCache.keys().next().value
+      if (firstKey != null) trackSnapshotCache.delete(firstKey)
+    }
+    overlayDirty = true
+  }
+  img.onerror = () => {
+    trackSnapshotCache.set(trackId, null)
+    snapshotLoading.delete(trackId)
+  }
+  img.src = `/api/tracks/${trackId}/snapshot`
+}
+
+/**
  * 检测框 EMA 平滑 + 速度插值
  * 维护每个 trackId 的当前显示位置，新检测到达时按 EMA 系数平滑过渡
  * 在两次推理之间根据速度向量预测位置，使检测框以视频帧率平滑移动
@@ -1255,8 +1287,15 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
           : ctx.measureText(line).width
         if (lw > maxLineW) maxLineW = lw
       }
-      const tipW = maxLineW + tipPad * 2
-      const tipH = lines.length * lineH + tipPad * 2
+      /** 缩略图尺寸 */
+      const thumbSize = 48
+      const thumbGap = 6
+      const snapshotImg = tid != null ? (trackSnapshotCache.get(tid) ?? undefined) : undefined
+      const hasSnapshot = snapshotImg != null && snapshotImg.width > 0
+      const textW = maxLineW + tipPad * 2
+      const thumbTotal = hasSnapshot ? thumbSize + thumbGap : 0
+      const tipW = textW + thumbTotal
+      const tipH = Math.max(lines.length * lineH + tipPad * 2, hasSnapshot ? thumbSize + tipPad * 2 : 0)
       /** 如果超出右边界，放到左侧 */
       const finalX = tipX + tipW > width ? x - tipW - 4 : tipX
       const finalY = Math.min(tipY, height - tipH - 4)
@@ -1298,6 +1337,29 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       }
       ctx.textBaseline = 'bottom'
       ctx.font = FONT_LABEL
+      /** 绘制缩略图（右侧垂直居中） */
+      if (hasSnapshot && snapshotImg) {
+        const thumbX = finalX + textW + thumbGap / 2
+        const thumbY = finalY + (tipH - thumbSize) / 2
+        ctx.save()
+        ctx.beginPath()
+        ctx.roundRect(thumbX, thumbY, thumbSize, thumbSize, 3)
+        ctx.clip()
+        /** 居中裁切填满 */
+        const imgW = snapshotImg.naturalWidth || snapshotImg.width
+        const imgH = snapshotImg.naturalHeight || snapshotImg.height
+        const scale = Math.max(thumbSize / imgW, thumbSize / imgH)
+        const drawW = imgW * scale
+        const drawH = imgH * scale
+        ctx.drawImage(snapshotImg, thumbX + (thumbSize - drawW) / 2, thumbY + (thumbSize - drawH) / 2, drawW, drawH)
+        ctx.restore()
+        /** 缩略图边框 */
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.roundRect(thumbX, thumbY, thumbSize, thumbSize, 3)
+        ctx.stroke()
+      }
     }
     if (d.velocity && (Math.abs(d.velocity.dx) > 0.005 || Math.abs(d.velocity.dy) > 0.005)) {
       const cx = x + w / 2
@@ -1888,6 +1950,8 @@ function onOverlayMouseMove(e: MouseEvent) {
     }
   }
   hoveredTrackId.value = found
+  /** 悬停时按需加载目标快照缩略图 */
+  if (found != null) loadTrackSnapshot(found)
 }
 
 function onOverlayMouseLeave() {

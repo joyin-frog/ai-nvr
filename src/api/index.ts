@@ -1771,7 +1771,19 @@ export function startServer(
         return Response.json(merged.slice(0, limit));
       }
 
-      /** 追踪目标快照图片 */
+      /** 按 trackId 获取快照图片 GET /api/tracks/:trackId/snapshot */
+      const trackSnapshotMatch = url.pathname.match(/^\/api\/tracks\/(\d+)\/snapshot$/);
+      if (trackSnapshotMatch && req.method === "GET") {
+        const trackId = parseInt(trackSnapshotMatch[1]!);
+        const track = trackStorage.getTrack(trackId);
+        if (!track?.snapshotFile) return new Response("Not Found", { status: 404 });
+        const filePath = trackStorage.getSnapshotPath(track.snapshotFile);
+        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        const file = Bun.file(filePath);
+        return new Response(file);
+      }
+
+      /** 追踪目标快照图片（按文件名） */
       if (url.pathname.startsWith("/api/tracks/snapshot/") && req.method === "GET") {
         const filename = url.pathname.slice("/api/tracks/snapshot/".length);
         const filePath = trackStorage.getSnapshotPath(filename);
