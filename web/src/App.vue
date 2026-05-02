@@ -63,8 +63,8 @@ interface CameraStatus {
 
 /** 侧边栏激活的标签 */
 type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'tracks' | 'settings'
-const savedTab = localStorage.getItem('nvr-active-tab') as SidebarTab | null
-const activeTab = ref<SidebarTab>(savedTab ?? 'events')
+const activeTab = ref<SidebarTab>('events')
+getPref<string>('nvr-active-tab', 'events').then(v => { activeTab.value = v as SidebarTab })
 
 /** 摄像头 FPS 映射（从 health API 更新） */
 const cameraFpsMap = ref<Record<string, number>>({})
@@ -105,14 +105,15 @@ function closePwaPrompt() {
 }
 
 /** 网格列数配置 */
-const gridCols = ref(Number(localStorage.getItem('nvr-grid-cols')) || 0) // 0 = auto
+const gridCols = ref(0) // 0 = auto
+getPref<number>('nvr-grid-cols', 0).then(v => { gridCols.value = v })
 
 /** 循环切换网格列数：auto → 1 → 2 → 3 → 4 → auto */
 function cycleGridCols() {
   const cycle = [0, 1, 2, 3, 4]
   const idx = cycle.indexOf(gridCols.value)
   gridCols.value = cycle[(idx + 1) % cycle.length]!
-  localStorage.setItem('nvr-grid-cols', String(gridCols.value))
+  setPref('nvr-grid-cols', gridCols.value)
 }
 
 /** 分组筛选（空字符串表示全部） */
@@ -132,7 +133,8 @@ const isMobile = ref(false)
 /** 移动端底部面板是否展开 */
 const mobilePanelOpen = ref(false)
 /** 移动端面板高度（px，默认 50vh） */
-const mobilePanelHeight = ref(Number(localStorage.getItem('nvr-mobile-panel-height')) || Math.round(window.innerHeight * 0.5))
+const mobilePanelHeight = ref(Math.round(window.innerHeight * 0.5))
+getPref<number>('nvr-mobile-panel-height', 0).then(v => { if (v > 0) mobilePanelHeight.value = v })
 
 /** 移动端面板拖拽调整高度 */
 function onMobileDragStart(e: TouchEvent) {
@@ -145,7 +147,7 @@ function onMobileDragStart(e: TouchEvent) {
     mobilePanelHeight.value = Math.max(minH, Math.min(maxH, startHeight + delta))
   }
   function onEnd() {
-    localStorage.setItem('nvr-mobile-panel-height', String(mobilePanelHeight.value))
+    setPref('nvr-mobile-panel-height', mobilePanelHeight.value)
     document.removeEventListener('touchmove', onMove)
     document.removeEventListener('touchend', onEnd)
   }
@@ -154,7 +156,8 @@ function onMobileDragStart(e: TouchEvent) {
 }
 
 /** 侧边栏宽度（可拖拽调整） */
-const sidebarWidth = ref(Number(localStorage.getItem('nvr-sidebar-width')) || 340)
+const sidebarWidth = ref(340)
+getPref<number>('nvr-sidebar-width', 0).then(v => { if (v > 0) sidebarWidth.value = v })
 /** 拖拽调整侧边栏宽度 */
 let resizing = false
 function onResizeStart(e: MouseEvent) {
@@ -173,7 +176,7 @@ function onResizeStart(e: MouseEvent) {
     resizing = false
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
-    localStorage.setItem('nvr-sidebar-width', String(sidebarWidth.value))
+    setPref('nvr-sidebar-width', sidebarWidth.value)
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
   }
@@ -187,8 +190,9 @@ function checkMobile() {
 }
 
 const cameras = ref<CameraStatus[]>([])
-/** 摄像头排序（ID 数组，持久化到 localStorage） */
-const cameraOrder = ref<string[]>(JSON.parse(localStorage.getItem('nvr-camera-order') ?? '[]'))
+/** 摄像头排序（ID 数组，持久化到后端偏好） */
+const cameraOrder = ref<string[]>([])
+getPref<string[]>('nvr-camera-order', []).then(v => { if (v.length > 0) cameraOrder.value = v })
 /** 是否显示检测框（从 settings API 获取） */
 const showBoxes = ref(true)
 /** 每个摄像头的追踪标签映射：cameraId -> { trackId: name } */
@@ -360,7 +364,7 @@ function reorderCamera(targetId: string) {
   ids.splice(fromIdx, 1)
   ids.splice(toIdx, 0, sourceId)
   cameraOrder.value = ids
-  localStorage.setItem('nvr-camera-order', JSON.stringify(ids))
+  setPref('nvr-camera-order', ids)
   dragCameraId.value = null
   touchDragId = null
 }
@@ -450,7 +454,7 @@ async function onPlayRecording(cameraId: string, timestamp: number) {
 /** 切换到录像标签时刷新列表 */
 function switchTab(tab: SidebarTab) {
   activeTab.value = tab
-  localStorage.setItem('nvr-active-tab', tab)
+  setPref('nvr-active-tab', tab)
   if (tab === 'recordings') {
     recordingsPanel.value?.loadRecordings()
   }
@@ -465,7 +469,7 @@ function switchTab(tab: SidebarTab) {
 /** 跳转到追踪目标 */
 function onJumpToTrack(trackId: number) {
   activeTab.value = 'tracks'
-  localStorage.setItem('nvr-active-tab', 'tracks')
+  setPref('nvr-active-tab', 'tracks')
   nextTick(() => {
     trackGallery.value?.selectTrack(trackId)
   })
