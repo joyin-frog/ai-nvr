@@ -1114,6 +1114,7 @@ onUnmounted(() => {
                 :cross-lines="crossLineDataMap[cam.id]"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
+                @jump-to-track="onJumpToTrack"
                 @track-label-updated="loadTrackLabels"
               />
             </div>

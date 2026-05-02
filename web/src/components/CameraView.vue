@@ -47,6 +47,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   fullscreen: [cameraId: string]
   jumpToRecording: [cameraId: string, timestamp: number]
+  jumpToTrack: [trackId: number]
   trackLabelUpdated: []
 }>()
 
@@ -1464,6 +1465,14 @@ function jumpToRecordingFromNaming() {
   cancelNaming()
 }
 
+/** 跳转到追踪目标图库 */
+function jumpToTrackFromNaming() {
+  if (namingBox.value) {
+    emit('jumpToTrack', namingBox.value.trackId)
+  }
+  cancelNaming()
+}
+
 /** 离线时显示"最后在线 x 分钟前" */
 const lastSeenText = computed(() => {
   if (props.online || !props.lastFrameAt) return ''
@@ -1867,6 +1876,7 @@ onUnmounted(() => {
             >{{ t('camera.clearName', '清除') }}</button>
             <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
             <button class="naming-recording" @click="jumpToRecordingFromNaming" :title="t('camera.jumpToRecording')">&#x25B6;</button>
+            <button class="naming-track" @click="jumpToTrackFromNaming" title="查看追踪目标">&#x1F3AF;</button>
           </div>
           <div v-if="namingError" class="naming-error">{{ namingError }}</div>
         </div>
@@ -2334,6 +2344,21 @@ onUnmounted(() => {
 .naming-recording:hover {
   border-color: #4ECDC4;
   color: #4ECDC4;
+}
+
+.naming-track {
+  flex: 0;
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.naming-track:hover {
+  border-color: #9b59b6;
+  color: #9b59b6;
 }
 
 .naming-save:hover {
