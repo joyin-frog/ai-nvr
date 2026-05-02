@@ -68,6 +68,8 @@ export class EventStorage {
     offset?: number;
     search?: string;
     starred?: boolean;
+    /** 按目标 trackId 筛选（从 detail JSON 的 trackId 字段匹配） */
+    trackId?: number;
   } = {}): EventRecord[] {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -80,7 +82,7 @@ export class EventStorage {
   }
 
   /** 统计事件数量 */
-  count(options: { type?: string; typeLike?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean } = {}): number {
+  count(options: { type?: string; typeLike?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean; trackId?: number } = {}): number {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = this.db.query(`SELECT COUNT(*) as count FROM events ${where}`).get(...params) as { count: number };
@@ -251,7 +253,7 @@ export class EventStorage {
   }
 
   /** 构建查询条件 */
-  private buildConditions(options: { type?: string; typeLike?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean }): { conditions: string[]; params: SQLQueryBindings[] } {
+  private buildConditions(options: { type?: string; typeLike?: string; cameraId?: string; since?: number; until?: number; search?: string; starred?: boolean; trackId?: number }): { conditions: string[]; params: SQLQueryBindings[] } {
     const conditions: string[] = [];
     const params: SQLQueryBindings[] = [];
 
@@ -281,6 +283,11 @@ export class EventStorage {
     }
     if (options.starred) {
       conditions.push("starred = 1");
+    }
+    if (options.trackId != null) {
+      /** 从 detail JSON 中提取 trackId（SQLite json_extract） */
+      conditions.push("(json_extract(detail, '$.trackId') = ? OR detail LIKE ?)");
+      params.push(options.trackId, `%"trackId":${options.trackId}%`);
     }
 
     return { conditions, params };
