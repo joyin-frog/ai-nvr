@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue'
+import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 
@@ -82,6 +82,28 @@ function startLine() {
 function cancelDrawing() {
   drawMode.value = 'none'
   currentPoints.value = []
+}
+
+/** 撤销最后一个顶点 */
+function undoLastPoint() {
+  if (drawMode.value !== 'none' && currentPoints.value.length > 0) {
+    currentPoints.value.pop()
+  }
+}
+
+/** 键盘快捷键处理 */
+function onKeyDown(e: KeyboardEvent) {
+  if (drawMode.value === 'none') return
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    finishDrawing()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelDrawing()
+  } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    undoLastPoint()
+  }
 }
 
 /** 点击画面添加顶点 */
@@ -229,6 +251,11 @@ function lineArrowPath(line: CrossLine): string {
 
 onMounted(() => {
   loadRegions()
+  window.addEventListener('keydown', onKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown)
 })
 </script>
 
@@ -244,11 +271,13 @@ onMounted(() => {
         </template>
         <template v-else-if="drawMode === 'polygon'">
           <span class="draw-hint">{{ t('roi.drawHint', { count: currentPoints.length }) }}</span>
+          <button class="undo-btn" :disabled="currentPoints.length === 0" @click="undoLastPoint">↩</button>
           <button class="save-btn" :disabled="currentPoints.length < 3" @click="finishDrawing">{{ t('roi.save') }}</button>
           <button class="cancel-btn" @click="cancelDrawing">{{ t('settings.cancel') }}</button>
         </template>
         <template v-else-if="drawMode === 'line'">
           <span class="draw-hint">{{ currentPoints.length === 0 ? 'Click start point' : 'Click end point' }}</span>
+          <button class="undo-btn" :disabled="currentPoints.length === 0" @click="undoLastPoint">↩</button>
           <button class="save-btn" :disabled="currentPoints.length < 2" @click="finishDrawing">{{ t('roi.save') }}</button>
           <button class="cancel-btn" @click="cancelDrawing">{{ t('settings.cancel') }}</button>
         </template>
@@ -396,6 +425,19 @@ onMounted(() => {
   font-size: 12px;
   cursor: pointer;
 }
+
+.undo-btn {
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.undo-btn:disabled { opacity: 0.3; }
+.undo-btn:hover:not(:disabled) { color: #e0e0e0; border-color: #888; }
 
 .image-container {
   position: relative;
