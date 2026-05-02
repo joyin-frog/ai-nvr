@@ -1,7 +1,53 @@
 import { type EventBus } from "@/event-bus";
 import { type CameraConfig } from "@/config";
 import { type RuntimeConfig } from "@/runtime-config";
+import { execFile } from "node:child_process";
 import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
+
+/** 硬件编码器探测结果缓存（进程级，只探测一次） */
+let cachedEncoder: string | null = null;
+/** 探测是否正在进行 */
+let probePromise: Promise<string> | null = null;
+
+/** 异步探测可用的硬件编码器，返回优先级最高的可用编码器名称 */
+function probeHardwareEncoder(ffmpegPath: string, vaapiDevice: string): Promise<string> {
+  if (cachedEncoder !== null) return Promise.resolve(cachedEncoder);
+  /** 复用正在进行的探测，避免并发启动多个 ffmpeg 进程 */
+  if (probePromise) return probePromise;
+
+  probePromise = (async () => {
+    const candidates = [
+      { name: "h264_nvenc", args: ["-f", "lavfi", "-i", "color=black:s=64x64:d=0.1", "-c:v", "h264_nvenc", "-f", "null", "-"] },
+      { name: "h264_vaapi", args: ["-f", "lavfi", "-i", "color=black:s=64x64:d=0.1", "-vaapi_device", vaapiDevice, "-c:v", "h264_vaapi", "-f", "null", "-"] },
+      { name: "h264_qsv", args: ["-f", "lavfi", "-i", "color=black:s=64x64:d=0.1", "-c:v", "h264_qsv", "-f", "null", "-"] },
+      { name: "h264_videotoolbox", args: ["-f", "lavfi", "-i", "color=black:s=64x64:d=0.1", "-c:v", "h264_videotoolbox", "-f", "null", "-"] },
+      { name: "h264_amf", args: ["-f", "lavfi", "-i", "color=black:s=64x64:d=0.1", "-c:v", "h264_amf", "-f", "null", "-"] },
+    ];
+
+    for (const candidate of candidates) {
+      const ok = await new Promise<boolean>((resolve) => {
+        const proc = execFile(ffmpegPath, candidate.args, { timeout: 5000 }, (err) => {
+          resolve(!err);
+        });
+        proc.unref();
+      });
+      if (ok) {
+        cachedEncoder = candidate.name;
+        console.log(`[Encoder] 硬件编码器探测成功: ${candidate.name}`);
+        probePromise = null;
+        return cachedEncoder;
+      }
+    }
+
+    cachedEncoder = "libx264";
+    console.log("[Encoder] 无可用硬件编码器，回退到 libx264 软编码");
+    probePromise = null;
+    return cachedEncoder;
+  })();
+
+  return probePromise;
+}
 
 /** fMP4 段类型 */
 export interface Fmp4InitSegment {
@@ -12,7 +58,10 @@ export interface Fmp4InitSegment {
 
 export interface Fmp4MediaSegment {
   type: "media";
-  data: Buffer;
+  /** 零拷贝引用：moof box 数据 */
+  moofData: Buffer;
+  /** 零拷贝引用：mdat box 数据 */
+  mdatData: Buffer;
 }
 
 export type Fmp4Segment = Fmp4InitSegment | Fmp4MediaSegment;
@@ -31,10 +80,6 @@ function concat2(a: Buffer, b: Buffer): Buffer {
 }
 
 class Fmp4StreamParser {
-  /** 未处理的缓冲区 */
-  private buffer = Buffer.alloc(0);
-  /** 待合并的 chunks（延迟 flatten 减少 GC） */
-  private pendingChunks: Buffer[] = [];
   /** 已解析出的完整 box 列表（等待组装为 segment） */
   private completedBoxes: Array<{ type: string; data: Buffer }> = [];
   /** media segment 中是否已收集到 moof（标志位替代 Array.some） */
@@ -43,8 +88,11 @@ class Fmp4StreamParser {
   private initCollected = false;
   /** 缓存的 init segment */
   private cachedInit: Fmp4InitSegment | null = null;
-  /** 最近一个 media segment（用于新客户端首帧显示） */
-  private lastMediaData: Buffer | null = null;
+  /** 最近一个 media segment 的组成部分（零拷贝引用，按需合并） */
+  private lastMoof: Buffer | null = null;
+  private lastMdat: Buffer | null = null;
+  /** 缓存的合并结果（被 lastMediaSegment getter 消费后清除） */
+  private lastMergedMedia: Buffer | null = null;
   /** 帧率统计 */
   private segmentCount = 0;
   private segmentCountStart = Date.now();
@@ -55,11 +103,14 @@ class Fmp4StreamParser {
   private height = 0;
   /** 从 moov 中提取的 codec */
   private codec = "avc1.42C01E";
+  /** 已物化的连续 buffer */
+  private buffer: Buffer = Buffer.allocUnsafe(0);
+  /** 待合并的 chunks（延迟 flatten 减少 GC） */
+  private pendingChunks: Buffer[] = [];
 
   feed(data: Buffer, eventBus: EventBus, cameraId: string): void {
     if (this.pendingChunks.length === 0 && this.buffer.length === 0) {
-      /** data 来自 spawn stdout 的 data 事件，是独立 Buffer，可直接引用 */
-      this.buffer = data as typeof this.buffer;
+      this.buffer = data;
     } else {
       this.pendingChunks.push(data);
     }
@@ -73,25 +124,41 @@ class Fmp4StreamParser {
   get videoWidth(): number { return this.width; }
   get videoHeight(): number { return this.height; }
 
-  get lastMediaSegment(): Buffer | null { return this.lastMediaData; }
+  /** 获取缓存的最近 media segment（新客户端首帧，按需合并） */
+  get lastMediaSegment(): Buffer | null {
+    if (this.lastMergedMedia) return this.lastMergedMedia;
+    if (this.lastMoof && this.lastMdat) {
+      this.lastMergedMedia = concat2(this.lastMoof, this.lastMdat);
+      return this.lastMergedMedia;
+    }
+    return null;
+  }
 
   reset(): void {
-    this.buffer = Buffer.alloc(0);
+    this.buffer = Buffer.allocUnsafe(0);
     this.pendingChunks = [];
     this.completedBoxes = [];
     this.initCollected = false;
     this.segmentCount = 0;
     this.segmentCountStart = Date.now();
     this.currentFps = 0;
-    /** 清除缓存的 init/media segment，避免 ffmpeg 重启后旧数据与新流不兼容 */
     this.cachedInit = null;
-    this.lastMediaData = null;
+    this.lastMoof = null;
+    this.lastMdat = null;
+    this.lastMergedMedia = null;
   }
 
-  /** 将 pending chunks 合并到 buffer */
+  /** 将 pending chunks 合并到 buffer（使用 concat2 避免数组展开） */
   private flattenIfNeeded(): void {
-    if (this.pendingChunks.length === 0) return;
-    this.buffer = Buffer.concat([this.buffer, ...this.pendingChunks]);
+    const n = this.pendingChunks.length;
+    if (n === 0) return;
+    if (n === 1 && this.buffer.length === 0) {
+      this.buffer = this.pendingChunks[0]!;
+    } else if (n === 1) {
+      this.buffer = concat2(this.buffer, this.pendingChunks[0]!);
+    } else {
+      this.buffer = Buffer.concat([this.buffer, ...this.pendingChunks]);
+    }
     this.pendingChunks = [];
   }
 
@@ -102,36 +169,36 @@ class Fmp4StreamParser {
     let offset = 0;
 
     while (offset < buf.length) {
-      /** box header 至少需要 8 字节（4字节 size + 4字节 type） */
       if (buf.length - offset < 8) break;
 
       const boxSize = buf.readUInt32BE(offset);
       const boxType = buf.subarray(offset + 4, offset + 8).toString("ascii");
 
-      /** size=0 表示 box 延伸到文件末尾 */
       const actualSize = boxSize === 0 ? buf.length - offset : boxSize;
 
-      /** size=1 表示使用 8 字节 extended size */
       if (boxSize === 1) {
         if (buf.length - offset < 16) break;
         const extSize = Number(buf.readBigUInt64BE(offset + 8));
         if (buf.length - offset < extSize) break;
-        /** 零拷贝：subarray 是引用而非拷贝 */
         this.handleBox(boxType, buf.subarray(offset, offset + extSize), eventBus, cameraId);
         offset += extSize;
         continue;
       }
 
-      /** 数据不完整，等下次 */
       if (actualSize < 8 || buf.length - offset < actualSize) break;
 
-      /** 零拷贝：subarray 是引用而非拷贝 */
       this.handleBox(boxType, buf.subarray(offset, offset + actualSize), eventBus, cameraId);
       offset += actualSize;
     }
 
-    /** 保留未处理的数据（零拷贝引用） */
-    this.buffer = offset > 0 ? buf.subarray(offset) : buf;
+    /** 当消费了超过 64KB 数据时执行一次拷贝截断，避免 subarray 保留对大 buffer 的引用导致内存无法释放 */
+    if (offset > 0) {
+      this.buffer = (buf.length - offset < 65536 && offset > 65536)
+        ? Buffer.from(buf.subarray(offset))
+        : buf.subarray(offset);
+    } else {
+      this.buffer = buf;
+    }
   }
 
   /** 处理一个完整 box */
@@ -164,12 +231,15 @@ class Fmp4StreamParser {
 
       /** moof 后面跟的 mdat 组成一个完整的 media segment */
       if (type === "mdat" && this.hasMoof) {
-        const mediaData = concat2(this.completedBoxes[0]!.data, this.completedBoxes[1]!.data);
+        const moofData = this.completedBoxes[0]!.data;
+        const mdatData = this.completedBoxes[1]!.data;
 
-        /** 缓存最近一个 media segment（用于新客户端首帧） */
-        this.lastMediaData = mediaData;
+        /** 缓存零拷贝引用，lastMediaSegment getter 按需合并（消除每帧 alloc+copy） */
+        this.lastMoof = moofData;
+        this.lastMdat = mdatData;
+        this.lastMergedMedia = null;
 
-        eventBus.emit("fmp4:segment", { cameraId, data: mediaData });
+        eventBus.emit("fmp4:segment", { cameraId, moofData, mdatData });
         this.completedBoxes.length = 0;
         this.hasMoof = false;
 
@@ -311,7 +381,7 @@ export class H264Fmp4Extractor {
   private running = false;
   private online = false;
   /** 看门狗超时阈值（毫秒） */
-  private static readonly WATCHDOG_TIMEOUT = 15_000;
+  private static readonly WATCHDOG_TIMEOUT = 3_000;
   private retryCount = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** 看门狗：检测 ffmpeg 卡死（无数据输出） */
@@ -374,37 +444,60 @@ export class H264Fmp4Extractor {
    * 导致 PTZ 操作后要等关键帧才能看到画面变化（延迟 1-2s）
    * ultrafast 重编码 CPU 开销很低（~2% 单核/路），但 GOP 完全可控
    */
-  private getEncoderArgs(): string[] {
-    const encoder = this.runtimeConfig?.get().recording.encoder ?? "libx264";
+  private async getEncoderArgs(): Promise<string[]> {
+    let encoder = this.runtimeConfig?.get().recording.encoder ?? "libx264";
+    if (encoder === "auto") {
+      encoder = await probeHardwareEncoder(this.ffmpegPath, this.runtimeConfig?.get().recording.vaapiDevice ?? "/dev/dri/renderD128");
+    }
     switch (encoder) {
       case "h264_v4l2m2m":
         return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
-          "-g", "2", "-keyint_min", "1"];
+          "-g", "1", "-keyint_min", "1",
+          "-bf", "0"];
       case "h264_vaapi":
         return [
-          "-vaapi_device", "/dev/dri/renderD128",
+          "-vaapi_device", this.runtimeConfig?.get().recording.vaapiDevice ?? "/dev/dri/renderD128",
           "-c:v", "h264_vaapi",
           "-vf", "format=nv12,hwupload",
           "-qp", "23",
-          "-g", "2", "-keyint_min", "1",
+          "-g", "1", "-keyint_min", "1",
+          /** 低延迟：禁用 B 帧 + 立即输出 + 异步深度 1 */
+          "-bf", "0", "-flags", "+low_delay", "-async_depth", "1",
         ];
       case "h264_nvenc":
         return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
-          "-cq", "23", "-g", "2", "-keyint_min", "1"];
+          "-cq", "23", "-g", "1", "-keyint_min", "1",
+          /** 低延迟：禁用 B 帧 + 零 lookahead + 零延迟输出 */
+          "-bf", "0", "-rc-lookahead", "0", "-zerolatency", "1"];
+      case "h264_qsv":
+        return ["-c:v", "h264_qsv", "-preset", "veryfast",
+          "-global_quality", "23", "-g", "1", "-keyint_min", "1",
+          /** 低延迟：禁用 B 帧 + 异步深度 1 */
+          "-bf", "0", "-async_depth", "1"];
+      case "h264_videotoolbox":
+        return ["-c:v", "h264_videotoolbox",
+          "-q:v", "23",
+          "-g", "1", "-keyint_min", "1",
+          /** 低延迟：允许实时编码 */
+          "-realtime", "1"];
+      case "h264_amf":
+        return ["-c:v", "h264_amf", "-usage", "ultralowlatency",
+          "-quality", "speed", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23",
+          "-g", "1", "-keyint_min", "1"];
       default:
         return [
           "-c:v", "libx264",
           "-preset", "ultrafast",
           "-tune", "zerolatency",
           "-crf", "23",
-          "-g", "2",
+          "-g", "1",
           "-keyint_min", "1",
-          "-x264-params", "bframes=0",
+          "-x264-params", "bframes=0:sync-lookahead=0:rc-lookahead=0",
         ];
     }
   }
 
-  private spawnFfmpeg(): void {
+  private async spawnFfmpeg(): Promise<void> {
     /**
      * 使用 ffmpeg 直接输出 fMP4 格式
      * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 2帧 ~80ms@25fps）
@@ -417,19 +510,20 @@ export class H264Fmp4Extractor {
       "-flags", "low_delay",
       "-max_delay", "0",
       "-reorder_queue_size", "0",
+      "-thread_queue_size", "1",
     ];
 
     args.push(
-      "-analyzeduration", "50000",
-      "-probesize", "16384",
+      "-analyzeduration", "100000",
+      "-probesize", "32768",
       "-i", this.rtspUrl,
     );
 
-    /** 始终重编码：保证 GOP 可控，PTZ 后 ~160ms 即可看到画面变化 */
-    const encoderArgs = this.getEncoderArgs();
+    /** 始终重编码：保证 GOP 可控，PTZ 后即可看到画面变化 */
+    const encoderArgs = await this.getEncoderArgs();
     args.push(...encoderArgs);
-    /** 限制线程数避免多路并发时 CPU 过载 */
-    args.push("-threads", "2");
+    /** 单线程：zerolatency 模式下帧级并行无效，减少多路并发时 CPU 争用 */
+    args.push("-threads", "1");
 
     args.push(
       "-an",
@@ -446,12 +540,19 @@ export class H264Fmp4Extractor {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    this.proc.stdout?.on("data", (chunk: Buffer) => {
+    /** 用低水位线包装 stdout，减少 ffmpeg → Node 管道的批量缓冲延迟 */
+    const stdout = new Readable({ highWaterMark: 4096 }).wrap(this.proc.stdout!);
+    let initCached = false;
+    stdout.on("data", (chunk: Buffer) => {
       this.parser.feed(chunk, this.eventBus, this.config.id);
 
-      const init = this.parser.lastInitSegment;
-      if (init) {
-        this.cachedInit = init;
+      /** 只在首次缓存 init segment，之后跳过热路径上的冗余赋值 */
+      if (!initCached) {
+        const init = this.parser.lastInitSegment;
+        if (init) {
+          this.cachedInit = init;
+          initCached = true;
+        }
       }
 
       if (!this.online) {
@@ -513,10 +614,10 @@ export class H264Fmp4Extractor {
     this.watchdogTimer = setInterval(() => {
       if (!this.proc) { this.clearWatchdog(); return; }
       if (Date.now() - this.lastDataTime > H264Fmp4Extractor.WATCHDOG_TIMEOUT) {
-        console.warn(`${this.logTag} ffmpeg 15 秒无数据输出，可能卡死，强制重启`);
+        console.warn(`${this.logTag} ffmpeg 3 秒无数据输出，可能卡死，强制重启`);
         this.killProcess();
       }
-    }, 5000);
+    }, 1000);
   }
 
   /** 清除看门狗定时器 */

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
 import { type CameraConfig } from "@/config";
 import { type EventBus } from "@/event-bus";
 
@@ -115,7 +116,7 @@ export class FrameExtractor {
   /** 上一次接收到帧的时间 */
   private lastFrameTime = 0;
   /** 看门狗超时阈值（毫秒） */
-  private static readonly WATCHDOG_TIMEOUT = 15_000;
+  private static readonly WATCHDOG_TIMEOUT = 3_000;
   /** 当前是否在线（用于检测状态变化） */
   private online = false;
   /** 日志标签 */
@@ -126,6 +127,8 @@ export class FrameExtractor {
   private fpsLastTime = 0;
   /** 当前实际帧率（5秒滑动窗口） */
   private currentFps = 0;
+  /** 复用的帧 payload 对象（避免每帧分配新对象，减少 GC 压力） */
+  private reusablePayload: { cameraId: string; data: Buffer; timestamp: number };
 
   constructor(
     private config: CameraConfig,
@@ -139,6 +142,7 @@ export class FrameExtractor {
     this.logTag = purpose === "display"
       ? `[Display][${config.id}]`
       : `[Detect][${config.id}]`;
+    this.reusablePayload = { cameraId: config.id, data: Buffer.alloc(0), timestamp: 0 };
   }
 
   /** 启动帧提取 */
@@ -201,14 +205,14 @@ export class FrameExtractor {
 
     const args: string[] = [
       "-rtsp_transport", "tcp",
-      /** 低延迟：最小化缓冲和探测 */
       "-avioflags", "direct",
       "-fflags", "nobuffer+fastseek+genpts+discardcorrupt",
       "-flags", "low_delay",
       "-max_delay", "0",
       "-reorder_queue_size", "0",
-      "-analyzeduration", "50000",
-      "-probesize", "16384",
+      "-thread_queue_size", "1",
+      "-analyzeduration", "100000",
+      "-probesize", "32768",
       "-i", rtspUrl,
     ];
     if (vf) {
@@ -230,7 +234,8 @@ export class FrameExtractor {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const stdout = this.proc.stdout!;
+    /** 用低水位线包装 stdout，减少帧数据批量累积延迟 */
+    const stdout = this.proc.stdout ? new Readable({ highWaterMark: 4096 }).wrap(this.proc.stdout) : null;
     const stderr = this.proc.stderr!;
 
     if (stdout) {
@@ -254,12 +259,10 @@ export class FrameExtractor {
             console.log(`${this.logTag} 摄像头上线`);
           }
           /** 显示流发 frame 事件，检测流发 detect:frame 事件 */
-          /** 单流模式（默认 purpose=detect）同时发两个事件，兼容所有消费者 */
-          const payload = {
-            cameraId: this.config.id,
-            data: frame,
-            timestamp: now,
-          };
+          /** 复用 payload 对象，避免每帧分配 */
+          const payload = this.reusablePayload;
+          payload.data = frame;
+          payload.timestamp = now;
           if (this.purpose === "display") {
             this.eventBus.emit("frame", payload);
             this.eventBus.emit("detect:frame", payload);
@@ -329,10 +332,10 @@ export class FrameExtractor {
     this.watchdogTimer = setInterval(() => {
       if (!this.proc) { this.clearWatchdog(); return; }
       if (Date.now() - this.lastFrameTime > FrameExtractor.WATCHDOG_TIMEOUT) {
-        console.warn(`${this.logTag} ffmpeg 15 秒无帧输出，可能卡死，强制重启`);
+        console.warn(`${this.logTag} ffmpeg 3 秒无帧输出，可能卡死，强制重启`);
         this.killProcess();
       }
-    }, 5000);
+    }, 1000);
   }
 
   /** 清除看门狗定时器 */
