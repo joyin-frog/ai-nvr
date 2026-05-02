@@ -49,9 +49,11 @@ export class CameraManager {
   start(): void {
     this.cameraConfigs = this.config.cameras;
     /** 显示流的帧用于前端显示和录像 */
-    this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
-      this.latestFrames.set(cameraId, { data, timestamp });
-    });
+    this.unsubExtractors.push(
+      this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
+        this.latestFrames.set(cameraId, { data, timestamp });
+      }),
+    );
 
     /** 监听 extractor 内部事件，去重后发射 camera:online / camera:offline */
     this.unsubExtractors.push(
