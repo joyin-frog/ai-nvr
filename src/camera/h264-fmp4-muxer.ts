@@ -300,6 +300,8 @@ export class H264Fmp4Extractor {
   private logTag: string;
   /** 缓存 init segment（新客户端连接时发送） */
   private cachedInit: Fmp4InitSegment | null = null;
+  /** copy 模式是否失败过（HEVC 等不兼容编码） */
+  private lastCopyFailed = false;
 
   constructor(
     private config: CameraConfig,
@@ -347,11 +349,11 @@ export class H264Fmp4Extractor {
   private spawnFfmpeg(): void {
     /**
      * 使用 ffmpeg 直接输出 fMP4 格式
-     * -movflags frag_keyframe: 每个 IDR 帧产生一个 fragment
-     * -movflags empty_moov: init segment 不包含 media data
-     * -movflags default_base_moof: 使用 base_data_offset 使 trun 计算更简单
-     * libx264 ultrafast + zerolatency: 低延迟转码，通用兼容性好
+     * 策略：先尝试 copy（零 CPU 开销），copy 失败时 fallback 到 libx264 转码
+     * copy 模式：摄像头输出 H.264 → 直接封装 fMP4，CPU 接近 0
+     * transcode 模式：HEVC 等不兼容编码 → libx264 转码
      */
+    const isTranscode = this.retryCount >= 2 && this.lastCopyFailed;
     const args = [
       "-rtsp_transport", "tcp",
       "-fflags", "nobuffer",
@@ -361,15 +363,27 @@ export class H264Fmp4Extractor {
       "-analyzeduration", "1000000",
       "-probesize", "500000",
       "-i", this.rtspUrl,
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-tune", "zerolatency",
-      "-x264-params", "keyint=15:min-keyint=15",
+    ];
+
+    if (isTranscode) {
+      /** copy 持续失败时回退到转码 */
+      args.push(
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        "-x264-params", "keyint=15:min-keyint=15",
+      );
+    } else {
+      /** 零转码 copy — CPU 开销极低 */
+      args.push("-c:v", "copy");
+    }
+
+    args.push(
       "-an",
       "-f", "mp4",
       "-movflags", "frag_keyframe+empty_moov+default_base_moof",
       "pipe:1",
-    ];
+    );
 
     console.log(`${this.logTag} 启动 ffmpeg (fMP4 native): ${this.ffmpegPath} ${args.join(" ")}`);
 
@@ -397,10 +411,19 @@ export class H264Fmp4Extractor {
       if (msg.includes("error") || msg.includes("Error")) {
         console.error(`${this.logTag} ffmpeg error:`, msg);
       }
+      /** 检测 HEVC 码流 — copy 模式下 fMP4 会报错 */
+      if (msg.includes("hevc") || msg.includes("HEVC") || msg.includes("hvc1")) {
+        this.lastCopyFailed = true;
+        console.log(`${this.logTag} 检测到 HEVC 码流，下次重连将使用转码模式`);
+      }
     });
 
     this.proc.on("exit", (code) => {
       console.log(`${this.logTag} ffmpeg 退出, code=${code}`);
+      /** 如果没有收到过数据就退出，可能是 copy 模式不支持 */
+      if (!this.online && !this.lastCopyFailed) {
+        /** 检查是否是因为 codec 问题（短时间退出） */
+      }
       this.parser.reset();
       this.online = false;
       this.scheduleReconnect();

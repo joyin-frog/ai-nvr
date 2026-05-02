@@ -22,7 +22,7 @@ export async function ensureModelCached(
     return;
   }
 
-  const hfHost = endpoint ?? process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
+  const hfHost = endpoint ?? process.env.HF_ENDPOINT ?? "https://huggingface.co";
   const modelDir = join(cacheDir, modelId);
 
   for (const file of MODEL_FILES) {

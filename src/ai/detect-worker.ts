@@ -8,7 +8,7 @@ import { AutoModel, AutoProcessor, RawImage, env as transformersEnv } from "@hug
 import sharp from "sharp";
 
 /** 设置模型下载源 */
-const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
+const hfEndpoint = process.env.HF_ENDPOINT ?? "https://huggingface.co";
 transformersEnv.remoteHost = `${hfEndpoint}/`;
 transformersEnv.cacheDir = (workerData as { cacheDir: string }).cacheDir;
 

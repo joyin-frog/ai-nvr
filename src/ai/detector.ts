@@ -3,7 +3,7 @@ import { ensureModelCached } from "./model-downloader";
 import { ObjectTracker, initNextTrackId } from "./tracker";
 
 /** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
-const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
+const hfEndpoint = process.env.HF_ENDPOINT ?? "https://huggingface.co";
 
 /** 模型加载最大重试次数 */
 const MAX_RETRIES = 3;
