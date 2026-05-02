@@ -375,14 +375,14 @@ export class H264Fmp4Extractor {
     switch (encoder) {
       case "h264_v4l2m2m":
         return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
-          "-g", "8", "-keyint_min", "4"];
+          "-g", "4", "-keyint_min", "2"];
       case "h264_vaapi":
         return [
           "-vaapi_device", "/dev/dri/renderD128",
           "-c:v", "h264_vaapi",
           "-vf", "format=nv12,hwupload",
           "-qp", "23",
-          "-g", "8", "-keyint_min", "4",
+          "-g", "4", "-keyint_min", "2",
         ];
       case "h264_nvenc":
         return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
