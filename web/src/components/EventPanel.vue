@@ -110,6 +110,48 @@ const snapFilterLabel = ref('')
 /** 选中放大查看的快照 URL */
 const previewUrl = ref('')
 
+/**
+ * trackId → 快照缩略图 URL 缓存
+ * 从事件 detail 中提取 trackId，按需从后端加载快照
+ */
+const trackSnapshotMap = new Map<number, string>()
+const trackSnapshotLoading = new Set<number>()
+
+/** 按 trackId 加载快照缩略图 URL */
+async function loadTrackSnapshotUrl(trackId: number) {
+  if (trackSnapshotMap.has(trackId) || trackSnapshotLoading.has(trackId)) return
+  trackSnapshotLoading.add(trackId)
+  const url = `/api/tracks/${trackId}/snapshot`
+  const res = await fetch(url).catch(() => null)
+  if (res?.ok) {
+    trackSnapshotMap.set(trackId, url)
+  } else {
+    trackSnapshotMap.set(trackId, '')
+  }
+  trackSnapshotLoading.delete(trackId)
+}
+
+/** 从事件 detail 中提取 trackId */
+function extractTrackId(type: string, rawDetail: string | null): number | null {
+  if (!rawDetail || !type.startsWith('track:')) return null
+  try {
+    const d = JSON.parse(rawDetail)
+    return d.trackId ?? null
+  } catch { return null }
+}
+
+/** 获取 track 事件的快照 URL（按需加载） */
+function getTrackSnapshotUrl(type: string, rawDetail: string | null): string | null {
+  const trackId = extractTrackId(type, rawDetail)
+  if (trackId == null) return null
+  const cached = trackSnapshotMap.get(trackId)
+  if (cached === '') return null
+  if (cached) return cached
+  /** 触发异步加载 */
+  loadTrackSnapshotUrl(trackId)
+  return null
+}
+
 /** 加载快照列表 */
 async function loadSnapshots() {
   snapshotLoading.value = true
@@ -659,7 +701,10 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ cameraName(e.cameraId) }}</span>
-          <div v-if="(e.type === 'detect' || e.type === 'alert') && e.snapshotUrl" class="thumb-wrap">
+          <div v-if="getTrackSnapshotUrl(e.type, e.rawDetail)" class="thumb-wrap track-thumb">
+            <img :src="getTrackSnapshotUrl(e.type, e.rawDetail)!" class="event-thumb" alt="" />
+          </div>
+          <div v-else-if="(e.type === 'detect' || e.type === 'alert') && e.snapshotUrl" class="thumb-wrap">
             <img
               :src="authUrl(e.snapshotUrl)"
               class="event-thumb"
@@ -685,7 +730,10 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
-          <div v-if="(e.type === 'detect' || e.type === 'alert') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
+          <div v-if="getTrackSnapshotUrl(e.type, e.rawDetail)" class="expand-snap-wrap">
+            <img :src="getTrackSnapshotUrl(e.type, e.rawDetail)!" class="expand-snapshot" alt="" />
+          </div>
+          <div v-else-if="(e.type === 'detect' || e.type === 'alert') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
             <img
               :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshotMapByCamera.get(e.cameraId)"
               class="expand-snapshot"
@@ -1018,6 +1066,19 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 
 .thumb-wrap .event-thumb {
   display: block;
+}
+
+/** track 事件缩略图（正方形裁剪快照） */
+.thumb-wrap.track-thumb {
+  width: 27px;
+  height: 27px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.thumb-wrap.track-thumb .event-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .thumb-boxes {
