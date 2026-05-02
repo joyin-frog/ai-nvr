@@ -75,6 +75,12 @@ export class AiDetector {
   private lastDetectTime = new Map<string, number>();
   /** 上一次检测结果指纹（用于去重通知） */
   private lastDetectFingerprint = new Map<string, string>();
+  /** 每个摄像头的连续空检测计数（用于智能降频） */
+  private emptyDetectStreak = new Map<string, number>();
+  /** 智能降频：连续空检测达到此值时间隔翻倍 */
+  private static readonly IDLE_SLOWDOWN_THRESHOLD = 5;
+  /** 最大降频倍数 */
+  private static readonly MAX_IDLE_MULTIPLIER = 4;
   /** 每个摄像头的目标追踪器 */
   private trackers = new Map<string, ObjectTracker>();
   /** trackName 缓存：cameraId:trackId -> name，定期刷新 */
@@ -258,7 +264,7 @@ export class AiDetector {
       /** 帧驱动模式：每收到新帧时检查间隔，满足条件立即推理 */
       this.unsubFrame = this.eventBus.on("detect:frame", ({ cameraId, data, timestamp }) => {
         this.latestFrames.set(cameraId, { data, timestamp });
-        const camInterval = this.runtimeConfig.getAiInterval(cameraId);
+        const camInterval = this.getEffectiveInterval(cameraId);
         const lastTime = this.lastDetectTime.get(cameraId) ?? 0;
         if (timestamp - lastTime >= camInterval * 0.8) {
           this.detect(cameraId, data, timestamp).catch(err => {
@@ -299,11 +305,24 @@ export class AiDetector {
    * 并行发起所有待检测摄像头的推理请求
    * 不串行等待，Worker 内部 auto-skip 机制保证处理最新帧
    */
+  /** 获取有效检测间隔（考虑智能降频） */
+  private getEffectiveInterval(cameraId: string): number {
+    const baseInterval = this.runtimeConfig.getAiInterval(cameraId);
+    const streak = this.emptyDetectStreak.get(cameraId) ?? 0;
+    if (streak < AiDetector.IDLE_SLOWDOWN_THRESHOLD) return baseInterval;
+    /** 每超过阈值 5 次，倍数 +1，最高 4 倍 */
+    const multiplier = Math.min(
+      1 + Math.floor((streak - AiDetector.IDLE_SLOWDOWN_THRESHOLD) / AiDetector.IDLE_SLOWDOWN_THRESHOLD),
+      AiDetector.MAX_IDLE_MULTIPLIER,
+    );
+    return baseInterval * multiplier;
+  }
+
   private processQueue(): void {
     const now = Date.now();
     const batch = this.detectQueue.splice(0);
     for (const cameraId of batch) {
-      const camInterval = this.runtimeConfig.getAiInterval(cameraId);
+      const camInterval = this.getEffectiveInterval(cameraId);
       /** 始终使用该摄像头的最新帧（跳过中间帧） */
       const frame = this.latestFrames.get(cameraId);
       if (!frame) continue;
@@ -548,6 +567,13 @@ export class AiDetector {
       }
 
       const totalMs = performance.now() - t0;
+
+      /** 智能降频：无目标时增加空检测计数，有目标时重置 */
+      if (trackResult.detections.length === 0) {
+        this.emptyDetectStreak.set(cameraId, (this.emptyDetectStreak.get(cameraId) ?? 0) + 1);
+      } else {
+        this.emptyDetectStreak.set(cameraId, 0);
+      }
 
       /** 去重（在标注前计算，避免无变化时浪费标注开销） */
       const prevFp = this.lastDetectFingerprint.get(cameraId);
