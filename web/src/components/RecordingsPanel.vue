@@ -1090,8 +1090,13 @@ async function loadRecordings() {
     }
     const res = await authFetch(`/api/recordings?${params}`)
     if (res.ok) {
-      recordings.value = await res.json()
-      thumbUrls.value = {}
+      const newRecordings = await res.json()
+      /** 保留仍存在的录像缩略图，只移除已消失的 */
+      const newFilenames = new Set(newRecordings.map((r: any) => r.filename as string))
+      for (const key of Object.keys(thumbUrls.value)) {
+        if (!newFilenames.has(key)) delete thumbUrls.value[key]
+      }
+      recordings.value = newRecordings
       /** 静默预生成缩略图（后台批量请求，不阻塞 UI） */
       preloadThumbnails()
     }
