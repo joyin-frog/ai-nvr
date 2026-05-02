@@ -1,7 +1,7 @@
 # JK NVR - 项目状态文档
 
 ## 项目概述
-轻量级 NVR（网络视频录像机）系统，事件驱动架构，支持多路摄像头实时监控、变动检测、AI 目标检测、变动触发录像、多模态 LLM 场景分析。
+轻量级 NVR（网络视频录像机）系统，事件驱动架构，支持多路摄像头实时监控、变动检测、AI 目标检测（YOLO26s + ByteTrack + CLIP 零样本分类）、变动触发录像、多模态 LLM 场景分析。
 
 ## 技术栈
 - **后端**: Bun + TypeScript，`Bun.serve()` 提供 HTTP + WebSocket
@@ -9,8 +9,9 @@
 - **视频流**: 双模式 — fMP4/MSE（GPU 硬件解码）+ MJPEG Canvas 回退
 - **视频处理**: ffmpeg 子进程（fMP4 流提取 + JPEG 帧分割 + 录像编码）
 - **图像处理**: sharp（标注图合成）
-- **AI 检测**: @huggingface/transformers（YOLO26s ONNX 目标检测）+ Worker 线程推理
+- **AI 检测**: @huggingface/transformers（YOLO26s ONNX 目标检测）+ Worker 线程推理 + CLIP 零样本语义分类
 - **目标追踪**: ByteTrack（IoU 匹配 + min_hits 机制，跨帧稳定 ID）
+- **语义标签**: CLIP jina-clip-v2 零样本分类，自动生成丰富语义描述（如 "a black dog"）
 - **多模态 LLM**: OpenAI 兼容 API（LM Studio / Ollama），场景语义分析
 - **外观匹配**: dHash + 颜色直方图 + LBP 纹理，自动关联同名目标
 - **行为分析**: ROI 区域进出/停留/越线/徘徊/速度告警
@@ -49,7 +50,8 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 ```
 
 ## fMP4/MSE 模式（高性能）
-- ffmpeg 直接输出 fMP4 格式（`frag_keyframe+empty_moov`）
+- ffmpeg 直接输出 fMP4 格式（`frag_keyframe+empty_moov+frag_duration=1s`）
+- 每秒强制分段，降低端到端延迟至 ~1 秒
 - 浏览器 MediaSource + `<video>` GPU 硬件解码，零 CPU 解码开销
 - HEVC 摄像头自动检测并切换到 libx264 转码（superfast + CRF 23）
 - 低延迟参数：`-fflags nobuffer -flags low_delay -max_delay 0`
@@ -59,10 +61,12 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 
 ## AI 检测与追踪
 - YOLO26s ONNX 模型，Worker 线程推理不阻塞主线程
+- 帧驱动连续检测模式：detect:frame 事件触发，80% 间隔节流，比定时器延迟更低
 - ByteTrack 追踪器：min_hits=3 机制防止短暂误检产生幽灵 ID
+- CLIP 零样本分类：jina-clip-v2 为检测目标生成语义标签，全链路贯通
 - 外观匹配：dHash + 颜色直方图 + LBP 纹理特征
 - 自动关联：高置信度匹配自动命名同名目标
-- 检测指纹：label + 5% 网格位置量化，过滤无意义变化
+- 语义标签全链路：CLIP → Detector → BehaviorAnalyzer → EventBus → 持久化 → WS → 前端 → 通知
 
 ## 多模态 LLM 场景分析
 - 监听 track:appeared/enter-zone/loiter 等事件触发分析
