@@ -212,13 +212,10 @@ class Fmp4StreamParser {
       }
 
       /** 递归搜索容器 box */
-      if (type === "moov" || type === "trak" || type === "mdia" || type === "minf" || type === "stbl") {
-        /** 跳过 fullbox 的 version+flags（4字节） */
-        let childStart = offset + 8;
-        if (type !== "moov" && type !== "trak") {
-          /** moov 和 trak 是普通 box（不含 version+flags），其他是 fullbox */
-          /** 实际上 moov/trak/mdia/minf/stbl 都是普通 box，stbl 内的 stsd/stts 等才是 fullbox */
-        }
+      const isContainer = type === "moov" || type === "trak" || type === "mdia" || type === "minf" || type === "stbl" || type === "stsd";
+      if (isContainer) {
+        /** stsd 是 fullbox: version(1B) + flags(3B) + entry_count(4B) = 8 字节额外偏移 */
+        const childStart = offset + 8 + (type === "stsd" ? 8 : 0);
         const result = this.findCodecInBox(data, childStart);
         if (result) return result;
       }
@@ -274,8 +271,10 @@ class Fmp4StreamParser {
         }
       }
 
-      if (type === "moov" || type === "trak" || type === "mdia" || type === "minf" || type === "stbl") {
-        const result = this.findDimensionsInBox(data, offset + 8);
+      if (type === "moov" || type === "trak" || type === "mdia" || type === "minf" || type === "stbl" || type === "stsd") {
+        /** stsd 是 fullbox: version(1B) + flags(3B) + entry_count(4B) = 8 字节 */
+        const childStart = offset + 8 + (type === "stsd" ? 8 : 0);
+        const result = this.findDimensionsInBox(data, childStart);
         if (result) return result;
       }
 
@@ -405,6 +404,7 @@ export class H264Fmp4Extractor {
 
       if (!this.online) {
         this.online = true;
+        this.eventBus.emit("camera:online", { cameraId: this.config.id });
         console.log(`${this.logTag} 流上线 (codec=${this.parser.lastInitSegment?.codec ?? "unknown"}, ${this.parser.videoWidth}x${this.parser.videoHeight})`);
       }
       this.retryCount = 0;

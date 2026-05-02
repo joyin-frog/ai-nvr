@@ -78,7 +78,7 @@ export class CameraManager {
       result.push({
         id: cam.id,
         name: cam.friendlyName,
-        online: display?.isOnline ?? fmp4?.isOnline ?? false,
+        online: display?.isOnline || fmp4?.isOnline || false,
         lastFrameAt: display?.lastFrameAt ?? 0,
         group: cam.group,
         ptz: cam.ptz?.enabled === true,
