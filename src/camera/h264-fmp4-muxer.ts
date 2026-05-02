@@ -386,15 +386,15 @@ export class H264Fmp4Extractor {
         ];
       case "h264_nvenc":
         return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
-          "-cq", "23", "-g", "8", "-keyint_min", "4"];
+          "-cq", "23", "-g", "4", "-keyint_min", "2"];
       default:
         return [
           "-c:v", "libx264",
           "-preset", "ultrafast",
           "-tune", "zerolatency",
           "-crf", "23",
-          "-g", "8",
-          "-keyint_min", "4",
+          "-g", "4",
+          "-keyint_min", "2",
           "-x264-params", "bframes=0:nal-hrd=cbr",
         ];
     }
@@ -403,7 +403,7 @@ export class H264Fmp4Extractor {
   private spawnFfmpeg(): void {
     /**
      * 使用 ffmpeg 直接输出 fMP4 格式
-     * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 8帧 ~320ms@25fps）
+     * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 4帧 ~160ms@25fps）
      * 兼容 H.264/HEVC 等任意摄像头编码
      */
     const args = [
@@ -415,12 +415,12 @@ export class H264Fmp4Extractor {
     ];
 
     args.push(
-      "-analyzeduration", "200000",
+      "-analyzeduration", "50000",
       "-probesize", "16384",
       "-i", this.rtspUrl,
     );
 
-    /** 始终重编码：保证 GOP 可控，PTZ 后 ~320ms 即可看到画面变化 */
+    /** 始终重编码：保证 GOP 可控，PTZ 后 ~160ms 即可看到画面变化 */
     const encoderArgs = this.getEncoderArgs();
     args.push(...encoderArgs);
     /** 限制线程数避免多路并发时 CPU 过载 */

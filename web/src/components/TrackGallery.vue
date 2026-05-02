@@ -369,11 +369,11 @@ const filteredTracks = computed(() => {
       || (t.semanticLabel && t.semanticLabel.toLowerCase().includes(q))
       || String(t.trackId).includes(q)
     )
-    /** 本地匹配有结果就用本地结果；否则展示语义搜索结果 */
+    /** 本地匹配有结果就用本地结果；否则展示语义搜索结果（仍应用当前筛选条件） */
     if (localMatches.length > 0) return localMatches
     if (semanticResults.value.length > 0) {
-      /** 用语义搜索结果覆盖，但仍应用筛选条件 */
-      return semanticResults.value
+      const semIds = new Set(semanticResults.value.map(t => t.trackId))
+      return list.filter(t => semIds.has(t.trackId))
     }
     return []
   }

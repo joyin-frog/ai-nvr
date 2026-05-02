@@ -41,17 +41,17 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
   }
 }
 
-/** 保留当前播放位置前多少秒缓冲区（服务端 GOP=8 帧 ~320ms，0.5s 缓冲足够） */
-const BUFFER_RETAIN_SECONDS = 0.5
+/** 保留当前播放位置前多少秒缓冲区（GOP=4 帧 ~160ms，0.3s 缓冲足够） */
+const BUFFER_RETAIN_SECONDS = 0.3
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 0.2
+const LIVE_CATCHUP_THRESHOLD = 0.15
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 0.6
+const LIVE_SEEK_THRESHOLD = 0.4
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
-const MAX_PENDING_SEGMENTS = 4
+const MAX_PENDING_SEGMENTS = 8
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
@@ -485,11 +485,16 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
-  /** 从 pendingQueue 取出所有段合并 append */
+  /** 从 pendingQueue 取出段追加（优先低延迟：单段立即追加） */
   function drainPending() {
     if (pendingQueue.length === 0 || !sourceBuffer || sourceBuffer.updating) return
-    /** 限制合并段数量，减少单次 append 延迟 */
-    const batch = pendingQueue.splice(0, 3)
+    if (pendingQueue.length === 1) {
+      /** 单段直接追加，零额外延迟 */
+      doAppend(pendingQueue.shift()!)
+      return
+    }
+    /** 多段合并为一次 append（减少 MSE API 调用开销） */
+    const batch = pendingQueue.splice(0, pendingQueue.length)
     const total = batch.reduce((sum, b) => sum + b.byteLength, 0)
     const merged = new Uint8Array(total)
     let offset = 0

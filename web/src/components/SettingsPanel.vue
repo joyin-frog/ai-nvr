@@ -46,6 +46,7 @@ const SOUND_EVENT_OPTIONS = [
   { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
   { key: 'alert', labelKey: 'settings.soundEventAlert' },
   { key: 'detect', labelKey: 'settings.soundEventDetect' },
+  { key: 'detect:rule', labelKey: 'settings.soundEventDetectRule' },
   { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
   { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
   { key: 'motion', labelKey: 'settings.soundEventMotion' },
@@ -176,7 +177,14 @@ async function loadSettings() {
   try {
     const res = await authFetch('/api/settings')
     if (res.ok) {
-      settings.value = await res.json()
+      const data = await res.json()
+      /** 确保 smtp 非空，避免模板中 smtp! 崩溃 */
+      if (!data.notify?.email?.smtp) {
+        if (!data.notify) data.notify = {}
+        if (!data.notify.email) data.notify.email = { enabled: false, smtp: null, from: '', to: '' }
+        data.notify.email.smtp = { host: '', port: 465, secure: true, user: '', pass: '' }
+      }
+      settings.value = data
     }
   } catch {
     // ignore

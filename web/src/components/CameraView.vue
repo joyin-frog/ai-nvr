@@ -621,17 +621,24 @@ async function togglePip() {
     video.addEventListener('leavepictureinpicture', () => { isPip.value = false }, { once: true })
   } catch { /* 浏览器不支持或被阻止 */ }
 }
+/** fMP4 流首次变为非播放状态的时间 */
+let fmp4StallStart = 0
+
 function checkFrozen() {
-  if (!props.online) { frozen.value = false; return }
+  if (!props.online) { frozen.value = false; fmp4StallStart = 0; return }
   /** JPEG 帧超时检测 */
   const jpegFrozen = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
-  /** fMP4 流检测：已连接但 fps=0 超过 15 秒（排除刚连接的初始阶段） */
+  /** fMP4 流检测：连接但未播放超过 15 秒才判定冻结 */
   const fmp4Connected = fmp4.connected.value
-  const fmp4Fps = fmp4.fps.value
   const fmp4Playing = fmp4.playing.value
-  /** fMP4 连接且不在播放中（或 fps=0），说明流卡住了 */
-  const fmp4Frozen = fmp4Connected && !fmp4Playing && fmp4.videoRef.value && fmp4.videoRef.value.readyState >= 2
-  frozen.value = jpegFrozen || !!fmp4Frozen
+  let fmp4Frozen = false
+  if (fmp4Connected && !fmp4Playing && fmp4.videoRef.value && fmp4.videoRef.value.readyState >= 2) {
+    if (!fmp4StallStart) fmp4StallStart = Date.now()
+    fmp4Frozen = (Date.now() - fmp4StallStart) > 15000
+  } else {
+    fmp4StallStart = 0
+  }
+  frozen.value = jpegFrozen || fmp4Frozen
 }
 watch(() => props.online, (on) => {
   if (on) {
@@ -1828,7 +1835,7 @@ async function takeScreenshot() {
   link.download = `${props.name}_${ts}.jpg`
   link.href = URL.createObjectURL(blob)
   link.click()
-  URL.revokeObjectURL(link.href)
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000)
 }
 
 /** 画面调节面板 */
