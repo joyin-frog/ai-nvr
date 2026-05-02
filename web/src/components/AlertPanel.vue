@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { authFetch } from '../services/auth'
+import { authFetch, authUrl } from '../services/auth'
 
 /** 告警规则 */
 /** ROI 区域 */
@@ -39,6 +39,8 @@ interface AlertRecord {
   cameraId: string
   timestamp: number
   detail: string
+  /** 告警快照 URL */
+  snapshotUrl?: string | null
   /** 是否为实时新增（用于入场动画） */
   isNew?: boolean
 }
@@ -581,12 +583,17 @@ defineExpose({ loadAlerts, addAlert })
     <div v-if="activeView === 'history'" class="alert-list">
       <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
       <div v-for="alert in alerts" :key="alert.id" :class="['alert-item', { 'new-alert': alert.isNew }]" @click="emit('jumpToRecording', alert.cameraId, alert.timestamp)">
-        <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
-        <div class="alert-body">
-          <span class="alert-rule">{{ alert.ruleName }}</span>
-          <span class="alert-cam">{{ cameraNameMap[alert.cameraId] ?? alert.cameraId }}</span>
+        <div v-if="alert.snapshotUrl" class="alert-thumb">
+          <img :src="authUrl(alert.snapshotUrl)" alt="" />
         </div>
-        <div v-if="alert.detail" class="alert-detail">{{ formatDetail(alert.detail) }}</div>
+        <div class="alert-info">
+          <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
+          <div class="alert-body">
+            <span class="alert-rule">{{ alert.ruleName }}</span>
+            <span class="alert-cam">{{ cameraNameMap[alert.cameraId] ?? alert.cameraId }}</span>
+          </div>
+          <div v-if="alert.detail" class="alert-detail">{{ formatDetail(alert.detail) }}</div>
+        </div>
       </div>
       <button v-if="hasMore" class="load-more-btn" @click="loadMoreAlerts">{{ t('alert.loadMore') }}</button>
     </div>
@@ -938,6 +945,8 @@ select.input {
 }
 
 .alert-item {
+  display: flex;
+  gap: 8px;
   padding: 6px 8px;
   border-radius: 4px;
   border-left: 3px solid #FFD93D;
@@ -958,6 +967,26 @@ select.input {
 @keyframes alert-flash {
   0% { background: rgba(255, 217, 61, 0.25); }
   100% { background: #16213e; }
+}
+
+.alert-thumb {
+  flex-shrink: 0;
+  width: 64px;
+  height: 36px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #0a0a1a;
+}
+
+.alert-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.alert-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .alert-time {

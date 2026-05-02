@@ -1237,12 +1237,17 @@ export function startServer(
           limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
           offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
         });
+        /** 为每条告警附加快照 URL */
+        const enrichedAlerts = alerts.map(a => {
+          const snapshotUrl = alertSnapshotStorage?.findSnapshotPath(a.cameraId, a.timestamp);
+          return { ...a, snapshotUrl: snapshotUrl ? `/api/alert-snapshots/${snapshotUrl}` : null };
+        });
         const total = alertStorage.countAlerts({
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
         });
-        return Response.json({ alerts, total });
+        return Response.json({ alerts: enrichedAlerts, total });
       }
 
       /** 存储清理状态 */
