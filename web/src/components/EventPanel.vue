@@ -191,6 +191,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'play-recording', cameraId: string, timestamp: number): void
+  (e: 'jump-to-track', trackId: number): void
 }>()
 
 /** 摄像头 ID → 名称映射（O(1) 查找，替代模板中 find） */
@@ -443,9 +444,9 @@ function getDetectionLabel(cameraId: string, d: Detection): string {
 }
 
 /** 解析 rawDetail 为结构化信息 */
-function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string }> {
+function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string; trackId?: number }> {
   if (!e.rawDetail) return []
-  const items: Array<{ label: string; value: string }> = []
+  const items: Array<{ label: string; value: string; trackId?: number }> = []
   try {
     const obj = JSON.parse(e.rawDetail)
     if (e.type === 'motion' && obj.ratio !== undefined) {
@@ -456,7 +457,7 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       for (const d of obj.detections as Array<{ label: string; score: number; trackId?: number }>) {
         const customName = d.trackId && camLabels?.[d.trackId]
         const name = customName ? `${customName} (#${d.trackId})` : d.trackId ? `#${d.trackId}` : ''
-        items.push({ label: d.label, value: `${name}${name ? ' ' : ''}${(d.score * 100).toFixed(0)}%` })
+        items.push({ label: d.label, value: `${name}${name ? ' ' : ''}${(d.score * 100).toFixed(0)}%`, trackId: d.trackId })
       }
     }
     if (e.type === 'alert') {
@@ -465,22 +466,22 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
     }
     /** 行为事件详情 */
     if (e.type === 'track:enter-zone' || e.type === 'track:leave-zone' || e.type === 'track:dwell') {
-      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName) })
-      else if (obj.semanticLabel) items.push({ label: t('event.name', '名称'), value: String(obj.semanticLabel) })
+      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName), trackId: obj.trackId })
+      else if (obj.semanticLabel) items.push({ label: t('event.name', '名称'), value: String(obj.semanticLabel), trackId: obj.trackId })
       if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
       if (obj.zoneName) items.push({ label: t('event.zone', '区域'), value: String(obj.zoneName) })
       if (obj.dwellMs !== undefined) items.push({ label: t('event.dwellTime', '停留时长'), value: `${(obj.dwellMs / 1000).toFixed(1)}s` })
     }
     if (e.type === 'track:line-cross') {
-      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName) })
-      else if (obj.semanticLabel) items.push({ label: t('event.name', '名称'), value: String(obj.semanticLabel) })
+      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName), trackId: obj.trackId })
+      else if (obj.semanticLabel) items.push({ label: t('event.name', '名称'), value: String(obj.semanticLabel), trackId: obj.trackId })
       if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
       if (obj.lineName) items.push({ label: t('event.zone', '区域'), value: String(obj.lineName) })
       if (obj.direction) items.push({ label: t('event.direction', '方向'), value: String(obj.direction) })
     }
     if (e.type === 'track:speed') {
-      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName) })
-      else if (obj.semanticLabel) items.push({ label: t('event.name', '名称'), value: String(obj.semanticLabel) })
+      if (obj.trackName) items.push({ label: t('event.name', '名称'), value: String(obj.trackName), trackId: obj.trackId })
+      else if (obj.semanticLabel) items.push({ label: t('event.name', '名称'), value: String(obj.semanticLabel), trackId: obj.trackId })
       if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
       if (obj.speed !== undefined) items.push({ label: t('event.speed', '速度'), value: String(obj.speed) })
     }
@@ -678,9 +679,9 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
               </div>
             </div>
           </div>
-          <div v-for="(item, i) in parseExpandedDetail(e)" :key="i" class="detail-row">
+          <div v-for="(item, i) in parseExpandedDetail(e)" :key="i" class="detail-row" :class="{ clickable: !!item.trackId }" @click.stop="item.trackId && emit('jump-to-track', item.trackId)">
             <span class="detail-label">{{ item.label }}</span>
-            <span class="detail-value">{{ item.value }}</span>
+            <span class="detail-value">{{ item.value }}<span v-if="item.trackId" class="link-hint" /></span>
           </div>
           <div class="expand-actions">
             <button
@@ -1116,6 +1117,19 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 
 .detail-value {
   color: #e0e0e0;
+}
+
+.detail-row.clickable {
+  cursor: pointer;
+  border-radius: 3px;
+}
+.detail-row.clickable:hover {
+  background: rgba(78, 205, 196, 0.1);
+}
+.link-hint::after {
+  content: ' →';
+  color: #4ECDC4;
+  font-size: 11px;
 }
 
 .expand-actions {

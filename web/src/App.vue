@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
@@ -456,6 +456,15 @@ function switchTab(tab: SidebarTab) {
   if (tab === 'cameras') {
     cameraManagePanel.value?.loadCameras()
   }
+}
+
+/** 跳转到追踪目标 */
+function onJumpToTrack(trackId: number) {
+  activeTab.value = 'tracks'
+  localStorage.setItem('nvr-active-tab', 'tracks')
+  nextTick(() => {
+    trackGallery.value?.selectTrack(trackId)
+  })
 }
 
 /** 进入全屏单路 */
@@ -1148,7 +1157,7 @@ onUnmounted(() => {
           >⚙ {{ t('tab.settings') }}</button>
         </div>
         <div class="sidebar-content">
-          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" />
+          <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" @jump-to-track="onJumpToTrack" />
           <RecordingsPanel
             v-show="activeTab === 'recordings'"
             ref="recordingsPanel"

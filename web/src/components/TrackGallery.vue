@@ -463,7 +463,18 @@ onUnmounted(() => {
   if (semanticDebounce) clearTimeout(semanticDebounce)
 })
 
-defineExpose({ loadTracks })
+/** 选中并滚动到指定追踪目标 */
+function selectTrack(trackId: number) {
+  expandedTrackId.value = trackId
+  loadTrackEvents(trackId)
+  /** 延迟滚动，等 DOM 更新 */
+  setTimeout(() => {
+    const el = document.querySelector(`[data-track-id="${trackId}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, 100)
+}
+
+defineExpose({ loadTracks, selectTrack })
 </script>
 
 <template>
@@ -544,7 +555,8 @@ defineExpose({ loadTracks })
     </div>
 
     <div v-else class="track-grid">
-      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card" :class="{ 'new-track': isNewTrack(track) }"
+      <div v-for="track in filteredTracks" :key="track.trackId" class="track-card" :class="{ 'new-track': isNewTrack(track), 'highlighted': expandedTrackId === track.trackId }"
+            :data-track-id="track.trackId"
             @dblclick="props.cameras?.find(c => c.id === track.cameraIds[0])?.online && emit('viewLive', track.cameraIds[0])">
         <!-- 快照 -->
         <div class="track-snapshot" @click="track.snapshotFile && (previewUrl = snapshotUrl(track.snapshotFile))">
@@ -886,6 +898,11 @@ defineExpose({ loadTracks })
 
 .track-card:hover {
   border-color: #4ECDC4;
+}
+
+.track-card.highlighted {
+  border-color: #9b59b6;
+  box-shadow: 0 0 12px rgba(155, 89, 182, 0.5);
 }
 
 .track-snapshot {
