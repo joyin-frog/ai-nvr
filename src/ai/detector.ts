@@ -246,15 +246,17 @@ export class AiDetector {
   /** 启动连续检测循环 */
   private startContinuousLoop(interval: number): void {
     if (this.continuousTimer) clearInterval(this.continuousTimer);
+    /** 定时器使用全局 interval，per-camera 间隔在 processQueue 中按摄像头分别判断 */
     this.continuousTimer = setInterval(() => {
       const now = Date.now();
       for (const [cameraId, frame] of this.latestFrames) {
-        if (now - frame.timestamp > interval * 3) continue;
+        const camInterval = this.runtimeConfig.getAiInterval(cameraId);
+        if (now - frame.timestamp > camInterval * 3) continue;
         if (!this.detectQueue.includes(cameraId)) {
           this.detectQueue.push(cameraId);
         }
       }
-      this.processQueue(interval);
+      this.processQueue();
     }, interval);
   }
 
@@ -262,18 +264,19 @@ export class AiDetector {
    * 并行发起所有待检测摄像头的推理请求
    * 不串行等待，Worker 内部 auto-skip 机制保证处理最新帧
    */
-  private processQueue(interval: number): void {
+  private processQueue(): void {
     const now = Date.now();
     const batch = this.detectQueue.splice(0);
     for (const cameraId of batch) {
+      const camInterval = this.runtimeConfig.getAiInterval(cameraId);
       /** 始终使用该摄像头的最新帧（跳过中间帧） */
       const frame = this.latestFrames.get(cameraId);
       if (!frame) continue;
       /** 帧太旧 → 跳过 */
-      if (now - frame.timestamp > interval * 3) continue;
+      if (now - frame.timestamp > camInterval * 3) continue;
       /** 推理间隔保护：避免同一摄像头过于频繁推理 */
       const lastTime = this.lastDetectTime.get(cameraId) ?? 0;
-      if (now - lastTime < interval * 0.8) continue;
+      if (now - lastTime < camInterval * 0.8) continue;
       this.lastDetectTime.set(cameraId, now);
       /** 不 await — 并行发起推理，结果通过 Promise 异步处理 */
       this.detect(cameraId, frame.data, frame.timestamp).catch(err => {
