@@ -66,8 +66,6 @@ export class AiDetector {
   private unsubFrame: (() => void) | null = null;
   /** 待检测摄像头队列 */
   private detectQueue: string[] = [];
-  /** 队列处理中 */
-  private processingQueue = false;
   /** 每个摄像头最近一次完成推理的时间（用于跳过过密请求） */
   private lastDetectTime = new Map<string, number>();
   /** 上一次检测结果指纹（用于去重通知） */
@@ -260,13 +258,14 @@ export class AiDetector {
     }, interval);
   }
 
-  /** 依次处理检测队列（每次取摄像头最新帧） */
-  private async processQueue(interval: number): Promise<void> {
-    if (this.processingQueue) return;
-    this.processingQueue = true;
+  /**
+   * 并行发起所有待检测摄像头的推理请求
+   * 不串行等待，Worker 内部 auto-skip 机制保证处理最新帧
+   */
+  private processQueue(interval: number): void {
     const now = Date.now();
-    while (this.detectQueue.length > 0) {
-      const cameraId = this.detectQueue.shift()!;
+    const batch = this.detectQueue.splice(0);
+    for (const cameraId of batch) {
       /** 始终使用该摄像头的最新帧（跳过中间帧） */
       const frame = this.latestFrames.get(cameraId);
       if (!frame) continue;
@@ -275,10 +274,12 @@ export class AiDetector {
       /** 推理间隔保护：避免同一摄像头过于频繁推理 */
       const lastTime = this.lastDetectTime.get(cameraId) ?? 0;
       if (now - lastTime < interval * 0.8) continue;
-      await this.detect(cameraId, frame.data, frame.timestamp);
-      this.lastDetectTime.set(cameraId, Date.now());
+      this.lastDetectTime.set(cameraId, now);
+      /** 不 await — 并行发起推理，结果通过 Promise 异步处理 */
+      this.detect(cameraId, frame.data, frame.timestamp).catch(err => {
+        console.error(`[AiDetector] 检测失败 [${cameraId}]:`, err);
+      });
     }
-    this.processingQueue = false;
   }
 
   /** 停止连续检测 */
@@ -293,7 +294,6 @@ export class AiDetector {
     }
     this.latestFrames.clear();
     this.detectQueue = [];
-    this.processingQueue = false;
     this.lastDetectTime.clear();
   }
 
