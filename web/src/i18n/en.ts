@@ -286,7 +286,7 @@ export default {
     nameLabel: 'Name',
     namePlaceholder: 'e.g. Frequent person detection',
     cameraPlaceholder: 'Leave empty for all',
-    labelsPlaceholder: 'person, car (comma separated)',
+    labelsPlaceholder: 'person, car or CLIP semantic labels (comma separated)',
     labelsPlaceholderShort: 'person, car',
     trackNameFilter: 'Name Match',
     trackNamesPlaceholder: 'Alice, Bob (user-named names, comma separated)',

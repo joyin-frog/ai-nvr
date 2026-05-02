@@ -288,7 +288,7 @@ export default {
     nameLabel: '名称',
     namePlaceholder: '如：频繁人员检测',
     cameraPlaceholder: '留空表示所有',
-    labelsPlaceholder: 'person, car（逗号分隔）',
+    labelsPlaceholder: 'person, car 或 CLIP 语义标签（逗号分隔）',
     labelsPlaceholderShort: 'person, car',
     trackNameFilter: '命名匹配',
     trackNamesPlaceholder: '张三, 李四（右键命名的名称，逗号分隔）',
