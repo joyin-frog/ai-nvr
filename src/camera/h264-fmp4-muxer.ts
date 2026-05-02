@@ -866,8 +866,10 @@ class VideoToFmp4Muxer {
     this.sequenceNumber++;
     const moofMdat = this.buildMediaSegment();
     if (moofMdat) {
-      /** 缓存最近 media segment（新客户端快速显示首帧） */
-      this.lastMediaData = moofMdat;
+      /** 仅缓存包含 IDR 的 segment（新客户端需要 IDR 才能初始化解码器） */
+      if (this.segmentHasIdr) {
+        this.lastMediaData = moofMdat;
+      }
       eventBus.emit("fmp4:segment", { cameraId, data: moofMdat });
     }
 
@@ -1076,15 +1078,12 @@ export class H264Fmp4Extractor {
   /** 检测到的码流类型（avc/hevc） */
   get detectedCodec(): CodecType | null { return this.muxer.detectedCodec; }
 
-  /** 当前尝试的码流格式 */
-  private tryFormat: "hevc" | "avc" = "hevc";
-
   private spawnFfmpeg(): void {
-    /** 根据上次尝试结果选择格式 */
-    const isHevc = this.tryFormat === "hevc";
-    const format = isHevc ? "hevc" : "h264";
-    const bsf = isHevc ? "hevc_mp4toannexb" : "h264_mp4toannexb";
-
+    /**
+     * 策略：先尝试 copy（零转码），如果检测到 HEVC 则转为 H.264
+     * 浏览器 MSE 对 HEVC 支持有限（需要硬件解码），H.264 通用性更好
+     * 使用 libx264 ultrafast + zerolatency 保持低延迟
+     */
     const args = [
       "-rtsp_transport", "tcp",
       "-fflags", "nobuffer",
@@ -1094,14 +1093,15 @@ export class H264Fmp4Extractor {
       "-analyzeduration", "1000000",
       "-probesize", "500000",
       "-i", this.rtspUrl,
-      "-c:v", "copy",
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-tune", "zerolatency",
       "-an",
-      "-f", format,
-      "-bsf:v", bsf,
+      "-f", "h264",
       "pipe:1",
     ];
 
-    console.log(`${this.logTag} 启动 ffmpeg (${format}): ${this.ffmpegPath} ${args.join(" ")}`);
+    console.log(`${this.logTag} 启动 ffmpeg (h264 transcode): ${this.ffmpegPath} ${args.join(" ")}`);
 
     this.proc = spawn(this.ffmpegPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -1122,15 +1122,10 @@ export class H264Fmp4Extractor {
       this.retryCount = 0;
     });
 
-    let bsfError = false;
-
     this.proc.stderr?.on("data", (chunk: Buffer) => {
       const msg = chunk.toString().trim();
       if (msg.includes("error") || msg.includes("Error")) {
         console.error(`${this.logTag} ffmpeg error:`, msg);
-        if (msg.includes("not supported by the bitstream filter")) {
-          bsfError = true;
-        }
       }
     });
 
@@ -1139,11 +1134,6 @@ export class H264Fmp4Extractor {
       this.muxer.flushRemaining(this.eventBus, this.config.id);
       this.online = false;
       this.muxer.reset();
-      /** bsf 不匹配时切换格式重试 */
-      if (bsfError && code !== 0) {
-        this.tryFormat = this.tryFormat === "hevc" ? "avc" : "hevc";
-        console.log(`${this.logTag} bsf 不匹配，切换到 ${this.tryFormat} 格式`);
-      }
       this.scheduleReconnect();
     });
   }
