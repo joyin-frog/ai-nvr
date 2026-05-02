@@ -323,7 +323,10 @@ export class H264Fmp4Extractor {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    this.online = false;
+    if (this.online) {
+      this.online = false;
+      this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+    }
     this.killProcess();
   }
 
@@ -425,12 +428,11 @@ export class H264Fmp4Extractor {
 
     this.proc.on("exit", (code) => {
       console.log(`${this.logTag} ffmpeg 退出, code=${code}`);
-      /** 如果没有收到过数据就退出，可能是 copy 模式不支持 */
-      if (!this.online && !this.lastCopyFailed) {
-        /** 检查是否是因为 codec 问题（短时间退出） */
-      }
       this.parser.reset();
-      this.online = false;
+      if (this.online) {
+        this.online = false;
+        this.eventBus.emit("camera:offline", { cameraId: this.config.id });
+      }
       this.scheduleReconnect();
     });
   }
