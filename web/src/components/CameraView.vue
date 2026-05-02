@@ -11,6 +11,15 @@ import { registerShortcut } from '../composables/useKeyboard'
 
 const { t } = useI18n()
 const { setPref, getPref } = usePreferences()
+
+/** 主色调 → 颜色映射（常量，避免每帧每检测目标重建） */
+const DOMINANT_COLOR_MAP: Record<string, string> = {
+  red: '#e74c3c', orange: '#e67e22', yellow: '#f1c40f', lime: '#2ecc71',
+  green: '#27ae60', cyan: '#1abc9c', blue: '#3498db', purple: '#9b59b6',
+  pink: '#e91e63', gray: '#95a5a6',
+}
+/** 缓存 prefers-reduced-motion（避免每帧 matchMedia 调用） */
+const PREFERS_REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const props = defineProps<{
   cameraId: string
   name: string
@@ -1165,7 +1174,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
   if (sorted.length === 0) return
 
   /** 动画脉冲因子（用于未命名目标边框闪烁），减少动画模式下不闪烁 */
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const reduceMotion = PREFERS_REDUCED_MOTION
   const pulse = reduceMotion ? 0.8 : 0.5 + 0.5 * Math.sin(Date.now() / 500)
 
   ctx.save()
@@ -1287,12 +1296,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
     /** 绘制主色调圆点 */
     if (d.dominantColor) {
-      const colorMap: Record<string, string> = {
-        red: '#e74c3c', orange: '#e67e22', yellow: '#f1c40f', lime: '#2ecc71',
-        green: '#27ae60', cyan: '#1abc9c', blue: '#3498db', purple: '#9b59b6',
-        pink: '#e91e63', gray: '#95a5a6',
-      }
-      const dotColor = colorMap[d.dominantColor]
+      const dotColor = DOMINANT_COLOR_MAP[d.dominantColor]
       if (dotColor) {
         const dotR = 4
         const dotX = x + labelW + dotR + 2
@@ -1394,12 +1398,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
         /** 特殊行：主色调圆点 */
         if (line.startsWith('\0color:')) {
           const colorName = line.slice(7)
-          const colorMap: Record<string, string> = {
-            red: '#e74c3c', orange: '#e67e22', yellow: '#f1c40f', lime: '#2ecc71',
-            green: '#27ae60', cyan: '#1abc9c', blue: '#3498db', purple: '#9b59b6',
-            pink: '#e91e63', gray: '#95a5a6',
-          }
-          const dotColor = colorMap[colorName] ?? '#666'
+          const dotColor = DOMINANT_COLOR_MAP[colorName] ?? '#666'
           const dotY = finalY + tipPad + li * lineH + 7
           ctx.beginPath()
           ctx.arc(finalX + tipPad + 5, dotY, 5, 0, Math.PI * 2)

@@ -25,7 +25,6 @@ function registerStream(stream: { pruneBuffer: () => void; catchUpToLive: () => 
     sharedPruneTimer = setInterval(() => {
       for (const s of activeStreams) {
         s.pruneBuffer()
-        s.catchUpToLive()
       }
     }, 100)
   }
@@ -453,6 +452,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (wasAppending && pendingQueue.length > 0) {
       drainPending()
     }
+
+    /** append 完成后立即追赶直播（消除 100ms 定时器延迟） */
+    if (wasAppending) catchUpToLive()
 
     /** 确保 video 播放位置在有效缓冲区内 */
     if (wasAppending && videoRef.value && sourceBuffer && sourceBuffer.buffered.length > 0) {

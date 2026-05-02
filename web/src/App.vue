@@ -207,7 +207,7 @@ const frameLatencyMap = new Map<string, number>()
 const frameLatency = ref<Record<string, number>>({})
 /** 低频 reactive ticker：每 3 秒触发一次模板重渲染（驱动 lastFrameAtMap 的模板求值） */
 const frameTicker = ref(0)
-setInterval(() => {
+let frameTickerTimer = setInterval(() => {
   frameTicker.value++
   /** 同步帧延迟到 reactive（供模板消费） */
   const obj: Record<string, number> = {}
@@ -994,6 +994,7 @@ onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
   stopPatrol()
+  if (frameTickerTimer) clearInterval(frameTickerTimer)
   if (diskCheckTimer) clearInterval(diskCheckTimer)
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
 })
