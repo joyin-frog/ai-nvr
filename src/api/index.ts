@@ -1744,6 +1744,10 @@ export function startServer(
           return;
         }
         wsClients.delete(ws);
+        /** 清理客户端节流状态，释放内存 */
+        const wsData = ws as unknown as { lastPushTimeByCamera?: Map<string, number>; subscribedCameras?: Set<string> };
+        wsData.lastPushTimeByCamera = undefined;
+        wsData.subscribedCameras = undefined;
         console.log(`[WS] 客户端断开，当前 ${wsClients.size} 个`);
       },
       message(ws, raw) {
