@@ -461,6 +461,10 @@ export class AiDetector {
                 const top = ClipService.getTopLabels(result, 1);
                 if (top.length > 0 && top[0]!.score > 0.15) {
                   this.semanticLabelCache.set(target.trackId, top[0]!.label);
+                  /** 持久化到 TrackStorage */
+                  if (this.trackStorage) {
+                    this.trackStorage.setSemanticLabel(target.trackId, top[0]!.label);
+                  }
                   console.log(`[AiDetector] CLIP 分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
                 }
               })

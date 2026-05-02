@@ -23,6 +23,8 @@ export interface TrackInfo {
   snapshotFile?: string;
   /** 主色调名称（从 HSV 直方图提取，如 "red", "blue", "green"） */
   dominantColor?: string;
+  /** CLIP 零样本分类的语义标签（如 "a black dog"） */
+  semanticLabel?: string;
 }
 
 /** 备选指纹（每个目标最多保留 2 个备选 + 1 个主指纹） */
@@ -53,6 +55,8 @@ interface TrackRecord {
   lbpHist?: number[];
   /** 备选指纹列表（最多 2 个，不同角度/姿态的快照指纹） */
   altFingerprints?: AltFingerprint[];
+  /** CLIP 零样本分类的语义标签（如 "a black dog"） */
+  semanticLabel?: string;
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -220,6 +224,14 @@ export class TrackStorage {
     this.scheduleSave();
   }
 
+  /** 设置语义标签（CLIP 零样本分类结果） */
+  setSemanticLabel(trackId: number, label: string): void {
+    const record = this.tracks.get(trackId);
+    if (!record || record.semanticLabel === label) return;
+    record.semanticLabel = label;
+    this.scheduleSave();
+  }
+
   /** 获取所有追踪目标 */
   listTracks(): TrackInfo[] {
     return [...this.tracks.values()].map(r => ({
@@ -232,6 +244,7 @@ export class TrackStorage {
       cameraIds: [...r.cameraIds],
       snapshotFile: r.snapshotFile,
       dominantColor: r.colorHist ? TrackStorage.extractDominantColor(r.colorHist) : undefined,
+      semanticLabel: r.semanticLabel,
     })).sort((a, b) => b.lastSeen - a.lastSeen);
   }
 
@@ -294,6 +307,7 @@ export class TrackStorage {
       cameraIds: [...r.cameraIds],
       snapshotFile: r.snapshotFile,
       dominantColor: r.colorHist ? TrackStorage.extractDominantColor(r.colorHist) : undefined,
+      semanticLabel: r.semanticLabel,
     };
   }
 

@@ -21,6 +21,8 @@ interface TrackInfo {
   snapshotFile?: string
   /** 主色调名称 */
   dominantColor?: string
+  /** CLIP 零样本分类语义标签 */
+  semanticLabel?: string
   /** 行为事件数量 */
   eventCount?: number
   /** 当前是否活跃（前端计算） */
@@ -549,6 +551,7 @@ defineExpose({ loadTracks })
                 {{ track.customName || track.label }}
               </span>
               <span v-if="track.customName" class="track-original-label">{{ track.label }}</span>
+              <span v-if="track.semanticLabel" class="track-semantic-label">{{ track.semanticLabel }}</span>
               <!-- dHash 匹配建议：一键应用 -->
               <button
                 v-if="!track.customName && suggestions.get(track.trackId)"
@@ -884,6 +887,13 @@ defineExpose({ loadTracks })
 .track-original-label {
   color: #666;
   font-size: 10px;
+}
+
+.track-semantic-label {
+  color: #9c27b0;
+  font-size: 10px;
+  font-style: italic;
+  margin-left: 4px;
 }
 
 .suggest-btn {
