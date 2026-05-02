@@ -88,8 +88,8 @@ class VideoToFmp4Muxer {
   private segmentFrameSizes: number[] = [];
   /** 当前 segment 中每帧是否关键帧 */
   private segmentFrameFlags: boolean[] = [];
-  /** 每个 segment 累积的最大帧数，超过则强制刷新 */
-  private static readonly MAX_SEGMENT_FRAMES = 2;
+  /** 每个 segment 累积的最大帧数，超过则强制刷新（1=最低延迟，每帧独立 segment） */
+  private static readonly MAX_SEGMENT_FRAMES = 1;
   /** 是否已经在这个 segment 中遇到过 IDR（避免非起始 IDR 触发重复切分） */
   private segmentHasIdr = false;
 
@@ -365,8 +365,8 @@ class VideoToFmp4Muxer {
 
     /**
      * 段发送策略：
-     * - 有 IDR 帧且帧数达到阈值：立即发送（保证前端尽早开始播放）
-     * - 非 IDR 段但帧数超过 2 倍阈值：强制发送（防止 GOP 过大导致延迟堆积）
+     * - 每帧独立 segment（MAX_SEGMENT_FRAMES=1）：最低端到端延迟
+     * - 非 IDR 段但帧数超过 2 倍阈值时强制发送（兜底保护）
      */
     const maxFrames = VideoToFmp4Muxer.MAX_SEGMENT_FRAMES;
     if (this.segmentHasIdr && this.segmentFrames.length >= maxFrames) {
