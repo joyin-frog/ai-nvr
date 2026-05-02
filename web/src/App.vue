@@ -698,6 +698,13 @@ function startApp() {
 /** 声音提醒配置（从 composable 获取，notify 函数使用） */
 const { soundEvents, playAlertSound } = useNotification()
 
+/** 构建 track 事件的显示名称 */
+function buildTrackDisplayName(payload: { trackName?: string; trackId: number; semanticLabel?: string; label: string }, cameraId: string): string {
+  const customName = payload.trackName || trackLabelsMap.value[cameraId]?.[payload.trackId]
+  const displayLabel = payload.semanticLabel || payload.label
+  return customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
+}
+
 function notify(title: string, body: string, cameraId?: string, eventType?: string) {
   /** 检查该事件类型是否在声音触发列表中 */
   if (!eventType || soundEvents.value.length === 0 || soundEvents.value.includes(eventType)) {
@@ -794,11 +801,9 @@ function setupEventListeners() {
   })
 
   client.on('track:appeared', (payload) => {
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
     eventPanel.value?.addEvent('track:appeared', payload.cameraId, `${displayName} ${t('event.trackAppeared')}`)
-    /** 已命名目标出现时发送浏览器通知 */
     if (customName) {
       const cam = cameras.value.find(c => c.id === payload.cameraId)
       notify(displayName, `${t('event.trackAppeared')} · ${cam?.name ?? payload.cameraId}`, payload.cameraId, 'track:appeared')
@@ -806,60 +811,51 @@ function setupEventListeners() {
   })
 
   client.on('track:disappeared', (payload) => {
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     eventPanel.value?.addEvent('track:disappeared', payload.cameraId, `${displayName} ${t('event.trackDisappeared')}`)
   })
 
   client.on('track:enter-zone', (payload) => {
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
     eventPanel.value?.addEvent('track:enter-zone', payload.cameraId, `${displayName} → ${payload.zoneName}`)
-    pushZoneNotification(payload.cameraId, { type: 'enter', name: customName || displayLabel, zoneName: payload.zoneName, timestamp: payload.timestamp })
+    pushZoneNotification(payload.cameraId, { type: 'enter', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp })
   })
 
   client.on('track:leave-zone', (payload) => {
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
     const dwellSec = (payload.dwellMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:leave-zone', payload.cameraId, `${displayName} ← ${payload.zoneName} (${dwellSec}s)`)
-    pushZoneNotification(payload.cameraId, { type: 'leave', name: customName || displayLabel, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
+    pushZoneNotification(payload.cameraId, { type: 'leave', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
   })
 
   client.on('track:dwell', (payload) => {
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
     const dwellSec = (payload.dwellMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:dwell', payload.cameraId, t('event.dwellInZone', { name: displayName, zone: payload.zoneName, sec: dwellSec }))
-    pushZoneNotification(payload.cameraId, { type: 'dwell', name: customName || displayLabel, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
+    pushZoneNotification(payload.cameraId, { type: 'dwell', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
   })
 
   client.on('track:speed', (payload) => {
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     eventPanel.value?.addEvent('track:speed', payload.cameraId, t('event.speedHigh', { name: displayName, speed: payload.speed.toFixed(3) }))
   })
 
   client.on('track:line-cross', (payload) => {
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
     eventPanel.value?.addEvent('track:line-cross', payload.cameraId, t('event.lineCrossDetail', { name: displayName, line: payload.lineName, direction: payload.direction }))
-    pushZoneNotification(payload.cameraId, { type: 'line-cross', name: customName || displayLabel, zoneName: payload.lineName, timestamp: payload.timestamp, direction: payload.direction })
+    pushZoneNotification(payload.cameraId, { type: 'line-cross', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.lineName, timestamp: payload.timestamp, direction: payload.direction })
   })
 
   client.on('track:loiter', (payload) => {
+    const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
-    const displayLabel = payload.semanticLabel || payload.label
-    const displayName = customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
     const durationSec = (payload.durationMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:loiter', payload.cameraId, t('event.loiterInZone', { name: displayName, zone: payload.zoneName || t('event.trackLoiter'), sec: durationSec }))
-    pushZoneNotification(payload.cameraId, { type: 'loiter', name: customName || displayLabel, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.durationMs })
+    pushZoneNotification(payload.cameraId, { type: 'loiter', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.durationMs })
   })
 
   client.on('track:approach', (payload) => {
