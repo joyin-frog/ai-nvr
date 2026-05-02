@@ -1,5 +1,5 @@
 import { type EventBus } from "@/event-bus";
-import { execSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
 
 /** 单个摄像头的运行指标 */
 export interface CameraMetrics {
@@ -229,23 +229,23 @@ export class SystemMonitor {
       };
     });
 
-    /** 统计 ffmpeg 子进程数和内存占用（5 秒缓存） */
+    /** 统计 ffmpeg 子进程数和内存占用（5 秒缓存，直接读 /proc 避免 execSync 开销） */
     const now = Date.now();
     if (now - this.ffmpegCache.updatedAt > SystemMonitor.FFMPEG_CACHE_TTL) {
       let count = 0;
       let rss = 0;
       try {
-        const pids = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8", timeout: 2000 }).trim();
-        if (pids) {
-          const pidList = pids.split("\n").filter(Boolean);
-          count = pidList.length;
-          for (const pid of pidList) {
-            try {
-              const stat = execSync(`cat /proc/${pid}/status 2>/dev/null | grep VmRSS || true`, { encoding: "utf-8", timeout: 500 }).trim();
-              const match = stat.match(/VmRSS:\s+(\d+)\s+kB/);
-              if (match) rss += parseInt(match[1]!) / 1024;
-            } catch { /* ignore */ }
-          }
+        const entries = readdirSync("/proc");
+        for (const entry of entries) {
+          if (!/^\d+$/.test(entry)) continue;
+          try {
+            const cmdline = readFileSync(`/proc/${entry}/cmdline`, "utf-8");
+            if (!cmdline.includes("ffmpeg")) continue;
+            count++;
+            const status = readFileSync(`/proc/${entry}/status`, "utf-8");
+            const match = status.match(/VmRSS:\s+(\d+)\s+kB/);
+            if (match) rss += parseInt(match[1]!) / 1024;
+          } catch { /* 进程可能已退出 */ }
         }
       } catch { /* ignore */ }
       this.ffmpegCache = { count, rssMb: rss, updatedAt: now };
