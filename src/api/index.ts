@@ -1453,6 +1453,8 @@ export function startServer(
         /** 同步 customName 到 TrackStorage */
         if (body.trackId && body.name) {
           trackStorage.setCustomName(body.trackId, body.name);
+          /** 命名后反向关联外观相似的未命名目标 */
+          aiDetector.propagateName(body.trackId, body.name, body.cameraId);
         }
         /** 广播标签更新给其他客户端 */
         eventBus.emit("track:label-updated", {

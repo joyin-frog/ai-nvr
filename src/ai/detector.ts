@@ -683,4 +683,43 @@ export class AiDetector {
     this.trackColorCache.set(trackId, color);
     return color || undefined;
   }
+
+  /**
+   * 命名后反向关联：扫描所有外观相似的未命名目标并自动关联
+   * 在 POST /api/track-labels 命名保存后调用
+   */
+  propagateName(trackId: number, name: string, sourceCameraId: string): void {
+    if (!this.trackStorage || !this.trackLabelStorage) return;
+    const record = this.trackStorage.getRecord(trackId);
+    if (!record?.clipEmbedding?.length && !record?.dhash) return;
+
+    const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
+    if (autoThreshold <= 0) return;
+
+    /** 查找外观相似的目标 */
+    const matches = this.trackStorage.findSimilar(
+      trackId, sourceCameraId, record.label, record.dhash ?? "", 0.4,
+      record.colorHist, record.lbpHist, record.clipEmbedding,
+    );
+
+    for (const match of matches) {
+      if (match.distance >= autoThreshold) continue;
+      /** 跳过已命名的目标 */
+      const matchRec = this.trackStorage.getRecord(match.trackId);
+      if (matchRec?.customName) continue;
+      /** 为匹配的目标设置相同名称 */
+      for (const camId of matchRec?.cameraIds ?? []) {
+        this.trackLabelStorage.upsert(camId, match.trackId, matchRec?.label ?? record.label, name);
+      }
+      this.trackStorage.setCustomName(match.trackId, name);
+      /** 清除缓存 */
+      for (const camId of matchRec?.cameraIds ?? []) {
+        this.trackNameCache.delete(`${camId}:${match.trackId}`);
+      }
+      /** 广播更新 */
+      const camId = matchRec?.cameraIds[0] ?? sourceCameraId;
+      this.eventBus.emit("track:label-updated", { cameraId: camId, trackId: match.trackId, name });
+      console.log(`[AiDetector] 命名传播: track#${match.trackId} → ${name} (${(match.distance * 100).toFixed(0)}%)`);
+    }
+  }
 }
