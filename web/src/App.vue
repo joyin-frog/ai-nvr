@@ -935,6 +935,8 @@ function setupEventListeners() {
 
 }
 
+useKeyboardShortcuts()
+
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)

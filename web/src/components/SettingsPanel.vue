@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { getBackendUrl, setBackendUrl } from '../services/backend'
 import { useI18n } from 'vue-i18n'
 
@@ -350,7 +350,7 @@ async function loadCameras() {
 }
 
 /** 设置摄像头级别覆盖参数 */
-function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps' | 'aiThreshold' | 'aiInterval', rawValue: string) {
+function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps' | 'aiThreshold' | 'aiInterval' | 'inputWidth', rawValue: string) {
   if (!settings.value) return
   if (!settings.value.cameraOverrides[cameraId]) {
     settings.value.cameraOverrides[cameraId] = {}
@@ -428,9 +428,9 @@ async function purgeData() {
       body: JSON.stringify(purgeOpts),
     })
     if (res.ok) {
-      const data = await res.json()
+      const data = await res.json() as { results: Record<string, string> }
       purgeResult.value = Object.values(data.results).join('；')
-      Object.keys(purgeOpts).forEach(k => { purgeOpts[k] = false })
+      for (const k of Object.keys(purgeOpts) as Array<keyof typeof purgeOpts>) { purgeOpts[k] = false }
       loadCleanupStats()
     }
   } catch {
