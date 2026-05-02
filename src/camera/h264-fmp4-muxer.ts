@@ -420,8 +420,8 @@ export class H264Fmp4Extractor {
       "-an",
       "-f", "mp4",
       "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      /** 强制每 0.5 秒切割一个 fMP4 段，降低首帧和端到端延迟 */
-      "-frag_duration", "0.5",
+      /** 强制每 0.2 秒切割一个 fMP4 段，降低首帧和端到端延迟 */
+      "-frag_duration", "0.2",
       "pipe:1",
     );
 

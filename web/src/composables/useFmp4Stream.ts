@@ -17,13 +17,13 @@ const FMP4_TYPE_MEDIA = 0x02
 const BUFFER_RETAIN_SECONDS = 2
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 1.0
+const LIVE_CATCHUP_THRESHOLD = 0.6
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 2.5
+const LIVE_SEEK_THRESHOLD = 1.5
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
-const MAX_PENDING_SEGMENTS = 5
+const MAX_PENDING_SEGMENTS = 8
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
