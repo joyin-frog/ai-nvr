@@ -224,9 +224,21 @@ export class AiDetector {
     });
   }
 
+  /** 摄像头离线清理取消订阅 */
+  private unsubCameraOffline: (() => void) | null = null;
+
   /** 根据配置启动检测模式 */
   private startDetection(): void {
     const config = this.runtimeConfig.get().ai;
+
+    /** 摄像头离线时清理该摄像头的所有缓存 */
+    this.unsubCameraOffline = this.eventBus.on("camera:offline", ({ cameraId }) => {
+      this.latestFrames.delete(cameraId);
+      this.lastDetectTime.delete(cameraId);
+      this.lastDetectFingerprint.delete(cameraId);
+      this.trackers.delete(cameraId);
+      this.trackNameCache.forEach((_v, k) => { if (k.startsWith(`${cameraId}:`)) this.trackNameCache.delete(k); });
+    });
 
     if (config.mode === "continuous") {
       this.unsubFrame = this.eventBus.on("detect:frame", ({ cameraId, data, timestamp }) => {
@@ -294,6 +306,10 @@ export class AiDetector {
     if (this.unsubFrame) {
       this.unsubFrame();
       this.unsubFrame = null;
+    }
+    if (this.unsubCameraOffline) {
+      this.unsubCameraOffline();
+      this.unsubCameraOffline = null;
     }
     this.latestFrames.clear();
     this.detectQueue = [];
