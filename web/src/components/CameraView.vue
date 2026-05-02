@@ -708,6 +708,12 @@ let staticCacheW = 0
 let staticCacheH = 0
 let staticCacheKey = ''
 
+/** 热力图缓存（OffscreenCanvas，只在数据变化时重绘） */
+let heatmapCacheCanvas: OffscreenCanvas | null = null
+let heatmapCacheW = 0
+let heatmapCacheH = 0
+let heatmapCacheKey = ''
+
 /** 计算静态元素的缓存 key（props 变化时 key 改变触发重绘） */
 function computeStaticCacheKey(): string {
   const roiKey = (props.roiRegions ?? []).map(r => `${r.id}:${r.name}:${r.points.map(p => `${p.x},${p.y}`).join('|')}`).join(';')
@@ -817,6 +823,63 @@ function drawStaticCache(width: number, height: number): OffscreenCanvas {
   staticCacheW = width
   staticCacheH = height
   staticCacheKey = key
+  return oc
+}
+
+/** 绘制热力图到缓存（只在数据变化时重绘） */
+function drawHeatmapCache(width: number, height: number): OffscreenCanvas | null {
+  const grid = heatmapGrid.value
+  const maxCount = heatmapMaxCount.value
+  if (!grid.length || !maxCount) return null
+
+  const gridRows = grid.length
+  const gridCols = grid[0]?.length ?? 0
+  if (!gridRows || !gridCols) return null
+
+  /** 缓存 key：网格数据摘要 + 尺寸 */
+  const key = `${width}:${height}:${maxCount}:${gridRows}x${gridCols}:${grid[0]?.[0]}:${grid[Math.floor(gridRows/2)]?.[Math.floor(gridCols/2)]}`
+  if (heatmapCacheCanvas && heatmapCacheW === width && heatmapCacheH === height && heatmapCacheKey === key) {
+    return heatmapCacheCanvas
+  }
+
+  const oc = new OffscreenCanvas(width, height)
+  const ctx = oc.getContext('2d')
+  if (!ctx) return null
+
+  const cellW = width / gridCols
+  const cellH = height / gridRows
+  ctx.globalAlpha = 0.35
+  for (let row = 0; row < gridRows; row++) {
+    for (let col = 0; col < gridCols; col++) {
+      const count = grid[row]?.[col] ?? 0
+      if (count === 0) continue
+      const intensity = count / maxCount
+      let r: number, g: number, b: number
+      if (intensity < 0.33) {
+        const t = intensity / 0.33
+        r = 0; g = Math.round(t * 255); b = Math.round((1 - t) * 255)
+      } else if (intensity < 0.66) {
+        const t = (intensity - 0.33) / 0.33
+        r = Math.round(t * 255); g = 255; b = 0
+      } else {
+        const t = (intensity - 0.66) / 0.34
+        r = 255; g = Math.round((1 - t) * 255); b = 0
+      }
+      const cx = (col + 0.5) * cellW
+      const cy = (row + 0.5) * cellH
+      const radius = Math.max(cellW, cellH) * (0.6 + intensity * 0.8)
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
+      gradient.addColorStop(0, `rgba(${r},${g},${b},0.8)`)
+      gradient.addColorStop(1, `rgba(${r},${g},${b},0)`)
+      ctx.fillStyle = gradient
+      ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2)
+    }
+  }
+
+  heatmapCacheCanvas = oc
+  heatmapCacheW = width
+  heatmapCacheH = height
+  heatmapCacheKey = key
   return oc
 }
 
@@ -1084,44 +1147,11 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     }
   }
 
-  /** 绘制热力图叠加层 */
+  /** 绘制热力图叠加层（使用 OffscreenCanvas 缓存，只在数据变化时重绘） */
   if (showHeatmap.value && heatmapGrid.value.length > 0 && heatmapMaxCount.value > 0) {
-    const grid = heatmapGrid.value
-    const gridRows = grid.length
-    const gridCols = grid[0]?.length ?? 0
-    if (gridRows > 0 && gridCols > 0) {
-      const cellW = width / gridCols
-      const cellH = height / gridRows
-      ctx.save()
-      ctx.globalAlpha = 0.35
-      for (let row = 0; row < gridRows; row++) {
-        for (let col = 0; col < gridCols; col++) {
-          const count = grid[row]?.[col] ?? 0
-          if (count === 0) continue
-          const intensity = count / heatmapMaxCount.value
-          /** 热力颜色：低密度蓝 → 中密度绿 → 高密度红 */
-          let r: number, g: number, b: number
-          if (intensity < 0.33) {
-            const t = intensity / 0.33
-            r = 0; g = Math.round(t * 255); b = Math.round((1 - t) * 255)
-          } else if (intensity < 0.66) {
-            const t = (intensity - 0.33) / 0.33
-            r = Math.round(t * 255); g = 255; b = 0
-          } else {
-            const t = (intensity - 0.66) / 0.34
-            r = 255; g = Math.round((1 - t) * 255); b = 0
-          }
-          const cx = (col + 0.5) * cellW
-          const cy = (row + 0.5) * cellH
-          const radius = Math.max(cellW, cellH) * (0.6 + intensity * 0.8)
-          const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
-          gradient.addColorStop(0, `rgba(${r},${g},${b},0.8)`)
-          gradient.addColorStop(1, `rgba(${r},${g},${b},0)`)
-          ctx.fillStyle = gradient
-          ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2)
-        }
-      }
-      ctx.restore()
+    const hmCache = drawHeatmapCache(width, height)
+    if (hmCache) {
+      ctx.drawImage(hmCache, 0, 0)
     }
   }
 
