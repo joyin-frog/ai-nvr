@@ -17,13 +17,13 @@ const FMP4_TYPE_MEDIA = 0x02
 const BUFFER_RETAIN_SECONDS = 2
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 1.5
+const LIVE_CATCHUP_THRESHOLD = 1.0
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 3.0
+const LIVE_SEEK_THRESHOLD = 2.5
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
-const MAX_PENDING_SEGMENTS = 8
+const MAX_PENDING_SEGMENTS = 5
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
@@ -457,15 +457,15 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   /** 从 pendingQueue 取出所有段合并 append */
   function drainPending() {
     if (pendingQueue.length === 0 || !sourceBuffer || sourceBuffer.updating) return
-    /** 合并所有 pending 段一次 append */
-    const total = pendingQueue.reduce((sum, b) => sum + b.byteLength, 0)
+    /** 限制合并段数量，避免一次 append 过大导致解码延迟 */
+    const batch = pendingQueue.splice(0, 3)
+    const total = batch.reduce((sum, b) => sum + b.byteLength, 0)
     const merged = new Uint8Array(total)
     let offset = 0
-    for (const buf of pendingQueue) {
+    for (const buf of batch) {
       merged.set(new Uint8Array(buf), offset)
       offset += buf.byteLength
     }
-    pendingQueue = []
     doAppend(merged.buffer)
   }
 
@@ -477,8 +477,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       const currentTime = videoRef.value.currentTime
       const start = buffered.start(0)
       const behindDuration = currentTime - start
-      /** 只在已播放缓冲区超过 2 倍保留时长时才清理（减少 remove 调用频率） */
-      if (behindDuration > BUFFER_RETAIN_SECONDS * 2) {
+      /** 只在已播放缓冲区超过保留时长+1秒时才清理（减少 remove 调用频率） */
+      if (behindDuration > BUFFER_RETAIN_SECONDS + 1) {
         pruning = true
         try {
           sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
@@ -561,7 +561,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     pruneBuffer()
     /** pruneBuffer 可能设 pruning=true，catchUpToLive 会检查 */
     catchUpToLive()
-  }, 3000)
+  }, 1500)
 
   /** 页面隐藏时暂停 fMP4 流（节省带宽），可见时恢复 */
   let wasConnectedBeforeHidden = false
