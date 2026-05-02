@@ -509,15 +509,22 @@ export class AiDetector {
                 if (!updated) return;
                 const rec = this.trackStorage!.getRecord(det.trackId!);
                 if (!rec || rec.customName || (!rec.dhash && !rec.clipEmbedding?.length)) return;
-                /** 快照更新时也重新提取 CLIP embedding */
-                if (this.clipService && det.box && !rec.clipEmbedding?.length) {
-                  this.clipService.imageEmbed(jpeg, det.box)
-                    .then(embedRes => {
-                      if (embedRes.embedding.length > 0) {
-                        this.trackStorage!.setClipEmbedding(det.trackId!, embedRes.embedding);
+                /** 快照更新时重新做 CLIP 分类 + embedding（一次推理同时得到两者） */
+                if (this.clipService && det.box) {
+                  this.clipService.classifyTarget(jpeg, det.box, rec.label)
+                    .then(result => {
+                      /** 更新 semanticLabel（新快照可能提供更准确的分类） */
+                      const top = ClipService.getTopLabels(result, 1);
+                      if (top.length > 0 && top[0]!.score > 0.15) {
+                        this.semanticLabelCache.set(det.trackId!, top[0]!.label);
+                        this.trackStorage!.setSemanticLabel(det.trackId!, top[0]!.label);
+                      }
+                      /** 更新 CLIP embedding */
+                      if (result.imageEmbedding?.length) {
+                        this.trackStorage!.setClipEmbedding(det.trackId!, result.imageEmbedding);
                       }
                     })
-                    .catch(() => { /* embedding 提取失败不影响主流程 */ });
+                    .catch(() => { /* CLIP 推理失败不影响主流程 */ });
                 }
                 const matches = this.trackStorage!.findSimilar(det.trackId!, cameraId, rec.label, rec.dhash ?? "", 0.4, rec.colorHist, rec.lbpHist, rec.clipEmbedding);
                 if (matches.length === 0) return;
