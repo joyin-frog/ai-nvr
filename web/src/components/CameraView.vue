@@ -137,8 +137,9 @@ function drawOverlayOnce() {
     overlayDirty = true
   }
 
-  /** 尺寸未变且无新检测数据 → 跳过重绘 */
-  if (!overlayDirty && cssW === overlayLastW && cssH === overlayLastH) return
+  /** 尺寸未变且无新检测数据 → 跳过重绘（除非有速度插值需要更新） */
+  const hasVelocity = trackVelocities.size > 0 && lastInferTime > 0
+  if (!overlayDirty && cssW === overlayLastW && cssH === overlayLastH && !hasVelocity) return
   overlayLastW = cssW
   overlayLastH = cssH
   overlayDirty = false
