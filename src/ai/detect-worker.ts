@@ -67,6 +67,7 @@ const DEFAULT_LABELS = [
   "a motorcycle",
   "a bicycle",
   "a dog",
+  "multiple dogs",
   "a cat",
   "empty scene",
 ];
@@ -172,9 +173,11 @@ async function detect(req: DetectRequest): Promise<void> {
       .sort((a, b) => b.score - a.score)
       .slice(0, req.maxDetections);
 
-    /** 全图检测结果（框覆盖整图，因为 CLIP 不做空间定位） */
+    /** 全图检测结果（框覆盖整图，因为 CLIP 不做空间定位）
+     *  标签转换：去掉 "a " 前缀（"a dog" → "dog"），保持原样 "multiple dogs"
+     */
     result.detections = filtered.map(s => ({
-      label: s.label,
+      label: s.label.startsWith("a ") ? s.label.slice(2) : s.label,
       score: Math.min(s.score, 1),
       box: { xmin: 0, ymin: 0, xmax: 1, ymax: 1 },
     }));

@@ -211,8 +211,13 @@ export class AiDetector {
       const aiConfig = this.runtimeConfig.get().ai;
       pendingRequests.set(id, { resolve, cameraId, jpeg, timestamp });
 
-      /** 将 importantLabels 转为 CLIP 候选文本标签 */
-      const labels = aiConfig.importantLabels.map(l => `a ${l}`);
+      /** 将 importantLabels 转为 CLIP 候选文本标签
+       *  简单词直接加 "a " 前缀（如 "dog" → "a dog"）
+       *  已包含空格的短语保持原样（如 "multiple dogs"）
+       */
+      const labels = aiConfig.importantLabels.map(l =>
+        l.includes(" ") ? l : `a ${l}`
+      );
 
       this.worker?.postMessage({
         type: "detect",
