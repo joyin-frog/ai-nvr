@@ -79,6 +79,8 @@ watch(rootEl, (el, oldEl) => {
 
 /** MSE 模式的检测框 overlay canvas */
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
+/** 静态叠加层 canvas（OSD + ROI + 越线 + 热力图 + 区域计数，只在数据变化时重绘） */
+const staticCanvasRef = ref<HTMLCanvasElement | null>(null)
 let overlayVfcId: number | null = null
 /** rAF fallback（浏览器不支持 requestVideoFrameCallback 时使用） */
 let overlayRafId: number | null = null
@@ -87,6 +89,13 @@ let overlayDirty = true
 /** 上次 overlay 绘制时的 canvas 尺寸（用于检测 resize） */
 let overlayLastW = 0
 let overlayLastH = 0
+/** 静态层是否需要重绘 */
+let staticLayerDirty = true
+/** 静态层上次绘制的 canvas 尺寸 */
+let staticLayerLastW = 0
+let staticLayerLastH = 0
+/** 静态层缓存 key（ROI/越线/热力图数据变化时改变） */
+let staticLayerLastKey = ''
 
 /** MSE overlay 渲染：优先使用 requestVideoFrameCallback 与视频帧同步 */
 function startOverlayLoop() {
@@ -116,6 +125,84 @@ function startOverlayLoop() {
   }
 }
 
+/** 计算静态层的缓存 key */
+function computeStaticLayerKey(): string {
+  const roiKey = (props.roiRegions ?? []).map(r => `${r.id}:${r.name}`).join(';')
+  const lineKey = (props.crossLines ?? []).map(l => `${l.id}:${l.name}`).join(';')
+  const hmKey = `${showHeatmap.value}:${heatmapGrid.value.length}:${heatmapMaxCount.value}`
+  return `${roiKey}|${lineKey}|${hmKey}`
+}
+
+/** 绘制静态层（OSD + ROI + 越线 + 热力图 + 区域计数） */
+function drawStaticLayer(cssW: number, cssH: number) {
+  const sCanvas = staticCanvasRef.value
+  if (!sCanvas) return
+  const key = computeStaticLayerKey()
+  /** 尺寸未变且 key 未变 → 跳过重绘 */
+  if (!staticLayerDirty && cssW === staticLayerLastW && cssH === staticLayerLastH && key === staticLayerLastKey) return
+  staticLayerLastW = cssW
+  staticLayerLastH = cssH
+  staticLayerLastKey = key
+  staticLayerDirty = false
+
+  const dpr = window.devicePixelRatio || 1
+  const canvasW = Math.round(cssW * dpr)
+  const canvasH = Math.round(cssH * dpr)
+  if (sCanvas.width !== canvasW || sCanvas.height !== canvasH) {
+    sCanvas.width = canvasW
+    sCanvas.height = canvasH
+  }
+  const ctx = sCanvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, cssW, cssH)
+
+  /** OSD（摄像头名称 + 时钟 + FPS/延迟/AI指标 + 检测摘要） */
+  drawOSD(ctx, cssW, cssH)
+
+  /** 静态元素（ROI + 越线，使用离屏缓存） */
+  const staticCache = drawStaticCache(cssW, cssH)
+  ctx.drawImage(staticCache, 0, 0)
+
+  /** 热力图叠加层 */
+  if (showHeatmap.value && heatmapGrid.value.length > 0 && heatmapMaxCount.value > 0) {
+    const hmCache = drawHeatmapCache(cssW, cssH)
+    if (hmCache) ctx.drawImage(hmCache, 0, 0)
+  }
+
+  /** ROI 区域内目标计数徽章 */
+  if (props.roiRegions && props.roiRegions.length > 0) {
+    const sorted = localDetections.length > 0 ? getSortedDetections() : []
+    if (sorted.length > 0) {
+      ctx.font = 'bold 11px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      for (const roi of props.roiRegions) {
+        if (roi.points.length < 3) continue
+        let count = 0
+        for (const d of sorted) {
+          const cx = (d.box.xmin + d.box.xmax) / 2
+          const cy = (d.box.ymin + d.box.ymax) / 2
+          if (pointInPoly(cx, cy, roi.points)) count++
+        }
+        if (count === 0) continue
+        const rcx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * cssW
+        const rcy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * cssH
+        const badgeX = rcx + (roi.name ? ctx.measureText(roi.name).width / 2 + 14 : 0)
+        const badgeY = rcy
+        ctx.fillStyle = 'rgba(233, 30, 99, 0.9)'
+        ctx.beginPath()
+        ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.fillText(String(count), badgeX, badgeY + 1)
+      }
+      ctx.textAlign = 'start'
+      ctx.textBaseline = 'bottom'
+    }
+  }
+}
+
 /** 执行一次 overlay 绘制 */
 function drawOverlayOnce() {
   if (document.hidden) return
@@ -136,24 +223,14 @@ function drawOverlayOnce() {
     canvas.width = canvasW
     canvas.height = canvasH
     overlayDirty = true
+    staticLayerDirty = true
   }
-
-  /** 尺寸未变且无新检测数据 → 跳过重绘（除非有速度插值需要更新） */
-  const hasVelocity = trackVelocities.size > 0 && lastInferTime > 0
-  if (!overlayDirty && cssW === overlayLastW && cssH === overlayLastH && !hasVelocity) return
-  overlayLastW = cssW
-  overlayLastH = cssH
-  overlayDirty = false
-
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, cssW, cssH)
 
   /** poll 检测结果 */
   const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
   if (detectResult) {
     overlayDirty = true
+    staticLayerDirty = true
     consumedDetectVersion = detectResult.version
     localDetections = detectResult.detections
     updateSmoothedBoxes(localDetections)
@@ -161,10 +238,24 @@ function drawOverlayOnce() {
     updateDetectionSummary()
   }
 
+  /** 绘制静态层（OSD + ROI + 越线 + 热力图 + 区域计数） */
+  drawStaticLayer(cssW, cssH)
+
+  /** 尺寸未变且无新检测数据 → 跳过动态层重绘（除非有速度插值需要更新） */
+  const hasVelocity = trackVelocities.size > 0 && lastInferTime > 0
+  if (!overlayDirty && cssW === overlayLastW && cssH === overlayLastH && !hasVelocity) return
+  overlayLastW = cssW
+  overlayLastH = cssH
+  overlayDirty = false
+
+  /** 绘制动态层（检测框 + 轨迹 + 通知） */
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, cssW, cssH)
+
   if (hasFrame.value && props.showBoxes) {
-    drawDetectionOverlay(ctx, cssW, cssH)
-  } else {
-    drawOSD(ctx, cssW, cssH)
+    drawDynamicOverlay(ctx, cssW, cssH)
   }
 
   /** LLM 场景描述（AI 分析覆盖层） */
@@ -197,6 +288,8 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
   const mi = String(now.getMinutes()).padStart(2, '0')
   const s = String(now.getSeconds()).padStart(2, '0')
   clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
+  /** 时钟变化时标记静态层 dirty（OSD 在静态层） */
+  staticLayerDirty = true
 }, 1000)
 /** 立即初始化 */
 {
@@ -237,11 +330,13 @@ async function loadHeatmap() {
     const data = await res.json() as { grid: number[][]; maxCount: number; totalPoints: number }
     heatmapGrid.value = data.grid
     heatmapMaxCount.value = data.maxCount
+    staticLayerDirty = true
   } catch { /* 静默降级 */ }
 }
 
 /** 切换热力图显示 */
 watch(showHeatmap, (v) => {
+  staticLayerDirty = true
   if (v) {
     loadHeatmap()
     heatmapTimer = setInterval(loadHeatmap, 5000)
@@ -892,14 +987,11 @@ function drawHeatmapCache(width: number, height: number): OffscreenCanvas | null
 }
 
 /** Canvas overlay 绘制检测框 + OSD */
-function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
+function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
   if (!hasFrame.value) {
     trackTrails.clear()
     return
   }
-
-  /** 绘制 OSD（摄像头名称 + 时钟，始终显示） */
-  drawOSD(ctx, width, height)
 
   if (!props.showBoxes) {
     trackTrails.clear()
@@ -1176,14 +1268,6 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     }
   }
 
-  /** 绘制热力图叠加层（使用 OffscreenCanvas 缓存，只在数据变化时重绘） */
-  if (showHeatmap.value && heatmapGrid.value.length > 0 && heatmapMaxCount.value > 0) {
-    const hmCache = drawHeatmapCache(width, height)
-    if (hmCache) {
-      ctx.drawImage(hmCache, 0, 0)
-    }
-  }
-
   /** 绘制追踪轨迹线（贝塞尔平滑曲线 + 渐隐） */
   if (trackTrails.size > 0) {
     const now = Date.now()
@@ -1264,10 +1348,6 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     }
   }
 
-  /** 绘制静态元素（ROI + 越线，使用离屏缓存避免每帧重绘） */
-  const staticCache = drawStaticCache(width, height)
-  ctx.drawImage(staticCache, 0, 0)
-
   /** 绘制区域事件浮动通知（渐隐效果） */
   const notifications = takeZoneNotifications(props.cameraId)
   if (notifications.length > 0) {
@@ -1301,38 +1381,6 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       ctx.fillStyle = '#fff'
       ctx.fillText(text, nx, ny)
       ctx.globalAlpha = 1
-    }
-    ctx.textAlign = 'start'
-    ctx.textBaseline = 'bottom'
-  }
-
-  /** ROI 区域内目标计数徽章 */
-  if (props.roiRegions && props.roiRegions.length > 0 && sorted.length > 0) {
-    ctx.font = 'bold 11px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    for (const roi of props.roiRegions) {
-      if (roi.points.length < 3) continue
-      let count = 0
-      for (const d of sorted) {
-        const cx = (d.box.xmin + d.box.xmax) / 2
-        const cy = (d.box.ymin + d.box.ymax) / 2
-        if (pointInPoly(cx, cy, roi.points)) count++
-      }
-      if (count === 0) continue
-      /** 在 ROI 名称右侧显示计数 */
-      const rcx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * width
-      const rcy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * height
-      const badgeX = rcx + (roi.name ? ctx.measureText(roi.name).width / 2 + 14 : 0)
-      const badgeY = rcy
-      /** 计数徽章背景 */
-      ctx.fillStyle = 'rgba(233, 30, 99, 0.9)'
-      ctx.beginPath()
-      ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2)
-      ctx.fill()
-      /** 计数文字 */
-      ctx.fillStyle = '#fff'
-      ctx.fillText(String(count), badgeX, badgeY + 1)
     }
     ctx.textAlign = 'start'
     ctx.textBaseline = 'bottom'
@@ -1574,6 +1622,10 @@ async function takeScreenshot() {
     canvas.height = video.videoHeight || 1080
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(video, 0, 0)
+    /** 合成静态层和动态层两个 canvas */
+    if (staticCanvasRef.value) {
+      ctx.drawImage(staticCanvasRef.value, 0, 0, canvas.width, canvas.height)
+    }
     if (overlayCanvas.value) {
       ctx.drawImage(overlayCanvas.value, 0, 0, canvas.width, canvas.height)
     }
@@ -1884,8 +1936,13 @@ onUnmounted(() => {
               @contextmenu.prevent="onCanvasContext"
             />
             <canvas
+              ref="staticCanvasRef"
+              class="camera-overlay static-overlay"
+              style="pointer-events: none;"
+            />
+            <canvas
               ref="overlayCanvas"
-              class="camera-overlay"
+              class="camera-overlay dynamic-overlay"
               @contextmenu.prevent="onCanvasContext"
               @dblclick="onOverlayDblClick"
               @mousemove="onOverlayMouseMove"
@@ -2209,6 +2266,15 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.static-overlay {
+  z-index: 1;
+}
+
+.dynamic-overlay {
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .zoom-badge {
