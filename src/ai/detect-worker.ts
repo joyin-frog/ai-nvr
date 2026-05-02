@@ -101,7 +101,12 @@ async function loadModel(): Promise<void> {
   detector = await pipeline("object-detection", init.model, {
     dtype: "fp32",
   });
-  console.log(`[Detect Worker] 模型加载完成`);
+
+  /** Warm-up：用 1x1 黑图做一次 dummy 推理，触发 ONNX Runtime 的 JIT 编译优化 */
+  const dummyImage = new RawImage(new Uint8ClampedArray([0, 0, 0]), 1, 1, 3);
+  await (detector as Function)(dummyImage, { threshold: 0.5, percentage: true });
+  console.log(`[Detect Worker] 模型加载 + warm-up 完成`);
+
   parentPort?.postMessage({ type: "ready" });
 }
 
