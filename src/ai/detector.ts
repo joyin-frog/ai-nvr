@@ -66,6 +66,8 @@ export class AiDetector {
   private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 帧事件取消订阅函数 */
   private unsubFrame: (() => void) | null = null;
+  /** 变动触发模式的取消订阅函数 */
+  private unsubMotion: (() => void) | null = null;
   /** 待检测摄像头队列 */
   private detectQueue: string[] = [];
   /** 每个摄像头最近一次完成推理的时间（用于跳过过密请求） */
@@ -254,7 +256,7 @@ export class AiDetector {
       this.startContinuousLoop(config.interval);
       console.log(`[AiDetector] 连续检测模式，间隔 ${config.interval}ms`);
     } else {
-      this.eventBus.on("motion", ({ cameraId, data, timestamp }) => {
+      this.unsubMotion = this.eventBus.on("motion", ({ cameraId, data, timestamp }) => {
         this.detect(cameraId, data, timestamp);
       });
       console.log("[AiDetector] 变动触发检测模式");
@@ -312,6 +314,10 @@ export class AiDetector {
     if (this.unsubFrame) {
       this.unsubFrame();
       this.unsubFrame = null;
+    }
+    if (this.unsubMotion) {
+      this.unsubMotion();
+      this.unsubMotion = null;
     }
     if (this.unsubCameraOffline) {
       this.unsubCameraOffline();
