@@ -63,28 +63,28 @@ export class AlertEngine {
         this.onEvent("camera:lowfps", payload.cameraId, Date.now(), `FPS: ${payload.fps}`);
       }),
       this.eventBus.on("track:appeared", (payload) => {
-        this.onTrackEvent("track:appeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label, payload.score);
+        this.onTrackEvent("track:appeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label, payload.score, undefined, undefined, undefined, undefined, undefined, payload.semanticLabel);
       }),
       this.eventBus.on("track:disappeared", (payload) => {
-        this.onTrackEvent("track:disappeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label);
+        this.onTrackEvent("track:disappeared", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, undefined, undefined, undefined, undefined, undefined, payload.semanticLabel);
       }),
       this.eventBus.on("track:enter-zone", (payload) => {
-        this.onTrackEvent("track:enter-zone", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName);
+        this.onTrackEvent("track:enter-zone", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, undefined, undefined, undefined, payload.semanticLabel);
       }),
       this.eventBus.on("track:leave-zone", (payload) => {
-        this.onTrackEvent("track:leave-zone", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs);
+        this.onTrackEvent("track:leave-zone", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs, undefined, undefined, payload.semanticLabel);
       }),
       this.eventBus.on("track:dwell", (payload) => {
-        this.onTrackEvent("track:dwell", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs);
+        this.onTrackEvent("track:dwell", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.dwellMs, undefined, undefined, payload.semanticLabel);
       }),
       this.eventBus.on("track:speed", (payload) => {
-        this.onTrackEvent("track:speed", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, undefined, undefined, undefined, payload.speed);
+        this.onTrackEvent("track:speed", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, undefined, undefined, undefined, payload.speed, undefined, payload.semanticLabel);
       }),
       this.eventBus.on("track:line-cross", (payload) => {
-        this.onTrackEvent("track:line-cross", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.lineId, payload.lineName, undefined, undefined, payload.direction);
+        this.onTrackEvent("track:line-cross", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.lineId, payload.lineName, undefined, undefined, payload.direction, payload.semanticLabel);
       }),
       this.eventBus.on("track:loiter", (payload) => {
-        this.onTrackEvent("track:loiter", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.durationMs);
+        this.onTrackEvent("track:loiter", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.durationMs, undefined, undefined, payload.semanticLabel);
       }),
     );
     console.log("[AlertEngine] 告警引擎已启动");
@@ -125,7 +125,7 @@ export class AlertEngine {
   }
 
   /** 处理追踪目标事件（track:appeared / track:disappeared / track:enter-zone / track:leave-zone / track:dwell / track:speed / track:line-cross） */
-  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number, zoneId?: number, zoneName?: string, dwellMs?: number, speed?: number, direction?: string): void {
+  private onTrackEvent(eventType: string, cameraId: string, timestamp: number, trackId: number, label: string, score?: number, zoneId?: number, zoneName?: string, dwellMs?: number, speed?: number, direction?: string, semanticLabel?: string): void {
     this.refreshRules();
     this.refreshTrackNames(cameraId);
 
@@ -135,10 +135,12 @@ export class AlertEngine {
       if (rule.eventType !== eventType) continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
 
-      /** 标签过滤 */
+      /** 标签过滤（同时匹配原始 label 和 semanticLabel） */
       if (rule.labels) {
         const requiredLabels = new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()));
-        if (!requiredLabels.has(label.toLowerCase())) continue;
+        const matchLabel = requiredLabels.has(label.toLowerCase());
+        const matchSemantic = semanticLabel && requiredLabels.has(semanticLabel.toLowerCase());
+        if (!matchLabel && !matchSemantic) continue;
       }
 
       /** 命名匹配 */
@@ -154,6 +156,7 @@ export class AlertEngine {
       if (rule.minSpeed > 0 && speed !== undefined && speed < rule.minSpeed) continue;
 
       const detailObj: Record<string, unknown> = { trackId, label, trackName };
+      if (semanticLabel) detailObj.semanticLabel = semanticLabel;
       if (zoneId !== undefined) detailObj.zoneId = zoneId;
       if (zoneName) detailObj.zoneName = zoneName;
       if (dwellMs !== undefined) detailObj.dwellMs = dwellMs;
