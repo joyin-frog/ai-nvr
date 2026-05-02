@@ -98,6 +98,7 @@ export default {
     noSnapshots: '暂无检测快照',
     filterStarred: '仅看收藏',
     toggleStar: '收藏/取消收藏',
+    trackLoiter: '徘徊',
   },
   recording: {
     title: '录像',
@@ -152,6 +153,7 @@ export default {
     pip: '画中画',
     matchCountTip: '匹配 {count} 次',
     smartSpeed: '智能倍速：事件密集降速，稀疏加速',
+    filterEvents: '仅显示有事件',
   },
   timeline: {
     today: '今天',

@@ -181,7 +181,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     pendingQueue = []
     appending = false
     currentCodec = ''
-    fpsSegmentCount = 0
+    fpsFrameCount = 0
     fpsStartTime = performance.now()
 
     mediaSource = new MediaSource()

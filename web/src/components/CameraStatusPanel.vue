@@ -368,6 +368,15 @@ interface ZoneStat {
 }
 const zoneStats = ref<ZoneStat[]>([])
 
+async function loadTrackStats() {
+  try {
+    const res = await authFetch('/api/tracks/stats')
+    if (!res.ok) return
+    const data = await res.json() as { total: number; named: number; unnamed: number; active: number; byLabel: Record<string, number> }
+    trackStats.value = data
+  } catch { /* ignore */ }
+}
+
 async function loadZoneStats() {
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)

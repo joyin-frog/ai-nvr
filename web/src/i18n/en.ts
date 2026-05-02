@@ -98,6 +98,7 @@ export default {
     noSnapshots: 'No detection snapshots',
     filterStarred: 'Starred only',
     toggleStar: 'Star/unstar',
+    trackLoiter: 'Loiter',
   },
   recording: {
     title: 'Recordings',
@@ -152,6 +153,7 @@ export default {
     pip: 'PiP',
     matchCountTip: '{count} matches',
     smartSpeed: 'Smart speed: slow near events, fast between',
+    filterEvents: 'Events only',
   },
   timeline: {
     today: 'Today',
