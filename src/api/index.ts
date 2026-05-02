@@ -138,7 +138,7 @@ export function startServer(
   let cachedStorageRoot: string | null = null;
   function getStorageRoot(): string {
     if (!cachedStorageRoot) {
-      cachedStorageRoot = getStorageRoot();
+      cachedStorageRoot = realpathSync(recorder.getRecordingPath("."));
     }
     return cachedStorageRoot;
   }
@@ -146,7 +146,7 @@ export function startServer(
   let cachedRecFsRoot: string | null = null;
   function getRecFsRoot(): string {
     if (!cachedRecFsRoot) {
-      cachedRecFsRoot = getRecFsRoot();
+      cachedRecFsRoot = realpathSync(storageFs.resolve("recordings"));
     }
     return cachedRecFsRoot;
   }
@@ -432,7 +432,7 @@ export function startServer(
 
       /** 更新运行时设置 */
       if (url.pathname === "/api/settings" && req.method === "PATCH") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const oldMode = runtimeConfig.get().recording.mode;
           const updated = runtimeConfig.patchFromJSON(body);
           /** 录像模式变更时通知 recorder */
@@ -442,6 +442,12 @@ export function startServer(
           /** 通知组件配置已更新 */
           if (multimodalAnalyzer) {
             multimodalAnalyzer.updateConfig(updated.ai.llm);
+          }
+          /** CLIP 模型/配置变更时重新加载（后台加载，不阻塞响应） */
+          if (clipService) {
+            clipService.updateConfig(updated.ai.clip).catch(err => {
+              console.error("[API] CLIP 模型重新加载失败:", err);
+            });
           }
           return Response.json(updated);
         }).catch(() => new Response("Invalid JSON", { status: 400 }));

@@ -515,13 +515,20 @@ export class ClipService {
 
   /** 更新配置并重载模型 */
   async updateConfig(config: ClipConfig): Promise<void> {
-    if (config.model !== this.config.model || config.embeddingDim !== this.config.embeddingDim) {
-      this.config = config;
-      if (config.enabled) {
-        await this.loadModel();
+    const modelChanged = config.model !== this.config.model || config.embeddingDim !== this.config.embeddingDim;
+    const justEnabled = config.enabled && !this.config.enabled;
+    this.config = config;
+
+    if (config.enabled && (modelChanged || justEnabled || !this.initialized)) {
+      if (modelChanged) {
+        const hfEndpoint = process.env.HF_ENDPOINT ?? "https://huggingface.co";
+        await ensureModelCached(config.model, this.modelCacheDir, hfEndpoint);
       }
-    } else {
-      this.config = config;
+      await this.loadModel();
+    } else if (!config.enabled && this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+      this.initialized = false;
     }
   }
 
