@@ -54,6 +54,8 @@ class VideoToFmp4Muxer {
   private vps: Buffer | null = null;
   /** SPS 缓存 */
   private sps: Buffer | null = null;
+  /** SPS 去仿真字节缓存 */
+  private spsCleanCache: Buffer | null = null;
   /** PPS 缓存 */
   private pps: Buffer | null = null;
   /** 是否已发送 init segment */
@@ -230,6 +232,7 @@ class VideoToFmp4Muxer {
 
     if (nalType === AVC_NAL_SPS) {
       this.sps = nal;
+      this.spsCleanCache = null;
       this.parseAvcSpsDimensions(nal);
       this.flushAccessUnit(eventBus, cameraId);
       this.pendingNals.push(nal);
@@ -258,6 +261,7 @@ class VideoToFmp4Muxer {
       this.vps = nal;
     } else if (nalType === HEVC_NAL_SPS) {
       this.sps = nal;
+      this.spsCleanCache = null;
       this.parseHevcSpsDimensions(nal);
       this.flushAccessUnit(eventBus, cameraId);
       this.pendingNals.push(nal);
@@ -391,13 +395,17 @@ class VideoToFmp4Muxer {
 
   /** 将 NAL 数组转为 4 字节长度前缀格式 */
   private nalsToLengthPrefix(nals: Buffer[]): Buffer {
-    const parts: Buffer[] = [];
+    let totalLen = 0;
+    for (const nal of nals) totalLen += 4 + nal.length;
+    const buf = Buffer.allocUnsafe(totalLen);
+    let off = 0;
     for (const nal of nals) {
-      const len = Buffer.alloc(4);
-      len.writeUInt32BE(nal.length, 0);
-      parts.push(len, nal);
+      buf.writeUInt32BE(nal.length, off);
+      off += 4;
+      nal.copy(buf, off);
+      off += nal.length;
     }
-    return Buffer.concat(parts);
+    return buf;
   }
 
   // ==================== H.264 fMP4 构建 ====================
@@ -820,18 +828,18 @@ class VideoToFmp4Muxer {
 
     const mfhd = this.box("mfhd", this.u32(this.sequenceNumber));
 
-    const tfhdData = Buffer.alloc(8);
+    const tfhdData = Buffer.allocUnsafe(8);
     tfhdData.writeUInt32BE(1, 0);
     const tfhd = this.fullBox("tfhd", 0x020000, tfhdData);
 
-    const tfdtDataV1 = Buffer.alloc(8);
+    const tfdtDataV1 = Buffer.allocUnsafe(8);
     tfdtDataV1.writeBigUInt64BE(BigInt(this.segmentStartDts), 0);
     const tfdt = this.fullBox("tfdt", 0, tfdtDataV1, 1);
 
     const sampleCount = this.segmentFrames.length;
     const trunFlags = 0x000F01;
     const trunDataSize = 4 + 4 + sampleCount * 12;
-    const trunData = Buffer.alloc(trunDataSize);
+    const trunData = Buffer.allocUnsafe(trunDataSize);
     let off = 0;
     trunData.writeUInt32BE(sampleCount, off); off += 4;
     off += 4;
@@ -843,11 +851,19 @@ class VideoToFmp4Muxer {
     }
     const trun = this.fullBox("trun", trunFlags, trunData);
 
-    const traf = this.box("traf", Buffer.concat([tfhd, tfdt, trun]));
-    const moof = this.box("moof", Buffer.concat([mfhd, traf]));
+    /** 直接写入 traf/moof，减少中间 concat */
+    const tfhdLen = tfhd.length;
+    const tfdtLen = tfdt.length;
+    const trunLen = trun.length;
+    const trafPayloadLen = tfhdLen + tfdtLen + trunLen;
+    const traf = this.box("traf", tfhd, tfdt, trun);
+
+    const mfhdLen = mfhd.length;
+    const moof = this.box("moof", mfhd, traf);
 
     const moofSize = moof.length;
-    const dataOffsetPos = moof.length - trun.length + 12 + 4;
+    /** data_offset 在 trun 中的位置 */
+    const dataOffsetPos = 8 + 8 + mfhdLen + 8 + 8 + trafPayloadLen - trunLen + 12 + 4;
     moof.writeUInt32BE(moofSize + 8, dataOffsetPos);
 
     return Buffer.concat([moof, mdat]);
@@ -855,7 +871,15 @@ class VideoToFmp4Muxer {
 
   // ==================== 工具方法 ====================
 
+  /** 去除仿真预防字节（SPS 使用缓存避免重复计算） */
   private removeEmulationPrevention(nal: Buffer): Buffer {
+    if (nal === this.sps && this.spsCleanCache) return this.spsCleanCache;
+    const result = this.doRemoveEmulationPrevention(nal);
+    if (nal === this.sps) this.spsCleanCache = result;
+    return result;
+  }
+
+  private doRemoveEmulationPrevention(nal: Buffer): Buffer {
     const result: number[] = [];
     let i = 0;
     while (i < nal.length) {
@@ -905,22 +929,27 @@ class VideoToFmp4Muxer {
   }
 
   private box(type: string, ...parts: Buffer[]): Buffer {
-    const payload = Buffer.concat(parts);
-    const header = Buffer.alloc(8);
-    header.writeUInt32BE(8 + payload.length, 0);
-    header.write(type, 4, 4, "ascii");
-    return Buffer.concat([header, payload]);
+    let payloadLen = 0;
+    for (const p of parts) payloadLen += p.length;
+    const buf = Buffer.allocUnsafe(8 + payloadLen);
+    buf.writeUInt32BE(8 + payloadLen, 0);
+    buf.write(type, 4, 4, "ascii");
+    let off = 8;
+    for (const p of parts) {
+      p.copy(buf, off);
+      off += p.length;
+    }
+    return buf;
   }
 
   private fullBox(type: string, flags: number, data: Buffer, version: number = 0): Buffer {
-    const vf = Buffer.alloc(4);
-    /** version(1 byte) + flags(3 bytes) = 4 bytes */
+    const vf = Buffer.allocUnsafe(4);
     vf.writeUInt32BE((version << 24) | (flags & 0x00FFFFFF), 0);
     return this.box(type, vf, data);
   }
 
   private u32(v: number): Buffer {
-    const b = Buffer.alloc(4);
+    const b = Buffer.allocUnsafe(4);
     b.writeUInt32BE(v, 0);
     return b;
   }

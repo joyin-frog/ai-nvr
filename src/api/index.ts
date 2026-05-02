@@ -126,8 +126,7 @@ export function startServer(
   /** 封装 fMP4 init segment 为带协议头的二进制消息 */
   function encodeFmp4Init(codec: string, data: Buffer): Buffer {
     const codecBuf = Buffer.from(codec, "ascii");
-    /** 1字节类型 + 2字节codec长度 + codec + fMP4 data */
-    const msg = Buffer.alloc(1 + 2 + codecBuf.length + data.length);
+    const msg = Buffer.allocUnsafe(1 + 2 + codecBuf.length + data.length);
     msg[0] = FMP4_TYPE_INIT;
     msg.writeUInt16LE(codecBuf.length, 1);
     codecBuf.copy(msg, 3);
@@ -137,10 +136,21 @@ export function startServer(
 
   /** 封装 fMP4 media segment（共享 Buffer，多客户端复用） */
   function encodeFmp4Media(data: Buffer): Buffer {
-    const msg = Buffer.alloc(1 + data.length);
+    const msg = Buffer.allocUnsafe(1 + data.length);
     msg[0] = FMP4_TYPE_MEDIA;
     data.copy(msg, 1);
     return msg;
+  }
+
+  /** 缓存最近编码的 init segment（按摄像头分区） */
+  const cachedInitByCamera = new Map<string, { dataPtr: Buffer; encoded: Buffer }>();
+
+  function getOrEncodeInit(cameraId: string, codec: string, data: Buffer): Buffer {
+    const cached = cachedInitByCamera.get(cameraId);
+    if (cached && cached.dataPtr === data) return cached.encoded;
+    const encoded = encodeFmp4Init(codec, data);
+    cachedInitByCamera.set(cameraId, { dataPtr: data, encoded });
+    return encoded;
   }
 
   /** 缓存最近编码的 media segment（按摄像头分区，避免多摄像头互相覆盖） */
@@ -169,7 +179,7 @@ export function startServer(
 
     /** 发送缓存的 init segment（带协议头） */
     if (extractor.initSegment) {
-      ws.send(encodeFmp4Init(extractor.initSegment.codec, extractor.initSegment.data));
+      ws.send(getOrEncodeInit(cameraId, extractor.initSegment.codec, extractor.initSegment.data));
     }
 
     /** 发送缓存的最近 media segment（立即显示画面，消除黑屏等待） */
@@ -180,7 +190,7 @@ export function startServer(
     /** 监听新的 init segment */
     const unsubInit = bus.on("fmp4:init", (payload) => {
       if (payload.cameraId === cameraId) {
-        ws.send(encodeFmp4Init(payload.segment.codec, payload.segment.data));
+        ws.send(getOrEncodeInit(cameraId, payload.segment.codec, payload.segment.data));
       }
     });
     unsubs.push(unsubInit);
