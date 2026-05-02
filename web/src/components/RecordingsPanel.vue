@@ -190,13 +190,33 @@ function onLoadedMetadata() {
 /** 视频播放结束，自动播放同摄像头的下一段录像 */
 function onVideoEnded() {
   if (!autoPlayNext.value || !selectedRecording.value) return
-  /** 按时间升序排列，找到当前录像的下一段 */
-  const sameCam = filteredRecordings.value
+  playNextRecording()
+}
+
+/** 获取当前摄像头按时间排列的录像列表 */
+function sameCameraRecordings() {
+  return filteredRecordings.value
     .filter(r => r.cameraId === selectedRecording.value!.cameraId)
     .sort((a, b) => a.startTime - b.startTime)
-  const idx = sameCam.findIndex(r => r.filename === selectedRecording.value!.filename)
-  if (idx >= 0 && idx < sameCam.length - 1) {
-    play(sameCam[idx + 1]!)
+}
+
+/** 播放下一个录像 */
+function playNextRecording() {
+  if (!selectedRecording.value) return
+  const list = sameCameraRecordings()
+  const idx = list.findIndex(r => r.filename === selectedRecording.value!.filename)
+  if (idx >= 0 && idx < list.length - 1) {
+    play(list[idx + 1]!)
+  }
+}
+
+/** 播放上一个录像 */
+function playPrevRecording() {
+  if (!selectedRecording.value) return
+  const list = sameCameraRecordings()
+  const idx = list.findIndex(r => r.filename === selectedRecording.value!.filename)
+  if (idx > 0) {
+    play(list[idx - 1]!)
   }
 }
 
@@ -711,6 +731,14 @@ function onPlayerKeydown(e: KeyboardEvent) {
     case 'B':
       e.preventDefault()
       seekNextEvent(-1)
+      break
+    case 'PageDown':
+      e.preventDefault()
+      playNextRecording()
+      break
+    case 'PageUp':
+      e.preventDefault()
+      playPrevRecording()
       break
   }
 }
@@ -1735,6 +1763,8 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="ctrl-btn frame-btn" @click="stepFrame(1)" title="1帧 ▸ (.)">▸</button>
           <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(-1)" title="上一个事件">⏮</button>
           <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(1)" title="下一个事件">⏭</button>
+          <button class="ctrl-btn frame-btn" @click="playPrevRecording" title="上一个录像">⏪</button>
+          <button class="ctrl-btn frame-btn" @click="playNextRecording" title="下一个录像">⏩</button>
           <button :class="['ctrl-btn', 'loop-btn', { active: loopStart >= 0 }]" @click="loopStart >= 0 ? clearLoop() : setLoopPoint('a')" :title="loopStart >= 0 ? '清除循环 (\\)' : '设A点 ([)'">A</button>
           <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" title="设B点 (])">B</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
