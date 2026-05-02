@@ -33,6 +33,10 @@ export class EventStorage {
       this.db.run("ALTER TABLE events ADD COLUMN starred INTEGER DEFAULT 0");
       this.db.run("CREATE INDEX IF NOT EXISTS idx_events_starred ON events(starred)");
     }
+    /** 表达式索引：加速 json_extract(detail, '$.trackId') 查询 */
+    try {
+      this.db.run("CREATE INDEX IF NOT EXISTS idx_events_track_id ON events(json_extract(detail, '$.trackId')) WHERE json_extract(detail, '$.trackId') IS NOT NULL");
+    } catch { /* 旧版 SQLite 可能不支持表达式索引 */ }
   }
 
   /** 插入事件 */
