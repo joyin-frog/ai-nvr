@@ -57,6 +57,8 @@ const selectedRecording = ref<Recording | null>(null)
 const filterCamera = ref('')
 /** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
+/** 仅显示有检测/变动事件的录像 */
+const filterEventsOnly = ref(false)
 const loading = ref(false)
 /** AI 目标搜索关键词 */
 const searchLabel = ref('')
@@ -785,6 +787,21 @@ function clearSearch() {
   searchResults.value = null
 }
 
+/** 有事件的录像文件名集合（独立于 filteredRecordings，避免循环依赖） */
+const recordingsWithEvents = computed(() => {
+  if (timelineEvents.value.length === 0) return new Set<string>()
+  const set = new Set<string>()
+  for (const rec of recordings.value) {
+    for (const evt of timelineEvents.value) {
+      if (evt.timestamp >= rec.startTime && evt.timestamp <= rec.endTime && (!evt.cameraId || evt.cameraId === rec.cameraId)) {
+        set.add(rec.filename)
+        break
+      }
+    }
+  }
+  return set
+})
+
 const filteredRecordings = computed(() => {
   /** 搜索模式下直接返回搜索结果 */
   if (searchResults.value) return searchResults.value
@@ -796,6 +813,9 @@ const filteredRecordings = computed(() => {
     const since = new Date(`${filterDate.value}T00:00:00`).getTime()
     const until = since + 86_400_000
     list = list.filter(r => r.startTime < until && r.endTime > since)
+  }
+  if (filterEventsOnly.value && recordingsWithEvents.value.size > 0) {
+    list = list.filter(r => recordingsWithEvents.value.has(r.filename))
   }
   const sorted = [...list]
   if (sortMode.value === 'newest') sorted.sort((a, b) => b.startTime - a.startTime)
@@ -1835,6 +1855,9 @@ defineExpose({ loadRecordings, playAtTime })
       <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred" :title="t('recording.filterStarred')">
         {{ filterStarred ? '★' : '☆' }}
       </button>
+      <button :class="['events-filter-btn', { active: filterEventsOnly }]" @click="filterEventsOnly = !filterEventsOnly" :title="t('recording.filterEvents', '仅显示有事件')">
+        {{ filterEventsOnly ? '◆' : '◇' }}
+      </button>
     </div>
 
     <!-- 搜索结果指示 -->
@@ -2181,6 +2204,27 @@ defineExpose({ loadRecordings, playAtTime })
 .star-filter-btn.active {
   background: #FFD93D;
   border-color: #FFD93D;
+  color: #1a1a2e;
+}
+
+.events-filter-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.events-filter-btn:hover {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.events-filter-btn.active {
+  background: #4ECDC4;
+  border-color: #4ECDC4;
   color: #1a1a2e;
 }
 
