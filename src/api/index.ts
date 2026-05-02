@@ -1770,26 +1770,23 @@ export function startServer(
   });
 
   /**
-   * 帧推送：事件驱动 + 节流
-   * 帧到达后立即检查是否可推送，每路摄像头独立节流（30fps 上限）
-   * 相比定时器轮询，减少平均 16ms 推送延迟
+   * 帧推送：事件驱动 + 按客户端节流
+   * 帧到达后立即检查是否可推送，每路摄像头独立节流
+   * 节流间隔基于每个客户端订阅的摄像头数量（而非全局数量）
+   * 全屏只看 1 路时可达 30fps，多路时自适应降速
    */
 
   /** 每路摄像头最新帧缓存 */
   const latestFrameByCamera = new Map<string, { data: Buffer; timestamp: number }>();
 
-  /** 每路摄像头上次推送时间（用于节流） */
-  const lastPushTimeByCamera = new Map<string, number>();
-
   /**
-   * 根据活跃摄像头数量动态计算帧推送节流间隔
+   * 根据客户端订阅摄像头数量计算帧推送节流间隔
    * 1-2 路: 30fps (33ms)，3-4 路: 25fps (40ms)，5-8 路: 20fps (50ms)，9+ 路: 15fps (67ms)
    */
-  function getThrottleMs(): number {
-    const camCount = latestFrameByCamera.size;
-    if (camCount <= 2) return 33;
-    if (camCount <= 4) return 40;
-    if (camCount <= 8) return 50;
+  function getThrottleMs(subscribedCount: number): number {
+    if (subscribedCount <= 2) return 33;
+    if (subscribedCount <= 4) return 40;
+    if (subscribedCount <= 8) return 50;
     return 67;
   }
 
@@ -1802,29 +1799,59 @@ export function startServer(
     if (wsClients.size === 0 || latestFrameByCamera.size === 0) return;
 
     const now = Date.now();
+    /** 预编码帧（避免重复 JSON + Buffer 拼接） */
+    const encodedFrames = new Map<string, Uint8Array>();
+    let hasThrottled = false;
+
     for (const [cameraId, frame] of latestFrameByCamera) {
-      /** 节流：根据活跃摄像头数量限制帧率 */
-      const lastPush = lastPushTimeByCamera.get(cameraId) ?? 0;
-      if (now - lastPush < getThrottleMs()) continue;
-
       latestFrameByCamera.delete(cameraId);
-      lastPushTimeByCamera.set(cameraId, now);
 
-      const header = { event: "frame", cameraId, timestamp: frame.timestamp };
-      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
-      headerLenView.setUint32(0, headerBuf.length, true);
-
-      const message = new Uint8Array(4 + headerBuf.length + frame.data.length);
-      message.set(headerLenBuf, 0);
-      message.set(headerBuf, 4);
-      message.set(frame.data, 4 + headerBuf.length);
-
+      /** 延迟编码：先检查是否有客户端能接收此帧 */
+      let needEncode = false;
       for (const ws of wsClients) {
-        /** 客户端订阅过滤：只推送给订阅了该摄像头的客户端 */
-        const subscribed = (ws as unknown as { subscribedCameras?: Set<string> }).subscribedCameras;
+        const wsData = ws as unknown as { subscribedCameras?: Set<string>; lastPushTimeByCamera?: Map<string, number> };
+        const subscribed = wsData.subscribedCameras;
         if (subscribed && !subscribed.has(cameraId)) continue;
+        /** 按客户端订阅数量计算节流 */
+        const subCount = subscribed?.size ?? latestFrameByCamera.size;
+        const throttleMs = getThrottleMs(subCount);
+        if (!wsData.lastPushTimeByCamera) wsData.lastPushTimeByCamera = new Map();
+        const lastPush = wsData.lastPushTimeByCamera.get(cameraId) ?? 0;
+        if (now - lastPush < throttleMs) {
+          hasThrottled = true;
+          continue;
+        }
+        wsData.lastPushTimeByCamera.set(cameraId, now);
+        needEncode = true;
+      }
+
+      if (!needEncode) continue;
+
+      /** 编码帧 */
+      let message = encodedFrames.get(cameraId);
+      if (!message) {
+        const header = { event: "frame", cameraId, timestamp: frame.timestamp };
+        const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
+        headerLenView.setUint32(0, headerBuf.length, true);
+        message = new Uint8Array(4 + headerBuf.length + frame.data.length);
+        message.set(headerLenBuf, 0);
+        message.set(headerBuf, 4);
+        message.set(frame.data, 4 + headerBuf.length);
+        encodedFrames.set(cameraId, message);
+      }
+
+      /** 发送给允许通过的客户端 */
+      for (const ws of wsClients) {
+        const wsData = ws as unknown as { subscribedCameras?: Set<string>; lastPushTimeByCamera?: Map<string, number> };
+        const subscribed = wsData.subscribedCameras;
+        if (subscribed && !subscribed.has(cameraId)) continue;
+        const subCount = subscribed?.size ?? latestFrameByCamera.size + 1;
+        const throttleMs = getThrottleMs(subCount);
+        if (!wsData.lastPushTimeByCamera) wsData.lastPushTimeByCamera = new Map();
+        const lastPush = wsData.lastPushTimeByCamera.get(cameraId) ?? 0;
+        if (now - lastPush < throttleMs) continue;
         try {
-          ws.send(message);
+          ws.send(message!);
         } catch {
           /** 单个客户端发送失败不影响其他客户端 */
         }
@@ -1832,9 +1859,9 @@ export function startServer(
     }
 
     /** 如果还有被节流的帧，安排下次 flush */
-    if (latestFrameByCamera.size > 0 && !pushScheduled) {
+    if (hasThrottled && !pushScheduled) {
       pushScheduled = true;
-      setTimeout(flushFrames, getThrottleMs());
+      setTimeout(flushFrames, 33);
     }
   }
 
