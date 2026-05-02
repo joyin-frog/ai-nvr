@@ -794,43 +794,53 @@ class VideoToFmp4Muxer {
   }
 
   private buildHdlr(): Buffer {
+    /** hdlr fullBox data: pre_defined(4) + handler_type(4) + reserved(12) + name */
     const name = Buffer.from("VideoHandler\0", "ascii");
     const data = Buffer.concat([
-      Buffer.alloc(4),
-      Buffer.from("vide", "ascii"),
-      Buffer.alloc(12),
+      Buffer.alloc(4),             /** pre_defined */
+      Buffer.from("vide", "ascii"), /** handler_type */
+      Buffer.alloc(12),            /** reserved */
       name,
     ]);
-    return this.box("hdlr", data);
+    return this.fullBox("hdlr", 0, data);
   }
 
   private buildVmhd(): Buffer {
-    const data = Buffer.alloc(12);
-    data.writeUInt32BE(1, 0);
-    return this.box("vmhd", data);
+    /** vmhd fullBox data: graphicsmode(2) + opcolor(6) = 8 bytes */
+    const data = Buffer.alloc(8);
+    return this.fullBox("vmhd", 0, data);
   }
 
   private buildDinf(): Buffer {
+    /** url entry: [size=12][type="url "][version=0 + flags=1 (self-contained)] */
     const urlEntry = Buffer.alloc(12);
     urlEntry.writeUInt32BE(12, 0);
     urlEntry.write("url ", 4, 4, "ascii");
-    urlEntry.writeUInt32BE(1, 8);
+    urlEntry.writeUInt32BE(0x00000001, 8); /** version=0, flags=1 (self-contained) */
 
-    const dref = Buffer.concat([
-      Buffer.alloc(8),
-      urlEntry,
-    ]);
-    dref.writeUInt32BE(1, 4);
+    /** dref fullBox data: entry_count(4) + entries */
+    const drefData = Buffer.alloc(4);
+    drefData.writeUInt32BE(1, 0); /** entry_count = 1 */
+    const dref = this.fullBox("dref", 0, Buffer.concat([drefData, urlEntry]));
 
-    return this.box("dinf", this.box("dref", dref));
+    return this.box("dinf", dref);
   }
 
   private buildStbl(sampleEntry: Buffer): Buffer {
-    const stsd = this.box("stsd", Buffer.concat([Buffer.from([0, 0, 0, 1]), sampleEntry]));
-    const stts = this.box("stts", Buffer.alloc(8));
-    const stsc = this.box("stsc", Buffer.alloc(8));
-    const stsz = this.box("stsz", Buffer.alloc(12));
-    const stco = this.box("stco", Buffer.alloc(8));
+    /** stsd 是 fullBox：data 就是 entry_count(4) + sample entries */
+    const stsdData = Buffer.alloc(4);
+    stsdData.writeUInt32BE(1, 0); /** entry_count = 1 */
+    const stsd = this.fullBox("stsd", 0, Buffer.concat([stsdData, sampleEntry]));
+
+    /** stts fullBox：data = entry_count(4) */
+    const stts = this.fullBox("stts", 0, Buffer.alloc(4));
+    /** stsc fullBox：data = entry_count(4) */
+    const stsc = this.fullBox("stsc", 0, Buffer.alloc(4));
+    /** stsz fullBox：data = sample_size(4) + sample_count(4) */
+    const stsz = this.fullBox("stsz", 0, Buffer.alloc(8));
+    /** stco fullBox：data = entry_count(4) */
+    const stco = this.fullBox("stco", 0, Buffer.alloc(4));
+
     return this.box("stbl", Buffer.concat([stsd, stts, stsc, stsz, stco]));
   }
 
