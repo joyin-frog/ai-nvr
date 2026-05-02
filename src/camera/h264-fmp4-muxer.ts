@@ -78,8 +78,10 @@ class VideoToFmp4Muxer {
   private frameDuration = 3000;
   /** 上一帧的 wall-clock 时间（用于动态计算帧间隔） */
   private lastFrameWallTime = 0;
-  /** 帧间隔平滑窗口（最近 N 帧的平均间隔） */
+  /** 帧间隔平滑窗口（循环缓冲区，避免 shift O(n)） */
   private frameIntervals: number[] = [];
+  private frameIntervalsIdx = 0;
+  private frameIntervalsSum = 0;
   /** 平滑窗口大小 */
   private static readonly FPS_WINDOW = 30;
   /** 当前 segment 中累积的帧 */
@@ -149,6 +151,8 @@ class VideoToFmp4Muxer {
     this.currentFps = 0;
     this.lastFrameWallTime = 0;
     this.frameIntervals = [];
+    this.frameIntervalsIdx = 0;
+    this.frameIntervalsSum = 0;
     this.frameDuration = 3000;
   }
 
@@ -346,17 +350,22 @@ class VideoToFmp4Muxer {
       this.segmentStartDts = this.nextDts;
     }
 
-    /** 动态帧持续时间：基于 wall-clock 帧间隔平滑计算 */
+    /** 动态帧持续时间：基于 wall-clock 帧间隔平滑计算（循环缓冲区避免 shift/reduce） */
     const now = performance.now();
     if (this.lastFrameWallTime > 0) {
       const interval = now - this.lastFrameWallTime;
       if (interval > 0 && interval < 5000) {
-        this.frameIntervals.push(interval);
-        if (this.frameIntervals.length > VideoToFmp4Muxer.FPS_WINDOW) {
-          this.frameIntervals.shift();
+        const window = VideoToFmp4Muxer.FPS_WINDOW;
+        if (this.frameIntervals.length < window) {
+          this.frameIntervals.push(interval);
+          this.frameIntervalsSum += interval;
+        } else {
+          this.frameIntervalsSum -= this.frameIntervals[this.frameIntervalsIdx]!;
+          this.frameIntervals[this.frameIntervalsIdx] = interval;
+          this.frameIntervalsSum += interval;
+          this.frameIntervalsIdx = (this.frameIntervalsIdx + 1) % window;
         }
-        /** 计算平均帧间隔（ms），转为 90kHz ticks */
-        const avgInterval = this.frameIntervals.reduce((a, b) => a + b, 0) / this.frameIntervals.length;
+        const avgInterval = this.frameIntervalsSum / this.frameIntervals.length;
         this.frameDuration = Math.round(avgInterval * 90);
       }
     }
