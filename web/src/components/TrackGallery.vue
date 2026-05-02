@@ -357,6 +357,7 @@ const filteredTracks = computed(() => {
     list = list.filter(t =>
       (t.customName && t.customName.toLowerCase().includes(q))
       || t.label.toLowerCase().includes(q)
+      || (t.semanticLabel && t.semanticLabel.toLowerCase().includes(q))
       || String(t.trackId).includes(q)
     )
   }
