@@ -80,10 +80,10 @@ export class EmailNotifier {
         ? `<tr><td>变动比例</td><td><strong>${(ratio * 100).toFixed(1)}%</strong></td></tr>`
         : "";
     } else if (event === "detect") {
-      const detections = payload.detections as Array<{ label: string; score: number; trackName?: string }> | undefined;
+      const detections = payload.detections as Array<{ label: string; score: number; trackName?: string; semanticLabel?: string }> | undefined;
       if (detections && detections.length > 0) {
         const rows = detections.map(d =>
-          `<tr><td>${d.trackName || d.label}</td><td>${(d.score * 100).toFixed(0)}%</td></tr>`,
+          `<tr><td>${d.trackName || d.semanticLabel || d.label}</td><td>${(d.score * 100).toFixed(0)}%</td></tr>`,
         ).join("");
         detailHtml = `<tr><td colspan="2"><strong>检测目标</strong></td></tr>${rows}`;
       }
