@@ -333,12 +333,13 @@ export class DetectRuleEngine {
         JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt }),
       );
 
-      /** 处理状态更新 */
+      /** 处理状态更新（跳过已禁用的状态） */
       if (vlmResult.states && this.stateStorage) {
         for (const stateUpdate of vlmResult.states) {
+          const stateDef = this.stateStorage.getState(stateUpdate.id);
+          if (!stateDef?.enabled) continue;
           const change = this.stateStorage.setValue(stateUpdate.id, stateUpdate.value, `rule:${rule.id}`, rule.id);
           if (change) {
-            const stateDef = this.stateStorage.getState(stateUpdate.id);
             this.eventBus.emit("state:changed", {
               stateId: change.stateId,
               stateName: change.stateName,
@@ -348,7 +349,7 @@ export class DetectRuleEngine {
               source: change.source,
               sourceRuleId: change.sourceRuleId,
               timestamp: change.timestamp,
-              notify: stateDef?.notifyOnChange ?? false,
+              notify: stateDef.notifyOnChange,
             });
           }
         }

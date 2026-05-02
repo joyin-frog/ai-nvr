@@ -163,12 +163,13 @@ export class StateStorage {
     /** 值未变化则不记录 */
     if (state.currentValue === newValue) return null;
 
+    const ts = Date.now();
     this.db.run(`UPDATE states SET current_value = ? WHERE id = ?`, [newValue, stateId]);
 
     const result = this.db.run(`
       INSERT INTO state_changes (state_id, state_name, camera_id, old_value, new_value, source, source_rule_id, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [stateId, state.name, state.cameraId, state.currentValue, newValue, source, sourceRuleId, Date.now()]);
+    `, [stateId, state.name, state.cameraId, state.currentValue, newValue, source, sourceRuleId, ts]);
 
     return {
       id: Number(result.lastInsertRowid),
@@ -179,7 +180,7 @@ export class StateStorage {
       newValue,
       source,
       sourceRuleId,
-      timestamp: Date.now(),
+      timestamp: ts,
     };
   }
 
