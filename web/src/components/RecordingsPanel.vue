@@ -264,6 +264,8 @@ interface PlaybackDetection {
   box: { xmin: number; ymin: number; xmax: number; ymax: number }
   trackId?: number
   trackName?: string
+  /** CLIP 语义标签 */
+  semanticLabel?: string
 }
 /** 当前录像的检测事件列表（预加载） */
 const playbackEvents = ref<Array<{ timestamp: number; detections: PlaybackDetection[] }>>([])
@@ -386,7 +388,7 @@ function updatePlaybackDetections() {
   /** 收集当前帧中活跃的 trackId */
   const activeTracks = new Map<number, string>()
   for (const d of playbackDetections.value) {
-    if (d.trackId != null) activeTracks.set(d.trackId, d.label)
+    if (d.trackId != null) activeTracks.set(d.trackId, d.semanticLabel || d.label)
   }
   if (activeTracks.size === 0) {
     playbackTrails.value = []
@@ -421,14 +423,15 @@ function updatePlaybackDetections() {
   playbackTrails.value = trails
 }
 
-/** 获取回放检测框标签（含自定义名称） */
+/** 获取回放检测框标签（含自定义名称，优先 semanticLabel） */
 function getPlaybackDetectLabel(cameraId: string, d: PlaybackDetection): string {
   const camLabels = props.trackLabels?.[cameraId]
   const customName = d.trackName || (d.trackId && camLabels?.[d.trackId])
   if (customName) return `${customName} ${(d.score * 100).toFixed(0)}%`
+  const displayLabel = d.semanticLabel || d.label
   const parts: string[] = []
   if (d.trackId) parts.push(`#${d.trackId}`)
-  parts.push(d.label)
+  parts.push(displayLabel)
   parts.push(`${(d.score * 100).toFixed(0)}%`)
   return parts.join(' ')
 }
@@ -1168,9 +1171,9 @@ async function loadTimelineEvents() {
       for (const e of data.events as Array<{ timestamp: number; type: string; detail: string | null; camera_id: string }>) {
         let label: string | undefined
         if (e.detail) {
-          const detail = JSON.parse(e.detail) as { detections?: Array<{ label: string; trackName?: string }> }
+          const detail = JSON.parse(e.detail) as { detections?: Array<{ label: string; trackName?: string; semanticLabel?: string }> }
           if (detail.detections && detail.detections.length > 0) {
-            label = detail.detections.map(d => d.trackName || d.label).join(', ')
+            label = detail.detections.map(d => d.trackName || d.semanticLabel || d.label).join(', ')
           }
         }
         allEvents.push({ timestamp: e.timestamp, type: e.type, label, cameraId: e.camera_id })
@@ -1823,7 +1826,7 @@ defineExpose({ loadRecordings, playAtTime })
               @click="seekToPlaybackEvent(ev.timestamp)"
             >
               <span class="pev-time">{{ formatAbsTime(ev.timestamp) }}</span>
-              <span class="pev-labels">{{ [...new Set(ev.detections.map(d => d.trackName || d.label))].join(', ') }}</span>
+              <span class="pev-labels">{{ [...new Set(ev.detections.map(d => d.trackName || d.semanticLabel || d.label))].join(', ') }}</span>
               <span class="pev-count">{{ ev.detections.length }}</span>
             </div>
           </div>
