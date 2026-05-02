@@ -259,10 +259,31 @@ export function useFmp4Stream(cameraId: Ref<string>) {
           /** 新 SourceBuffer：直接 append init segment */
           doAppend(fmp4Data)
         } else {
-          /** 同 codec：可能分辨率变化（如 ffmpeg 重启），仍需 append init */
-          /** 清空 pending 队列避免旧的 media segment 残留 */
+          /**
+           * 同 codec：ffmpeg 重启/分辨率变化后重发 init segment
+           * 必须先清理旧缓冲区再 append，否则新旧 media segment 混合导致解码异常闪烁
+           */
           pendingQueue = []
-          doAppend(fmp4Data)
+          if (sourceBuffer && !sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
+            /** 先移除旧缓冲区数据 */
+            pruning = true
+            appending = false
+            try {
+              sourceBuffer.remove(
+                sourceBuffer.buffered.start(0),
+                sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1),
+              )
+            } catch {
+              pruning = false
+            }
+            /** remove 完成后 onUpdateEnd 会处理 init segment append */
+            pendingQueue.push(fmp4Data)
+          } else if (sourceBuffer?.updating || pruning) {
+            /** 正在更新中，排队等待 */
+            pendingQueue.push(fmp4Data)
+          } else {
+            doAppend(fmp4Data)
+          }
         }
       } else if (type === FMP4_TYPE_MEDIA) {
         /** slice 创建独立 ArrayBuffer，避免将 type 标记字节传入 MSE */
@@ -406,6 +427,17 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     /** append 完成：处理队列中的段 */
     if (wasAppending && pendingQueue.length > 0) {
       drainPending()
+    }
+
+    /** 确保 video 播放位置在有效缓冲区内 */
+    if (wasAppending && videoRef.value && sourceBuffer && sourceBuffer.buffered.length > 0) {
+      const video = videoRef.value
+      const bufStart = sourceBuffer.buffered.start(0)
+      const bufEnd = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
+      /** currentTime 落在缓冲区外 → seek 到缓冲区起点附近 */
+      if (video.currentTime < bufStart || video.currentTime > bufEnd) {
+        video.currentTime = bufEnd - 0.1
+      }
     }
 
     /** 自动播放 */

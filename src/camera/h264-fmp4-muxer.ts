@@ -71,6 +71,9 @@ class Fmp4StreamParser {
     this.segmentCount = 0;
     this.segmentCountStart = Date.now();
     this.currentFps = 0;
+    /** 清除缓存的 init/media segment，避免 ffmpeg 重启后旧数据与新流不兼容 */
+    this.cachedInit = null;
+    this.lastMediaData = null;
   }
 
   /** 将 pending chunks 合并到 buffer */
@@ -430,6 +433,8 @@ export class H264Fmp4Extractor {
     this.proc.on("exit", (code) => {
       console.log(`${this.logTag} ffmpeg 退出, code=${code}`);
       this.parser.reset();
+      /** 清除缓存的 init segment（ffmpeg 重启后旧 init 不再兼容） */
+      this.cachedInit = null;
       if (this.online) {
         this.online = false;
         this.eventBus.emit("camera:offline", { cameraId: this.config.id });
