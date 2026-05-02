@@ -101,10 +101,19 @@ export class EventStorage {
     return newVal === 1;
   }
 
-  /** 删除过期事件 */
+  /** 删除过期事件（分批删除避免长事务锁） */
   purge(beforeTimestamp: number): number {
-    const result = this.db.run("DELETE FROM events WHERE timestamp < ?", [beforeTimestamp]);
-    return result.changes;
+    let total = 0;
+    const BATCH = 5000;
+    for (;;) {
+      const result = this.db.run(
+        "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE timestamp < ? LIMIT ?)",
+        [beforeTimestamp, BATCH],
+      );
+      total += result.changes;
+      if (result.changes < BATCH) break;
+    }
+    return total;
   }
 
   /** 按类型统计事件数量 */
