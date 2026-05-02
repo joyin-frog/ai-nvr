@@ -22,7 +22,36 @@ import { checkAuth } from "@/auth";
 import { getLogs } from "@/log-buffer";
 import { existsSync, statSync, realpathSync } from "node:fs";
 import { resolve, extname } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+
+/** 异步执行 ffmpeg 并收集 stdout/stderr */
+function runFfmpegAsync(ffmpegPath: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stderr?: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); resolve({ ok: false, stderr }); }, timeoutMs);
+    proc.on("exit", (code) => { clearTimeout(timer); resolve({ ok: code === 0, stderr }); });
+    proc.on("error", () => { clearTimeout(timer); resolve({ ok: false }); });
+  });
+}
+
+/** 异步执行 ffmpeg 截帧，返回 JPEG Buffer */
+function runFfmpegCapture(ffmpegPath: string, inputUrl: string, timeoutMs: number): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const args = ["-rtsp_transport", "tcp", "-i", inputUrl, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "2", "-an", "pipe:1"];
+    const proc = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "ignore"] });
+    const chunks: Buffer[] = [];
+    proc.stdout?.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); resolve(null); }, timeoutMs);
+    proc.on("exit", () => {
+      clearTimeout(timer);
+      const buf = Buffer.concat(chunks);
+      resolve(buf.length > 100 ? buf : null);
+    });
+    proc.on("error", () => { clearTimeout(timer); resolve(null); });
+  });
+}
 
 /** WebSocket 客户端集合 */
 type WsClient = import("bun").ServerWebSocket<{ type?: string; cameraId?: string }>;
@@ -313,23 +342,21 @@ export function startServer(
 
       /** 测试 RTSP 连接 */
       if (url.pathname === "/api/cameras/test" && req.method === "POST") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const obj = body as Record<string, unknown>;
           const rtspUrl = obj.url as string | undefined;
           if (!rtspUrl) return new Response("Missing url", { status: 400 });
           const ffmpegPath = loadConfig().ffmpegPath;
-          const result = spawnSync(ffmpegPath, [
+          const result = await runFfmpegAsync(ffmpegPath, [
             "-rtsp_transport", "tcp",
             "-i", rtspUrl,
             "-frames:v", "1",
             "-f", "null",
             "-",
-          ], { timeout: 8000, stdio: "pipe" });
-          const ok = result.status === 0;
-          const stderr = result.stderr?.toString() ?? "";
-          const match = stderr.match(/Video: ([^\n]+)/);
+          ], 8000);
+          const match = result.stderr?.match(/Video: ([^\n]+)/);
           const videoInfo = match ? match[1] : undefined;
-          return Response.json({ ok, videoInfo, error: ok ? undefined : stderr.slice(-200) });
+          return Response.json({ ok: result.ok, videoInfo, error: result.ok ? undefined : (result.stderr ?? "").slice(-200) });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
@@ -682,20 +709,11 @@ export function startServer(
           const cam = loadConfig().cameras.find(c => c.id === cameraId);
           if (!cam) return new Response("Camera not found", { status: 404 });
           const ffmpegPath = loadConfig().ffmpegPath;
-          const result = spawnSync(ffmpegPath, [
-            "-rtsp_transport", "tcp",
-            "-i", cam.stream.hd,
-            "-frames:v", "1",
-            "-f", "image2pipe",
-            "-vcodec", "mjpeg",
-            "-q:v", "2",
-            "-an",
-            "pipe:1",
-          ], { timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
-          if (result.error || !result.stdout || result.stdout.length < 100) {
+          const result = await runFfmpegCapture(ffmpegPath, cam.stream.hd, 5000);
+          if (!result) {
             return new Response("HD capture failed", { status: 504 });
           }
-          return new Response(result.stdout, {
+          return new Response(result, {
             headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-cache" },
           });
         }
