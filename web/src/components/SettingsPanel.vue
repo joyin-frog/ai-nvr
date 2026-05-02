@@ -105,6 +105,11 @@ interface RuntimeSettings {
       systemPrompt: string
       triggers: string[]
     }
+    clip: {
+      enabled: boolean
+      model: string
+      embeddingDim: number
+    }
   }
   recording: {
     mode: string
@@ -178,6 +183,10 @@ async function loadSettings() {
       /** 确保 watermark 有默认值（向后兼容旧版后端） */
       if (settings.value && !settings.value.recording.watermark) {
         settings.value.recording.watermark = { enabled: true, namePosition: 'top-left', timePosition: 'bottom-left', fontSize: 24 }
+      }
+      /** 确保 clip 有默认值（向后兼容） */
+      if (settings.value && !settings.value.ai.clip) {
+        settings.value.ai.clip = { enabled: false, model: 'jinaai/jina-clip-v2', embeddingDim: 512 }
       }
     }
   } catch {
@@ -517,6 +526,30 @@ onMounted(() => {
             <span class="field-label">{{ t('settings.llmTriggers', '触发事件') }}</span>
             <input type="text" :value="settings.ai.llm.triggers?.join(', ') ?? ''" @change="settings.ai.llm.triggers = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
             <span class="field-hint">track:appeared, track:enter-zone, track:loiter</span>
+          </label>
+        </template>
+      </section>
+
+      <!-- CLIP 零样本分类 -->
+      <section class="section">
+        <h3>{{ t('settings.clipTitle', 'CLIP 零样本分类') }}</h3>
+        <p class="section-desc">{{ t('settings.clipDesc', '使用 CLIP 模型对检测到的目标进行零样本语义分类，提供比 YOLO 标签更丰富的描述（如 "black dog"、"person walking"）。') }}</p>
+        <label class="field">
+          <span class="field-label">{{ t('settings.clipEnabled', '启用') }}</span>
+          <input type="checkbox" v-model="settings.ai.clip.enabled" class="checkbox" />
+        </label>
+        <template v-if="settings.ai.clip.enabled">
+          <label class="field">
+            <span class="field-label">{{ t('settings.clipModel', '模型') }}</span>
+            <select v-model="settings.ai.clip.model" class="input">
+              <option value="jinaai/jina-clip-v2">Jina CLIP v2 (推荐)</option>
+            </select>
+            <span class="field-hint">支持 Matryoshka 嵌入截断，GPU/CPU 均可</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.clipEmbeddingDim', '嵌入维度') }}</span>
+            <input type="number" v-model.number="settings.ai.clip.embeddingDim" step="64" min="64" max="1024" class="input" />
+            <span class="field-hint">Matryoshka 截断维度，越小越快但精度降低（默认 512）</span>
           </label>
         </template>
       </section>

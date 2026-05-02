@@ -417,6 +417,11 @@ export default {
     connection: '连接',
     backendUrl: '后端地址',
     inputWidth: '输入宽度',
+    clipTitle: 'CLIP 零样本分类',
+    clipDesc: '使用 CLIP 模型对检测到的目标进行零样本语义分类，提供比 YOLO 标签更丰富的描述（如 "black dog"、"person walking"）。',
+    clipEnabled: '启用',
+    clipModel: '模型',
+    clipEmbeddingDim: '嵌入维度',
   },
   login: {
     title: 'JK NVR 登录',

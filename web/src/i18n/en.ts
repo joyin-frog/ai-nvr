@@ -415,6 +415,11 @@ export default {
     connection: 'Connection',
     backendUrl: 'Backend URL',
     inputWidth: 'Input Width',
+    clipTitle: 'CLIP Zero-Shot Classification',
+    clipDesc: 'Use CLIP model to perform zero-shot semantic classification on detected targets, providing richer descriptions than YOLO labels (e.g. "black dog", "person walking").',
+    clipEnabled: 'Enabled',
+    clipModel: 'Model',
+    clipEmbeddingDim: 'Embedding Dimension',
   },
   login: {
     title: 'JK NVR Login',
