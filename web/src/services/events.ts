@@ -152,8 +152,8 @@ export class EventClient {
     const headerLen = buf[0]! | (buf[1]! << 8) | (buf[2]! << 16) | (buf[3]! << 24)
     if (buf.length < 4 + headerLen) return
 
-    /** 解析 JSON 头 */
-    const headerBytes = buf.slice(4, 4 + headerLen)
+    /** 解析 JSON 头（subarray 零拷贝，textDecoder 支持 Uint8Array 视图） */
+    const headerBytes = buf.subarray(4, 4 + headerLen)
     let header: Record<string, unknown>
     try {
       header = JSON.parse(textDecoder.decode(headerBytes))
@@ -164,14 +164,15 @@ export class EventClient {
     const event = header.event as string
     if (!event) return
 
-    /** 构建载荷 */
-    const payload: Record<string, unknown> = { ...header }
-    delete payload.event
+    /** 构建载荷（过滤式复制，避免 spread + delete 触发 V8 hidden class 退化） */
+    const payload: Record<string, unknown> = {}
+    for (const key of Object.keys(header)) {
+      if (key !== 'event') payload[key] = header[key]
+    }
 
-    /** frame 事件：传递原始 JPEG ArrayBuffer（由 Canvas 渲染器消费） */
+    /** frame 事件：直接 slice ArrayBuffer 获取独立的 JPEG 数据（避免 Uint8Array.slice 的中间拷贝） */
     if (event === 'frame' && buf.length > 4 + headerLen) {
-      const jpegBytes = buf.slice(4 + headerLen)
-      payload.jpegData = jpegBytes.buffer as ArrayBuffer
+      payload.jpegData = data.slice(4 + headerLen)
     }
 
     this.dispatch(event, payload)

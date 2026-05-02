@@ -126,8 +126,10 @@ interface RecordingState {
   stopTimer: ReturnType<typeof setTimeout> | null;
   /** 持续录制定时器（用于自动分段） */
   continuousTimer: ReturnType<typeof setTimeout> | null;
-  /** ffmpeg stdin 写锁（避免并发 write） */
+  /** ffmpeg stdin 写锁（背压时暂停写入，等 drain 恢复） */
   writing: boolean;
+  /** stdin 缓冲区已满，等待 drain 事件 */
+  drainPending: boolean;
   /** 上次写入帧的时间戳（用于帧率节流） */
   lastWriteTime: number;
   /** 高帧率模式截止时间（motion 触发后 2 秒内 ~30fps，之后恢复 15fps） */
@@ -469,7 +471,7 @@ export class MotionRecorder {
 
     const state = this.states.get(cameraId);
 
-    if (!state?.recording || !state.proc?.stdin?.writable || state.writing) {
+    if (!state?.recording || !state.proc?.stdin?.writable || state.writing || state.drainPending) {
       /** 不在录像状态 → 缓存到缓冲区（motion 触发模式） */
       if (mode === "motion") {
         const buf = this.getOrCreateBuffer(cameraId);
@@ -488,9 +490,19 @@ export class MotionRecorder {
     state.lastWriteTime = now;
 
     state.writing = true;
-    state.proc.stdin.write(jpegData, () => {
+    const canWrite = state.proc.stdin.write(jpegData, () => {
       state.writing = false;
     });
+    if (!canWrite) {
+      /** stdin 缓冲区满，暂停写入直到 drain */
+      state.drainPending = true;
+      const stdin = state.proc.stdin;
+      const onDrain = () => {
+        state.drainPending = false;
+        stdin.removeListener("drain", onDrain);
+      };
+      stdin.once("drain", onDrain);
+    }
   }
 
   /** 录像列表缓存 */
@@ -696,11 +708,15 @@ export class MotionRecorder {
     state.startTime = timestamp;
     state.boostUntil = timestamp + MotionRecorder.WRITE_BOOST_DURATION_MS;
 
-    /** 写入预缓冲帧（事件前/motion 前的帧） */
+    /** 写入预缓冲帧（事件前/motion 前的帧），逐帧等待 drain 防止背压丢失 */
     if (preFrames && preFrames.length > 0) {
       console.log(`[Recorder] ${cameraId} 写入预缓冲帧: ${preFrames.length} 帧`);
+      const stdin = proc.stdin!;
       for (const frame of preFrames) {
-        proc.stdin?.write(frame.data);
+        const canWrite = stdin.write(frame.data);
+        if (!canWrite) {
+          await new Promise<void>(resolve => stdin.once("drain", resolve));
+        }
       }
     }
   }
@@ -840,7 +856,7 @@ export class MotionRecorder {
     const existing = this.states.get(cameraId);
     if (existing) return existing;
 
-    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false, lastWriteTime: 0, boostUntil: 0 };
+    const state: RecordingState = { proc: null, recording: false, lastMotionTime: 0, startTime: 0, stopTimer: null, continuousTimer: null, writing: false, drainPending: false, lastWriteTime: 0, boostUntil: 0 };
     this.states.set(cameraId, state);
     return state;
   }

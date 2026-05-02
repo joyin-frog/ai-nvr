@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { loadConfig, watchConfig } from "@/config";
 import { EventBus } from "@/event-bus";
@@ -54,26 +53,25 @@ process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 /** 全局事件总线 */
 const eventBus = new EventBus();
 
-/** 启动前清理残留 ffmpeg 进程（包括僵尸进程） */
-try {
-  /** 清理活跃的 ffmpeg 进程 */
-  const pids = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8" }).trim();
-  if (pids) {
-    const list = pids.split("\n").filter(Boolean);
-    console.log(`[App] 清理 ${list.length} 个残留 ffmpeg 进程: ${list.join(", ")}`);
-    execSync(`kill -9 ${list.join(" ")} 2>/dev/null || true`, { timeout: 3000 });
+/** 启动前异步清理残留 ffmpeg 进程（不阻塞事件循环） */
+void (async () => {
+  try {
+    const pids = (await Bun.$`pgrep -f ffmpeg 2>/dev/null || true`.text()).trim();
+    if (pids) {
+      const list = pids.split("\n").filter(Boolean);
+      console.log(`[App] 清理 ${list.length} 个残留 ffmpeg 进程: ${list.join(", ")}`);
+      await Bun.$`kill -9 ${list.join(" ")} 2>/dev/null || true`.quiet();
+    }
+    const defunct = (await Bun.$`ps aux | grep -c '<defunct>' 2>/dev/null || echo 0`.text()).trim();
+    const count = parseInt(defunct, 10);
+    if (count > 10) {
+      console.log(`[App] 检测到 ${count} 个僵尸进程，尝试清理`);
+      await Bun.$`kill -CHLD 1 2>/dev/null || true`.quiet();
+    }
+  } catch {
+    // ignore
   }
-  /** 清理 bun --watch 留下的 ffmpeg 僵尸进程（通过 kill 父进程 PID 来回收） */
-  const defunct = execSync("ps aux | grep -c '<defunct>' || echo 0", { encoding: "utf-8" }).trim();
-  const count = parseInt(defunct, 10);
-  if (count > 10) {
-    console.log(`[App] 检测到 ${count} 个僵尸进程，尝试清理`);
-    /** 向 init 进程发送信号回收僵尸（linux 会自动回收） */
-    execSync("kill -CHLD 1 2>/dev/null || true", { timeout: 3000 });
-  }
-} catch {
-  // ignore
-}
+})();
 
 /** 加载配置 */
 const config = loadConfig();
@@ -233,23 +231,23 @@ cleaner.start();
 
 /** PTZ 云台控制器 */
 const ptzController = new PtzController();
-for (const cam of config.cameras) {
-  if (cam.ptz?.enabled) {
-    ptzController.register({
-      cameraId: cam.id,
-      driver: cam.ptz.driver ?? "onvif",
-      hostname: cam.ptz.host,
-      port: cam.ptz.port,
-      username: cam.ptz.username,
-      password: cam.ptz.password,
-      channel: cam.ptz.channel ?? 1,
-    }).then(() => {
-      console.log(`[PTZ] ${cam.id} 已注册`);
-    }).catch((err) => {
-      console.error(`[PTZ] ${cam.id} 注册失败:`, err);
-    });
-  }
-}
+/** 并行注册所有 PTZ 设备（避免串行等待） */
+const ptzRegistrations = config.cameras
+  .filter(cam => cam.ptz?.enabled)
+  .map(cam => ptzController.register({
+    cameraId: cam.id,
+    driver: cam.ptz!.driver ?? "onvif",
+    hostname: cam.ptz!.host,
+    port: cam.ptz!.port,
+    username: cam.ptz!.username,
+    password: cam.ptz!.password,
+    channel: cam.ptz!.channel ?? 1,
+  }).then(() => {
+    console.log(`[PTZ] ${cam.id} 已注册`);
+  }).catch((err) => {
+    console.error(`[PTZ] ${cam.id} 注册失败:`, err);
+  }));
+void Promise.allSettled(ptzRegistrations);
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);

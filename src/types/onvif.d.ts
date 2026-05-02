@@ -8,6 +8,8 @@ declare module "onvif/promises" {
     username?: string
     password?: string
     agent?: HttpAgent | false
+    /** HTTP 请求超时（ms），默认 120000 */
+    timeout?: number
   }
 
   interface MoveOptions {

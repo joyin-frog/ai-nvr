@@ -29,6 +29,11 @@ interface CameraState {
 export class MotionDetector {
   /** 每个摄像头的检测状态 */
   private states = new Map<string, CameraState>();
+  /** ROI 多边形缓存（cameraId → 多边形列表），避免每次 processFrame 查 SQLite */
+  private roiCache = new Map<string, { polygons: ReturnType<RoiStorage["getEnabledPolygons"]>; key: string }>();
+  /** ROI 缓存失效时间（30 秒自动刷新） */
+  private static readonly ROI_CACHE_TTL = 30_000;
+  private roiCacheTime = 0;
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -102,10 +107,11 @@ export class MotionDetector {
     const pixels = new Uint8Array(data.buffer);
 
     try {
-    /** 构建 ROI mask（仅在配置变化时重建） */
-    const roiKey = this.getRoiCacheKey(cameraId, width, height);
+    /** 构建 ROI mask（使用缓存的多边形列表，仅在配置变化或 TTL 到期时重建） */
+    const roiEntry = this.getCachedRoi(cameraId);
+    const roiKey = `${width}x${height}:${roiEntry.key}`;
     if (state.roiCacheKey !== roiKey) {
-      state.roiMask = this.buildRoiMask(cameraId, width, height);
+      state.roiMask = this.buildRoiMaskFromPolygons(roiEntry.polygons, width, height);
       state.roiCacheKey = roiKey;
     }
 
@@ -169,19 +175,33 @@ export class MotionDetector {
   }
 
   /**
-   * 构建 ROI mask
-   * 返回一个与图像同大小的 Uint8Array，1 = 在检测区域内，0 = 不在
-   * 如果没有 ROI，返回 null（表示全图检测）
+   * 获取缓存的 ROI 多边形列表（30 秒 TTL，避免每 200ms 查 SQLite）
    */
-  /** 计算 ROI 缓存 key：只在多边形配置或分辨率变化时才重建 mask */
-  private getRoiCacheKey(cameraId: string, width: number, height: number): string {
-    const polygons = this.roiStorage.getEnabledPolygons(cameraId);
-    if (polygons.length === 0) return `${width}x${height}:none`;
-    return `${width}x${height}:${polygons.map(p => p.points.map(pt => `${pt.x.toFixed(4)},${pt.y.toFixed(4)}`).join(";")).join("|")}`;
+  private getCachedRoi(cameraId: string): { polygons: ReturnType<RoiStorage["getEnabledPolygons"]>; key: string } {
+    const now = Date.now();
+    if (now - this.roiCacheTime > MotionDetector.ROI_CACHE_TTL) {
+      this.roiCache.clear();
+      this.roiCacheTime = now;
+    }
+    let entry = this.roiCache.get(cameraId);
+    if (!entry) {
+      const polygons = this.roiStorage.getEnabledPolygons(cameraId);
+      const key = polygons.length === 0
+        ? "none"
+        : polygons.map(p => p.points.map(pt => `${pt.x.toFixed(4)},${pt.y.toFixed(4)}`).join(";")).join("|");
+      entry = { polygons, key };
+      this.roiCache.set(cameraId, entry);
+    }
+    return entry;
   }
 
-  private buildRoiMask(cameraId: string, width: number, height: number): Uint8Array | null {
-    const polygons = this.roiStorage.getEnabledPolygons(cameraId);
+  /** ROI 缓存失效（外部调用，当 ROI 数据变更时） */
+  invalidateRoiCache(): void {
+    this.roiCache.clear();
+    this.roiCacheTime = 0;
+  }
+
+  private buildRoiMaskFromPolygons(polygons: ReturnType<RoiStorage["getEnabledPolygons"]>, width: number, height: number): Uint8Array | null {
     if (polygons.length === 0) return null;
 
     const mask = new Uint8Array(width * height);

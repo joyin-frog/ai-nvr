@@ -87,6 +87,8 @@ const stateList = ref<StateItem[]>([])
 /** 表单状态 */
 const showAddForm = ref(false)
 const editingRuleId = ref<number | null>(null)
+/** 高级设置折叠状态 */
+const showAdvanced = ref(false)
 const roiList = ref<RoiItem[]>([])
 
 const form = ref({
@@ -283,6 +285,8 @@ function startEdit(rule: DetectRule) {
     saveOriginal: rule.saveOriginal ?? true,
   }
   parseScheduleJson(rule.schedule ?? '')
+  /** 有高级配置时自动展开 */
+  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal
 }
 
 async function saveEdit() {
@@ -356,6 +360,13 @@ const promptTemplates = computed(() => [
 
 function applyTemplate(prompt: string) {
   form.value.prompt = prompt
+}
+
+/** textarea 自动增长高度 */
+function autoGrowTextarea(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  el.style.height = 'auto'
+  el.style.height = `${Math.max(80, el.scrollHeight)}px`
 }
 
 /** 实时追加记录 */
@@ -452,12 +463,11 @@ defineExpose({ loadRecords, addRecord })
       </div>
       <div class="form-field">
         <label>{{ t('detectRule.prompt') }}</label>
-        <textarea v-model="form.prompt" :placeholder="t('detectRule.promptPlaceholder')" class="input textarea" rows="2"></textarea>
+        <textarea v-model="form.prompt" :placeholder="t('detectRule.promptPlaceholder')" class="input textarea auto-grow" rows="3" @input="autoGrowTextarea"></textarea>
       </div>
-      <div v-if="!form.prompt" class="prompt-templates">
-        <label>{{ t('detectRule.quickTemplate', '快速模板') }}</label>
+      <div class="prompt-templates">
         <div class="template-chips">
-          <button v-for="tpl in promptTemplates" :key="tpl.label" class="tpl-chip" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
+          <button v-for="tpl in promptTemplates" :key="tpl.label" :class="['tpl-chip', { active: form.prompt === tpl.prompt }]" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
         </div>
       </div>
       <div class="form-row">
@@ -470,49 +480,55 @@ defineExpose({ loadRecords, addRecord })
           <input v-model.number="form.cooldownMs" type="number" step="1000" min="1000" class="input" />
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-field half">
-          <label>{{ t('settings.aiInputWidth') }}</label>
-          <input v-model.number="form.imageWidth" type="number" min="0" step="64" class="input" :placeholder="'0 = auto'" />
+      <!-- 高级设置 -->
+      <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+        {{ showAdvanced ? '▾' : '▸' }} {{ t('settings.title') }}
+      </button>
+      <div v-if="showAdvanced" class="advanced-section">
+        <div class="form-row">
+          <div class="form-field half">
+            <label>{{ t('settings.aiInputWidth') }}</label>
+            <input v-model.number="form.imageWidth" type="number" min="0" step="64" class="input" :placeholder="'0 = auto'" />
+          </div>
+          <div class="form-field half">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="form.saveOriginal" />
+              {{ t('state.saveOriginal') }}
+            </label>
+          </div>
         </div>
-        <div class="form-field half">
+        <!-- 关联状态 -->
+        <div v-if="availableStates.length > 0" class="form-field">
+          <label>{{ t('detectRule.linkedStates') }}</label>
+          <div class="chip-group">
+            <button
+              v-for="st in availableStates" :key="st.id"
+              :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
+              @click="toggleStateId(st.id)"
+            >{{ st.name }}</button>
+          </div>
+          <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
+        </div>
+        <!-- 启用时段 -->
+        <div class="schedule-section">
           <label class="checkbox-label">
-            <input type="checkbox" v-model="form.saveOriginal" />
-            {{ t('state.saveOriginal') }}
+            <input type="checkbox" v-model="form.scheduleEnabled" />
+            {{ t('detectRule.schedule') }}
           </label>
+          <template v-if="form.scheduleEnabled">
+            <div class="schedule-times">
+              <input type="time" v-model="form.scheduleStart" class="input time-input" />
+              <span class="time-sep">~</span>
+              <input type="time" v-model="form.scheduleEnd" class="input time-input" />
+            </div>
+            <div class="day-chips">
+              <button v-for="d in dayOptions" :key="d.value"
+                :class="['day-chip', { selected: form.scheduleDays.includes(d.value) }]"
+                @click="toggleDay(d.value)"
+              >{{ d.label() }}</button>
+            </div>
+          </template>
         </div>
-      </div>
-      <!-- 关联状态 -->
-      <div v-if="availableStates.length > 0" class="form-field">
-        <label>{{ t('detectRule.linkedStates') }}</label>
-        <div class="chip-group">
-          <button
-            v-for="st in availableStates" :key="st.id"
-            :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
-            @click="toggleStateId(st.id)"
-          >{{ st.name }}</button>
-        </div>
-        <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
-      </div>
-      <!-- 启用时段 -->
-      <div class="schedule-section">
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="form.scheduleEnabled" />
-          {{ t('detectRule.schedule') }}
-        </label>
-        <template v-if="form.scheduleEnabled">
-          <div class="schedule-times">
-            <input type="time" v-model="form.scheduleStart" class="input time-input" />
-            <span class="time-sep">~</span>
-            <input type="time" v-model="form.scheduleEnd" class="input time-input" />
-          </div>
-          <div class="day-chips">
-            <button v-for="d in dayOptions" :key="d.value"
-              :class="['day-chip', { selected: form.scheduleDays.includes(d.value) }]"
-              @click="toggleDay(d.value)"
-            >{{ d.label() }}</button>
-          </div>
-        </template>
       </div>
       <button class="submit-btn" @click="addRule">{{ t('alert.confirmAdd') }}</button>
     </div>
@@ -549,11 +565,11 @@ defineExpose({ loadRecords, addRecord })
             </div>
             <div class="form-field">
               <label>{{ t('detectRule.prompt') }}</label>
-              <textarea v-model="form.prompt" class="input textarea" rows="2"></textarea>
+              <textarea v-model="form.prompt" class="input textarea auto-grow" rows="3" @input="autoGrowTextarea"></textarea>
             </div>
-            <div v-if="!form.prompt" class="prompt-templates">
+            <div class="prompt-templates">
               <div class="template-chips">
-                <button v-for="tpl in promptTemplates" :key="tpl.label" class="tpl-chip" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
+                <button v-for="tpl in promptTemplates" :key="tpl.label" :class="['tpl-chip', { active: form.prompt === tpl.prompt }]" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
               </div>
             </div>
             <div class="form-row">
@@ -566,49 +582,53 @@ defineExpose({ loadRecords, addRecord })
                 <input v-model.number="form.cooldownMs" type="number" class="input" />
               </div>
             </div>
-            <div class="form-row">
-              <div class="form-field half">
-                <label>{{ t('settings.aiInputWidth') }}</label>
-                <input v-model.number="form.imageWidth" type="number" min="0" step="64" class="input" :placeholder="'0 = auto'" />
+            <!-- 高级设置（编辑） -->
+            <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+              {{ showAdvanced ? '▾' : '▸' }} {{ t('settings.title') }}
+            </button>
+            <div v-if="showAdvanced" class="advanced-section">
+              <div class="form-row">
+                <div class="form-field half">
+                  <label>{{ t('settings.aiInputWidth') }}</label>
+                  <input v-model.number="form.imageWidth" type="number" min="0" step="64" class="input" :placeholder="'0 = auto'" />
+                </div>
+                <div class="form-field half">
+                  <label class="checkbox-label">
+                    <input type="checkbox" v-model="form.saveOriginal" />
+                    {{ t('state.saveOriginal') }}
+                  </label>
+                </div>
               </div>
-              <div class="form-field half">
+              <div v-if="availableStates.length > 0" class="form-field">
+                <label>{{ t('detectRule.linkedStates') }}</label>
+                <div class="chip-group">
+                  <button
+                    v-for="st in availableStates" :key="st.id"
+                    :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
+                    @click="toggleStateId(st.id)"
+                  >{{ st.name }}</button>
+                </div>
+                <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
+              </div>
+              <div class="schedule-section">
                 <label class="checkbox-label">
-                  <input type="checkbox" v-model="form.saveOriginal" />
-                  {{ t('state.saveOriginal') }}
+                  <input type="checkbox" v-model="form.scheduleEnabled" />
+                  {{ t('detectRule.schedule') }}
                 </label>
+                <template v-if="form.scheduleEnabled">
+                  <div class="schedule-times">
+                    <input type="time" v-model="form.scheduleStart" class="input time-input" />
+                    <span class="time-sep">~</span>
+                    <input type="time" v-model="form.scheduleEnd" class="input time-input" />
+                  </div>
+                  <div class="day-chips">
+                    <button v-for="d in dayOptions" :key="d.value"
+                      :class="['day-chip', { selected: form.scheduleDays.includes(d.value) }]"
+                      @click="toggleDay(d.value)"
+                    >{{ d.label() }}</button>
+                  </div>
+                </template>
               </div>
-            </div>
-            <!-- 关联状态（编辑） -->
-            <div v-if="availableStates.length > 0" class="form-field">
-              <label>{{ t('detectRule.linkedStates') }}</label>
-              <div class="chip-group">
-                <button
-                  v-for="st in availableStates" :key="st.id"
-                  :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
-                  @click="toggleStateId(st.id)"
-                >{{ st.name }}</button>
-              </div>
-              <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
-            </div>
-            <!-- 启用时段（编辑） -->
-            <div class="schedule-section">
-              <label class="checkbox-label">
-                <input type="checkbox" v-model="form.scheduleEnabled" />
-                {{ t('detectRule.schedule') }}
-              </label>
-              <template v-if="form.scheduleEnabled">
-                <div class="schedule-times">
-                  <input type="time" v-model="form.scheduleStart" class="input time-input" />
-                  <span class="time-sep">~</span>
-                  <input type="time" v-model="form.scheduleEnd" class="input time-input" />
-                </div>
-                <div class="day-chips">
-                  <button v-for="d in dayOptions" :key="d.value"
-                    :class="['day-chip', { selected: form.scheduleDays.includes(d.value) }]"
-                    @click="toggleDay(d.value)"
-                  >{{ d.label() }}</button>
-                </div>
-              </template>
             </div>
             <div class="edit-actions">
               <button class="save-btn" @click="saveEdit">{{ t('alert.save') }}</button>
@@ -1087,13 +1107,6 @@ select.input {
   margin-bottom: 6px;
 }
 
-.prompt-templates label {
-  font-size: 11px;
-  color: #555;
-  display: block;
-  margin-bottom: 4px;
-}
-
 .template-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1102,18 +1115,46 @@ select.input {
 
 .tpl-chip {
   padding: 3px 8px;
-  border: 1px solid #4ECDC4;
+  border: 1px solid #3a3a5a;
   border-radius: 12px;
   background: transparent;
-  color: #4ECDC4;
+  color: #888;
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .tpl-chip:hover {
-  background: #4ECDC4;
-  color: #1a1a2e;
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+}
+
+.tpl-chip.active {
+  border-color: #4ECDC4;
+  background: rgba(78, 205, 196, 0.15);
+  color: #4ECDC4;
+}
+
+/** 高级设置折叠 */
+.advanced-toggle {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-bottom: 4px;
+  transition: color 0.15s;
+}
+
+.advanced-toggle:hover { color: #aaa; }
+
+.advanced-section {
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: rgba(10, 10, 26, 0.5);
+  border-radius: 4px;
+  border: 1px solid #222;
 }
 
 .checkbox-label {

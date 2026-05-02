@@ -29,3 +29,9 @@ export function takeFrame(cameraId: string, lastVersion: number): { jpeg: ArrayB
 export function getVersion(cameraId: string): number {
   return versions.get(cameraId) ?? 0
 }
+
+/** 清理已删除摄像头的缓存（释放 ArrayBuffer 内存） */
+export function removeFrameCache(cameraId: string): void {
+  frames.delete(cameraId)
+  versions.delete(cameraId)
+}

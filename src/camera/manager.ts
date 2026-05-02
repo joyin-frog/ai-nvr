@@ -29,6 +29,8 @@ export class CameraManager {
   private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 当前摄像头配置列表 */
   private cameraConfigs: CameraConfig[] = [];
+  /** 摄像头 ID → 配置 Map（O(1) 查找，与 cameraConfigs 同步维护） */
+  private cameraConfigMap = new Map<string, CameraConfig>();
   /**
    * 摄像头在线状态（去重用）
    * 两个 extractor 可能各自发射 extractor:online/offline，
@@ -45,13 +47,38 @@ export class CameraManager {
     private runtimeConfig: RuntimeConfig,
   ) {}
 
+  /** 获取摄像头配置（O(1) Map 查找） */
+  getCameraConfig(cameraId: string): CameraConfig | undefined {
+    return this.cameraConfigMap.get(cameraId);
+  }
+
+  /** 从 cameraConfigs 数组重建 Map */
+  private rebuildConfigMap(): void {
+    this.cameraConfigMap.clear();
+    for (const c of this.cameraConfigs) {
+      this.cameraConfigMap.set(c.id, c);
+    }
+  }
+
+  /** 获取 ffmpeg 路径 */
+  getFfmpegPath(): string {
+    return this.config.ffmpegPath;
+  }
+
   /** 启动所有摄像头 */
   start(): void {
     this.cameraConfigs = this.config.cameras;
+    this.rebuildConfigMap();
     /** 显示流的帧用于前端显示和录像 */
     this.unsubExtractors.push(
       this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
-        this.latestFrames.set(cameraId, { data, timestamp });
+        let entry = this.latestFrames.get(cameraId);
+        if (!entry) {
+          entry = { data: Buffer.alloc(0), timestamp: 0 };
+          this.latestFrames.set(cameraId, entry);
+        }
+        entry.data = data;
+        entry.timestamp = timestamp;
       }),
     );
 
@@ -85,8 +112,15 @@ export class CameraManager {
       }),
     );
 
-    for (const cam of this.cameraConfigs) {
-      this.startCamera(cam);
+    /** 错开启动：8+ 摄像头用 500ms 间隔，避免同时初始化争抢硬件编码器 */
+    const staggerMs = this.cameraConfigs.length > 8 ? 500 : 200;
+    for (let i = 0; i < this.cameraConfigs.length; i++) {
+      const cam = this.cameraConfigs[i]!;
+      if (i === 0) {
+        this.startCamera(cam);
+      } else {
+        setTimeout(() => this.startCamera(cam), i * staggerMs);
+      }
     }
   }
 
@@ -186,6 +220,7 @@ export class CameraManager {
     }
 
     this.cameraConfigs = newConfig.cameras;
+    this.rebuildConfigMap();
     this.config = newConfig;
   }
 

@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, watchFile } from "node:fs";
+import { readFileSync, watchFile } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
 import { type AiConfig, type DetectMode } from "@/ai/types";
@@ -6,12 +7,12 @@ import { type ClipConfig } from "@/ai/clip-service";
 
 /** 配置文件写操作互斥锁（防止并发 TOCTOU 竞态） */
 let configWriteQueue: Promise<void> = Promise.resolve();
-function withConfigLock<T>(fn: () => T): Promise<T> {
+function withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
   const prev = configWriteQueue;
   let resolve_: (value: void) => void;
   configWriteQueue = new Promise<void>(r => { resolve_ = r; });
-  return prev.then(() => {
-    const result = fn();
+  return prev.then(async () => {
+    const result = await fn();
     resolve_();
     return result;
   });
@@ -181,10 +182,10 @@ export function loadConfig(configPath?: string): AppConfig {
     ffmpegPath,
     cameras,
     motion: {
-      threshold: 0.01,
-      cooldown: 1000,
-      compareWidth: 160,
-      compareHeight: 120,
+      threshold: ((doc.motion as Record<string, unknown>)?.threshold as number) ?? 0.01,
+      cooldown: ((doc.motion as Record<string, unknown>)?.cooldown as number) ?? 1000,
+      compareWidth: ((doc.motion as Record<string, unknown>)?.compare_width as number) ?? 160,
+      compareHeight: ((doc.motion as Record<string, unknown>)?.compare_height as number) ?? 120,
     },
     ai: {
       enabled: (aiNode?.enabled as boolean) ?? true,
@@ -206,7 +207,7 @@ export function loadConfig(configPath?: string): AppConfig {
       token: (authNode?.token as string) ?? "",
     },
     server: {
-      port: 3100,
+      port: ((doc.server as Record<string, unknown>)?.port as number) || 3100,
     },
     storage: {
       dataDir: (doc.storage as Record<string, unknown>)?.data_dir as string
@@ -277,10 +278,10 @@ export function getConfigPath(): string {
   return configFilePath;
 }
 
-/** 添加摄像头到配置文件并写回 YAML */
-export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number; group?: string }): Promise<void> {
-  return withConfigLock(() => {
-    const raw = readFileSync(configFilePath, "utf-8");
+/** 添加摄像头到配置文件并写回 YAML，返回更新后的配置 */
+export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number; group?: string }): Promise<AppConfig> {
+  return withConfigLock(async () => {
+    const raw = await Bun.file(configFilePath).text();
     const doc = yaml.load(raw) as Record<string, unknown>;
 
     const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
@@ -295,28 +296,30 @@ export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl
     };
 
     const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-    writeFileSync(configFilePath, yamlContent, "utf-8");
+    await writeFile(configFilePath, yamlContent, "utf-8");
+    return loadConfig();
   });
 }
 
-/** 删除摄像头从配置文件 */
-export function removeCameraFromConfig(cameraId: string): Promise<void> {
-  return withConfigLock(() => {
-    const raw = readFileSync(configFilePath, "utf-8");
+/** 删除摄像头从配置文件，返回更新后的配置 */
+export function removeCameraFromConfig(cameraId: string): Promise<AppConfig> {
+  return withConfigLock(async () => {
+    const raw = await Bun.file(configFilePath).text();
     const doc = yaml.load(raw) as Record<string, unknown>;
 
     const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
     delete camerasNode[cameraId];
 
     const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-    writeFileSync(configFilePath, yamlContent, "utf-8");
+    await writeFile(configFilePath, yamlContent, "utf-8");
+    return loadConfig();
   });
 }
 
-/** 更新摄像头名称 */
-export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string; group?: string }): Promise<void> {
-  return withConfigLock(() => {
-    const raw = readFileSync(configFilePath, "utf-8");
+/** 更新摄像头名称，返回更新后的配置 */
+export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string; group?: string }): Promise<AppConfig> {
+  return withConfigLock(async () => {
+    const raw = await Bun.file(configFilePath).text();
     const doc = yaml.load(raw) as Record<string, unknown>;
 
     const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
@@ -340,7 +343,8 @@ export function updateCameraInConfig(cameraId: string, updates: { friendlyName?:
     }
 
     const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-    writeFileSync(configFilePath, yamlContent, "utf-8");
+    await writeFile(configFilePath, yamlContent, "utf-8");
+    return loadConfig();
   });
 }
 

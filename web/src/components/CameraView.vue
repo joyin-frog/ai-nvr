@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
+import { useClock } from '../composables/useClock'
 import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
@@ -72,29 +73,74 @@ const fmp4 = useFmp4Stream(fmp4CameraId)
 /** 根元素引用（用于 IntersectionObserver） */
 const rootEl = ref<HTMLElement | null>(null)
 
-/** 视口可见性管理：不可见时断开 fMP4 流节省带宽 */
-let viewportObserver: IntersectionObserver | null = null
+/** 共享 IntersectionObserver（所有 CameraView 实例共用一个，避免 N 路摄像头创建 N 个 Observer） */
+let sharedViewportObserver: IntersectionObserver | null = null
+let sharedViewportRefCount = 0
+const viewportCallbacks = new Map<Element, (visible: boolean) => void>()
+
+function getSharedViewportObserver(): IntersectionObserver {
+  if (!sharedViewportObserver) {
+    sharedViewportObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const cb = viewportCallbacks.get(entry.target)
+          if (cb) cb(entry.isIntersecting)
+        }
+      },
+      { rootMargin: '100px' },
+    )
+  }
+  return sharedViewportObserver
+}
+
+/** 视口可见性管理：不可见时暂停 fMP4 流 + 停止 overlay 绘制节省 CPU */
+let isInViewport = true
 onMounted(() => {
-  viewportObserver = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        fmp4.setVisible(entry.isIntersecting)
+  const observer = getSharedViewportObserver()
+  sharedViewportRefCount++
+  const el = rootEl.value
+  if (el) {
+    viewportCallbacks.set(el, (visible) => {
+      isInViewport = visible
+      fmp4.setVisible(visible)
+      if (visible && props.online) {
+        startOverlayLoop()
+      } else {
+        stopOverlayLoop()
       }
-    },
-    { rootMargin: '100px' },
-  )
-  if (rootEl.value) viewportObserver.observe(rootEl.value)
+    })
+    observer.observe(el)
+  }
 })
 
 watch(rootEl, (el, oldEl) => {
-  if (oldEl && viewportObserver) viewportObserver.unobserve(oldEl)
-  if (el && viewportObserver) viewportObserver.observe(el)
+  const observer = sharedViewportObserver
+  if (oldEl && observer) {
+    observer.unobserve(oldEl)
+    viewportCallbacks.delete(oldEl)
+  }
+  if (el && observer) {
+    viewportCallbacks.set(el, (visible) => {
+      isInViewport = visible
+      fmp4.setVisible(visible)
+      if (visible && props.online) {
+        startOverlayLoop()
+      } else {
+        stopOverlayLoop()
+      }
+    })
+    observer.observe(el)
+  }
 })
 
 /** MSE 模式的检测框 overlay canvas */
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
+/** 缓存的动态层 canvas 2d context（避免每帧 getContext 调用） */
+let overlayCtx: CanvasRenderingContext2D | null = null
 /** 静态叠加层 canvas（OSD + ROI + 越线 + 热力图 + 区域计数，只在数据变化时重绘） */
 const staticCanvasRef = ref<HTMLCanvasElement | null>(null)
+/** 缓存的静态层 canvas 2d context */
+let staticCtx: CanvasRenderingContext2D | null = null
 /** 缓存的 canvas CSS 尺寸（由 ResizeObserver 更新，避免每帧 getBoundingClientRect） */
 let cachedCssW = 0
 let cachedCssH = 0
@@ -104,6 +150,7 @@ let overlayVfcId: number | null = null
 /** 监听 canvas 元素挂载，设置 ResizeObserver 缓存尺寸 */
 watch(overlayCanvas, (canvas) => {
   canvasResizeObserver?.disconnect()
+  overlayCtx = null /** canvas 元素变化时重置 context 缓存 */
   if (canvas) {
     cachedCssW = Math.round(canvas.getBoundingClientRect().width)
     cachedCssH = Math.round(canvas.getBoundingClientRect().height)
@@ -161,19 +208,19 @@ function startOverlayLoop() {
   }
 }
 
-/** 计算静态层的缓存 key */
-function computeStaticLayerKey(): string {
+/** 静态层的缓存 key（computed 自动缓存，只在依赖变化时重算） */
+const staticLayerKey = computed(() => {
   const roiKey = (props.roiRegions ?? []).map(r => `${r.id}:${r.name}`).join(';')
   const lineKey = (props.crossLines ?? []).map(l => `${l.id}:${l.name}`).join(';')
   const hmKey = `${showHeatmap.value}:${heatmapGrid.value.length}:${heatmapMaxCount.value}`
   return `${roiKey}|${lineKey}|${hmKey}`
-}
+})
 
 /** 绘制静态层（OSD + ROI + 越线 + 热力图 + 区域计数） */
 function drawStaticLayer(cssW: number, cssH: number) {
   const sCanvas = staticCanvasRef.value
   if (!sCanvas) return
-  const key = computeStaticLayerKey()
+  const key = staticLayerKey.value
   /** 尺寸未变且 key 未变 → 跳过重绘 */
   if (!staticLayerDirty && cssW === staticLayerLastW && cssH === staticLayerLastH && key === staticLayerLastKey) return
   staticLayerLastW = cssW
@@ -188,7 +235,8 @@ function drawStaticLayer(cssW: number, cssH: number) {
     sCanvas.width = canvasW
     sCanvas.height = canvasH
   }
-  const ctx = sCanvas.getContext('2d')
+  if (!staticCtx) staticCtx = sCanvas.getContext('2d')
+  const ctx = staticCtx
   if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
@@ -265,7 +313,8 @@ function drawOverlayOnce() {
   const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
   if (detectResult) {
     overlayDirty = true
-    staticLayerDirty = true
+    /** 仅在有 ROI 区域时才需要更新静态层（区域计数徽标依赖检测结果） */
+    if (props.roiRegions && props.roiRegions.length > 0) staticLayerDirty = true
     consumedDetectVersion = detectResult.version
     localDetections = detectResult.detections
     updateSmoothedBoxes(localDetections)
@@ -284,7 +333,8 @@ function drawOverlayOnce() {
   overlayDirty = false
 
   /** 绘制动态层（时钟 + FPS/延迟/AI指标 + 检测框 + 轨迹 + 通知） */
-  const ctx = canvas.getContext('2d')
+  if (!overlayCtx) overlayCtx = canvas.getContext('2d')
+  const ctx = overlayCtx
   if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
@@ -315,29 +365,8 @@ function stopOverlayLoop() {
   }
 }
 
-/** 实时时钟 */
-const clockText = ref('')
-let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
-  const now = new Date()
-  const y = now.getFullYear()
-  const mo = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  const h = String(now.getHours()).padStart(2, '0')
-  const mi = String(now.getMinutes()).padStart(2, '0')
-  const s = String(now.getSeconds()).padStart(2, '0')
-  clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
-}, 1000)
-/** 立即初始化 */
-{
-  const now = new Date()
-  const y = now.getFullYear()
-  const mo = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  const h = String(now.getHours()).padStart(2, '0')
-  const mi = String(now.getMinutes()).padStart(2, '0')
-  const s = String(now.getSeconds()).padStart(2, '0')
-  clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
-}
+/** 实时时钟（全局共享定时器，所有 CameraView 共用一个 setInterval） */
+const { clockText, cleanup: cleanupClock } = useClock()
 
 /**
  * 追踪目标轨迹缓存
@@ -355,6 +384,8 @@ const showHeatmap = ref(false)
 /** 热力图网格数据 */
 const heatmapGrid = ref<number[][]>([])
 const heatmapMaxCount = ref(0)
+/** 预计算的热力图 hash（避免绘制时遍历所有格子） */
+let heatmapDataHash = ''
 let heatmapTimer: ReturnType<typeof setInterval> | null = null
 
 /** 加载热力图数据 */
@@ -366,6 +397,15 @@ async function loadHeatmap() {
     const data = await res.json() as { grid: number[][]; maxCount: number; totalPoints: number }
     heatmapGrid.value = data.grid
     heatmapMaxCount.value = data.maxCount
+    /** 预计算 hash，避免 drawHeatmapCache 每次遍历所有格子 */
+    let nonZeroCount = 0
+    let nonZeroSum = 0
+    for (const row of data.grid) {
+      for (const v of row) {
+        if (v > 0) { nonZeroCount++; nonZeroSum += v }
+      }
+    }
+    heatmapDataHash = `${data.maxCount}:${nonZeroCount}:${nonZeroSum}`
     staticLayerDirty = true
   } catch { /* 静默降级 */ }
 }
@@ -381,11 +421,6 @@ watch(showHeatmap, (v) => {
     heatmapGrid.value = []
     heatmapMaxCount.value = 0
   }
-})
-
-/** 摄像头上线时加载热力图 */
-watch(() => props.online, (v) => {
-  if (v && showHeatmap.value) loadHeatmap()
 })
 
 /** 记录当前帧中所有检测目标的中心点到轨迹缓存 */
@@ -439,7 +474,11 @@ async function loadHistoryTrails() {
 /** 清理不再活跃的轨迹（消失后保留 3 秒渐隐） */
 function cleanupTrails() {
   const now = Date.now()
-  const activeIds = new Set(localDetections.filter(d => d.trackId != null).map(d => d.trackId!))
+  /** 从当前检测构建活跃 trackId Set，O(1) 查找代替 O(n) some */
+  const activeIds = new Set<number>()
+  for (const d of localDetections) {
+    if (d.trackId != null) activeIds.add(d.trackId)
+  }
   for (const id of trackTrails.keys()) {
     if (!activeIds.has(id)) {
       if (!trailFadeStart.has(id)) trailFadeStart.set(id, now)
@@ -559,28 +598,45 @@ function updateSmoothedBoxes(detections: Detection[]) {
   }
 }
 
-/** 获取插值后的检测框（EMA 平滑 + 速度预测） */
+/** 帧级平滑框缓存（每帧开始时 clear，同一帧内同一检测只计算一次） */
+let smoothBoxFrameCache = new Map<number, { xmin: number; ymin: number; xmax: number; ymax: number }>()
+/** 预计算的速度插值偏移量（每帧一次） */
+let velocityShifts = { computed: false, shifts: new Map<number, { sx: number; sy: number }>() }
+
+/** 清空帧级平滑框缓存（每帧绘制开始时调用） */
+function resetSmoothBoxCache() {
+  smoothBoxFrameCache.clear()
+  velocityShifts.computed = false
+}
+
+/** 计算所有 track 的速度偏移（每帧只执行一次） */
+function ensureVelocityShifts() {
+  if (velocityShifts.computed) return
+  velocityShifts.computed = true
+  velocityShifts.shifts.clear()
+  if (lastInferTime === 0) return
+  const ratio = Math.min((performance.now() - lastInferTime) / inferInterval, 1)
+  for (const [trackId, vel] of trackVelocities) {
+    velocityShifts.shifts.set(trackId, { sx: vel.dx * ratio, sy: vel.dy * ratio })
+  }
+}
+
+/** 获取插值后的检测框（EMA 平滑 + 速度预测），带帧级缓存 */
 function getSmoothedBox(d: Detection): { xmin: number; ymin: number; xmax: number; ymax: number } {
   if (d.trackId == null) return d.box
+  const cached = smoothBoxFrameCache.get(d.trackId)
+  if (cached) return cached
   const smoothed = smoothedBoxes.get(d.trackId)
   if (!smoothed) return d.box
 
-  /** 速度插值：预测自上次推理以来的位移 */
-  const vel = trackVelocities.get(d.trackId)
-  if (!vel || lastInferTime === 0) return smoothed
+  ensureVelocityShifts()
+  const shift = velocityShifts.shifts.get(d.trackId)
+  const result = shift
+    ? { xmin: smoothed.xmin + shift.sx, ymin: smoothed.ymin + shift.sy, xmax: smoothed.xmax + shift.sx, ymax: smoothed.ymax + shift.sy }
+    : smoothed
 
-  const elapsed = performance.now() - lastInferTime
-  /** 外推比例：不超过 1 个推理间隔（避免过度外推） */
-  const ratio = Math.min(elapsed / inferInterval, 1)
-  const shiftX = vel.dx * ratio
-  const shiftY = vel.dy * ratio
-
-  return {
-    xmin: smoothed.xmin + shiftX,
-    ymin: smoothed.ymin + shiftY,
-    xmax: smoothed.xmax + shiftX,
-    ymax: smoothed.ymax + shiftY,
-  }
+  smoothBoxFrameCache.set(d.trackId, result)
+  return result
 }
 
 /** 标记检测结果已更新，需要重新排序 */
@@ -599,11 +655,20 @@ function getSortedDetections(): Detection[] {
 
 /** 检测计数（响应式，用于模板徽标和 footer） */
 const detectCount = ref(0)
+/** 检测计数归零防抖定时器（避免 badge 逐帧闪烁） */
+let detectCountZeroTimer: ReturnType<typeof setTimeout> | null = null
 const detectionSummary = ref('')
 
 /** 更新检测摘要（在 poll 回调中调用） */
 function updateDetectionSummary() {
-  detectCount.value = localDetections.length
+  const newCount = localDetections.length
+  if (newCount > 0) {
+    if (detectCountZeroTimer) { clearTimeout(detectCountZeroTimer); detectCountZeroTimer = null }
+    detectCount.value = newCount
+  } else if (detectCount.value > 0 && !detectCountZeroTimer) {
+    /** 归零延迟 2 秒，避免逐帧闪烁 */
+    detectCountZeroTimer = setTimeout(() => { detectCountZeroTimer = null; detectCount.value = 0 }, 2000)
+  }
   const counts = new Map<string, { count: number; customNames: string[] }>()
   for (const det of localDetections) {
     const entry = counts.get(det.label) ?? { count: 0, customNames: [] }
@@ -676,6 +741,8 @@ watch(() => props.online, (on) => {
   if (on) {
     /** 加载历史轨迹（后台静默） */
     loadHistoryTrails()
+    /** 热力图上线恢复 */
+    if (showHeatmap.value) loadHeatmap()
     /** MSE 模式：仅在未连接时连接（避免 brief offline 时全管道重建） */
     if (!fmp4.connected.value) {
       fmp4.connect()
@@ -752,33 +819,61 @@ function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: n
   return { r: Math.round(f(0) * 255), g: Math.round(f(8) * 255), b: Math.round(f(4) * 255) }
 }
 
-/** 在两个 CSS 颜色之间线性插值，t=0 返回 a，t=1 返回 b */
+/** parseCssColor 缓存（颜色字符串通常只有几种，避免每帧 regex） */
+const _parsedColorCache = new Map<string, { r: number; g: number; b: number }>()
+function cachedParseCssColor(color: string): { r: number; g: number; b: number } {
+  const cached = _parsedColorCache.get(color)
+  if (cached) return cached
+  const parsed = parseCssColor(color)
+  _parsedColorCache.set(color, parsed)
+  return parsed
+}
+
+/** 在两个 CSS 颜色之间线性插值，t=0 返回 a，t=1 返回 b（带颜色解析缓存） */
 function lerpColor(a: string, b: string, t: number): string {
-  const ca = parseCssColor(a)
-  const cb = parseCssColor(b)
+  const ca = cachedParseCssColor(a)
+  const cb = cachedParseCssColor(b)
   const r = Math.round(ca.r + (cb.r - ca.r) * t)
   const g = Math.round(ca.g + (cb.g - ca.g) * t)
   const bl = Math.round(ca.b + (cb.b - ca.b) * t)
   return `rgb(${r},${g},${bl})`
 }
 
-/** 根据 trackId + label + customName 获取颜色（同名目标同色） */
+/** 颜色缓存（避免每帧对相同 trackId/name 重复生成 HSL 字符串） */
+const MAX_COLOR_CACHE = 200
+const colorCache = new Map<string, { stroke: string; fill: string }>()
+
+/** 根据 trackId + label + customName 获取颜色（同名目标同色，带缓存） */
 function getColor(label: string, trackId?: number, customName?: string): { stroke: string; fill: string } {
+  const key = customName ? `n:${customName}` : trackId != null ? `t:${trackId}` : `l:${label}`
+  const cached = colorCache.get(key)
+  if (cached) return cached
+  let result: { stroke: string; fill: string }
   if (customName) {
-    /** 已命名目标：按名称 hash 稳定着色，同名始终同色 */
     const hue = nameHash(customName) % 360
-    return { stroke: `hsl(${hue}, 75%, 60%)`, fill: `hsla(${hue}, 75%, 60%, 0.12)` }
-  }
-  if (trackId != null) {
-    /** 黄金角分布：每个 trackId 色相间隔 ~137.5°，饱和度 75%，亮度 60% */
+    result = { stroke: `hsl(${hue}, 75%, 60%)`, fill: `hsla(${hue}, 75%, 60%, 0.12)` }
+  } else if (trackId != null) {
     const hue = (trackId * 137.508) % 360
-    return { stroke: `hsl(${hue}, 75%, 60%)`, fill: `hsla(${hue}, 75%, 60%, 0.12)` }
+    result = { stroke: `hsl(${hue}, 75%, 60%)`, fill: `hsla(${hue}, 75%, 60%, 0.12)` }
+  } else {
+    const hex = LABEL_COLORS[label] ?? '#4ECDC4'
+    result = { stroke: hex, fill: hex + '1F' }
   }
-  const hex = LABEL_COLORS[label] ?? '#4ECDC4'
-  return { stroke: hex, fill: hex + '1F' }
+  if (colorCache.size >= MAX_COLOR_CACHE) {
+    /** 删除最早插入的条目（Map 保持插入顺序） */
+    const firstKey = colorCache.keys().next().value
+    if (firstKey !== undefined) colorCache.delete(firstKey)
+  }
+  colorCache.set(key, result)
+  return result
 }
 
 /** Canvas overlay 绘制 OSD（摄像头名称 + 时钟 + FPS/延迟/AI指标） */
+/** LLM 描述换行缓存（避免每帧字符级 measureText） */
+let llmWrapCacheKey = ''
+let llmWrapCacheWidth = 0
+let llmWrapCacheLines: string[] = []
+
 /** 绘制 LLM 场景描述（左下角半透明条） */
 function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height: number, desc: string) {
   ctx.save()
@@ -786,27 +881,30 @@ function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height
   ctx.font = `${fontSize}px sans-serif`
   ctx.textBaseline = 'bottom'
 
-  /** 自动换行 */
+  /** 自动换行（缓存结果，文本和宽度不变时跳过重算） */
   const maxLineWidth = width - 16
-  const lines: string[] = []
-  let currentLine = ''
-  for (const ch of desc) {
-    const testLine = currentLine + ch
-    if (ctx.measureText(testLine).width > maxLineWidth) {
-      if (currentLine) lines.push(currentLine)
-      currentLine = ch
-    } else {
-      currentLine = testLine
+  if (desc !== llmWrapCacheKey || maxLineWidth !== llmWrapCacheWidth) {
+    llmWrapCacheKey = desc
+    llmWrapCacheWidth = maxLineWidth
+    const lines: string[] = []
+    let currentLine = ''
+    for (const ch of desc) {
+      const testLine = currentLine + ch
+      if (ctx.measureText(testLine).width > maxLineWidth) {
+        if (currentLine) lines.push(currentLine)
+        currentLine = ch
+      } else {
+        currentLine = testLine
+      }
     }
+    if (currentLine) lines.push(currentLine)
+    llmWrapCacheLines = lines.slice(0, 3)
   }
-  if (currentLine) lines.push(currentLine)
-  /** 最多 3 行 */
-  const displayLines = lines.slice(0, 3)
+  const displayLines = llmWrapCacheLines
 
   const lineHeight = fontSize + 4
   const pad = 6
   const boxH = displayLines.length * lineHeight + pad * 2
-  /** 放在时钟上方 */
   const boxY = height - 26 - boxH - 4
 
   ctx.fillStyle = 'rgba(156, 39, 176, 0.7)'
@@ -886,21 +984,19 @@ function drawDynamicOSD(ctx: CanvasRenderingContext2D, width: number, height: nu
     ctx.font = '10px monospace'
     ctx.textBaseline = 'bottom'
     const pad = 4
-    let totalWidth = 0
-    for (const s of stats) {
-      totalWidth += ctx.measureText(s.text).width + pad * 2 + 4
-    }
-    totalWidth -= 4
+    /** 一次 measureText 缓存宽度，避免二次重复测量 */
+    const statWidths = stats.map(s => ctx.measureText(s.text).width + pad * 2)
+    let totalWidth = statWidths.reduce((sum, w) => sum + w + 4, 0) - 4
     const boxX = width - totalWidth - 4
     const boxY = height - 4
 
     let x = boxX
-    for (const s of stats) {
-      const tw = ctx.measureText(s.text).width + pad * 2
+    for (let i = 0; i < stats.length; i++) {
+      const tw = statWidths[i]!
       ctx.fillStyle = 'rgba(0,0,0,0.55)'
       ctx.fillRect(x, boxY - 16, tw, 16)
-      ctx.fillStyle = s.color
-      ctx.fillText(s.text, x + pad, boxY - 3)
+      ctx.fillStyle = stats[i]!.color
+      ctx.fillText(stats[i]!.text, x + pad, boxY - 3)
       x += tw + 4
     }
   }
@@ -1056,16 +1152,8 @@ function drawHeatmapCache(width: number, height: number): OffscreenCanvas | null
   const gridCols = grid[0]?.length ?? 0
   if (!gridRows || !gridCols) return null
 
-  /** 缓存 key：网格非零值数量+总和+采样点，确保数据变化时 key 不同 */
-  let nonZeroCount = 0
-  let nonZeroSum = 0
-  for (let row = 0; row < gridRows; row++) {
-    for (let col = 0; col < gridCols; col++) {
-      const v = grid[row]?.[col] ?? 0
-      if (v > 0) { nonZeroCount++; nonZeroSum += v }
-    }
-  }
-  const key = `${width}:${height}:${maxCount}:${nonZeroCount}:${nonZeroSum}`
+  /** 使用预计算的 hash 作为缓存 key（避免绘制时遍历所有格子） */
+  const key = `${width}:${height}:${heatmapDataHash}`
   if (heatmapCacheCanvas && heatmapCacheW === width && heatmapCacheH === height && heatmapCacheKey === key) {
     return heatmapCacheCanvas
   }
@@ -1123,9 +1211,16 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     return
   }
 
+  /** 清空帧级平滑框缓存 */
+  resetSmoothBoxCache()
+
   /** 记录轨迹 + 清理失效轨迹 */
   recordTrails()
   cleanupTrails()
+
+  /** 帧级统一时间戳（避免多次 Date.now 系统调用） */
+  const now = Date.now()
+  const nowPerf = performance.now()
 
   const sorted = getSortedDetections()
 
@@ -1134,7 +1229,6 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
   if (notifications.length > 0) {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    const now = Date.now()
     for (let i = 0; i < notifications.length; i++) {
       const n = notifications[i]!
       const age = now - n.timestamp
@@ -1165,7 +1259,6 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
   /** 绘制消失目标的淡出框（即使无活跃目标也需要绘制） */
   if (fadeOutBoxes.size > 0) {
-    const now = Date.now()
     for (const [id, state] of fadeOutBoxes) {
       const elapsed = now - state.startTime
       const alpha = Math.max(0, 1 - elapsed / FADE_OUT_DURATION)
@@ -1192,7 +1285,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
   /** 动画脉冲因子（用于未命名目标边框闪烁），减少动画模式下不闪烁 */
   const reduceMotion = PREFERS_REDUCED_MOTION
-  const pulse = reduceMotion ? 0.8 : 0.5 + 0.5 * Math.sin(Date.now() / 500)
+  const pulse = reduceMotion ? 0.8 : 0.5 + 0.5 * Math.sin(nowPerf / 500)
 
   ctx.save()
   const FONT_LABEL = 'bold 12px monospace'
@@ -1228,7 +1321,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     if (tid) {
       const firstSeen = getTrackFirstSeen(tid)
       if (firstSeen) {
-        dwellSec = (Date.now() - firstSeen) / 1000
+        dwellSec = (now - firstSeen) / 1000
         if (dwellSec > 30) {
           dwellColorShift = dwellSec > 120 ? 1 : (dwellSec - 30) / 90
         }
@@ -1283,16 +1376,10 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     /** semanticLabel（CLIP 分类）优先于原始 label，去掉 "a " 前缀使标签更紧凑 */
     const rawSemantic = d.semanticLabel || d.label
     const displayLabel = rawSemantic.startsWith('a ') ? rawSemantic.slice(2) : rawSemantic
-    /** 停留时间后缀（超过 5 秒才显示） */
+    /** 停留时间后缀（超过 5 秒才显示，复用上方已计算的 dwellSec） */
     let dwellSuffix = ''
-    if (tid) {
-      const firstSeen = getTrackFirstSeen(tid)
-      if (firstSeen) {
-        const dwellSec = (Date.now() - firstSeen) / 1000
-        if (dwellSec >= 5) {
-          dwellSuffix = dwellSec < 60 ? ` ${Math.round(dwellSec)}s` : ` ${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`
-        }
-      }
+    if (tid && dwellSec >= 5) {
+      dwellSuffix = dwellSec < 60 ? ` ${Math.round(dwellSec)}s` : ` ${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`
     }
     const text = customName
       ? `${customName} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
@@ -1363,7 +1450,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       if (tid) {
         const firstSeen = getTrackFirstSeen(tid)
         if (firstSeen) {
-          const dwellSec = (Date.now() - firstSeen) / 1000
+          const dwellSec = (now - firstSeen) / 1000
           if (dwellSec >= 3) {
             lines.push(`停留: ${dwellSec < 60 ? Math.round(dwellSec) + 's' : `${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`}`)
           }
@@ -1490,7 +1577,6 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
   /** 绘制追踪轨迹线（贝塞尔平滑曲线 + 渐隐） */
   if (trackTrails.size > 0) {
-    const now = Date.now()
     ctx.lineWidth = 1.5
     ctx.setLineDash([])
     for (const [trackId, points] of trackTrails) {
@@ -1925,6 +2011,8 @@ function onWheel(e: WheelEvent) {
 
 /** 拖拽平移 */
 let dragging = false
+/** 拖拽状态 ref（用于模板 class 绑定，控制 transition） */
+const isDragging = ref(false)
 let dragStartX = 0
 let dragStartY = 0
 let dragStartPanX = 0
@@ -1933,6 +2021,7 @@ let dragStartPanY = 0
 function onPanStart(e: MouseEvent) {
   if (zoomLevel.value <= 1) return
   dragging = true
+  isDragging.value = true
   dragStartX = e.clientX
   dragStartY = e.clientY
   dragStartPanX = panX.value
@@ -1947,6 +2036,7 @@ function onPanMove(e: MouseEvent) {
 
 function onPanEnd() {
   dragging = false
+  isDragging.value = false
 }
 
 /** 触摸手势：双指缩放 + 单指平移 */
@@ -2091,9 +2181,18 @@ watch(() => props.isFullscreen, (fs) => {
 }, { immediate: true })
 
 onUnmounted(() => {
-  if (viewportObserver) {
-    viewportObserver.disconnect()
-    viewportObserver = null
+  /** 从共享 IntersectionObserver 注销 */
+  const el = rootEl.value
+  if (el && sharedViewportObserver) {
+    sharedViewportObserver.unobserve(el)
+    viewportCallbacks.delete(el)
+  }
+  sharedViewportRefCount--
+  if (sharedViewportRefCount <= 0 && sharedViewportObserver) {
+    sharedViewportObserver.disconnect()
+    sharedViewportObserver = null
+    viewportCallbacks.clear()
+    sharedViewportRefCount = 0
   }
   if (canvasResizeObserver) {
     canvasResizeObserver.disconnect()
@@ -2101,8 +2200,10 @@ onUnmounted(() => {
   }
   fmp4.disconnect()
   stopOverlayLoop()
+  if (detectCountZeroTimer) clearTimeout(detectCountZeroTimer)
+  if (longPressTimer) clearTimeout(longPressTimer)
   if (frozenTimer) clearInterval(frozenTimer)
-  if (clockTimer) clearInterval(clockTimer)
+  cleanupClock()
   if (recDurationTimer) clearInterval(recDurationTimer)
   if (heatmapTimer) clearInterval(heatmapTimer)
   trackTrails.clear()
@@ -2151,7 +2252,7 @@ onUnmounted(() => {
       @touchend="onTouchEnd"
       @mouseleave="onPanEnd"
     >
-      <div class="camera-content" :style="{ transform: zoomTransform }">
+      <div class="camera-content" :class="{ 'dragging-zoom': isDragging }" :style="{ transform: zoomTransform }">
         <!-- fMP4/MSE 模式：video 硬件解码 — 始终渲染，避免 online 抖动导致销毁重建黑闪 -->
         <div class="mse-wrapper">
           <video
@@ -2159,6 +2260,8 @@ onUnmounted(() => {
             class="camera-video"
             :style="{ filter: imageFilter }"
             autoplay muted playsinline
+            disablePictureInPicture
+            disableremoteplayback
             @contextmenu.prevent="onCanvasContext"
           />
           <canvas
@@ -2179,7 +2282,7 @@ onUnmounted(() => {
           />
         </div>
         <!-- placeholder 叠加层：离线时覆盖在视频上方，不销毁视频元素 -->
-        <div v-show="!online" class="camera-placeholder">
+        <div v-if="!online" class="camera-placeholder">
           <div class="placeholder-icon offline-icon">&#10005;</div>
           <span>{{ t('camera.cameraOffline') }}</span>
           <span v-if="lastSeenText" class="last-seen">{{ lastSeenText }}</span>
@@ -2474,6 +2577,10 @@ onUnmounted(() => {
   justify-content: center;
   position: relative;
   transform-origin: center center;
+}
+
+/** 仅在非拖拽状态下启用 transition（避免高频输入时连续取消/重启动画） */
+.camera-content:not(.dragging-zoom) {
   transition: transform 0.15s ease-out;
 }
 
@@ -2491,12 +2598,14 @@ onUnmounted(() => {
   max-width: 100%;
   max-height: 100%;
   line-height: 0;
+  contain: layout style;
 }
 
 .camera-video {
   max-width: 100%;
   max-height: 100%;
   display: block;
+  will-change: transform;
 }
 
 .camera-overlay {
@@ -2506,7 +2615,8 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  will-change: contents;
+  contain: strict;
+  will-change: transform;
 }
 
 .static-overlay {

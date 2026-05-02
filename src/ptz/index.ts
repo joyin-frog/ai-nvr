@@ -200,6 +200,8 @@ export class PtzController {
         username: config.username,
         password: config.password,
         agent: onvifAgent,
+        /** PTZ 命令超时 5 秒（默认 120s 过长，PTZ 操作应快速响应） */
+        timeout: 5000,
       });
 
       await cam.connect();

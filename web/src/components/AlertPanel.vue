@@ -224,6 +224,8 @@ async function addRule() {
   } catch {
     toastError(t('alert.saveFailed'))
   }
+}
+
 function startEdit(rule: AlertRule) {
   editingRuleId.value = rule.id
   showAddForm.value = false
@@ -496,7 +498,10 @@ defineExpose({ loadAlerts, addAlert })
             </div>
             <div class="form-field">
               <label>{{ t('alert.cameraFilter') }}</label>
-              <input v-model="form.cameraId" :placeholder="t('alert.cameraPlaceholder')" class="input" />
+              <select v-model="form.cameraId" class="input">
+                <option value="">{{ t('alert.allCameras') }}</option>
+                <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name || cam.id }}</option>
+              </select>
             </div>
             <div class="form-field" v-if="showLabelFields">
               <label>{{ t('alert.labelFilter') }}</label>

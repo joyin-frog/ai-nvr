@@ -20,6 +20,10 @@ interface RuleWindow {
 export class AlertEngine {
   /** 规则缓存（每 30 秒刷新一次） */
   private rules: AlertRule[] = [];
+  /** 预解析的标签 Set 缓存：ruleId -> Set（避免每事件每规则重复 split） */
+  private ruleLabelSets = new Map<number, Set<string>>();
+  /** 预解析的命名 Set 缓存：ruleId -> Set */
+  private ruleTrackNameSets = new Map<number, Set<string>>();
   /** 每个规则的滑动窗口状态 */
   private windows = new Map<number, RuleWindow>();
   /** 规则缓存刷新时间 */
@@ -33,6 +37,8 @@ export class AlertEngine {
   private trackNameCache = new Map<string, string>();
   /** 每个摄像头的缓存刷新时间 */
   private trackNameCacheTimeByCamera = new Map<string, number>();
+  /** ROI 多边形缓存：roiId -> { points, raw } 避免每次 detect 事件重复 JSON.parse */
+  private roiPolygonCache = new Map<number, { polygon: Array<{ x: number; y: number }>; raw: string }>();
 
   /** 告警快照保存回调 */
   private saveAlertSnapshot?: (cameraId: string, timestamp: number, jpeg: Buffer) => void;
@@ -98,16 +104,32 @@ export class AlertEngine {
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
     this.windows.clear();
+    this.ruleLabelSets.clear();
+    this.ruleTrackNameSets.clear();
     this.trackNameCache.clear();
     this.trackNameCacheTimeByCamera.clear();
+    this.roiPolygonCache.clear();
   }
 
-  /** 刷新规则缓存 */
+  /** 刷新规则缓存（同时预解析 labels/trackNames 为 Set） */
   private refreshRules(): void {
     const now = Date.now();
     if (now - this.rulesCacheTime < AlertEngine.CACHE_TTL && this.rules.length > 0) return;
     this.rules = this.storage.getEnabledRules();
     this.rulesCacheTime = now;
+
+    /** 预解析标签和命名为 Set */
+    this.ruleLabelSets.clear();
+    this.ruleTrackNameSets.clear();
+    for (const rule of this.rules) {
+      if (rule.labels) {
+        this.ruleLabelSets.set(rule.id, new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()).filter(Boolean)));
+      }
+      if (rule.trackNames) {
+        this.ruleTrackNameSets.set(rule.id, new Set(rule.trackNames.split(",").map(n => n.trim())));
+      }
+    }
+
     /** 清理已删除规则的滑动窗口 */
     const activeIds = new Set(this.rules.map(r => r.id));
     for (const id of this.windows.keys()) {
@@ -138,18 +160,18 @@ export class AlertEngine {
       if (rule.eventType !== eventType) continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
 
-      /** 标签过滤（同时匹配原始 label 和 semanticLabel） */
-      if (rule.labels) {
-        const requiredLabels = new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()));
-        const matchLabel = requiredLabels.has(label.toLowerCase());
-        const matchSemantic = semanticLabel && requiredLabels.has(semanticLabel.toLowerCase());
+      /** 标签过滤（同时匹配原始 label 和 semanticLabel，使用预解析 Set） */
+      const labelSet = this.ruleLabelSets.get(rule.id);
+      if (labelSet) {
+        const matchLabel = labelSet.has(label.toLowerCase());
+        const matchSemantic = semanticLabel && labelSet.has(semanticLabel.toLowerCase());
         if (!matchLabel && !matchSemantic) continue;
       }
 
-      /** 命名匹配 */
-      if (rule.trackNames) {
-        const requiredNames = new Set(rule.trackNames.split(",").map(n => n.trim()));
-        if (!trackName || !requiredNames.has(trackName)) continue;
+      /** 命名匹配（使用预解析 Set） */
+      const nameSet = this.ruleTrackNameSets.get(rule.id);
+      if (nameSet) {
+        if (!trackName || !nameSet.has(trackName)) continue;
       }
 
       /** ROI 区域过滤 */
@@ -181,10 +203,11 @@ export class AlertEngine {
       if (rule.eventType !== "detect") continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
 
-      /** 标签过滤（同时匹配原始 label 和 semanticLabel，支持子字符串匹配）+ 数量统计 */
+      /** 标签过滤（使用预解析 keywords，支持子字符串匹配）+ 数量统计 */
       let matchedDetections = detections;
-      if (rule.labels) {
-        const keywords = rule.labels.split(",").map(l => l.trim().toLowerCase()).filter(Boolean);
+      const labelSet = this.ruleLabelSets.get(rule.id);
+      if (labelSet) {
+        const keywords = [...labelSet];
         matchedDetections = detections.filter(d => {
           const labelLower = d.label.toLowerCase();
           const semanticLower = d.semanticLabel?.toLowerCase() ?? "";
@@ -193,13 +216,13 @@ export class AlertEngine {
         if (matchedDetections.length === 0) continue;
       }
 
-      /** 命名匹配：规则指定 trackNames 时，只匹配指定名称的目标 */
-      if (rule.trackNames) {
-        const requiredNames = new Set(rule.trackNames.split(",").map(n => n.trim()));
+      /** 命名匹配（使用预解析 Set） */
+      const nameSet = this.ruleTrackNameSets.get(rule.id);
+      if (nameSet) {
         matchedDetections = matchedDetections.filter(d => {
           if (!d.trackId) return false;
           const name = this.trackNameCache.get(`${cameraId}:${d.trackId}`);
-          return name && requiredNames.has(name);
+          return name && nameSet.has(name);
         });
         if (matchedDetections.length === 0) continue;
       }
@@ -208,7 +231,12 @@ export class AlertEngine {
       if (rule.roiId > 0 && this.roiStorage) {
         const roi = this.roiStorage.getById(rule.roiId);
         if (roi && roi.points) {
-          const polygon = JSON.parse(roi.points) as Array<{ x: number; y: number }>;
+          let cached = this.roiPolygonCache.get(rule.roiId);
+          if (!cached || cached.raw !== roi.points) {
+            cached = { polygon: JSON.parse(roi.points) as Array<{ x: number; y: number }>, raw: roi.points };
+            this.roiPolygonCache.set(rule.roiId, cached);
+          }
+          const polygon = cached.polygon;
           matchedDetections = matchedDetections.filter(d => {
             if (!d.box) return false;
             const cx = (d.box.xmin + d.box.xmax) / 2;

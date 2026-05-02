@@ -34,7 +34,7 @@ const EVENT_COLORS: Record<string, string> = {
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
 /**
  * 邮件告警通知
@@ -98,6 +98,11 @@ export class EmailNotifier {
       if (result) detailHtml += `<tr><td>AI 结果</td><td>${result}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}</td></tr>`;
     } else if (event === "camera:offline") {
       detailHtml = `<tr><td>状态</td><td style="color:#d9534f">已断开连接</td></tr>`;
+    } else if (event === "alert") {
+      const ruleName = payload.ruleName as string | undefined;
+      const triggerDetail = payload.detail as string | undefined;
+      detailHtml = `<tr><td>告警规则</td><td><strong>${ruleName ?? ""}</strong></td></tr>`;
+      if (triggerDetail) detailHtml += `<tr><td>触发详情</td><td>${triggerDetail}</td></tr>`;
     } else if (event === "track:appeared") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;

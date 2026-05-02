@@ -67,6 +67,27 @@ export class MultimodalAnalyzer {
   private unsubFrame: (() => void) | null = null;
   /** 是否已启动 */
   private started = false;
+  /** 全局并发信号量（防止突发流量压垮 VLM 服务） */
+  private concurrency = 0;
+  private static readonly MAX_CONCURRENCY = 3;
+  private waitQueue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
+
+  private acquire(): Promise<void> {
+    if (this.concurrency < MultimodalAnalyzer.MAX_CONCURRENCY) {
+      this.concurrency++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => { this.waitQueue.push({ resolve, reject }); });
+  }
+
+  private release(): void {
+    this.concurrency--;
+    const next = this.waitQueue.shift();
+    if (next) {
+      this.concurrency++;
+      next.resolve();
+    }
+  }
 
   constructor(eventBus: EventBus, config: LlmConfig) {
     this.eventBus = eventBus;
@@ -130,6 +151,12 @@ export class MultimodalAnalyzer {
     this.lastAnalysisTime.clear();
     this.analyzing.clear();
     this.latestFrames.clear();
+    /** reject 所有等待中的 Promise，防止永久挂起 */
+    for (const { reject } of this.waitQueue) {
+      reject(new Error("Analyzer stopped"));
+    }
+    this.waitQueue = [];
+    this.concurrency = 0;
   }
 
   /** 调度分析（带节流） */
@@ -159,6 +186,16 @@ export class MultimodalAnalyzer {
 
   /** 执行多模态分析 */
   private async analyzeScene(cameraId: string, jpeg: Buffer, trigger: string, timestamp: number): Promise<void> {
+    await this.acquire();
+    try {
+      await this.doAnalyze(cameraId, jpeg, trigger, timestamp);
+    } finally {
+      this.release();
+    }
+  }
+
+  /** 实际分析逻辑 */
+  private async doAnalyze(cameraId: string, jpeg: Buffer, trigger: string, timestamp: number): Promise<void> {
     const t0 = performance.now();
 
     /** 将 JPEG 转为 base64 data URL */
@@ -193,7 +230,7 @@ export class MultimodalAnalyzer {
     };
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     const response = await fetch(this.config.apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

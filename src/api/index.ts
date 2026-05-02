@@ -22,7 +22,7 @@ import { type PtzController } from "@/ptz";
 import { type PreferencesStorage } from "@/storage/preferences";
 import { type CrossLineStorage } from "@/storage/cross-lines";
 import { type StorageFs } from "@/storage/storage-fs";
-import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
+import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
 import { getLogs } from "@/log-buffer";
 import { realpath } from "node:fs/promises";
@@ -78,6 +78,8 @@ const wsClients = new Set<WsClient>();
 const WS_PING_INTERVAL = 30_000;
 const WS_PONG_TIMEOUT = 60_000;
 const textEncoder = new TextEncoder();
+/** 预分配心跳消息（避免每 30 秒重复 JSON.stringify） */
+const WS_PING_MSG = JSON.stringify({ event: "ping" });
 const wsLastPong = new WeakMap<WsClient, number>();
 let wsHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 function startWsHeartbeat() {
@@ -93,7 +95,7 @@ function startWsHeartbeat() {
         continue;
       }
       try {
-        ws.send(JSON.stringify({ event: "ping" }));
+        ws.send(WS_PING_MSG);
       } catch {
         wsClients.delete(ws);
       }
@@ -171,20 +173,38 @@ export function startServer(
     return cachedRecFsRoot;
   }
 
-  /** 登录速率限制：IP → { count, resetAt } */
+  /** 登录速率限制：IP → { count, resetAt }，内联清理 + 大小限制 */
   const loginRateLimits = new Map<string, { count: number; resetAt: number }>();
-  /** 定期清理过期的速率限制记录 */
-  setInterval(() => {
-    const now = Date.now();
-    for (const [ip, bucket] of loginRateLimits) {
-      if (now - bucket.resetAt > 120_000) loginRateLimits.delete(ip);
-    }
-  }, 120_000);
+  const LOGIN_RATE_LIMIT_MAX = 1000;
 
   /** fMP4 流连接管理 */
-  const fmp4Unsubs = new WeakMap<WsClient, (() => void)[]>();
+  /** 每个摄像头的 fMP4 客户端集合（用于正确判断是否还有活跃连接） */
+  const fmp4ClientsByCamera = new Map<string, Set<WsClient>>();
   /** 跟踪哪些摄像头有活跃的 fMP4 客户端（有 fMP4 客户端时不推送 JPEG 帧） */
   const fmp4ActiveCameras = new Set<string>();
+
+  /** 全局 fMP4 分发器：只注册一次，按 cameraId 查找客户端集合发送（O(M) 而非 O(M*N)） */
+  let fmp4GlobalDispatcherRegistered = false;
+  function ensureFmp4GlobalDispatcher(bus: EventBus): void {
+    if (fmp4GlobalDispatcherRegistered) return;
+    fmp4GlobalDispatcherRegistered = true;
+
+    bus.on("fmp4:init", (payload) => {
+      const clientSet = fmp4ClientsByCamera.get(payload.cameraId);
+      if (!clientSet || clientSet.size === 0) return;
+      const encoded = getOrEncodeInit(payload.cameraId, payload.segment.codec, payload.segment.data);
+      for (const client of clientSet) {
+        client.send(encoded, false);
+      }
+    });
+
+    bus.on("fmp4:segment", (payload) => {
+      const clientSet = fmp4ClientsByCamera.get(payload.cameraId);
+      if (!clientSet || clientSet.size === 0) return;
+      encodeAndSendFmp4Media(payload.moofData, payload.mdatData, clientSet);
+    });
+  }
+
   /** 事件统计 API 缓存（10 秒 TTL） */
   const statsCache = new Map<string, { data: Record<string, unknown>; ts: number }>();
 
@@ -207,11 +227,12 @@ export function startServer(
     return msg;
   }
 
-  /** 封装 fMP4 media segment（共享 Buffer，多客户端复用） */
-  function encodeFmp4Media(data: Buffer): Buffer {
-    const msg = Buffer.allocUnsafe(1 + data.length);
+  /** 封装 fMP4 media segment：直接拼接协议头 + moof + mdat，跳过 parser 层 concat2 的中间合并 */
+  function encodeFmp4MediaFromParts(moofData: Buffer, mdatData: Buffer): Buffer {
+    const msg = Buffer.allocUnsafe(1 + moofData.length + mdatData.length);
     msg[0] = FMP4_TYPE_MEDIA;
-    data.copy(msg, 1);
+    moofData.copy(msg, 1);
+    mdatData.copy(msg, 1 + moofData.length);
     return msg;
   }
 
@@ -226,22 +247,26 @@ export function startServer(
     return encoded;
   }
 
-  /** 缓存最近编码的 media segment（按摄像头分区，避免多摄像头互相覆盖） */
-  const cachedMediaByCamera = new Map<string, { dataPtr: Buffer; encoded: Buffer }>();
-
-  function getOrEncodeMedia(cameraId: string, data: Buffer): Buffer {
-    const cached = cachedMediaByCamera.get(cameraId);
-    if (cached && cached.dataPtr === data) {
-      return cached.encoded;
+  function encodeAndSendFmp4Media(moofData: Buffer, mdatData: Buffer, clientSet: Set<WsClient>): void {
+    /** 实时流每帧内容不同，跳过缓存命中检查，直接编码并广播 */
+    const encoded = encodeFmp4MediaFromParts(moofData, mdatData);
+    for (const client of clientSet) {
+      /** 背压保护：缓冲区积压超过 2MB 时跳过（fMP4 允许更大缓冲，丢帧后 MSE 自动追赶到最新） */
+      if (client.getBufferedAmount() > 2097152) continue;
+      client.send(encoded, false);
     }
-    const encoded = encodeFmp4Media(data);
-    cachedMediaByCamera.set(cameraId, { dataPtr: data, encoded });
-    return encoded;
+  }
+
+  /** 封装已合并的 media segment（用于缓存首帧，无需拆分） */
+  function encodeFmp4Media(data: Buffer): Buffer {
+    const msg = Buffer.allocUnsafe(1 + data.length);
+    msg[0] = FMP4_TYPE_MEDIA;
+    data.copy(msg, 1);
+    return msg;
   }
 
   function handleFmp4Connection(ws: WsClient, cameraId: string, camMgr: CameraManager, bus: EventBus) {
     const extractor = camMgr.getFmp4Extractor(cameraId);
-    const unsubs: (() => void)[] = [];
 
     /** 没有 fMP4 提取器时直接关闭，让前端回退到 Canvas */
     if (!extractor) {
@@ -250,57 +275,42 @@ export function startServer(
       return;
     }
 
-    /** 发送缓存的 init segment（带协议头） */
+    /** 注册全局分发器（只注册一次，所有客户端共享） */
+    ensureFmp4GlobalDispatcher(bus);
+
+    /** 发送缓存的 init segment（带协议头，关闭压缩） */
     if (extractor.initSegment) {
-      ws.send(getOrEncodeInit(cameraId, extractor.initSegment.codec, extractor.initSegment.data));
+      ws.send(getOrEncodeInit(cameraId, extractor.initSegment.codec, extractor.initSegment.data), false);
     }
 
-    /** 发送缓存的最近 media segment（立即显示画面，消除黑屏等待） */
+    /** 发送缓存的最近 media segment（立即显示画面，关闭压缩） */
     if (extractor.lastMediaSegment) {
-      ws.send(getOrEncodeMedia(cameraId, extractor.lastMediaSegment));
+      ws.send(encodeFmp4Media(extractor.lastMediaSegment), false);
     }
 
-    /** 监听新的 init segment */
-    const unsubInit = bus.on("fmp4:init", (payload) => {
-      if (payload.cameraId === cameraId) {
-        ws.send(getOrEncodeInit(cameraId, payload.segment.codec, payload.segment.data));
-      }
-    });
-    unsubs.push(unsubInit);
-
-    /** 监听 media segment */
-    const unsubSeg = bus.on("fmp4:segment", (payload) => {
-      if (payload.cameraId === cameraId) {
-        ws.send(getOrEncodeMedia(cameraId, payload.data));
-      }
-    });
-    unsubs.push(unsubSeg);
-
-    fmp4Unsubs.set(ws, unsubs);
     fmp4ActiveCameras.add(cameraId);
+    /** 注册到按摄像头分组的客户端集合（全局分发器直接发送） */
+    let clientSet = fmp4ClientsByCamera.get(cameraId);
+    if (!clientSet) {
+      clientSet = new Set();
+      fmp4ClientsByCamera.set(cameraId, clientSet);
+    }
+    clientSet.add(ws);
     console.log(`[fMP4] 客户端连接: ${cameraId}`);
   }
 
   function cleanupFmp4Connection(ws: WsClient) {
-    const unsubs = fmp4Unsubs.get(ws);
-    if (unsubs) {
-      for (const unsub of unsubs) unsub();
-    }
     const camId = (ws as unknown as { cameraId?: string }).cameraId;
     if (camId) {
-      /** 检查是否还有其他 fMP4 客户端连接同一摄像头 */
-      let hasOther = false;
-      for (const otherWs of wsClients) {
-        if (otherWs !== ws && (otherWs as unknown as { cameraId?: string }).cameraId === camId && fmp4Unsubs.has(otherWs)) {
-          hasOther = true;
-          break;
+      const clientSet = fmp4ClientsByCamera.get(camId);
+      if (clientSet) {
+        clientSet.delete(ws);
+        /** 没有其他 fMP4 客户端连接同一摄像头 */
+        if (clientSet.size === 0) {
+          fmp4ClientsByCamera.delete(camId);
+          fmp4ActiveCameras.delete(camId);
+          cachedInitByCamera.delete(camId);
         }
-      }
-      if (!hasOther) {
-        fmp4ActiveCameras.delete(camId);
-        /** 清理编码缓存，避免离线摄像头占用内存 */
-        cachedInitByCamera.delete(camId);
-        cachedMediaByCamera.delete(camId);
       }
     }
     console.log(`[fMP4] 客户端断开`);
@@ -321,6 +331,12 @@ export function startServer(
           ?? req.headers.get("x-real-ip")
           ?? "unknown";
         const now = Date.now();
+        /** 内联清理：每次登录时顺便清理过期条目，避免独立定时器 */
+        if (loginRateLimits.size > LOGIN_RATE_LIMIT_MAX) {
+          for (const [ip, b] of loginRateLimits) {
+            if (now - b.resetAt > 120_000) loginRateLimits.delete(ip);
+          }
+        }
         let bucket = loginRateLimits.get(clientIp);
         if (!bucket || now - bucket.resetAt > 60_000) {
           bucket = { count: 0, resetAt: now };
@@ -393,9 +409,7 @@ export function startServer(
           if (!id || !friendlyName || !hdUrl || !sdUrl) {
             return new Response("Missing required fields: id, friendlyName, hdUrl, sdUrl", { status: 400 });
           }
-          await addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined, group: obj.group as string | undefined });
-          /** 触发配置热重载 */
-          const newConfig = loadConfig();
+          const newConfig = await addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined, group: obj.group as string | undefined });
           cameraManager.reloadConfig(newConfig);
           return Response.json({ ok: true, cameraId: id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
@@ -407,7 +421,7 @@ export function startServer(
           const obj = body as Record<string, unknown>;
           const rtspUrl = obj.url as string | undefined;
           if (!rtspUrl) return new Response("Missing url", { status: 400 });
-          const ffmpegPath = loadConfig().ffmpegPath;
+          const ffmpegPath = cameraManager.getFfmpegPath();
           const result = await runFfmpegAsync(ffmpegPath, [
             "-rtsp_transport", "tcp",
             "-i", rtspUrl,
@@ -429,21 +443,19 @@ export function startServer(
         if (req.method === "PATCH") {
           return req.json().then(async (body: unknown) => {
             const obj = body as Record<string, unknown>;
-            await updateCameraInConfig(cameraId, {
+            const newConfig = await updateCameraInConfig(cameraId, {
               friendlyName: obj.friendlyName as string | undefined,
               hdUrl: obj.hdUrl as string | undefined,
               sdUrl: obj.sdUrl as string | undefined,
               group: obj.group as string | undefined,
             });
-            const newConfig = loadConfig();
             cameraManager.reloadConfig(newConfig);
             return Response.json({ ok: true });
           }).catch(() => new Response("Invalid JSON", { status: 400 }));
         }
 
         if (req.method === "DELETE") {
-          await removeCameraFromConfig(cameraId);
-          const newConfig = loadConfig();
+          const newConfig = await removeCameraFromConfig(cameraId);
           cameraManager.reloadConfig(newConfig);
           return Response.json({ ok: true });
         }
@@ -572,31 +584,47 @@ export function startServer(
         const { rows: rawEvents, total } = eventStorage.queryWithTotal(queryOpts);
 
         /**
-         * 轻量化响应：从 detail JSON 中提取摘要字段，不返回原始大 detail
-         * detect 事件：提取标签摘要（如 "person ×2, car ×1"）
-         * motion 事件：提取 ratio
-         * 快照 URL 按需生成，不逐条查文件系统
+         * 批量预加载快照路径和元数据，避免逐条异步 I/O
+         * detect 事件用 detect 快照，alert/detect:rule 用告警快照
          */
-        const eventPromises = rawEvents.map(async (ev) => {
+        const detectEntries = rawEvents
+          .filter(ev => ev.type === "detect")
+          .map(ev => ({ cameraId: ev.camera_id, timestamp: ev.timestamp }));
+        const detectSnapPaths = snapshotStorage.batchFindSnapshotPaths(detectEntries);
+
+        const alertEntries = rawEvents
+          .filter(ev => ev.type === "alert" || ev.type === "detect:rule")
+          .map(ev => ({ cameraId: ev.camera_id, timestamp: ev.timestamp }));
+        const alertSnapPaths = alertSnapshotStorage
+          ? alertSnapshotStorage.batchFindSnapshotPaths(alertEntries)
+          : new Map<string, string | null>();
+
+        /** 批量加载需要 meta 的快照（去重） */
+        const metaNeeded = [...detectSnapPaths.values()].filter((p): p is string => p != null);
+        const metaMap = new Map<string, Awaited<ReturnType<typeof snapshotStorage.getSnapshotMeta>>>();
+        if (metaNeeded.length > 0) {
+          const uniquePaths = [...new Set(metaNeeded)];
+          const metaResults = await Promise.all(uniquePaths.map(p => snapshotStorage.getSnapshotMeta(p).then(m => [p, m] as const)));
+          for (const [p, m] of metaResults) metaMap.set(p, m);
+        }
+
+        /** 同步映射事件（无逐条 async，直接查预加载的数据） */
+        const events = rawEvents.map(ev => {
           let summary: string | null = null;
           let snapshotUrl: string | null = null;
           let detections: unknown = null;
 
           if (ev.type === "detect" && ev.detail) {
-            const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+            const snapPath = detectSnapPaths.get(`${ev.camera_id}:${ev.timestamp}`) ?? null;
             if (snapPath) {
               snapshotUrl = `/api/snapshots/${snapPath}`;
-              /** 从快照 JSON 元数据读取完整检测数据（含 bbox） */
-              const meta = await snapshotStorage.getSnapshotMeta(snapPath);
+              const meta = metaMap.get(snapPath);
               if (meta?.detections) detections = meta.detections;
             }
-            /** 从 detail 提取标签摘要（兼容新旧格式） */
             const detailObj = JSON.parse(ev.detail);
             if (detailObj?.labels && typeof detailObj.labels === "object") {
-              /** 新格式：{labels: {person: 2, car: 1}, count: 3} */
               summary = Object.entries(detailObj.labels as Record<string, number>).map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
             } else if (Array.isArray(detailObj?.detections)) {
-              /** 旧格式：{detections: [...]} */
               const labelCounts = new Map<string, number>();
               for (const d of detailObj.detections) {
                 const name = d.trackName ?? d.label;
@@ -604,8 +632,8 @@ export function startServer(
               }
               summary = [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
             }
-          } else if ((ev.type === "alert" || ev.type === "detect:rule") && alertSnapshotStorage) {
-            const snapPath = alertSnapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
+          } else if (ev.type === "alert" || ev.type === "detect:rule") {
+            const snapPath = alertSnapPaths.get(`${ev.camera_id}:${ev.timestamp}`) ?? null;
             if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
             if (ev.detail) {
               const detailObj = JSON.parse(ev.detail);
@@ -617,7 +645,6 @@ export function startServer(
               summary = `变动 ${(detailObj.ratio * 100).toFixed(1)}%`;
             }
           } else if (ev.type.startsWith("track:") && ev.detail) {
-            /** 行为事件摘要：名称 + 区域/动作 + 参数 */
             const d = JSON.parse(ev.detail) as Record<string, unknown>;
             const parts: string[] = [];
             if (d.trackName) parts.push(String(d.trackName));
@@ -640,7 +667,6 @@ export function startServer(
             starred: ev.starred,
           };
         });
-        const events = await Promise.all(eventPromises);
         return Response.json({ events, total });
       }
 
@@ -709,6 +735,11 @@ export function startServer(
           byLabel: eventStorage.countByDetectionLabel(opts),
         };
         statsCache.set(cacheKey, { data, ts: Date.now() });
+        /** 限制缓存大小，防止无限增长 */
+        if (statsCache.size > 20) {
+          const oldest = [...statsCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+          if (oldest) statsCache.delete(oldest[0]);
+        }
         return Response.json(data);
       }
 
@@ -834,10 +865,10 @@ export function startServer(
         const cameraId = snapshotMatch[1]!;
         const isHd = url.searchParams.get("quality") === "hd";
         if (isHd) {
-          /** 从主码流拉取高清帧 */
-          const cam = loadConfig().cameras.find(c => c.id === cameraId);
+          /** 从主码流拉取高清帧（使用内存中的配置，避免 readFileSync） */
+          const cam = cameraManager.getCameraConfig(cameraId);
           if (!cam) return new Response("Camera not found", { status: 404 });
-          const ffmpegPath = loadConfig().ffmpegPath;
+          const ffmpegPath = cameraManager.getFfmpegPath();
           const result = await runFfmpegCapture(ffmpegPath, cam.stream.hd, 5000);
           if (!result) {
             return new Response("HD capture failed", { status: 504 });
@@ -1657,102 +1688,90 @@ export function startServer(
         return Response.json(result);
       }
 
-      // ===== PTZ 云台控制 =====
+      // ===== PTZ 云台控制（统一 regex 匹配，单次提取 cameraId + action） =====
+      const ptzMatch = url.pathname.match(/^\/api\/ptz\/([^/]+)\/([a-z-]+)$/);
+      if (ptzMatch) {
+        const cameraId = decodeURIComponent(ptzMatch[1]!);
+        const action = ptzMatch[2]!;
 
-      /** 查询摄像头是否支持 PTZ */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/status") && req.method === "GET") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        const supported = ptzController.hasPtz(cameraId);
-        if (!supported) return Response.json({ supported: false });
-        return ptzController.getStatus(cameraId)
-          .then(pos => Response.json({ supported: true, position: pos }))
-          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
+        if (action === "status" && req.method === "GET") {
+          const supported = ptzController.hasPtz(cameraId);
+          if (!supported) return Response.json({ supported: false });
+          return ptzController.getStatus(cameraId)
+            .then(pos => Response.json({ supported: true, position: pos }))
+            .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
 
-      /** 连续移动（持续按住方向） */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/move") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          const vel = obj.velocity as { x?: number; y?: number; zoom?: number } | undefined;
-          const timeout = (obj.timeout as number) ?? 0;
-          await ptzController.continuousMove(cameraId, vel ?? {}, timeout);
+        if (action === "move" && req.method === "POST") {
+          return req.json().then((body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            const vel = obj.velocity as { x?: number; y?: number; zoom?: number } | undefined;
+            const timeout = (obj.timeout as number) ?? 0;
+            /** fire-and-forget：不等待设备响应，消除 50-200ms 延迟感知 */
+            ptzController.continuousMove(cameraId, vel ?? {}, timeout).catch(err => console.error(`[PTZ] move error:`, err));
+            return Response.json({ ok: true });
+          }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
+
+        if (action === "stop" && req.method === "POST") {
+          ptzController.stop(cameraId).catch(err => console.error(`[PTZ] stop error:`, err));
           return Response.json({ ok: true });
-        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
+        }
 
-      /** 停止移动 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/stop") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return ptzController.stop(cameraId)
-          .then(() => Response.json({ ok: true }))
-          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
+        if (action === "absolute" && req.method === "POST") {
+          return req.json().then((body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            ptzController.absoluteMove(cameraId, obj.position as { x?: number; y?: number; zoom?: number })
+              .catch(err => console.error(`[PTZ] absolute error:`, err));
+            return Response.json({ ok: true });
+          }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
 
-      /** 绝对移动 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/absolute") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          await ptzController.absoluteMove(cameraId, obj.position as { x?: number; y?: number; zoom?: number });
+        if (action === "relative" && req.method === "POST") {
+          return req.json().then((body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            ptzController.relativeMove(cameraId, obj.delta as { x?: number; y?: number; zoom?: number })
+              .catch(err => console.error(`[PTZ] relative error:`, err));
+            return Response.json({ ok: true });
+          }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
+
+        if (action === "presets" && req.method === "GET") {
+          return ptzController.getPresets(cameraId)
+            .then(presets => Response.json({ presets }))
+            .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
+
+        if (action === "goto-preset" && req.method === "POST") {
+          return req.json().then((body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            ptzController.gotoPreset(cameraId, obj.presetToken as string)
+              .catch(err => console.error(`[PTZ] goto-preset error:`, err));
+            return Response.json({ ok: true });
+          }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
+
+        if (action === "set-preset" && req.method === "POST") {
+          return req.json().then(async (body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            const token = await ptzController.setPreset(cameraId, obj.presetName as string);
+            return Response.json({ ok: true, presetToken: token });
+          }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
+
+        if (action === "remove-preset" && req.method === "POST") {
+          return req.json().then(async (body: unknown) => {
+            const obj = body as Record<string, unknown>;
+            await ptzController.removePreset(cameraId, obj.presetToken as string);
+            return Response.json({ ok: true });
+          }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
+
+        if (action === "home" && req.method === "POST") {
+          ptzController.gotoHomePosition(cameraId)
+            .catch(err => console.error(`[PTZ] home error:`, err));
           return Response.json({ ok: true });
-        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
-
-      /** 相对移动 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/relative") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          await ptzController.relativeMove(cameraId, obj.delta as { x?: number; y?: number; zoom?: number });
-          return Response.json({ ok: true });
-        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
-
-      /** 获取预置位列表 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/presets") && req.method === "GET") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return ptzController.getPresets(cameraId)
-          .then(presets => Response.json({ presets }))
-          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
-
-      /** 跳转预置位 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/goto-preset") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          await ptzController.gotoPreset(cameraId, obj.presetToken as string);
-          return Response.json({ ok: true });
-        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
-
-      /** 设置预置位 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/set-preset") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          const token = await ptzController.setPreset(cameraId, obj.presetName as string);
-          return Response.json({ ok: true, presetToken: token });
-        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
-
-      /** 删除预置位 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/remove-preset") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          await ptzController.removePreset(cameraId, obj.presetToken as string);
-          return Response.json({ ok: true });
-        }).catch(err => Response.json({ error: String(err) }, { status: 500 }));
-      }
-
-      /** 回到初始位置 */
-      if (url.pathname.startsWith("/api/ptz/") && url.pathname.endsWith("/home") && req.method === "POST") {
-        const cameraId = decodeURIComponent(url.pathname.split("/")[3]!);
-        return ptzController.gotoHomePosition(cameraId)
-          .then(() => Response.json({ ok: true }))
-          .catch(err => Response.json({ error: String(err) }, { status: 500 }));
+        }
       }
 
       /** 用户偏好设置 API */
@@ -2217,18 +2236,13 @@ export function startServer(
       },
       message(ws, raw) {
         if (typeof raw !== "string") return;
-        /** 心跳 pong 响应 */
-        try {
-          const parsed = JSON.parse(raw);
-          if (parsed.type === "pong") {
-            wsLastPong.set(ws, Date.now());
-            return;
-          }
-        } catch { /* not JSON, continue */ }
-        /** 处理客户端订阅消息：{"type":"subscribe","cameraIds":["cam1","cam2"]} */
-        if (typeof raw !== "string") return;
+        /** 解析 JSON 消息（心跳 + 订阅共用一次解析） */
         let msg: { type: string; cameraIds?: string[] };
         try { msg = JSON.parse(raw); } catch { return; }
+        if (msg.type === "pong") {
+          wsLastPong.set(ws, Date.now());
+          return;
+        }
         if (msg.type === "subscribe" && Array.isArray(msg.cameraIds)) {
           (ws as unknown as { subscribedCameras: Set<string> }).subscribedCameras = new Set(msg.cameraIds);
         } else if (msg.type === "unsubscribe") {
@@ -2310,15 +2324,17 @@ export function startServer(
 
       /** 编码帧（仅在有目标时） */
       const header = { event: "frame", cameraId, timestamp: frame.timestamp };
-      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
-      headerLenView.setUint32(0, headerBuf.length, true);
-      const message = new Uint8Array(4 + headerBuf.length + frame.data.length);
+      const headerBuf = textEncoder.encode(JSON.stringify(header));
+      headerLenView.setUint32(0, headerBuf.byteLength, true);
+      const message = new Uint8Array(4 + headerBuf.byteLength + frame.data.length);
       message.set(headerLenBuf, 0);
       message.set(headerBuf, 4);
-      message.set(frame.data, 4 + headerBuf.length);
+      message.set(frame.data, 4 + headerBuf.byteLength);
 
       for (const { ws } of targets) {
         try {
+          /** 背压保护：客户端发送缓冲区积压超过 1MB 时跳过，防止内存泄漏 */
+          if (ws.getBufferedAmount() > 1048576) continue;
           ws.send(message);
         } catch {
           /** 单个客户端发送失败不影响其他客户端 */
@@ -2379,10 +2395,10 @@ export function startServer(
       if (wsClients.size === 0) return;
 
       /** 二进制协议：[4字节头长度 LE uint32][JSON头] */
-      const headerBuf = Buffer.from(JSON.stringify(header), "utf-8");
-      headerLenView.setUint32(0, headerBuf.length, true);
+      const headerBuf = textEncoder.encode(JSON.stringify(header));
+      headerLenView.setUint32(0, headerBuf.byteLength, true);
 
-      const message = new Uint8Array(4 + headerBuf.length);
+      const message = new Uint8Array(4 + headerBuf.byteLength);
       message.set(headerLenBuf, 0);
       message.set(headerBuf, 4);
 
@@ -2427,13 +2443,9 @@ async function serveStatic(pathname: string): Promise<Response> {
     return new Response("Forbidden", { status: 403 });
   }
 
-  /** 如果文件不存在，SPA fallback 到 index.html */
-  if ((await Bun.file(filePath).size) === undefined) {
+  /** 如果文件不存在，SPA fallback 到 index.html（单次 stat 检查） */
+  if (!await Bun.file(filePath).exists()) {
     filePath = resolve(STATIC_DIR, "index.html");
-  }
-
-  if ((await Bun.file(filePath).size) === undefined) {
-    return new Response("Not Found", { status: 404 });
   }
 
   const ext = extname(filePath);

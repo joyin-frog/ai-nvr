@@ -48,15 +48,15 @@ State definitions:
 
 For boolean states, use "true" or "false". For string/number states, use the appropriate value.`;
 
-/** 时段配置接口 */
+/** 时段配置接口（预计算分钟数，避免每次 split） */
 interface ScheduleConfig {
   enabled: boolean;
-  /** "HH:MM" 格式 */
-  start: string;
-  /** "HH:MM" 格式 */
-  end: string;
   /** 0=周日, 1=周一, ..., 6=周六 */
   days: number[];
+  /** 开始时间（一天中的分钟数，预计算） */
+  startMinutes: number;
+  /** 结束时间（一天中的分钟数，预计算） */
+  endMinutes: number;
 }
 
 /** 全局最大并发 VLM 调用数 */
@@ -87,6 +87,11 @@ export class DetectRuleEngine {
   private rulesCache: DetectRule[] = [];
   private rulesCacheTime = 0;
   private static readonly CACHE_TTL = 30_000;
+  /** 状态定义缓存（避免每次 executeRule 都查 SQLite） */
+  private statesCache: import("@/state/storage").StateDef[] = [];
+  private statesCacheTime = 0;
+  /** schedule 解析缓存（rule.schedule -> ScheduleConfig | null） */
+  private scheduleCache = new Map<string, ScheduleConfig | null>();
   /** 是否已启动 */
   private started = false;
   /** 快照保存回调 */
@@ -129,12 +134,27 @@ export class DetectRuleEngine {
     this.lastTriggerTime.clear();
     this.queue = [];
     this.concurrent = 0;
+    this.statesCache = [];
+    this.statesCacheTime = 0;
+    this.scheduleCache.clear();
   }
 
   /** 规则变更时重新加载 */
   reloadRules(): void {
     this.rulesCacheTime = 0;
+    this.statesCacheTime = 0;
+    this.scheduleCache.clear();
     if (this.started) this.refreshAndStartTimers();
+  }
+
+  /** 获取缓存的状态列表（30 秒 TTL） */
+  private getCachedStates(): import("@/state/storage").StateDef[] {
+    if (!this.stateStorage) return [];
+    const now = Date.now();
+    if (now - this.statesCacheTime < DetectRuleEngine.CACHE_TTL) return this.statesCache;
+    this.statesCache = this.stateStorage.listStates();
+    this.statesCacheTime = now;
+    return this.statesCache;
   }
 
   /** 刷新规则缓存并重建定时器 */
@@ -199,30 +219,34 @@ export class DetectRuleEngine {
   /** 检查当前时间是否在规则配置的启用时段内 */
   private isInSchedule(rule: DetectRule): boolean {
     if (!rule.schedule) return true;
-    let config: ScheduleConfig;
-    try {
-      config = JSON.parse(rule.schedule) as ScheduleConfig;
-    } catch {
-      return true;
+    let config = this.scheduleCache.get(rule.schedule);
+    if (config === undefined) {
+      try {
+        const raw = JSON.parse(rule.schedule) as { enabled?: boolean; start?: string; end?: string; days?: number[] };
+        const [sH, sM] = (raw.start ?? "00:00").split(":").map(Number);
+        const [eH, eM] = (raw.end ?? "23:59").split(":").map(Number);
+        config = {
+          enabled: raw.enabled !== false,
+          days: raw.days ?? [],
+          startMinutes: (sH ?? 0) * 60 + (sM ?? 0),
+          endMinutes: (eH ?? 23) * 60 + (eM ?? 59),
+        };
+      } catch {
+        config = null;
+      }
+      this.scheduleCache.set(rule.schedule, config);
     }
+    if (!config) return true;
     if (!config.enabled) return false;
 
     const now = new Date();
-    /** 检查星期 */
     if (config.days.length > 0 && !config.days.includes(now.getDay())) return false;
 
-    /** 检查时段 */
-    const [startH, startM] = config.start.split(":").map(Number);
-    const [endH, endM] = config.end.split(":").map(Number);
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const startMinutes = (startH ?? 0) * 60 + (startM ?? 0);
-    const endMinutes = (endH ?? 23) * 60 + (endM ?? 59);
-
-    if (startMinutes <= endMinutes) {
-      return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    if (config.startMinutes <= config.endMinutes) {
+      return currentMinutes >= config.startMinutes && currentMinutes <= config.endMinutes;
     }
-    /** 跨午夜（如 22:00 - 06:00） */
-    return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+    return currentMinutes >= config.startMinutes || currentMinutes <= config.endMinutes;
   }
 
   /** 处理排队任务 */
@@ -255,7 +279,8 @@ export class DetectRuleEngine {
       const imageWidth = rule.imageWidth > 0 ? rule.imageWidth : llmConfig.imageWidth;
       let imageDataUrl: string;
       if (imageWidth > 0) {
-        const resized = await sharp(jpeg)
+        /** sharp 管线：resize + jpeg 编码一步完成，避免中间 Buffer 分配 */
+        const resized = await sharp(jpeg, { failOn: "none" })
           .resize(imageWidth)
           .jpeg({ quality: 80 })
           .toBuffer();
@@ -271,7 +296,7 @@ export class DetectRuleEngine {
       /** 状态评估 prompt（当规则关联了状态时） */
       let statePrompt = "";
       if (rule.stateIds.length > 0 && this.stateStorage) {
-        const allStates = this.stateStorage.listStates();
+        const allStates = this.getCachedStates();
         const linkedStates = allStates.filter(s => rule.stateIds.includes(s.id));
         if (linkedStates.length > 0) {
           const defs = linkedStates.map(s =>
@@ -300,11 +325,16 @@ export class DetectRuleEngine {
         temperature: 0.1,
       };
 
+      /** AbortController 超时保护：15 秒后自动中断，防止单规则卡死整个引擎 */
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+
       const response = await fetch(llmConfig.apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");

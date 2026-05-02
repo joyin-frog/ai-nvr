@@ -122,6 +122,9 @@ export class AiDetector {
   /** 每个摄像头正在分析中 */
   private analyzing = new Set<string>();
 
+  /** JPEG 尺寸缓存：cameraId → { width, height }，同一摄像头分辨率通常不变 */
+  private jpegDimCache = new Map<string, { width: number; height: number; hash: number }>();
+
   /** VLM API 全局并发信号量（限制同时进行的 VLM 调用数） */
   private vlmConcurrency = 0;
   /** 最大并发 VLM 调用数 */
@@ -233,6 +236,7 @@ export class AiDetector {
       this.trackers.delete(cameraId);
       this.analyzing.delete(cameraId);
       this.trackNameCache.forEach((_v, k) => { if (k.startsWith(`${cameraId}:`)) this.trackNameCache.delete(k); });
+      this.jpegDimCache.delete(cameraId);
     });
 
     if (config.mode === "continuous") {
@@ -286,9 +290,14 @@ export class AiDetector {
   /** 动态调整全局定时器：所有摄像头深度 idle 时降频，有活动时恢复 */
   private adjustGlobalInterval(): void {
     if (!this.continuousTimer || this.baseInterval === 0) return;
-    const allDeepIdle = this.latestFrames.size > 0 && [...this.emptyDetectStreak.values()].every(
-      s => s >= AiDetector.IDLE_SLOWDOWN_THRESHOLD * 2,
-    );
+    /** 用 for-of 替代 [...values()].every()，避免每次 tick 创建中间数组 */
+    const deepThreshold = AiDetector.IDLE_SLOWDOWN_THRESHOLD * 2;
+    let allDeepIdle = this.latestFrames.size > 0;
+    if (allDeepIdle) {
+      for (const s of this.emptyDetectStreak.values()) {
+        if (s < deepThreshold) { allDeepIdle = false; break; }
+      }
+    }
     if (allDeepIdle && !this.globalIdleBoosted) {
       clearInterval(this.continuousTimer);
       this.continuousTimer = setInterval(() => this.tickDetect(), this.baseInterval * 2);
@@ -392,9 +401,15 @@ export class AiDetector {
     const aiConfig = this.runtimeConfig.get().ai;
     const llmConfig = aiConfig.llm;
 
-    /** 缩放图片减少传输和推理开销 */
+    /** 缩放图片减少传输和推理开销（原始尺寸 <= 目标宽度时跳过 resize） */
     const resizeImage = async (img: Buffer): Promise<string> => {
       if (llmConfig.imageWidth > 0) {
+        /** 从 jpegDimCache 获取原始宽度（已缓存，避免重复解析 SOF marker） */
+        const dimCache = this.jpegDimCache.get(cameraId);
+        const origWidth = dimCache?.width ?? 0;
+        if (origWidth > 0 && origWidth <= llmConfig.imageWidth) {
+          return `data:image/jpeg;base64,${img.toString("base64")}`;
+        }
         const resized = await sharp(img)
           .resize(llmConfig.imageWidth)
           .jpeg({ quality: 80 })
@@ -464,8 +479,19 @@ export class AiDetector {
     const content = result.choices?.[0]?.message?.content?.trim() ?? "";
     const inferMs = performance.now() - t0;
 
-    /** 从 JPEG SOF marker 解析实际图像尺寸（避免硬编码 16:9 假设） */
-    const { width: imgW, height: imgH } = parseJpegDimensions(jpeg);
+    /** 从 JPEG SOF marker 解析实际图像尺寸（带缓存，同一摄像头分辨率通常不变） */
+    const jpegHash = jpeg.length;
+    let imgW: number, imgH: number;
+    const cached = this.jpegDimCache.get(cameraId);
+    if (cached && cached.hash === jpegHash) {
+      imgW = cached.width;
+      imgH = cached.height;
+    } else {
+      const dim = parseJpegDimensions(jpeg);
+      imgW = dim.width;
+      imgH = dim.height;
+      this.jpegDimCache.set(cameraId, { width: imgW, height: imgH, hash: jpegHash });
+    }
     /** 解析 VLM 输出为结构化结果 */
     return this.parseVlmResponse(content, inferMs, imgW, imgH);
   }

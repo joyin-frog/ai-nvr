@@ -232,10 +232,10 @@ const DEFAULT_CANDIDATES = [
 /** 用户自定义候选标签（运行时可通过 API 更新） */
 let customCandidates: Record<string, string[]> = {};
 
-/** 文本 embedding 缓存（key = 查询文本, value = embedding 向量） */
+/** 文本 embedding LRU 缓存（key = 查询文本, value = embedding 向量） */
 const textEmbedCache = new Map<string, number[]>();
 /** 文本缓存最大条目 */
-const TEXT_CACHE_MAX = 100;
+const TEXT_CACHE_MAX = 500;
 
 /** 设置用户自定义候选标签 */
 export function setCustomCandidates(candidates: Record<string, string[]>): void {
@@ -462,6 +462,9 @@ export class ClipService {
       const text = texts[i]!;
       const hit = textEmbedCache.get(text);
       if (hit) {
+        /** LRU：访问时重排序到最新 */
+        textEmbedCache.delete(text);
+        textEmbedCache.set(text, hit);
         cached[i] = hit;
       } else {
         uncached.push(text);

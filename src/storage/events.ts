@@ -5,11 +5,17 @@ import { dirname } from "node:path";
 /** 事件持久化存储 */
 export class EventStorage {
   private db: Database;
+  /** 预编译高频语句 */
+  private stmtInsert: ReturnType<Database["prepare"]>;
+  private stmtGetById: ReturnType<Database["prepare"]>;
+  private stmtGetStar: ReturnType<Database["prepare"]>;
+  private stmtUpdateStar: ReturnType<Database["prepare"]>;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath, { create: true });
     this.db.run("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA synchronous = NORMAL");
     this.db.run("PRAGMA busy_timeout = 5000");
     this.db.run("PRAGMA wal_autocheckpoint = 1000");
     this.db.run(`
@@ -38,13 +44,17 @@ export class EventStorage {
     try {
       this.db.run("CREATE INDEX IF NOT EXISTS idx_events_track_id ON events(json_extract(detail, '$.trackId')) WHERE json_extract(detail, '$.trackId') IS NOT NULL");
     } catch { /* 旧版 SQLite 可能不支持表达式索引 */ }
+
+    /** 预编译高频 SQL 语句（避免每次调用重新解析 SQL） */
+    this.stmtInsert = this.db.prepare("INSERT INTO events (type, camera_id, timestamp, detail) VALUES (?, ?, ?, ?) RETURNING id");
+    this.stmtGetById = this.db.prepare("SELECT * FROM events WHERE id = ?");
+    this.stmtGetStar = this.db.prepare("SELECT starred FROM events WHERE id = ?");
+    this.stmtUpdateStar = this.db.prepare("UPDATE events SET starred = ? WHERE id = ?");
   }
 
   /** 插入事件 */
   insert(type: string, cameraId: string, timestamp: number, detail?: string): number {
-    const result = this.db.query(
-      "INSERT INTO events (type, camera_id, timestamp, detail) VALUES (?, ?, ?, ?) RETURNING id"
-    ).get(type, cameraId, timestamp, detail ?? null);
+    const result = this.stmtInsert.get(type, cameraId, timestamp, detail ?? null);
     return (result as { id: number }).id;
   }
 
@@ -62,7 +72,7 @@ export class EventStorage {
     })();
   }
 
-  /** 查询事件列表（带总数，单次 SQL） */
+  /** 查询事件列表（带总数，分离 COUNT + SELECT 避免窗口函数全量扫描） */
   queryWithTotal(options: {
     type?: string;
     typeLike?: string;
@@ -80,15 +90,19 @@ export class EventStorage {
     const limit = options.limit ?? 100;
     const offset = options.offset ?? 0;
 
-    /** 使用 CTE + window function 合并 query + count 为单次查询 */
-    const rows = this.db.query(
-      `SELECT *, COUNT(*) OVER() as _total FROM events ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`
-    ).all(...params, limit, offset) as Array<EventRecord & { _total: number }>;
+    /** 分离查询：COUNT 走索引覆盖，SELECT + LIMIT 只取需要的行 */
+    const countRow = this.db.query(
+      `SELECT COUNT(*) as cnt FROM events ${where}`
+    ).get(...params) as { cnt: number };
+    const total = countRow.cnt;
 
-    const total = rows.length > 0 ? rows[0]!._total : 0;
-    /** 移除 _total 字段 */
-    const cleanRows = rows.map(({ _total, ...rest }) => rest) as EventRecord[];
-    return { rows: cleanRows, total };
+    if (total === 0) return { rows: [], total: 0 };
+
+    const rows = this.db.query(
+      `SELECT * FROM events ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as EventRecord[];
+
+    return { rows, total };
   }
 
   /** 查询事件列表（不带总数，用于内部查询） */
@@ -113,15 +127,15 @@ export class EventStorage {
 
   /** 根据 ID 获取单条事件 */
   getById(id: number): EventRecord | null {
-    return this.db.query("SELECT * FROM events WHERE id = ?").get(id) as EventRecord | null;
+    return this.stmtGetById.get(id) as EventRecord | null;
   }
 
   /** 切换事件收藏状态 */
   toggleStar(id: number): boolean {
-    const row = this.db.query("SELECT starred FROM events WHERE id = ?").get(id) as { starred: number } | null;
+    const row = this.stmtGetStar.get(id) as { starred: number } | null;
     if (!row) return false;
     const newVal = row.starred ? 0 : 1;
-    this.db.run("UPDATE events SET starred = ? WHERE id = ?", [newVal, id]);
+    this.stmtUpdateStar.run(newVal, id);
     return newVal === 1;
   }
 
@@ -216,7 +230,7 @@ export class EventStorage {
 
   /**
    * 按区域聚合统计事件（enter-zone / leave-zone / dwell / loiter / line-cross）
-   * 单次查询取出所有 track:% 类型事件，内存中按类型和区域聚合
+   * 使用 SQLite json_extract 直接在 SQL 层聚合，避免全量加载到 JS 内存
    */
   zoneStats(options: { cameraId?: string; since?: number; until?: number } = {}): Array<{
     zoneId: number;
@@ -229,53 +243,72 @@ export class EventStorage {
     totalDwellMs: number;
     avgDwellMs: number;
   }> {
-    const zoneMap = new Map<string, {
-      zoneId: number; zoneName: string;
-      enters: number; leaves: number; dwells: number; loiters: number; lineCrosses: number;
-      totalDwellMs: number; dwellCount: number;
-    }>();
-
-    const targetTypes = new Set(["track:enter-zone", "track:leave-zone", "track:dwell", "track:loiter", "track:line-cross"]);
     /** 默认只统计最近 24 小时，避免全表扫描 */
     const since = options.since ?? (Date.now() - 86_400_000);
-    const { conditions, params } = this.buildConditions({ ...options, since, typeLike: "track:%" });
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const rows = this.db.query(
-      `SELECT type, detail FROM events ${where}`
-    ).all(...params) as Array<{ type: string; detail: string | null }>;
 
-    for (const row of rows) {
-      if (!targetTypes.has(row.type) || !row.detail) continue;
-      const d = JSON.parse(row.detail) as {
-        zoneId?: number; zoneName?: string; dwellMs?: number;
-        lineId?: number; lineName?: string;
-      };
-      const isLineCross = row.type === "track:line-cross";
-      const zId = isLineCross ? d.lineId : d.zoneId;
-      const zName = isLineCross ? d.lineName : d.zoneName;
-      if (zId == null || !zName) continue;
+    /** 区域类事件（zoneId + zoneName） */
+    const { conditions: zCond, params: zParams } = this.buildConditions({
+      ...options,
+      since,
+      typeLike: "track:%",
+    });
+    const zoneTypes = ["track:enter-zone", "track:leave-zone", "track:dwell", "track:loiter"];
+    const zWhere = zCond.length > 0 ? `AND ${zCond.join(" AND ")}` : "";
+    const zoneRows = this.db.query(
+      `SELECT type,
+         json_extract(detail, '$.zoneId') as zoneId,
+         json_extract(detail, '$.zoneName') as zoneName,
+         SUM(CASE WHEN type = 'track:enter-zone' THEN 1 ELSE 0 END) as enters,
+         SUM(CASE WHEN type = 'track:leave-zone' THEN 1 ELSE 0 END) as leaves,
+         SUM(CASE WHEN type = 'track:dwell' THEN 1 ELSE 0 END) as dwells,
+         SUM(CASE WHEN type = 'track:loiter' THEN 1 ELSE 0 END) as loiters,
+         SUM(CASE WHEN type IN ('track:leave-zone', 'track:dwell') THEN json_extract(detail, '$.dwellMs') ELSE 0 END) as totalDwellMs,
+         SUM(CASE WHEN type IN ('track:leave-zone', 'track:dwell') AND json_extract(detail, '$.dwellMs') > 0 THEN 1 ELSE 0 END) as dwellCount
+       FROM events
+       WHERE type IN (${zoneTypes.map(() => '?').join(',')})
+         AND json_extract(detail, '$.zoneId') IS NOT NULL
+         ${zWhere}
+       GROUP BY zoneId, zoneName
+       ORDER BY enters DESC`
+    ).all(...zoneTypes, ...zParams) as Array<{
+      zoneId: number; zoneName: string;
+      enters: number; leaves: number; dwells: number; loiters: number;
+      totalDwellMs: number; dwellCount: number;
+    }>;
 
-      const key = `${zId}:${zName}`;
-      if (!zoneMap.has(key)) {
-        zoneMap.set(key, { zoneId: zId, zoneName: zName, enters: 0, leaves: 0, dwells: 0, loiters: 0, lineCrosses: 0, totalDwellMs: 0, dwellCount: 0 });
-      }
-      const entry = zoneMap.get(key)!;
-      if (row.type === "track:enter-zone") entry.enters++;
-      else if (row.type === "track:leave-zone") { entry.leaves++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
-      else if (row.type === "track:dwell") { entry.dwells++; if (d.dwellMs) { entry.totalDwellMs += d.dwellMs; entry.dwellCount++; } }
-      else if (row.type === "track:loiter") entry.loiters++;
-      else if (row.type === "track:line-cross") entry.lineCrosses++;
-    }
+    /** 越线类事件（lineId + lineName） */
+    const { conditions: lCond, params: lParams } = this.buildConditions({
+      ...options,
+      since,
+      type: "track:line-cross",
+    });
+    const lWhere = lCond.length > 0 ? `AND ${lCond.join(" AND ")}` : "";
+    const lineRows = this.db.query(
+      `SELECT
+         json_extract(detail, '$.lineId') as zoneId,
+         json_extract(detail, '$.lineName') as zoneName,
+         COUNT(*) as lineCrosses
+       FROM events
+       WHERE json_extract(detail, '$.lineId') IS NOT NULL
+         ${lWhere}
+       GROUP BY zoneId, zoneName`
+    ).all(...lParams) as Array<{
+      zoneId: number; zoneName: string; lineCrosses: number;
+    }>;
 
-    return Array.from(zoneMap.values())
-      .map(e => ({
-        zoneId: e.zoneId, zoneName: e.zoneName,
-        enters: e.enters, leaves: e.leaves, dwells: e.dwells,
-        loiters: e.loiters, lineCrosses: e.lineCrosses,
-        totalDwellMs: e.totalDwellMs,
-        avgDwellMs: e.dwellCount > 0 ? Math.round(e.totalDwellMs / e.dwellCount) : 0,
-      }))
-      .sort((a, b) => b.enters - a.enters);
+    /** 合并区域和越线统计 */
+    const lineMap = new Map(lineRows.map(r => [`${r.zoneId}:${r.zoneName}`, r.lineCrosses]));
+    return zoneRows.map(r => ({
+      zoneId: r.zoneId,
+      zoneName: r.zoneName,
+      enters: r.enters,
+      leaves: r.leaves,
+      dwells: r.dwells,
+      loiters: r.loiters,
+      lineCrosses: lineMap.get(`${r.zoneId}:${r.zoneName}`) ?? 0,
+      totalDwellMs: r.totalDwellMs,
+      avgDwellMs: r.dwellCount > 0 ? Math.round(r.totalDwellMs / r.dwellCount) : 0,
+    }));
   }
 
   /** 关闭数据库 */

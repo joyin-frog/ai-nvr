@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import { takeFrame } from '../services/ws-frame-cache'
@@ -1663,11 +1663,7 @@ watch(selectedRecording, (rec) => {
   }
 })
 
-onMounted(() => {
-  loadRecordings()
-})
-
-/** 监听 active 状态：激活时启动定时刷新，离开时停止 */
+/** 监听 active 状态：激活时启动定时刷新，离开时停止（immediate 处理首次加载，无需 onMounted 重复调用） */
 watch(() => props.active, (isActive) => {
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
   if (isActive) {

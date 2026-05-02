@@ -46,6 +46,9 @@ export class FileIndex {
   private stmtLatest: Statement;
   private stmtCount: Statement;
   private stmtRemoveOlder: Statement;
+  private stmtLatestNoCam: Statement;
+  private stmtListExpired: Statement;
+  private stmtHasData: Statement;
 
   /** 已完成校准的 category 集合 */
   private calibratedCategories = new Set<string>();
@@ -53,6 +56,7 @@ export class FileIndex {
   constructor(db: Database) {
     this.db = db;
     this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.run("PRAGMA busy_timeout = 5000");
     this.db.exec("PRAGMA wal_autocheckpoint = 1000");
 
@@ -106,6 +110,15 @@ export class FileIndex {
     );
     this.stmtRemoveOlder = this.db.prepare(
       "DELETE FROM file_index WHERE category = ? AND created_at > 0 AND created_at < ?"
+    );
+    this.stmtLatestNoCam = this.db.prepare(
+      "SELECT * FROM file_index WHERE category = ? ORDER BY created_at DESC LIMIT 1"
+    );
+    this.stmtListExpired = this.db.prepare(
+      "SELECT * FROM file_index WHERE category = ? AND created_at > 0 AND created_at < ?"
+    );
+    this.stmtHasData = this.db.prepare(
+      "SELECT COUNT(*) as c FROM file_index WHERE category = ?"
     );
   }
 
@@ -206,9 +219,7 @@ export class FileIndex {
       const row = this.stmtLatest.get(category, cameraId) as Record<string, unknown> | null;
       return row ? this.rowToEntry(row) : null;
     }
-    const rows = this.db.prepare(
-      "SELECT * FROM file_index WHERE category = ? ORDER BY created_at DESC LIMIT 1"
-    ).all(category) as Array<Record<string, unknown>>;
+    const rows = this.stmtLatestNoCam.all(category) as Array<Record<string, unknown>>;
     return rows[0] ? this.rowToEntry(rows[0]) : null;
   }
 
@@ -220,17 +231,13 @@ export class FileIndex {
 
   /** 查询过期文件（用于 purge，返回 createdAt < cutoff 的条目） */
   listExpired(category: string, cutoffMs: number): FileEntry[] {
-    const rows = this.db.prepare(
-      "SELECT * FROM file_index WHERE category = ? AND created_at > 0 AND created_at < ?"
-    ).all(category, cutoffMs) as Array<Record<string, unknown>>;
+    const rows = this.stmtListExpired.all(category, cutoffMs) as Array<Record<string, unknown>>;
     return rows.map(r => this.rowToEntry(r));
   }
 
   /** 检查某 category 是否已有索引数据 */
   hasData(category: string): boolean {
-    const row = this.db.prepare(
-      "SELECT COUNT(*) as c FROM file_index WHERE category = ?"
-    ).get(category) as { c: number };
+    const row = this.stmtHasData.get(category) as { c: number };
     return row.c > 0;
   }
 

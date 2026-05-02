@@ -17,6 +17,8 @@ const inferMsMap = new Map<string, number>()
 
 /** 每个 trackId 的首次出现时间戳（用于计算停留时长） */
 const trackFirstSeen = new Map<number, number>()
+/** trackFirstSeen 清理阈值（超过此数量时才触发清理，避免每次 putDetections 都遍历） */
+const TRACK_FIRST_SEEN_CLEANUP_THRESHOLD = 200
 
 /** 存入检测结果 */
 export function putDetections(cameraId: string, dets: Detection[], inferMs?: number): void {
@@ -25,19 +27,19 @@ export function putDetections(cameraId: string, dets: Detection[], inferMs?: num
   if (inferMs != null) inferMsMap.set(cameraId, inferMs)
   /** 记录首次出现时间 */
   const now = Date.now()
-  const activeIds = new Set<number>()
   for (const d of dets) {
-    if (d.trackId != null) {
-      activeIds.add(d.trackId)
-      if (!trackFirstSeen.has(d.trackId)) {
-        trackFirstSeen.set(d.trackId, now)
-      }
+    if (d.trackId != null && !trackFirstSeen.has(d.trackId)) {
+      trackFirstSeen.set(d.trackId, now)
     }
   }
-  /** 清除已消失目标的记录 */
-  for (const [id] of trackFirstSeen) {
-    if (!activeIds.has(id)) {
-      trackFirstSeen.delete(id)
+  /** 仅在 map 过大时清理已消失目标的记录 */
+  if (trackFirstSeen.size > TRACK_FIRST_SEEN_CLEANUP_THRESHOLD) {
+    const activeIds = new Set<number>()
+    for (const d of dets) {
+      if (d.trackId != null) activeIds.add(d.trackId)
+    }
+    for (const [id] of trackFirstSeen) {
+      if (!activeIds.has(id)) trackFirstSeen.delete(id)
     }
   }
 }

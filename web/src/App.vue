@@ -1,26 +1,28 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, provide } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, provide, shallowReactive, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
-import { putFrame } from './services/ws-frame-cache'
+import { putFrame, removeFrameCache } from './services/ws-frame-cache'
 import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
 import { useNotification } from './composables/useNotification'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
+/** 首屏必需组件 — 同步导入 */
 import CameraView from './components/CameraView.vue'
-import EventPanel from './components/EventPanel.vue'
-import RecordingsPanel from './components/RecordingsPanel.vue'
-import CameraStatusPanel from './components/CameraStatusPanel.vue'
-import CameraManagePanel from './components/CameraManagePanel.vue'
-import AlertPanel from './components/AlertPanel.vue'
-import DetectRulePanel from './components/DetectRulePanel.vue'
-import StatePanel from './components/StatePanel.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
 import LoginView from './components/LoginView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+/** Tab 面板 — 懒加载减少初始包体积（~40% JS 减少） */
+const EventPanel = defineAsyncComponent(() => import('./components/EventPanel.vue'))
+const RecordingsPanel = defineAsyncComponent(() => import('./components/RecordingsPanel.vue'))
+const CameraStatusPanel = defineAsyncComponent(() => import('./components/CameraStatusPanel.vue'))
+const CameraManagePanel = defineAsyncComponent(() => import('./components/CameraManagePanel.vue'))
+const DetectRulePanel = defineAsyncComponent(() => import('./components/DetectRulePanel.vue'))
+const AlertPanel = defineAsyncComponent(() => import('./components/AlertPanel.vue'))
+const StatePanel = defineAsyncComponent(() => import('./components/StatePanel.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
 
 const { t, locale } = useI18n()
 const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, warning: toastWarning } = useToast()
@@ -66,6 +68,9 @@ interface CameraStatus {
 type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'tracks' | 'states' | 'settings'
 const activeTab = ref<SidebarTab>('events')
 getPref<string>('nvr-active-tab', 'events').then(v => { activeTab.value = v as SidebarTab })
+/** alerts tab 内部子标签 */
+type AlertSubTab = 'detect' | 'alert'
+const alertSubTab = ref<AlertSubTab>('detect')
 
 /** 摄像头 FPS 映射（从 health API 更新） */
 const cameraFpsMap = ref<Record<string, number>>({})
@@ -191,29 +196,32 @@ function checkMobile() {
 }
 
 const cameras = ref<CameraStatus[]>([])
-/** 每个摄像头的最后帧时间（非响应式，避免每帧触发 Vue proxy 开销） */
-const lastFrameAtMap = new Map<string, number>()
+/** 每个摄像头的最后帧时间（非响应式 Map，由低频 ticker 差量同步到 reactive） */
+const lastFrameAtMapInner = new Map<string, number>()
+/** reactive 副本（shallowReactive：只有变化的 key 触发对应 CameraView 重渲染） */
+const lastFrameAtMap = shallowReactive<Record<string, number>>({})
+/** 合并低频 ticker：差量同步帧时间 + 帧延迟到 reactive（只更新变化的 key，避免全量替换导致所有组件重渲染） */
+let syncTimer = setInterval(() => {
+  for (const [k, v] of lastFrameAtMapInner) {
+    if (lastFrameAtMap[k] !== v) lastFrameAtMap[k] = v
+  }
+  for (const [k, v] of frameLatencyMap) {
+    if (frameLatency[k] !== v) frameLatency[k] = v
+  }
+}, 3000)
 /** 摄像头排序（ID 数组，持久化到后端偏好） */
 const cameraOrder = ref<string[]>([])
 getPref<string[]>('nvr-camera-order', []).then(v => { if (v.length > 0) cameraOrder.value = v })
 /** 是否显示检测框（从 settings API 获取） */
 const showBoxes = ref(true)
-/** 每个摄像头的追踪标签映射：cameraId -> { trackId: name } */
-const trackLabelsMap = ref<Record<string, Record<number, string>>>({})
+/** 每个摄像头的追踪标签映射：cameraId -> { trackId: name }
+ *  使用 shallowReactive 避免整体替换触发所有 CameraView 重渲染 */
+const trackLabelsMap = shallowReactive<Record<string, Record<number, string>>>({})
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
 /** 每个摄像头的帧延迟（非响应式 Map，由 frameTicker 驱动同步到 reactive） */
 const frameLatencyMap = new Map<string, number>()
-/** 帧延迟的 reactive 副本（供模板使用，由 ticker 每 3 秒同步一次） */
-const frameLatency = ref<Record<string, number>>({})
-/** 低频 reactive ticker：每 3 秒触发一次模板重渲染（驱动 lastFrameAtMap 的模板求值） */
-const frameTicker = ref(0)
-let frameTickerTimer = setInterval(() => {
-  frameTicker.value++
-  /** 同步帧延迟到 reactive（供模板消费） */
-  const obj: Record<string, number> = {}
-  for (const [k, v] of frameLatencyMap) obj[k] = v
-  frameLatency.value = obj
-}, 3000)
+/** 帧延迟的 reactive 副本（shallowReactive：差量更新，只有变化的 key 触发重渲染） */
+const frameLatency = shallowReactive<Record<string, number>>({})
 /** ROI 区域数据（按摄像头分组） */
 const roiDataMap = ref<Record<string, Array<{ id: number; name: string; points: string }>>>({})
 /** 越线检测线段数据（按摄像头分组） */
@@ -231,11 +239,11 @@ const parsedRoiMap = computed(() => {
   return result
 })
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
-const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
-const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
-const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
-const detectRulePanel = ref<InstanceType<typeof DetectRulePanel> | null>(null)
-const statePanel = ref<InstanceType<typeof StatePanel> | null>(null)
+const recordingsPanel = ref<any>(null)
+const cameraManagePanel = ref<any>(null)
+const alertPanel = ref<any>(null)
+const detectRulePanel = ref<any>(null)
+const statePanel = ref<any>(null)
 const showShortcuts = ref(false)
 
 /** 认证状态 */
@@ -391,6 +399,11 @@ async function loadCameras() {
     const res = await authFetch('/api/cameras')
     if (res.status === 401) return
     const data = await res.json()
+    /** 清理已删除摄像头的帧缓存（释放 ArrayBuffer） */
+    const newIds = new Set((data as Array<{ id: string }>).map(c => c.id))
+    for (const cam of cameras.value) {
+      if (!newIds.has(cam.id)) removeFrameCache(cam.id)
+    }
     cameras.value = data.map((c: CameraStatus) => ({
       id: c.id,
       name: c.name,
@@ -481,10 +494,13 @@ function switchTab(tab: SidebarTab) {
   }
 }
 
-/** 跳转到追踪目标 */
+/** 跳转到追踪目标（在事件面板中查看该追踪 ID 的事件） */
 function onJumpToTrack(trackId: number) {
-  activeTab.value = 'alerts'
-  setPref('nvr-active-tab', 'alerts')
+  activeTab.value = 'events'
+  setPref('nvr-active-tab', 'events')
+  nextTick(() => {
+    eventPanel.value?.filterByTrack?.(trackId)
+  })
 }
 
 /** 进入全屏单路 */
@@ -667,7 +683,9 @@ async function loadTrackLabels() {
       }
     }
   } catch { /* non-critical */ }
-  trackLabelsMap.value = map
+  /** 直接赋值到 shallowReactive 对象（清除旧键，设置新键） */
+  for (const key of Object.keys(trackLabelsMap)) delete trackLabelsMap[key]
+  Object.assign(trackLabelsMap, map)
 }
 
 /** 启动应用主逻辑 */
@@ -700,7 +718,7 @@ const { soundEvents, playAlertSound } = useNotification()
 
 /** 构建 track 事件的显示名称 */
 function buildTrackDisplayName(payload: { trackName?: string; trackId: number; semanticLabel?: string; label: string }, cameraId: string): string {
-  const customName = payload.trackName || trackLabelsMap.value[cameraId]?.[payload.trackId]
+  const customName = payload.trackName || trackLabelsMap[cameraId]?.[payload.trackId]
   const displayLabel = payload.semanticLabel || payload.label
   return customName ? `${customName} (${displayLabel})` : `${displayLabel} #${payload.trackId}`
 }
@@ -739,7 +757,7 @@ function setupEventListeners() {
 
   client.on('frame', (payload) => {
     /** 更新摄像头最后帧时间（非响应式 Map，避免每帧触发 Vue proxy 开销） */
-    lastFrameAtMap.set(payload.cameraId, payload.timestamp ?? Date.now())
+    lastFrameAtMapInner.set(payload.cameraId, payload.timestamp ?? Date.now())
     /** 计算帧延迟（非响应式 Map，避免每帧触发 Vue proxy） */
     if (payload.timestamp) {
       frameLatencyMap.set(payload.cameraId, Math.max(0, Date.now() - payload.timestamp))
@@ -802,10 +820,10 @@ function setupEventListeners() {
 
   client.on('track:appeared', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
     eventPanel.value?.addEvent('track:appeared', payload.cameraId, `${displayName} ${t('event.trackAppeared')}`)
     if (customName) {
-      const cam = cameras.value.find(c => c.id === payload.cameraId)
+      const cam = getCamera(payload.cameraId)
       notify(displayName, `${t('event.trackAppeared')} · ${cam?.name ?? payload.cameraId}`, payload.cameraId, 'track:appeared')
     }
   })
@@ -817,14 +835,14 @@ function setupEventListeners() {
 
   client.on('track:enter-zone', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
     eventPanel.value?.addEvent('track:enter-zone', payload.cameraId, `${displayName} → ${payload.zoneName}`)
     pushZoneNotification(payload.cameraId, { type: 'enter', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp })
   })
 
   client.on('track:leave-zone', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
     const dwellSec = (payload.dwellMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:leave-zone', payload.cameraId, `${displayName} ← ${payload.zoneName} (${dwellSec}s)`)
     pushZoneNotification(payload.cameraId, { type: 'leave', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
@@ -832,7 +850,7 @@ function setupEventListeners() {
 
   client.on('track:dwell', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
     const dwellSec = (payload.dwellMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:dwell', payload.cameraId, t('event.dwellInZone', { name: displayName, zone: payload.zoneName, sec: dwellSec }))
     pushZoneNotification(payload.cameraId, { type: 'dwell', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.dwellMs })
@@ -845,14 +863,14 @@ function setupEventListeners() {
 
   client.on('track:line-cross', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
     eventPanel.value?.addEvent('track:line-cross', payload.cameraId, t('event.lineCrossDetail', { name: displayName, line: payload.lineName, direction: payload.direction }))
     pushZoneNotification(payload.cameraId, { type: 'line-cross', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.lineName, timestamp: payload.timestamp, direction: payload.direction })
   })
 
   client.on('track:loiter', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
-    const customName = payload.trackName || trackLabelsMap.value[payload.cameraId]?.[payload.trackId]
+    const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
     const durationSec = (payload.durationMs / 1000).toFixed(0)
     eventPanel.value?.addEvent('track:loiter', payload.cameraId, t('event.loiterInZone', { name: displayName, zone: payload.zoneName || t('event.trackLoiter'), sec: durationSec }))
     pushZoneNotification(payload.cameraId, { type: 'loiter', name: customName || (payload.semanticLabel || payload.label), zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.durationMs })
@@ -865,7 +883,7 @@ function setupEventListeners() {
     pushZoneNotification(payload.cameraId, { type: 'approach', name: aName, zoneName: bName, timestamp: payload.timestamp, distance: payload.distance })
     /** 已命名目标接近时发送浏览器通知 */
     if (payload.trackName || payload.targetTrackName) {
-      const cam = cameras.value.find(c => c.id === payload.cameraId)
+      const cam = getCamera(payload.cameraId)
       notify(t('event.approachTarget', { aName, bName }), cam?.name ?? payload.cameraId, payload.cameraId, 'track:approach')
     }
   })
@@ -878,17 +896,18 @@ function setupEventListeners() {
     pushMatchSuggestion(payload.cameraId, { trackId: payload.trackId, label: payload.label, matches: payload.matches, timestamp: payload.timestamp })
   })
 
-  /** 其他客户端更新了追踪标签 → 实时同步 */
+  /** 其他客户端更新了追踪标签 → 就地更新，只触发对应摄像头的响应式通知 */
   client.on('track:label-updated', (payload) => {
-    const map = trackLabelsMap.value
-    const camMap = { ...(map[payload.cameraId] ?? {}) }
+    let camMap = trackLabelsMap[payload.cameraId]
+    if (!camMap) {
+      camMap = {}
+      trackLabelsMap[payload.cameraId] = camMap
+    }
     if (payload.name) {
       camMap[payload.trackId] = payload.name
     } else {
       delete camMap[payload.trackId]
     }
-    map[payload.cameraId] = camMap
-    trackLabelsMap.value = { ...map }
   })
 
   /** LLM 场景分析结果 → 推送到 CameraView overlay */
@@ -990,7 +1009,7 @@ onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
   stopPatrol()
-  if (frameTickerTimer) clearInterval(frameTickerTimer)
+  if (syncTimer) clearInterval(syncTimer)
   if (diskCheckTimer) clearInterval(diskCheckTimer)
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
 })
@@ -1084,7 +1103,7 @@ onUnmounted(() => {
                 :data-camera-id="cam.id"
                 :name="cam.name"
                 :online="cam.online"
-                :last-frame-at="lastFrameAtMap.get(cam.id) ?? 0 + frameTicker * 0"
+                :last-frame-at="lastFrameAtMap[cam.id] ?? 0"
                 :ptz="cam.ptz"
                 :video-width="cam.width"
                 :video-height="cam.height"
@@ -1147,7 +1166,7 @@ onUnmounted(() => {
         <div class="sidebar-content">
           <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" @jump-to-track="onJumpToTrack" />
           <RecordingsPanel
-            v-show="activeTab === 'recordings'"
+            v-if="activeTab === 'recordings'"
             ref="recordingsPanel"
             :cameras="cameras"
             :track-labels="trackLabelsMap"
@@ -1158,7 +1177,14 @@ onUnmounted(() => {
             :cameras="cameras"
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-          <DetectRulePanel v-if="activeTab === 'alerts'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          <template v-if="activeTab === 'alerts'">
+            <div class="sub-tabs">
+              <button :class="['sub-tab-btn', { active: alertSubTab === 'detect' }]" @click="alertSubTab = 'detect'">{{ t('detectRule.title') }}</button>
+              <button :class="['sub-tab-btn', { active: alertSubTab === 'alert' }]" @click="alertSubTab = 'alert'">{{ t('alert.rules') }}</button>
+            </div>
+            <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+            <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          </template>
           <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
@@ -1202,7 +1228,7 @@ onUnmounted(() => {
       <div class="mobile-content">
         <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" @jump-to-track="onJumpToTrack" />
         <RecordingsPanel
-          v-show="activeTab === 'recordings'"
+          v-if="activeTab === 'recordings'"
           ref="recordingsPanel"
           :cameras="cameras"
           :track-labels="trackLabelsMap"
@@ -1213,7 +1239,14 @@ onUnmounted(() => {
           :cameras="cameras"
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-        <DetectRulePanel v-if="activeTab === 'alerts'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        <template v-if="activeTab === 'alerts'">
+          <div class="sub-tabs">
+            <button :class="['sub-tab-btn', { active: alertSubTab === 'detect' }]" @click="alertSubTab = 'detect'">{{ t('detectRule.title') }}</button>
+            <button :class="['sub-tab-btn', { active: alertSubTab === 'alert' }]" @click="alertSubTab = 'alert'">{{ t('alert.rules') }}</button>
+          </div>
+          <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        </template>
         <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
@@ -1542,7 +1575,7 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color 0.15s, background 0.15s;
 }
 
 .tab-btn:hover {
@@ -1558,6 +1591,34 @@ onUnmounted(() => {
 .sidebar-content {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* alerts 子 tab */
+.sub-tabs {
+  display: flex;
+  border-bottom: 1px solid #2a2a4a;
+  background: #0e1628;
+  flex-shrink: 0;
+}
+
+.sub-tab-btn {
+  flex: 1;
+  padding: 5px 0;
+  background: transparent;
+  border: none;
+  color: #666;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.sub-tab-btn:hover { color: #aaa; }
+
+.sub-tab-btn.active {
+  color: #FFD93D;
+  border-bottom: 2px solid #FFD93D;
 }
 
 /* 移动端布局 */

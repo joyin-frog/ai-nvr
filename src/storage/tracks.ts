@@ -131,10 +131,11 @@ export class TrackStorage {
           }
           existingRecord.snapshotFile = snapshotFile;
           existingRecord.bestSnapshotScore = snapshotScore;
-          /** 更新 dHash 和颜色直方图 */
-          existingRecord.dhash = await this.computeDHash(frameImage, box);
-          existingRecord.colorHist = await this.computeColorHist(frameImage, box);
-          existingRecord.lbpHist = await this.computeLBP(frameImage, box);
+          /** 更新指纹（单次并行计算） */
+          const fp = await this.computeFingerprints(frameImage, box);
+          existingRecord.dhash = fp.dhash;
+          existingRecord.colorHist = fp.colorHist;
+          existingRecord.lbpHist = fp.lbpHist;
         }
       }
       this.scheduleSave();
@@ -143,10 +144,8 @@ export class TrackStorage {
 
     /** 新目标：裁剪快照并保存 */
     const snapshotFile = await this.cropAndSave(trackId, cameraId, frameImage, box);
-    /** 计算 dHash 和颜色直方图 */
-    const dhash = box ? await this.computeDHash(frameImage, box) : undefined;
-    const colorHist = box ? await this.computeColorHist(frameImage, box) : undefined;
-    const lbpHist = box ? await this.computeLBP(frameImage, box) : undefined;
+    /** 计算指纹（单次并行计算） */
+    const fp = box ? await this.computeFingerprints(frameImage, box) : { dhash: undefined as string | undefined, colorHist: undefined as number[] | undefined, lbpHist: undefined as number[] | undefined };
 
     const newRecord: TrackRecord = {
       trackId,
@@ -157,9 +156,9 @@ export class TrackStorage {
       cameraIds: [cameraId],
       snapshotFile,
       bestSnapshotScore: snapshotScore,
-      dhash,
-      colorHist,
-      lbpHist,
+      dhash: fp.dhash,
+      colorHist: fp.colorHist,
+      lbpHist: fp.lbpHist,
     };
     this.tracks.set(trackId, newRecord);
     this.invalidateListCache();
@@ -219,10 +218,11 @@ export class TrackStorage {
       }
       record.snapshotFile = snapshotFile;
       record.bestSnapshotScore = snapshotScore;
-      /** 同时更新指纹 */
-      record.dhash = await this.computeDHash(frameImage, box);
-      record.colorHist = await this.computeColorHist(frameImage, box);
-      record.lbpHist = await this.computeLBP(frameImage, box);
+      /** 同时更新指纹（单次并行计算） */
+      const fp = await this.computeFingerprints(frameImage, box);
+      record.dhash = fp.dhash;
+      record.colorHist = fp.colorHist;
+      record.lbpHist = fp.lbpHist;
       this.scheduleSave();
       return true;
     }
@@ -461,14 +461,13 @@ export class TrackStorage {
   }
 
   /**
-   * 计算图像的差异哈希（dHash）
-   * 缩放到 9x8 灰度，比较相邻像素亮度，生成 64 位哈希
+   * 并行计算三种指纹（dHash + 颜色直方图 + LBP）
+   * 共享一次 metadata 调用和 extract 区域计算，3x → 1x I/O 开销
    */
-  async computeDHash(frameImage: Buffer, box: Detection["box"]): Promise<string> {
-    if (!box) return "";
-    const image = sharp(frameImage);
-    const meta = await image.metadata();
-    if (!meta.width || !meta.height) return "";
+  async computeFingerprints(frameImage: Buffer, box: Detection["box"]): Promise<{ dhash: string; colorHist: number[]; lbpHist: number[] }> {
+    if (!box) return { dhash: "", colorHist: [], lbpHist: [] };
+    const meta = await sharp(frameImage).metadata();
+    if (!meta.width || !meta.height) return { dhash: "", colorHist: [], lbpHist: [] };
 
     const padW = (box.xmax - box.xmin) * 0.2;
     const padH = (box.ymax - box.ymin) * 0.2;
@@ -477,16 +476,32 @@ export class TrackStorage {
     const width = Math.min(meta.width - left, Math.ceil((box.xmax - box.xmin + padW * 2) * meta.width));
     const height = Math.min(meta.height - top, Math.ceil((box.ymax - box.ymin + padH * 2) * meta.height));
 
-    if (width < 10 || height < 10) return "";
+    if (width < 10 || height < 10) return { dhash: "", colorHist: [], lbpHist: [] };
 
-    const { data, info } = await image
-      .extract({ left, top, width, height })
+    const extractRegion = { left, top, width, height };
+    const [dhash, colorHist, lbpHist] = await Promise.all([
+      this.computeDHashExtract(frameImage, extractRegion),
+      this.computeColorHistExtract(frameImage, extractRegion),
+      this.computeLBPExtract(frameImage, extractRegion),
+    ]);
+    return { dhash, colorHist, lbpHist };
+  }
+
+  /** 计算图像的差异哈希（委托给 computeFingerprints） */
+  async computeDHash(frameImage: Buffer, box: Detection["box"]): Promise<string> {
+    const { dhash } = await this.computeFingerprints(frameImage, box);
+    return dhash;
+  }
+
+  /** 内部：从预计算区域提取 dHash */
+  private async computeDHashExtract(frameImage: Buffer, region: { left: number; top: number; width: number; height: number }): Promise<string> {
+    const { data, info } = await sharp(frameImage)
+      .extract(region)
       .resize(9, 8, { fit: "fill" })
       .grayscale()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    /** dHash: 每行比较相邻像素，左 > 右 = 1 */
     let hash = BigInt(0);
     for (let row = 0; row < info.height; row++) {
       for (let col = 0; col < info.width - 1; col++) {
@@ -514,34 +529,20 @@ export class TrackStorage {
     return count;
   }
 
-  /**
-   * 计算 HSV 颜色直方图
-   * H=8 bins, S=4 bins, V=4 bins = 128 维
-   * 归一化后量化为 0-255 的 uint8 数组
-   */
+  /** 计算 HSV 颜色直方图（委托给 computeFingerprints） */
   async computeColorHist(frameImage: Buffer, box: Detection["box"]): Promise<number[]> {
-    if (!box) return [];
-    const image = sharp(frameImage);
-    const meta = await image.metadata();
-    if (!meta.width || !meta.height) return [];
+    const { colorHist } = await this.computeFingerprints(frameImage, box);
+    return colorHist;
+  }
 
-    const padW = (box.xmax - box.xmin) * 0.2;
-    const padH = (box.ymax - box.ymin) * 0.2;
-    const left = Math.max(0, Math.floor((box.xmin - padW) * meta.width));
-    const top = Math.max(0, Math.floor((box.ymin - padH) * meta.height));
-    const width = Math.min(meta.width - left, Math.ceil((box.xmax - box.xmin + padW * 2) * meta.width));
-    const height = Math.min(meta.height - top, Math.ceil((box.ymax - box.ymin + padH * 2) * meta.height));
-
-    if (width < 10 || height < 10) return [];
-
-    /** 缩小到 32x32 减少计算量 */
-    const { data, info } = await image
-      .extract({ left, top, width, height })
+  /** 内部：从预计算区域提取颜色直方图 */
+  private async computeColorHistExtract(frameImage: Buffer, region: { left: number; top: number; width: number; height: number }): Promise<number[]> {
+    const { data, info } = await sharp(frameImage)
+      .extract(region)
       .resize(32, 32, { fit: "fill" })
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    /** H=8, S=4, V=4 → 128 bins */
     const bins = new Float64Array(128);
     let totalPixels = 0;
 
@@ -550,15 +551,11 @@ export class TrackStorage {
       const g = data[i + 1]! / 255;
       const b = data[i + 2]! / 255;
 
-      /** RGB → HSV */
       const max = Math.max(r, g, b);
       const min = Math.min(r, g, b);
       const d = max - min;
-      /** 明度 V */
       const v = max;
-      /** 饱和度 S */
       const s = max === 0 ? 0 : d / max;
-      /** 色相 H */
       let h = 0;
       if (d !== 0) {
         if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
@@ -566,19 +563,15 @@ export class TrackStorage {
         else h = ((r - g) / d + 4) / 6;
       }
 
-      /** 量化到 bins */
       const hBin = Math.min(7, Math.floor(h * 8));
       const sBin = Math.min(3, Math.floor(s * 4));
       const vBin = Math.min(3, Math.floor(v * 4));
-      /** 组合索引: hBin * 16 + sBin * 4 + vBin */
-      const idx = hBin * 16 + sBin * 4 + vBin;
-      bins[idx]!++;
+      bins[hBin * 16 + sBin * 4 + vBin]!++;
       totalPixels++;
     }
 
     if (totalPixels === 0) return [];
 
-    /** 归一化并量化到 0-255 */
     const result: number[] = new Array(128);
     for (let i = 0; i < 128; i++) {
       result[i] = Math.round((bins[i]! / totalPixels) * 255);
@@ -601,39 +594,24 @@ export class TrackStorage {
         chiSq += ((ai - bi) * (ai - bi)) / sum;
       }
     }
-    /** 归一化：卡方距离的最大值约为 2（完全不同的分布） */
     return Math.min(1, chiSq / 2);
   }
 
-  /**
-   * 计算 LBP（Local Binary Pattern）纹理直方图
-   * 使用 uniform 模式（59 bins: 0-57 为 uniform 模式，58 为所有非 uniform 模式）
-   * 对光照变化鲁棒，能有效区分不同纹理（如衣物花纹）
-   */
+  /** 计算 LBP 纹理直方图（委托给 computeFingerprints） */
   async computeLBP(frameImage: Buffer, box: Detection["box"]): Promise<number[]> {
-    if (!box) return [];
-    const image = sharp(frameImage);
-    const meta = await image.metadata();
-    if (!meta.width || !meta.height) return [];
+    const { lbpHist } = await this.computeFingerprints(frameImage, box);
+    return lbpHist;
+  }
 
-    const padW = (box.xmax - box.xmin) * 0.2;
-    const padH = (box.ymax - box.ymin) * 0.2;
-    const left = Math.max(0, Math.floor((box.xmin - padW) * meta.width));
-    const top = Math.max(0, Math.floor((box.ymin - padH) * meta.height));
-    const width = Math.min(meta.width - left, Math.ceil((box.xmax - box.xmin + padW * 2) * meta.width));
-    const height = Math.min(meta.height - top, Math.ceil((box.ymax - box.ymin + padH * 2) * meta.height));
-
-    if (width < 10 || height < 10) return [];
-
-    /** 缩小到 32x32 减少计算量 */
-    const { data, info } = await image
-      .extract({ left, top, width, height })
+  /** 内部：从预计算区域提取 LBP 直方图 */
+  private async computeLBPExtract(frameImage: Buffer, region: { left: number; top: number; width: number; height: number }): Promise<number[]> {
+    const { data, info } = await sharp(frameImage)
+      .extract(region)
       .resize(32, 32, { fit: "fill" })
       .grayscale()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    /** LBP uniform 模式表：8 邻域最多 58 种 uniform 模式 */
     const HIST_BINS = 59;
     const bins = new Float64Array(HIST_BINS);
     let totalPixels = 0;
@@ -641,7 +619,6 @@ export class TrackStorage {
     for (let y = 1; y < info.height - 1; y++) {
       for (let x = 1; x < info.width - 1; x++) {
         const center = data[y * info.width + x]!;
-        /** 8 邻域顺时针从右上角开始 */
         const neighbors = [
           data[(y - 1) * info.width + x + 1]!,
           data[y * info.width + x + 1]!,
@@ -653,13 +630,11 @@ export class TrackStorage {
           data[(y - 1) * info.width + x]!,
         ];
 
-        /** 计算 LBP 值 */
         let lbpVal = 0;
         for (let i = 0; i < 8; i++) {
           if (neighbors[i]! >= center) lbpVal |= (1 << i);
         }
 
-        /** 映射到 uniform 模式 */
         const bin = TrackStorage.lbpToUniform(lbpVal);
         bins[bin]!++;
         totalPixels++;
@@ -668,7 +643,6 @@ export class TrackStorage {
 
     if (totalPixels === 0) return [];
 
-    /** 归一化并量化到 0-255 */
     const result: number[] = new Array(HIST_BINS);
     for (let i = 0; i < HIST_BINS; i++) {
       result[i] = Math.round((bins[i]! / totalPixels) * 255);
@@ -983,7 +957,7 @@ export class TrackStorage {
       this.saveTimer = null;
     }
     const data = [...this.tracks.values()];
-    writeFile(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data, null, 2)).catch(() => {});
+    writeFile(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data)).catch(() => {});
   }
 
   /** 从磁盘加载 */

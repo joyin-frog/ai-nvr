@@ -53,6 +53,17 @@ const todayStats = ref<{
   byLabel: Array<{ label: string; count: number }>
 } | null>(null)
 
+/** 摄像头事件计数 Map（O(1) 查找替代模板中的 O(N) find） */
+const todayStatsByCameraMap = computed(() => {
+  const map = new Map<string, number>()
+  if (todayStats.value?.byCamera) {
+    for (const item of todayStats.value.byCamera) {
+      map.set(item.cameraId, item.count)
+    }
+  }
+  return map
+})
+
 /** 7天趋势数据 */
 const weekStats = ref<Array<{ date: string; motion: number; detect: number; alert: number }>>([])
 
@@ -218,14 +229,8 @@ function logLevelColor(level: string): string {
   return '#888'
 }
 
-/** 摄像头 ID → 名称 */
-const nameMap = () => {
-  const map: Record<string, string> = {}
-  for (const cam of props.cameras) {
-    map[cam.id] = cam.name
-  }
-  return map
-}
+/** 摄像头 ID → 名称（computed 缓存，仅 cameras 变化时重建） */
+const nameMap = computed(() => new Map(props.cameras.map(c => [c.id, c.name] as const)))
 
 /** 格式化运行时长 */
 function formatUptime(seconds: number): string {
@@ -318,33 +323,27 @@ async function loadTodayStats() {
   }
 }
 
-/** 加载 7 天趋势数据 */
+/** 加载 7 天趋势数据（并行请求，7 天同时发起） */
 async function loadWeekStats() {
-  const result: Array<{ date: string; motion: number; detect: number; alert: number }> = []
   const now = new Date()
-  for (let i = 6; i >= 0; i--) {
+  const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(now)
-    d.setDate(d.getDate() - i)
+    d.setDate(d.getDate() - (6 - i))
     d.setHours(0, 0, 0, 0)
-    const since = d.getTime()
-    const until = since + 86400000
-    const dateStr = `${d.getMonth() + 1}/${d.getDate()}`
+    return { since: d.getTime(), until: d.getTime() + 86400000, dateStr: `${d.getMonth() + 1}/${d.getDate()}` }
+  })
+  const results = await Promise.all(days.map(async ({ since, until, dateStr }) => {
     try {
       const res = await authFetch(`/api/events/stats?since=${since}&until=${until}`)
-      if (!res.ok) { result.push({ date: dateStr, motion: 0, detect: 0, alert: 0 }); continue }
+      if (!res.ok) return { date: dateStr, motion: 0, detect: 0, alert: 0 }
       const data = await res.json()
       const byType = data.byType as Record<string, number>
-      result.push({
-        date: dateStr,
-        motion: byType.motion ?? 0,
-        detect: byType.detect ?? 0,
-        alert: byType.alert ?? 0,
-      })
+      return { date: dateStr, motion: byType.motion ?? 0, detect: byType.detect ?? 0, alert: byType.alert ?? 0 }
     } catch {
-      result.push({ date: dateStr, motion: 0, detect: 0, alert: 0 })
+      return { date: dateStr, motion: 0, detect: 0, alert: 0 }
     }
-  }
-  weekStats.value = result
+  }))
+  weekStats.value = results
 }
 
 
@@ -583,7 +582,7 @@ onUnmounted(() => {
         >
           <div class="cam-header">
             <span class="cam-dot" :class="{ online: cam.online }" />
-            <span class="cam-name">{{ nameMap()[cam.cameraId] ?? cam.cameraId }}</span>
+            <span class="cam-name">{{ nameMap.get(cam.cameraId) ?? cam.cameraId }}</span>
             <span v-if="!cam.online && cam.lastFrameAt" class="cam-last-seen">{{ formatLastSeen(cam.lastFrameAt) }}</span>
             <span class="cam-status">{{ cam.online ? t('status.online') : t('status.offline') }}</span>
           </div>
@@ -611,7 +610,7 @@ onUnmounted(() => {
               <span class="metric-unit">{{ t('status.avgMotion') }}</span>
             </div>
             <div v-if="todayStats" class="metric">
-              <span class="metric-val">{{ todayStats.byCamera.find(c => c.cameraId === cam.cameraId)?.count ?? 0 }}</span>
+              <span class="metric-val">{{ todayStatsByCameraMap.get(cam.cameraId) ?? 0 }}</span>
               <span class="metric-unit">{{ t('status.todayEvents') }}</span>
             </div>
             <div v-if="cam.avgFrameSizeKb > 0" class="metric">

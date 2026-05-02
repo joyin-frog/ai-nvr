@@ -107,6 +107,8 @@ export interface RuntimeSettings {
     segmentDuration: number;
     /** 编码器：auto / libx264 / h264_v4l2m2m / h264_vaapi / h264_nvenc */
     encoder: string;
+    /** VAAPI 设备路径（默认 /dev/dri/renderD128） */
+    vaapiDevice: string;
     /** 水印配置 */
     watermark: WatermarkConfig;
     /** 事件前保留时长（ms，仅 event 模式，从环形缓冲区取） */
@@ -154,6 +156,7 @@ export class RuntimeConfig {
         retentionDays: 7,
         segmentDuration: 300,
         encoder: "auto",
+        vaapiDevice: "/dev/dri/renderD128",
         watermark: {
           enabled: true,
           namePosition: "top-left",
@@ -261,6 +264,7 @@ export class RuntimeConfig {
       if (typeof r.retentionDays === "number") this.settings.recording.retentionDays = r.retentionDays;
       if (typeof r.segmentDuration === "number") this.settings.recording.segmentDuration = r.segmentDuration;
       if (typeof r.encoder === "string") this.settings.recording.encoder = r.encoder;
+      if (typeof r.vaapiDevice === "string") this.settings.recording.vaapiDevice = r.vaapiDevice;
       if (typeof r.eventPreMs === "number") this.settings.recording.eventPreMs = r.eventPreMs;
       if (typeof r.eventPostMs === "number") this.settings.recording.eventPostMs = r.eventPostMs;
       if (typeof r.bufferDurationMs === "number") this.settings.recording.bufferDurationMs = r.bufferDurationMs;

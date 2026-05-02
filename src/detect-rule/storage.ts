@@ -53,11 +53,15 @@ export interface DetectRuleRecord {
  */
 export class DetectRuleStorage {
   private db: Database;
+  /** 预编译高频语句 */
+  private stmtInsertRecord: ReturnType<Database["prepare"]>;
+  private stmtGetEnabledRules: ReturnType<Database["prepare"]>;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath, { create: true });
     this.db.run("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA synchronous = NORMAL");
     this.db.run("PRAGMA busy_timeout = 5000");
     this.db.run("PRAGMA wal_autocheckpoint = 1000");
 
@@ -94,6 +98,18 @@ export class DetectRuleStorage {
 
     /** 迁移：添加扩展列 */
     this.migrate();
+
+    /** 预编译高频 SQL（避免每次调用重新解析） */
+    this.stmtInsertRecord = this.db.prepare(
+      "INSERT INTO detect_rule_records (rule_id, rule_name, camera_id, timestamp, result, matched, detail) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
+    );
+    this.stmtGetEnabledRules = this.db.prepare(
+      `SELECT id, name, camera_id as cameraId, roi_id as roiId, prompt,
+        interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
+        image_width as imageWidth, state_ids as stateIdsJson,
+        schedule, save_original as saveOriginal
+      FROM detect_rules WHERE enabled = 1`
+    );
   }
 
   /** 检测并添加新列（兼容已有数据库） */
@@ -127,15 +143,9 @@ export class DetectRuleStorage {
     ).all() as Array<DetectRule & { stateIdsJson: string }>).map(this.mapRule);
   }
 
-  /** 获取启用的规则 */
+  /** 获取启用的规则（预编译查询） */
   getEnabledRules(): DetectRule[] {
-    return (this.db.query(
-      `SELECT id, name, camera_id as cameraId, roi_id as roiId, prompt,
-        interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
-        image_width as imageWidth, state_ids as stateIdsJson,
-        schedule, save_original as saveOriginal
-      FROM detect_rules WHERE enabled = 1`
-    ).all() as Array<DetectRule & { stateIdsJson: string }>).map(this.mapRule);
+    return (this.stmtGetEnabledRules.all() as Array<DetectRule & { stateIdsJson: string }>).map(this.mapRule);
   }
 
   /** 添加规则 */
@@ -186,11 +196,9 @@ export class DetectRuleStorage {
     return result.changes > 0;
   }
 
-  /** 记录检测结果 */
+  /** 记录检测结果（预编译语句） */
   insertRecord(ruleId: number, ruleName: string, cameraId: string, timestamp: number, result: string, matched: boolean, detail: string): number {
-    const row = this.db.query(
-      "INSERT INTO detect_rule_records (rule_id, rule_name, camera_id, timestamp, result, matched, detail) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
-    ).get(ruleId, ruleName, cameraId, timestamp, result, matched ? 1 : 0, detail);
+    const row = this.stmtInsertRecord.get(ruleId, ruleName, cameraId, timestamp, result, matched ? 1 : 0, detail);
     return (row as { id: number }).id;
   }
 

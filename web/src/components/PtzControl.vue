@@ -14,8 +14,6 @@ const props = defineProps<{
 const expanded = ref(false)
 /** 预置位列表 */
 const presets = ref<Array<{ token: string; name: string }>>([])
-/** 是否正在移动 */
-let moving = false
 
 /** 发送 PTZ 命令 */
 async function ptzCommand(action: string, body?: Record<string, unknown>): Promise<boolean> {
@@ -31,23 +29,18 @@ async function ptzCommand(action: string, body?: Record<string, unknown>): Promi
   }
 }
 
-/** 开始连续移动（按住） */
+/** 开始连续移动（按住）— 允许方向切换，最新命令覆盖旧命令 */
 function onStartMove(x: number, y: number, zoom = 0) {
-  if (moving) return
-  moving = true
   ptzCommand('move', { velocity: { x, y, zoom }, timeout: 5000 })
 }
 
 /** 停止移动（松开） */
 function onStopMove() {
-  moving = false
   ptzCommand('stop')
 }
 
 /** 缩放开始 */
 function onStartZoom(zoom: number) {
-  if (moving) return
-  moving = true
   ptzCommand('move', { velocity: { x: 0, y: 0, zoom }, timeout: 5000 })
 }
 

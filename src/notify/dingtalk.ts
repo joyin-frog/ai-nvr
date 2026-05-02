@@ -31,7 +31,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
 /**
  * 钉钉机器人通知推送
@@ -91,6 +91,10 @@ export class DingTalkNotifier {
       body = `规则: ${ruleName ?? ""}\n提示词: ${prompt ?? ""}\n结果: ${result ?? ""}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}`;
     } else if (event === "camera:offline") {
       body = "摄像头已断开连接";
+    } else if (event === "alert") {
+      const ruleName = payload.ruleName as string | undefined;
+      const triggerDetail = payload.detail as string | undefined;
+      body = `规则: ${ruleName ?? ""}\n${triggerDetail ?? ""}`;
     } else if (event === "track:appeared") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;

@@ -90,6 +90,8 @@ const sortDesc = ref(true)
 const filterStarred = ref(false)
 /** 是否显示检测框标注 */
 const showDetectionBoxes = ref(true)
+/** 是否展开所有类型筛选 */
+const showAllTypes = ref(false)
 
 /** 筛选条件变更：持久化 + 重新加载 */
 function onFilterChange(field: 'type' | 'camera') {
@@ -146,6 +148,16 @@ function extractTrackId(type: string, rawDetail: string | null): number | null {
     const d = JSON.parse(rawDetail)
     return d.trackId ?? null
   } catch { return null }
+}
+
+/** getTrackSnapshotUrl 缓存（WeakMap 绑定到事件对象，避免重复 JSON.parse） */
+const _trackSnapCache = new WeakMap<object, string | null>()
+function getCachedTrackSnapshot(e: { type: string; rawDetail: string | null }): string | null {
+  const cached = _trackSnapCache.get(e)
+  if (cached !== undefined) return cached
+  const v = getTrackSnapshotUrl(e.type, e.rawDetail)
+  if (v !== null) _trackSnapCache.set(e, v)
+  return v
 }
 
 /** 获取 track 事件的快照 URL（按需加载） */
@@ -285,11 +297,48 @@ function motionRatio(detail: string): number {
   return match ? parseFloat(match[1]!) : 0
 }
 
+/** motionRatio 缓存（WeakMap 绑定到事件对象，避免重复 regex） */
+const _motionRatioCache = new WeakMap<object, number>()
+function getMotionRatio(e: { detail: string }): number {
+  const cached = _motionRatioCache.get(e)
+  if (cached !== undefined) return cached
+  const v = motionRatio(e.detail)
+  _motionRatioCache.set(e, v)
+  return v
+}
+
 /** 变动比例 → 颜色（绿→黄→红） */
 function motionBarColor(ratio: number): string {
   if (ratio < 5) return '#4CAF50'
   if (ratio < 15) return '#FFC107'
   return '#F44336'
+}
+
+/** 缓存的时间格式化器（避免每次事件创建 Intl.DateTimeFormat） */
+let cachedFormatter: Intl.DateTimeFormat | null = null
+let cachedFormatterLocale = ''
+function formatTime(ts: number): string {
+  if (cachedFormatterLocale !== locale.value || !cachedFormatter) {
+    cachedFormatter = new Intl.DateTimeFormat(locale.value, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    cachedFormatterLocale = locale.value
+  }
+  return cachedFormatter.format(ts)
+}
+
+/** 批量 isNew 清理：用单个 rAF 合并多个标记，替代每个事件独立 setTimeout */
+let isNewPendingIds = new Set<number>()
+let isNewRafId = 0
+function scheduleIsNewClear(eventId: number): void {
+  isNewPendingIds.add(eventId)
+  if (isNewRafId) return
+  isNewRafId = requestAnimationFrame(() => {
+    isNewRafId = 0
+    for (const id of isNewPendingIds) {
+      const ev = events.value.find(e => e.id === id)
+      if (ev) ev.isNew = false
+    }
+    isNewPendingIds.clear()
+  })
 }
 
 /** 添加实时事件（受筛选条件过滤） */
@@ -305,7 +354,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
       recent.detail = detail
       recent.summary = detail
       recent.rawDetail = detail
-      recent.time = new Date(now).toLocaleTimeString(locale.value)
+      recent.time = formatTime(now)
       return
     }
   }
@@ -317,19 +366,14 @@ function addEvent(type: string, cameraId: string, detail: string) {
       recent.detail = detail
       recent.summary = detail
       recent.rawDetail = detail
-      recent.time = new Date(now).toLocaleTimeString(locale.value)
+      recent.time = formatTime(now)
       return
     }
   }
 
-  const time = new Date(now).toLocaleTimeString(locale.value)
+  const time = formatTime(now)
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, summary: detail, rawDetail: detail, starred: false, isNew: true })
-  /** 1 秒后移除动画标记 */
-  const eventId = now
-  setTimeout(() => {
-    const ev = events.value.find(e => e.id === eventId)
-    if (ev) ev.isNew = false
-  }, 1000)
+  scheduleIsNewClear(now)
   if (events.value.length > PAGE_SIZE) {
     events.value = events.value.slice(0, PAGE_SIZE)
   }
@@ -358,22 +402,18 @@ function addDetectEvent(type: string, cameraId: string, detail: string, snapshot
     recent.detail = summary
     recent.summary = summary
     recent.rawDetail = detail
-    recent.time = new Date(now).toLocaleTimeString(locale.value)
+    recent.time = formatTime(now)
     recent.snapshotUrl = snapshotUrl
     recent.snapshotDetections = detections
     return
   }
 
-  const time = new Date(now).toLocaleTimeString(locale.value)
+  const time = formatTime(now)
   events.value.unshift({
     id: now, time, timestamp: now, type, cameraId, detail: summary, summary, rawDetail: detail,
     starred: false, isNew: true, snapshotUrl, snapshotDetections: detections,
   })
-  const eventId = now
-  setTimeout(() => {
-    const ev = events.value.find(e => e.id === eventId)
-    if (ev) ev.isNew = false
-  }, 1000)
+  scheduleIsNewClear(now)
   if (events.value.length > PAGE_SIZE) {
     events.value = events.value.slice(0, PAGE_SIZE)
   }
@@ -381,7 +421,7 @@ function addDetectEvent(type: string, cameraId: string, detail: string, snapshot
 
 /** 格式化时间戳 */
 function formatTimestamp(ts: number): string {
-  return new Date(ts).toLocaleTimeString(locale.value)
+  return formatTime(ts)
 }
 
 /** 加载历史事件 */
@@ -466,7 +506,13 @@ async function loadMore() {
         snapshotDetections: (e.detections as Detection[]) || null,
       }))
       events.value.push(...moreEvents)
-      hasMore.value = moreEvents.length >= PAGE_SIZE
+      /** 防止 loadMore 无限增长，超过上限时截断并停止加载 */
+      if (events.value.length > MAX_RENDER_EVENTS) {
+        events.value = events.value.slice(0, MAX_RENDER_EVENTS)
+        hasMore.value = false
+      } else {
+        hasMore.value = moreEvents.length >= PAGE_SIZE
+      }
     }
   } catch {
     // ignore
@@ -632,84 +678,80 @@ async function toggleStar(id: number) {
   }
 }
 
-defineExpose({ addEvent, addDetectEvent, loadHistory })
+/** 外部调用：跳转到某追踪 ID 的事件（设置搜索关键词并加载） */
+function filterByTrack(trackId: number) {
+  filterSearch.value = `#${trackId}`
+  loadHistory()
+}
+
+defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
 </script>
 
 <template>
   <div class="event-panel">
     <div class="panel-header">
-      <span>{{ t('event.title') }} <span v-if="totalCount > 0 && subView === 'events'" class="total-count">{{ totalCount }}</span></span>
+      <span class="header-title">{{ t('event.title') }} <span v-if="totalCount > 0 && subView === 'events'" class="total-count">{{ totalCount }}</span></span>
       <button :class="['view-toggle', { active: subView === 'events' }]" @click="subView = 'events'" :title="t('event.viewEvents')">☰</button>
       <button :class="['view-toggle', { active: subView === 'gallery' }]" @click="switchToGallery" :title="t('event.viewGallery')">☷</button>
       <template v-if="subView === 'events'">
-      <button :class="['range-btn', { active: filterRange === '1h' }]" @click="setRange('1h')">1h</button>
-      <button :class="['range-btn', { active: filterRange === '24h' }]" @click="setRange('24h')">24h</button>
-      <input
-        type="date"
-        v-model="filterDate"
-        @change="filterRange = ''; loadHistory()"
-        class="filter-date"
-        :title="t('event.filterDate')"
-      />
-      <input
-        type="text"
-        v-model="filterSearch"
-        @input="onSearchInput"
-        class="filter-search"
-        :placeholder="t('event.searchPlaceholder')"
-        :title="t('event.search')"
-      />
-      <select v-model="filterCamera" @change="onFilterChange('camera')" class="filter-select">
-        <option value="">{{ t('event.allCameras') }}</option>
-        <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
-      </select>
+        <button :class="['sort-btn', { desc: sortDesc }]" @click="sortDesc = !sortDesc" :title="sortDesc ? t('event.sortOldest') : t('event.sortNewest')">
+          {{ sortDesc ? '↓' : '↑' }}
+        </button>
+        <button :class="['detect-box-btn', { active: showDetectionBoxes }]" @click="showDetectionBoxes = !showDetectionBoxes" title="Toggle detection boxes">
+          ⊡
+        </button>
+        <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred; loadHistory()" :title="t('event.filterStarred')">
+          {{ filterStarred ? '★' : '☆' }}
+        </button>
+        <button class="refresh-btn" @click="loadHistory" :disabled="loading">{{ t('event.refresh') }}</button>
+        <button class="export-btn" @click="exportCsv" :disabled="loading" :title="t('event.exportCsv')">CSV</button>
+      </template>
+      <template v-if="subView === 'gallery'">
+        <select v-model="snapFilterCamera" @change="loadSnapshots" class="filter-select">
+          <option value="">{{ t('event.allCameras') }}</option>
+          <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+        </select>
+        <select v-if="allSnapshotLabels.length > 1" v-model="snapFilterLabel" class="filter-select">
+          <option value="">{{ t('event.allTypes') }}</option>
+          <option v-for="label in allSnapshotLabels" :key="label" :value="label">{{ label }}</option>
+        </select>
+        <button class="refresh-btn" @click="loadSnapshots" :disabled="snapshotLoading">{{ t('event.refresh') }}</button>
+      </template>
+    </div>
+    <!-- 筛选工具栏（事件视图） -->
+    <div v-if="subView === 'events'" class="filter-bar">
+      <div class="filter-row">
+        <button :class="['range-btn', { active: filterRange === '1h' }]" @click="setRange('1h')">1h</button>
+        <button :class="['range-btn', { active: filterRange === '24h' }]" @click="setRange('24h')">24h</button>
+        <input type="date" v-model="filterDate" @change="filterRange = ''; loadHistory()" class="filter-date" :title="t('event.filterDate')" />
+        <select v-model="filterCamera" @change="onFilterChange('camera')" class="filter-select">
+          <option value="">{{ t('event.allCameras') }}</option>
+          <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+        </select>
+      </div>
+      <input type="text" v-model="filterSearch" @input="onSearchInput" class="filter-search" :placeholder="t('event.searchPlaceholder')" />
       <div class="type-chips">
         <button :class="['type-chip', { active: !filterType }]" @click="filterType = ''; onFilterChange('type')">{{ t('event.allTypes') }}</button>
         <button :class="['type-chip', 'motion', { active: filterType === 'motion' }]" @click="filterType = 'motion'; onFilterChange('type')">{{ t('event.motion') }}</button>
         <button :class="['type-chip', 'detect', { active: filterType === 'detect' }]" @click="filterType = 'detect'; onFilterChange('type')">{{ t('event.detect') }}</button>
         <button :class="['type-chip', 'offline', { active: filterType === 'camera:offline' }]" @click="filterType = 'camera:offline'; onFilterChange('type')">{{ t('event.offline') }}</button>
-        <button :class="['type-chip', 'lowfps', { active: filterType === 'camera:lowfps' }]" @click="filterType = 'camera:lowfps'; onFilterChange('type')">{{ t('event.lowfps') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:enter-zone' }]" @click="filterType = 'track:enter-zone'; onFilterChange('type')">{{ t('event.trackEnterZone', '进入区域') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:leave-zone' }]" @click="filterType = 'track:leave-zone'; onFilterChange('type')">{{ t('event.trackLeaveZone', '离开区域') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:dwell' }]" @click="filterType = 'track:dwell'; onFilterChange('type')">{{ t('event.trackDwell', '停留') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:speed' }]" @click="filterType = 'track:speed'; onFilterChange('type')">{{ t('event.trackSpeed', '高速') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:line-cross' }]" @click="filterType = 'track:line-cross'; onFilterChange('type')">{{ t('event.trackLineCross', '越线') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:loiter' }]" @click="filterType = 'track:loiter'; onFilterChange('type')">{{ t('event.trackLoiter', '徘徊') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:appeared' }]" @click="filterType = 'track:appeared'; onFilterChange('type')">{{ t('event.trackAppeared', '出现') }}</button>
-        <button :class="['type-chip', { active: filterType === 'track:disappeared' }]" @click="filterType = 'track:disappeared'; onFilterChange('type')">{{ t('event.trackDisappeared', '消失') }}</button>
-        <button :class="['type-chip', { active: filterType === 'detect:rule' }]" @click="filterType = 'detect:rule'; onFilterChange('type')">{{ t('event.detectRule', '检测规则') }}</button>
-        <button :class="['type-chip', { active: filterType === 'llm:scene' }]" @click="filterType = 'llm:scene'; onFilterChange('type')">{{ t('event.llmScene', 'AI场景') }}</button>
-        <button :class="['type-chip', { active: filterType === 'state:changed' }]" @click="filterType = 'state:changed'; onFilterChange('type')">{{ t('event.stateChanged', '状态变更') }}</button>
+        <button :class="['type-chip', { active: filterType === 'alert' }]" @click="filterType = 'alert'; onFilterChange('type')">{{ t('event.alert') }}</button>
+        <button :class="['type-chip', { active: filterType === 'detect:rule' }]" @click="filterType = 'detect:rule'; onFilterChange('type')">{{ t('event.detectRule') }}</button>
+        <template v-if="showAllTypes">
+          <button :class="['type-chip', 'lowfps', { active: filterType === 'camera:lowfps' }]" @click="filterType = 'camera:lowfps'; onFilterChange('type')">{{ t('event.lowfps') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:appeared' }]" @click="filterType = 'track:appeared'; onFilterChange('type')">{{ t('event.trackAppeared') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:disappeared' }]" @click="filterType = 'track:disappeared'; onFilterChange('type')">{{ t('event.trackDisappeared') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:enter-zone' }]" @click="filterType = 'track:enter-zone'; onFilterChange('type')">{{ t('event.trackEnterZone') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:leave-zone' }]" @click="filterType = 'track:leave-zone'; onFilterChange('type')">{{ t('event.trackLeaveZone') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:dwell' }]" @click="filterType = 'track:dwell'; onFilterChange('type')">{{ t('event.trackDwell') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:speed' }]" @click="filterType = 'track:speed'; onFilterChange('type')">{{ t('event.trackSpeed') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:line-cross' }]" @click="filterType = 'track:line-cross'; onFilterChange('type')">{{ t('event.trackLineCross') }}</button>
+          <button :class="['type-chip', { active: filterType === 'track:loiter' }]" @click="filterType = 'track:loiter'; onFilterChange('type')">{{ t('event.trackLoiter') }}</button>
+          <button :class="['type-chip', { active: filterType === 'llm:scene' }]" @click="filterType = 'llm:scene'; onFilterChange('type')">{{ t('event.llmScene') }}</button>
+          <button :class="['type-chip', { active: filterType === 'state:changed' }]" @click="filterType = 'state:changed'; onFilterChange('type')">{{ t('event.stateChanged') }}</button>
+        </template>
+        <button class="type-chip more-chip" @click="showAllTypes = !showAllTypes">{{ showAllTypes ? '▲' : '…' }}</button>
       </div>
-      <button class="refresh-btn" @click="loadHistory" :disabled="loading">
-        {{ t('event.refresh') }}
-      </button>
-      <button class="export-btn" @click="exportCsv" :disabled="loading" :title="t('event.exportCsv')">
-        CSV
-      </button>
-      <button :class="['sort-btn', { desc: sortDesc }]" @click="sortDesc = !sortDesc" :title="sortDesc ? t('event.sortOldest') : t('event.sortNewest')">
-        {{ sortDesc ? '↓' : '↑' }}
-      </button>
-      <button :class="['detect-box-btn', { active: showDetectionBoxes }]" @click="showDetectionBoxes = !showDetectionBoxes" title="Toggle detection boxes">
-        ⊡
-      </button>
-      <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred; loadHistory()" :title="t('event.filterStarred')">
-        {{ filterStarred ? '★' : '☆' }}
-      </button>
-      </template>
-      <template v-if="subView === 'gallery'">
-      <select v-model="snapFilterCamera" @change="loadSnapshots" class="filter-select">
-        <option value="">{{ t('event.allCameras') }}</option>
-        <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
-      </select>
-      <select v-if="allSnapshotLabels.length > 1" v-model="snapFilterLabel" class="filter-select">
-        <option value="">{{ t('event.allTypes') }}</option>
-        <option v-for="label in allSnapshotLabels" :key="label" :value="label">{{ label }}</option>
-      </select>
-      <button class="refresh-btn" @click="loadSnapshots" :disabled="snapshotLoading">
-        {{ t('event.refresh') }}
-      </button>
-      </template>
     </div>
     <EventTimeline v-if="subView === 'events'" :events="events" />
     <div v-if="subView === 'events'" class="event-list">
@@ -734,8 +776,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
             :style="{ background: typeConfig[e.type].bg, color: typeConfig[e.type].color }"
           >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ cameraName(e.cameraId) }}</span>
-          <div v-if="getTrackSnapshotUrl(e.type, e.rawDetail)" class="thumb-wrap track-thumb">
-            <img :src="getTrackSnapshotUrl(e.type, e.rawDetail)!" class="event-thumb" alt="" />
+          <div v-if="getCachedTrackSnapshot(e)" class="thumb-wrap track-thumb">
+            <img :src="getCachedTrackSnapshot(e)!" class="event-thumb" alt="" />
           </div>
           <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'llm:scene') && e.snapshotUrl" class="thumb-wrap">
             <img
@@ -753,8 +795,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
             </div>
           </div>
           <span class="event-detail">{{ e.detail }}</span>
-          <div v-if="e.type === 'motion' && motionRatio(e.detail) > 0" class="motion-bar-wrap">
-            <div class="motion-bar" :style="{ width: Math.min(motionRatio(e.detail) * 10, 100) + '%', background: motionBarColor(motionRatio(e.detail)) }" />
+          <div v-if="e.type === 'motion' && getMotionRatio(e) > 0" class="motion-bar-wrap">
+            <div class="motion-bar" :style="{ width: Math.min(getMotionRatio(e) * 10, 100) + '%', background: motionBarColor(getMotionRatio(e)) }" />
           </div>
           <span class="expand-icon">{{ expandedId === e.id ? '▾' : '▸' }}</span>
           <button :class="['star-btn', { starred: e.starred }]" @click.stop="toggleStar(e.id)" :title="t('event.toggleStar')">
@@ -763,8 +805,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         </div>
         <!-- 展开详情 -->
         <div v-if="expandedId === e.id" class="event-expand">
-          <div v-if="getTrackSnapshotUrl(e.type, e.rawDetail)" class="expand-snap-wrap">
-            <img :src="getTrackSnapshotUrl(e.type, e.rawDetail)!" class="expand-snapshot" alt="" />
+          <div v-if="getCachedTrackSnapshot(e)" class="expand-snap-wrap">
+            <img :src="getCachedTrackSnapshot(e)!" class="expand-snapshot" alt="" />
           </div>
           <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'llm:scene') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
             <img
@@ -851,15 +893,36 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 }
 
 .panel-header {
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: #1a1a2e;
   border-bottom: 1px solid #2a2a4a;
   color: #e0e0e0;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.header-title {
+  margin-right: auto;
+}
+
+.filter-bar {
+  padding: 6px 10px;
+  background: #16213e;
+  border-bottom: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .filter-select {
@@ -868,7 +931,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
   border: 1px solid #2a2a4a;
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: 11px;
+  max-width: 100px;
 }
 
 .filter-date {
@@ -889,9 +953,9 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
   color: #e0e0e0;
   border: 1px solid #2a2a4a;
   border-radius: 4px;
-  padding: 2px 6px;
+  padding: 3px 8px;
   font-size: 12px;
-  width: 100px;
+  width: 100%;
 }
 
 .type-chips {
@@ -937,6 +1001,16 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 .type-chip.lowfps.active {
   background: #FF9800;
   color: #fff;
+}
+
+.type-chip.more-chip {
+  background: transparent;
+  color: #555;
+  padding: 1px 6px;
+}
+
+.type-chip.more-chip:hover {
+  color: #4ECDC4;
 }
 
 .refresh-btn {

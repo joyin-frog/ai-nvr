@@ -55,6 +55,7 @@ export class StateStorage {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath, { create: true });
     this.db.run("PRAGMA journal_mode = WAL");
+    this.db.run("PRAGMA synchronous = NORMAL");
     this.db.run("PRAGMA busy_timeout = 5000");
     this.db.run("PRAGMA wal_autocheckpoint = 1000");
 
@@ -164,12 +165,15 @@ export class StateStorage {
     if (state.currentValue === newValue) return null;
 
     const ts = Date.now();
+    /** 事务保证 currentValue 更新和 change record 插入的原子性 */
+    this.db.run("BEGIN");
     this.db.run(`UPDATE states SET current_value = ? WHERE id = ?`, [newValue, stateId]);
 
     const result = this.db.run(`
       INSERT INTO state_changes (state_id, state_name, camera_id, old_value, new_value, source, source_rule_id, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [stateId, state.name, state.cameraId, state.currentValue, newValue, source, sourceRuleId, ts]);
+    this.db.run("COMMIT");
 
     return {
       id: Number(result.lastInsertRowid),
