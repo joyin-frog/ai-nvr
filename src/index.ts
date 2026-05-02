@@ -246,7 +246,7 @@ function flushPendingEvents() {
   eventStorage.insertMany(batch);
 }
 
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "llm:scene"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "llm:scene"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -281,6 +281,11 @@ for (const eventType of RECORDED_EVENTS) {
       if (p.dwellMs !== undefined) obj.dwellMs = p.dwellMs;
       if (p.score !== undefined) obj.score = p.score;
       if (p.speed !== undefined) obj.speed = p.speed;
+      if (p.targetTrackId !== undefined) obj.targetTrackId = p.targetTrackId;
+      if (p.targetLabel) obj.targetLabel = p.targetLabel;
+      if (p.targetTrackName) obj.targetTrackName = p.targetTrackName;
+      if (p.targetSemanticLabel) obj.targetSemanticLabel = p.targetSemanticLabel;
+      if (p.distance !== undefined) obj.distance = p.distance;
       detail = JSON.stringify(obj);
     }
     pendingEvents.push({ type: eventType, cameraId: (payload as { cameraId: string }).cameraId, timestamp: (payload as { timestamp: number }).timestamp ?? Date.now(), detail });

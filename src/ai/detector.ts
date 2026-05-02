@@ -93,6 +93,13 @@ export class AiDetector {
   /** CLIP 语义标签缓存：trackId → semanticLabel */
   private semanticLabelCache = new Map<number, string>();
 
+  /** 接近检测：最近一次触发过的目标对（避免重复触发），key = "smallerId:largerId" */
+  private approachCooldown = new Map<string, number>();
+  /** 接近事件冷却时间 ms */
+  private static readonly APPROACH_COOLDOWN_MS = 10_000;
+  /** 接近距离阈值（归一化 0-1） */
+  private static readonly APPROACH_DISTANCE_THRESHOLD = 0.15;
+
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
@@ -708,6 +715,9 @@ export class AiDetector {
       /** 缓存最新帧和 enriched 检测结果（用于按需生成标注图） */
       this.annotator.setLatestFrame(cameraId, jpeg, enricheddetections);
 
+      /** 目标间接近检测：计算所有活跃目标两两之间的距离 */
+      this.detectApproaches(cameraId, timestamp, enricheddetections);
+
       this.eventBus.emit("detect", {
         cameraId,
         timestamp,
@@ -720,6 +730,66 @@ export class AiDetector {
       console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
+    }
+  }
+
+  /** 检测目标间的接近事件（两两计算中心距离，低于阈值时触发） */
+  private detectApproaches(
+    cameraId: string,
+    timestamp: number,
+    detections: Array<{ trackId?: number; label: string; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackName?: string; semanticLabel?: string }>,
+  ): void {
+    /** 至少需要 2 个有 trackId 和 box 的目标 */
+    const targets = detections.filter(d => d.trackId != null && d.box);
+    if (targets.length < 2) return;
+
+    const now = Date.now();
+    const threshold = AiDetector.APPROACH_DISTANCE_THRESHOLD;
+
+    for (let i = 0; i < targets.length; i++) {
+      const a = targets[i]!;
+      const aCx = (a.box!.xmin + a.box!.xmax) / 2;
+      const aCy = (a.box!.ymin + a.box!.ymax) / 2;
+
+      for (let j = i + 1; j < targets.length; j++) {
+        const b = targets[j]!;
+        const bCx = (b.box!.xmin + b.box!.xmax) / 2;
+        const bCy = (b.box!.ymin + b.box!.ymax) / 2;
+
+        const dist = Math.sqrt((aCx - bCx) ** 2 + (aCy - bCy) ** 2);
+        if (dist >= threshold) continue;
+
+        /** 冷却期检查 */
+        const pairKey = a.trackId! < b.trackId!
+          ? `${a.trackId}:${b.trackId}`
+          : `${b.trackId}:${a.trackId}`;
+        const lastTime = this.approachCooldown.get(pairKey);
+        if (lastTime && now - lastTime < AiDetector.APPROACH_COOLDOWN_MS) continue;
+
+        this.approachCooldown.set(pairKey, now);
+
+        const aTrackName = a.trackName || this.lookupTrackName(cameraId, a.trackId!);
+        const bTrackName = b.trackName || this.lookupTrackName(cameraId, b.trackId!);
+
+        this.eventBus.emit("track:approach", {
+          cameraId,
+          timestamp,
+          trackId: a.trackId!,
+          label: a.label,
+          trackName: aTrackName || undefined,
+          semanticLabel: a.semanticLabel || this.semanticLabelCache.get(a.trackId!),
+          targetTrackId: b.trackId!,
+          targetLabel: b.label,
+          targetTrackName: bTrackName || undefined,
+          targetSemanticLabel: b.semanticLabel || this.semanticLabelCache.get(b.trackId!),
+          distance: dist,
+        });
+      }
+    }
+
+    /** 清理过期的冷却记录（超过 60 秒未触发的） */
+    for (const [key, time] of this.approachCooldown) {
+      if (now - time > 60_000) this.approachCooldown.delete(key);
     }
   }
 

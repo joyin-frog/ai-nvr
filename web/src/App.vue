@@ -889,6 +889,13 @@ function setupEventListeners() {
     pushZoneNotification(payload.cameraId, { type: 'loiter', name: customName || displayLabel, zoneName: payload.zoneName, timestamp: payload.timestamp, dwellMs: payload.durationMs })
   })
 
+  client.on('track:approach', (payload) => {
+    const aName = payload.trackName || payload.semanticLabel || payload.label
+    const bName = payload.targetTrackName || payload.targetSemanticLabel || payload.targetLabel
+    eventPanel.value?.addEvent('track:approach', payload.cameraId, `${aName} 接近 ${bName}`)
+    pushZoneNotification(payload.cameraId, { type: 'approach', name: aName, zoneName: bName, timestamp: payload.timestamp, distance: payload.distance })
+  })
+
   client.on('track:match-suggest', (payload) => {
     const best = payload.matches[0]
     if (!best) return

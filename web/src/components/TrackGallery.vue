@@ -90,6 +90,7 @@ const EVENT_TYPE_STYLE: Record<string, { label: string; bg: string; color: strin
   'track:speed': { label: '速度', bg: '#42A5F5', color: '#fff' },
   'track:line-cross': { label: '越线', bg: '#FF6F00', color: '#fff' },
   'track:loiter': { label: '徘徊', bg: '#795548', color: '#fff' },
+  'track:approach': { label: '接近', bg: '#E91E63', color: '#fff' },
   'track:match-suggest': { label: '匹配', bg: '#CE93D8', color: '#fff' },
   'detect': { label: '检测', bg: '#4ECDC4', color: '#fff' },
   'motion': { label: '变动', bg: '#FFC107', color: '#333' },

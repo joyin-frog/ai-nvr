@@ -247,6 +247,32 @@ export interface EventPayloads {
     bboxArea: number;
   };
 
+  /** 追踪目标接近事件（两个目标距离低于阈值时触发） */
+  "track:approach": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 主动目标 trackId */
+    trackId: number;
+    /** 主动目标标签 */
+    label: string;
+    /** 主动目标名称 */
+    trackName?: string;
+    /** 主动目标 CLIP 语义标签 */
+    semanticLabel?: string;
+    /** 被动目标 trackId */
+    targetTrackId: number;
+    /** 被动目标标签 */
+    targetLabel: string;
+    /** 被动目标名称 */
+    targetTrackName?: string;
+    /** 被动目标 CLIP 语义标签 */
+    targetSemanticLabel?: string;
+    /** 两目标中心距离（归一化 0-1） */
+    distance: number;
+  };
+
   /** fMP4 初始化段（ftyp + moov） */
   "fmp4:init": {
     cameraId: string;

@@ -1022,15 +1022,15 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       if (alpha <= 0) continue
       const nx = width / 2
       const ny = height * 0.25 + i * 24
-      const arrow = n.type === 'enter' ? '→' : n.type === 'leave' ? '←' : n.type === 'line-cross' ? '⚡' : n.type === 'loiter' ? '↻' : '⏳'
+      const arrow = n.type === 'enter' ? '→' : n.type === 'leave' ? '←' : n.type === 'line-cross' ? '⚡' : n.type === 'loiter' ? '↻' : n.type === 'approach' ? '⊕' : '⏳'
       const directionText = n.direction ? ` ${n.direction}` : ''
       const dwellText = n.dwellMs ? ` ${(n.dwellMs / 1000).toFixed(0)}s` : ''
-      const text = `${arrow} ${n.name} ${n.zoneName}${directionText}${dwellText}`
+      const text = n.type === 'approach' ? `${arrow} ${n.name} → ${n.zoneName}` : `${arrow} ${n.name} ${n.zoneName}${directionText}${dwellText}`
       ctx.font = 'bold 12px sans-serif'
       const tm = ctx.measureText(text)
       const pad = 6
       ctx.globalAlpha = alpha * 0.85
-      ctx.fillStyle = n.type === 'enter' ? 'rgba(0, 150, 136, 0.9)' : n.type === 'leave' ? 'rgba(156, 39, 176, 0.9)' : n.type === 'line-cross' ? 'rgba(255, 111, 0, 0.9)' : n.type === 'loiter' ? 'rgba(121, 85, 72, 0.9)' : 'rgba(255, 152, 0, 0.9)'
+      ctx.fillStyle = n.type === 'enter' ? 'rgba(0, 150, 136, 0.9)' : n.type === 'leave' ? 'rgba(156, 39, 176, 0.9)' : n.type === 'line-cross' ? 'rgba(255, 111, 0, 0.9)' : n.type === 'loiter' ? 'rgba(121, 85, 72, 0.9)' : n.type === 'approach' ? 'rgba(233, 30, 99, 0.9)' : 'rgba(255, 152, 0, 0.9)'
       ctx.beginPath()
       ctx.roundRect(nx - tm.width / 2 - pad, ny - 10, tm.width + pad * 2, 20, 4)
       ctx.fill()

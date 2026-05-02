@@ -86,6 +86,9 @@ export class AlertEngine {
       this.eventBus.on("track:loiter", (payload) => {
         this.onTrackEvent("track:loiter", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, payload.zoneId, payload.zoneName, payload.durationMs, undefined, undefined, payload.semanticLabel);
       }),
+      this.eventBus.on("track:approach", (payload) => {
+        this.onTrackEvent("track:approach", payload.cameraId, payload.timestamp, payload.trackId, payload.label, undefined, undefined, undefined, undefined, undefined, undefined, payload.semanticLabel);
+      }),
     );
     console.log("[AlertEngine] 告警引擎已启动");
   }

@@ -73,7 +73,7 @@ export function getDetectVersion(cameraId: string): number {
 
 export interface ZoneNotification {
   /** 事件类型 */
-  type: 'enter' | 'leave' | 'dwell' | 'line-cross' | 'loiter'
+  type: 'enter' | 'leave' | 'dwell' | 'line-cross' | 'loiter' | 'approach'
   /** 目标名称（自定义名或标签） */
   name: string
   /** 区域名称 */
@@ -84,6 +84,8 @@ export interface ZoneNotification {
   dwellMs?: number
   /** 穿越方向（仅 line-cross） */
   direction?: string
+  /** 接近距离（归一化，仅 approach） */
+  distance?: number
 }
 
 /** 通知显示时长（ms） */
