@@ -87,6 +87,8 @@ export class AiDetector {
   private unsubMotion: (() => void) | null = null;
   /** 待检测摄像头队列 */
   private detectQueue: string[] = [];
+  /** detectQueue 的 O(1) 去重集合 */
+  private detectQueueSet = new Set<string>();
   /** 每个摄像头最近一次完成推理的时间（用于跳过过密请求） */
   private lastDetectTime = new Map<string, number>();
   /** 上一次检测结果指纹（用于去重通知） */
@@ -233,18 +235,22 @@ export class AiDetector {
   private startContinuousLoop(interval: number): void {
     if (this.continuousTimer) clearInterval(this.continuousTimer);
     this.baseInterval = interval;
-    this.continuousTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [cameraId, frame] of this.latestFrames) {
-        const camInterval = this.getEffectiveInterval(cameraId);
-        if (now - frame.timestamp > camInterval * 3) continue;
-        if (!this.detectQueue.includes(cameraId)) {
-          this.detectQueue.push(cameraId);
-        }
+    this.continuousTimer = setInterval(() => this.tickDetect(), interval);
+  }
+
+  /** 定时检测回调：扫描活跃摄像头加入队列 */
+  private tickDetect(): void {
+    const now = Date.now();
+    for (const [cameraId, frame] of this.latestFrames) {
+      const camInterval = this.getEffectiveInterval(cameraId);
+      if (now - frame.timestamp > camInterval * 3) continue;
+      if (!this.detectQueueSet.has(cameraId)) {
+        this.detectQueueSet.add(cameraId);
+        this.detectQueue.push(cameraId);
       }
-      this.processQueue();
-      this.adjustGlobalInterval();
-    }, interval);
+    }
+    this.processQueue();
+    this.adjustGlobalInterval();
   }
 
   /** 动态调整全局定时器：所有摄像头深度 idle 时降频，有活动时恢复 */
@@ -255,33 +261,11 @@ export class AiDetector {
     );
     if (allDeepIdle && !this.globalIdleBoosted) {
       clearInterval(this.continuousTimer);
-      this.continuousTimer = setInterval(() => {
-        const now = Date.now();
-        for (const [cameraId, frame] of this.latestFrames) {
-          const camInterval = this.getEffectiveInterval(cameraId);
-          if (now - frame.timestamp > camInterval * 3) continue;
-          if (!this.detectQueue.includes(cameraId)) {
-            this.detectQueue.push(cameraId);
-          }
-        }
-        this.processQueue();
-        this.adjustGlobalInterval();
-      }, this.baseInterval * 2);
+      this.continuousTimer = setInterval(() => this.tickDetect(), this.baseInterval * 2);
       this.globalIdleBoosted = true;
     } else if (!allDeepIdle && this.globalIdleBoosted) {
       clearInterval(this.continuousTimer);
-      this.continuousTimer = setInterval(() => {
-        const now = Date.now();
-        for (const [cameraId, frame] of this.latestFrames) {
-          const camInterval = this.getEffectiveInterval(cameraId);
-          if (now - frame.timestamp > camInterval * 3) continue;
-          if (!this.detectQueue.includes(cameraId)) {
-            this.detectQueue.push(cameraId);
-          }
-        }
-        this.processQueue();
-        this.adjustGlobalInterval();
-      }, this.baseInterval);
+      this.continuousTimer = setInterval(() => this.tickDetect(), this.baseInterval);
       this.globalIdleBoosted = false;
     }
   }
@@ -301,6 +285,7 @@ export class AiDetector {
   private processQueue(): void {
     const now = Date.now();
     const batch = this.detectQueue.splice(0);
+    this.detectQueueSet.clear();
     for (const cameraId of batch) {
       const camInterval = this.getEffectiveInterval(cameraId);
       const frame = this.latestFrames.get(cameraId);
@@ -335,6 +320,7 @@ export class AiDetector {
     }
     this.latestFrames.clear();
     this.detectQueue = [];
+    this.detectQueueSet.clear();
     this.lastDetectTime.clear();
   }
 
