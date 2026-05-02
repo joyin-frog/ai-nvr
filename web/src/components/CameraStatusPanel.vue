@@ -23,6 +23,8 @@ interface SystemMetrics {
   uptime: number
   memoryUsedMb: number
   memoryRssMb: number
+  ffmpegProcessCount: number
+  ffmpegTotalRssMb: number
   cameraCount: number
   onlineCameras: number
   cameras: CameraMetric[]
@@ -445,6 +447,10 @@ onUnmounted(() => {
       <div class="stat-row">
         <span class="stat-label">{{ t('status.memoryUsage') }}</span>
         <span class="stat-value">{{ metrics.memoryUsedMb }} MB</span>
+      </div>
+      <div v-if="metrics.ffmpegProcessCount > 0" class="stat-row">
+        <span class="stat-label">ffmpeg</span>
+        <span class="stat-value">{{ metrics.ffmpegProcessCount }} 进程 / {{ metrics.ffmpegTotalRssMb }} MB</span>
       </div>
       <div class="stat-row">
         <span class="stat-label">{{ t('status.cameras') }}</span>

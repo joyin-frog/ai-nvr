@@ -1,4 +1,5 @@
 import { type EventBus } from "@/event-bus";
+import { execSync } from "node:child_process";
 
 /** 单个摄像头的运行指标 */
 export interface CameraMetrics {
@@ -32,6 +33,10 @@ export interface SystemMetrics {
   memoryUsedMb: number;
   /** 内存 RSS（MB） */
   memoryRssMb: number;
+  /** ffmpeg 子进程数量 */
+  ffmpegProcessCount: number;
+  /** ffmpeg 子进程总 RSS（MB） */
+  ffmpegTotalRssMb: number;
   /** 摄像头数量 */
   cameraCount: number;
   /** 在线摄像头数量 */
@@ -84,6 +89,9 @@ export class SystemMonitor {
   private static readonly LOW_FPS_CHECK_INTERVAL = 10;
   /** 低帧率检查定时器 */
   private lowFpsTimer: ReturnType<typeof setInterval> | null = null;
+  /** ffmpeg 进程统计缓存（5 秒刷新） */
+  private ffmpegCache = { count: 0, rssMb: 0, updatedAt: 0 };
+  private static readonly FFMPEG_CACHE_TTL = 5000;
 
   constructor(
     private eventBus: EventBus,
@@ -221,10 +229,35 @@ export class SystemMonitor {
       };
     });
 
+    /** 统计 ffmpeg 子进程数和内存占用（5 秒缓存） */
+    const now = Date.now();
+    if (now - this.ffmpegCache.updatedAt > SystemMonitor.FFMPEG_CACHE_TTL) {
+      let count = 0;
+      let rss = 0;
+      try {
+        const pids = execSync("pgrep -f ffmpeg || true", { encoding: "utf-8", timeout: 2000 }).trim();
+        if (pids) {
+          const pidList = pids.split("\n").filter(Boolean);
+          count = pidList.length;
+          for (const pid of pidList) {
+            try {
+              const stat = execSync(`cat /proc/${pid}/status 2>/dev/null | grep VmRSS || true`, { encoding: "utf-8", timeout: 500 }).trim();
+              const match = stat.match(/VmRSS:\s+(\d+)\s+kB/);
+              if (match) rss += parseInt(match[1]!) / 1024;
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore */ }
+      this.ffmpegCache = { count, rssMb: rss, updatedAt: now };
+    }
+    const { count: ffmpegProcessCount, rssMb: ffmpegTotalRssMb } = this.ffmpegCache;
+
     return {
       uptime: Math.floor((Date.now() - this.startedAt) / 1000),
       memoryUsedMb: Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10,
       memoryRssMb: Math.round(mem.rss / 1024 / 1024 * 10) / 10,
+      ffmpegProcessCount,
+      ffmpegTotalRssMb: Math.round(ffmpegTotalRssMb * 10) / 10,
       cameraCount: cameraIds.length,
       onlineCameras: cameras.filter(c => c.online).length,
       cameras,
