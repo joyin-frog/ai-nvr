@@ -120,6 +120,7 @@ export class MotionRecorder {
   unregisterStream(cameraId: string): void {
     this.forceStop(cameraId);
     this.preBuffers.delete(cameraId);
+    this.states.delete(cameraId);
   }
 
   /** 启动：订阅帧事件 + 根据模式初始化录制 */
@@ -457,11 +458,12 @@ export class MotionRecorder {
 
     proc.on("exit", (code) => {
       console.log(`[Recorder] ${cameraId} 录像结束, code=${code}`);
+      /** 只有当前进程仍是这个 proc 时才清理状态（防止 forceStop + 新录像的竞态） */
       if (state.proc === proc) {
         proc.unref();
         state.proc = null;
+        state.recording = false;
       }
-      state.recording = false;
 
       /** 清理空或异常小的录像文件（< 1KB 视为无效） */
       try {
