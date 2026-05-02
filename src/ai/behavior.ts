@@ -80,10 +80,20 @@ export class BehaviorAnalyzer {
     this.runtimeConfig = runtimeConfig;
   }
 
+  /** 取消订阅函数（camera:offline） */
+  private unsubCameraOffline: (() => void) | null = null;
+
   /** 启动：订阅 detect 事件 */
   start(): void {
     this.unsub = this.eventBus.on("detect", (payload) => {
       this.onDetect(payload.cameraId, payload.timestamp, payload.detections);
+    });
+
+    /** 摄像头离线时清理该摄像头的所有状态 */
+    this.unsubCameraOffline = this.eventBus.on("camera:offline", ({ cameraId }) => {
+      this.states.delete(cameraId);
+      this.roiCache.delete(cameraId);
+      this.lineCache.delete(cameraId);
     });
 
     /** 每 60 秒清理超过 5 分钟无更新的过期状态 */
@@ -95,6 +105,10 @@ export class BehaviorAnalyzer {
     if (this.unsub) {
       this.unsub();
       this.unsub = null;
+    }
+    if (this.unsubCameraOffline) {
+      this.unsubCameraOffline();
+      this.unsubCameraOffline = null;
     }
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
