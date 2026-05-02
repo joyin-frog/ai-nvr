@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 
@@ -34,6 +34,10 @@ const props = defineProps<{
 const regions = ref<RoiRegion[]>([])
 const crossLines = ref<CrossLine[]>([])
 const loading = ref(false)
+
+/** 通知父组件刷新 ROI / 越线数据 */
+const reloadRoi = inject<() => void>('reloadRoi')
+const reloadCrossLines = inject<() => void>('reloadCrossLines')
 
 /** 绘制模式：none / polygon / line */
 type DrawMode = 'none' | 'polygon' | 'line'
@@ -113,6 +117,7 @@ async function finishDrawing() {
         drawMode.value = 'none'
         currentPoints.value = []
         loadRegions()
+        reloadRoi?.()
       }
     } else if (drawMode.value === 'line') {
       const res = await authFetch('/api/cross-lines', {
@@ -129,6 +134,7 @@ async function finishDrawing() {
         drawMode.value = 'none'
         currentPoints.value = []
         loadRegions()
+        reloadCrossLines?.()
       }
     }
   } catch {
@@ -145,6 +151,7 @@ async function toggleRegion(region: RoiRegion) {
       body: JSON.stringify({ enabled: !region.enabled }),
     })
     loadRegions()
+    reloadRoi?.()
   } catch {
     // ignore
   }
@@ -155,6 +162,7 @@ async function deleteRegion(id: number) {
   try {
     await authFetch(`/api/roi/item/${id}`, { method: 'DELETE' })
     loadRegions()
+    reloadRoi?.()
   } catch {
     // ignore
   }
@@ -169,6 +177,7 @@ async function toggleLine(line: CrossLine) {
       body: JSON.stringify({ enabled: !line.enabled }),
     })
     loadRegions()
+    reloadCrossLines?.()
   } catch {
     // ignore
   }
@@ -179,6 +188,7 @@ async function deleteLine(id: number) {
   try {
     await authFetch(`/api/cross-lines/${id}`, { method: 'DELETE' })
     loadRegions()
+    reloadCrossLines?.()
   } catch {
     // ignore
   }
