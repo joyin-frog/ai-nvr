@@ -435,10 +435,44 @@ export class AiDetector {
             target.box,
             target.score,
           ).then(() => {
-            /** 快照保存后，查找外观相似的已命名目标 */
+            /** 快照保存后，提取 CLIP embedding 并查找相似目标 */
             const record = this.trackStorage!.getRecord(target.trackId);
-            if (record?.dhash) {
-              const matches = this.trackStorage!.findSimilar(target.trackId, cameraId, target.label, record.dhash, 0.4, record.colorHist, record.lbpHist);
+
+            /** 异步提取 CLIP image embedding（用于高精度 ReID） */
+            const embedPromise = (this.clipService && target.box && record)
+              ? this.clipService.imageEmbed(jpeg, target.box).then(res => {
+                  if (res.embedding.length > 0 && this.trackStorage) {
+                    this.trackStorage.setClipEmbedding(target.trackId, res.embedding);
+                  }
+                  return res.embedding;
+                }).catch(() => <number[]>[])
+              : Promise.resolve(<number[]>[]);
+
+            /** 同时执行零样本分类 */
+            if (this.clipService && target.box) {
+              this.clipService.classifyTarget(jpeg, target.box, target.label)
+                .then(result => {
+                  const top = ClipService.getTopLabels(result, 1);
+                  if (top.length > 0 && top[0]!.score > 0.15) {
+                    this.semanticLabelCache.set(target.trackId, top[0]!.label);
+                    if (this.trackStorage) {
+                      this.trackStorage.setSemanticLabel(target.trackId, top[0]!.label);
+                    }
+                    console.log(`[AiDetector] CLIP 分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
+                  }
+                })
+                .catch(() => { /* CLIP 分类失败不影响主流程 */ });
+            }
+
+            /** 等 embedding 提取完成后再做匹配（确保高精度） */
+            embedPromise.then(clipEmbedding => {
+              if (!record?.dhash && !clipEmbedding.length) return;
+              const matches = this.trackStorage!.findSimilar(
+                target.trackId, cameraId, target.label,
+                record?.dhash ?? "", 0.4,
+                record?.colorHist, record?.lbpHist,
+                clipEmbedding.length ? clipEmbedding : record?.clipEmbedding,
+              );
               if (matches.length > 0) {
                 this.eventBus.emit("track:match-suggest", {
                   cameraId,
@@ -447,13 +481,11 @@ export class AiDetector {
                   label: target.label,
                   matches,
                 });
-                /** 高置信度匹配自动关联名称 */
                 const best = matches[0]!;
                 const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
                 if (autoThreshold > 0 && best.distance < autoThreshold && this.trackLabelStorage) {
                   this.trackLabelStorage.upsert(cameraId, target.trackId, target.label, best.customName);
                   this.trackStorage!.setCustomName(target.trackId, best.customName);
-                  /** 清除缓存强制下次查找刷新 */
                   this.trackNameCache.delete(`${cameraId}:${target.trackId}`);
                   this.eventBus.emit("track:label-updated", {
                     cameraId,
@@ -463,25 +495,8 @@ export class AiDetector {
                   console.log(`[AiDetector] 自动关联: track#${target.trackId} → ${best.customName} (${(best.distance * 100).toFixed(0)}%)`);
                 }
               }
-            }
+            }).catch(() => { /* embedding 匹配失败不影响主流程 */ });
           }).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
-
-          /** CLIP 零样本分类：对新目标异步分类，结果缓存到 semanticLabelCache */
-          if (this.clipService && target.box) {
-            this.clipService.classifyTarget(jpeg, target.box, target.label)
-              .then(result => {
-                const top = ClipService.getTopLabels(result, 1);
-                if (top.length > 0 && top[0]!.score > 0.15) {
-                  this.semanticLabelCache.set(target.trackId, top[0]!.label);
-                  /** 持久化到 TrackStorage */
-                  if (this.trackStorage) {
-                    this.trackStorage.setSemanticLabel(target.trackId, top[0]!.label);
-                  }
-                  console.log(`[AiDetector] CLIP 分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
-                }
-              })
-              .catch(() => { /* CLIP 分类失败不影响主流程 */ });
-          }
         }
       }
       /** 更新已有活跃目标的 lastSeen/hitCount */
@@ -499,8 +514,18 @@ export class AiDetector {
               .then(updated => {
                 if (!updated) return;
                 const rec = this.trackStorage!.getRecord(det.trackId!);
-                if (!rec || rec.customName || !rec.dhash) return;
-                const matches = this.trackStorage!.findSimilar(det.trackId!, cameraId, rec.label, rec.dhash, 0.4, rec.colorHist, rec.lbpHist);
+                if (!rec || rec.customName || (!rec.dhash && !rec.clipEmbedding?.length)) return;
+                /** 快照更新时也重新提取 CLIP embedding */
+                if (this.clipService && det.box && !rec.clipEmbedding?.length) {
+                  this.clipService.imageEmbed(jpeg, det.box)
+                    .then(embedRes => {
+                      if (embedRes.embedding.length > 0) {
+                        this.trackStorage!.setClipEmbedding(det.trackId!, embedRes.embedding);
+                      }
+                    })
+                    .catch(() => { /* embedding 提取失败不影响主流程 */ });
+                }
+                const matches = this.trackStorage!.findSimilar(det.trackId!, cameraId, rec.label, rec.dhash ?? "", 0.4, rec.colorHist, rec.lbpHist, rec.clipEmbedding);
                 if (matches.length === 0) return;
                 const top = matches[0]!;
                 const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;

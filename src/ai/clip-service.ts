@@ -28,6 +28,14 @@ export interface ZeroShotResult {
   inferMs: number;
 }
 
+/** 图像嵌入结果 */
+export interface ImageEmbedResult {
+  /** 嵌入向量（Float32，已 L2 归一化） */
+  embedding: number[];
+  /** 推理耗时 ms */
+  inferMs: number;
+}
+
 /** Worker 初始化参数 */
 interface ClipWorkerInit {
   model: string;
@@ -42,6 +50,14 @@ interface ClassifyRequest {
   image: Buffer;
   crop?: { xmin: number; ymin: number; xmax: number; ymax: number };
   labels: string[];
+}
+
+/** 图像嵌入请求 */
+interface EmbedRequest {
+  type: "image";
+  id: number;
+  image: Buffer;
+  crop?: { xmin: number; ymin: number; xmax: number; ymax: number };
 }
 
 /** Worker 响应 */
@@ -59,9 +75,15 @@ interface ClipWorkerResponse {
 /** 请求 ID 计数器 */
 let requestId = 0;
 
-/** 待处理请求 */
-const pendingRequests = new Map<number, {
+/** 零样本分类待处理请求 */
+const pendingClassify = new Map<number, {
   resolve: (result: ZeroShotResult) => void;
+  reject: (err: Error) => void;
+}>();
+
+/** 图像嵌入待处理请求 */
+const pendingEmbed = new Map<number, {
+  resolve: (result: ImageEmbedResult) => void;
   reject: (err: Error) => void;
 }>();
 
@@ -244,17 +266,32 @@ export class ClipService {
           this.initialized = true;
           resolve();
         } else if (msg.type === "result" && msg.id !== undefined) {
-          const pending = pendingRequests.get(msg.id);
-          if (pending) {
-            pendingRequests.delete(msg.id);
-            if (msg.error) {
-              pending.reject(new Error(msg.error));
-            } else {
-              pending.resolve({
-                labels: msg.labels ?? [],
-                scores: msg.scores ?? [],
-                inferMs: msg.inferMs ?? 0,
-              });
+          if (msg.resultType === "image") {
+            const pending = pendingEmbed.get(msg.id);
+            if (pending) {
+              pendingEmbed.delete(msg.id);
+              if (msg.error) {
+                pending.reject(new Error(msg.error));
+              } else {
+                pending.resolve({
+                  embedding: msg.embeddings?.[0] ?? [],
+                  inferMs: msg.inferMs ?? 0,
+                });
+              }
+            }
+          } else {
+            const pending = pendingClassify.get(msg.id);
+            if (pending) {
+              pendingClassify.delete(msg.id);
+              if (msg.error) {
+                pending.reject(new Error(msg.error));
+              } else {
+                pending.resolve({
+                  labels: msg.labels ?? [],
+                  scores: msg.scores ?? [],
+                  inferMs: msg.inferMs ?? 0,
+                });
+              }
             }
           }
         } else if (msg.type === "error") {
@@ -302,14 +339,49 @@ export class ClipService {
     };
 
     return new Promise<ZeroShotResult>((resolve, reject) => {
-      pendingRequests.set(id, { resolve, reject });
+      pendingClassify.set(id, { resolve, reject });
       this.worker!.postMessage(req);
 
       /** 超时保护：10 秒内未返回则丢弃 */
       setTimeout(() => {
-        if (pendingRequests.has(id)) {
-          pendingRequests.delete(id);
+        if (pendingClassify.has(id)) {
+          pendingClassify.delete(id);
           resolve({ labels: [], scores: [], inferMs: 0 });
+        }
+      }, 10_000);
+    });
+  }
+
+  /**
+   * 提取检测目标的 CLIP 图像嵌入向量
+   * 用于高精度 ReID 匹配（替代/补充 dHash 外观匹配）
+   */
+  imageEmbed(
+    jpeg: Buffer,
+    box: { xmin: number; ymin: number; xmax: number; ymax: number },
+  ): Promise<ImageEmbedResult> {
+    if (!this.initialized || !this.worker) {
+      return Promise.resolve({ embedding: [], inferMs: 0 });
+    }
+
+    const id = ++requestId;
+
+    const req: EmbedRequest = {
+      type: "image",
+      id,
+      image: jpeg,
+      crop: box,
+    };
+
+    return new Promise<ImageEmbedResult>((resolve, reject) => {
+      pendingEmbed.set(id, { resolve, reject });
+      this.worker!.postMessage(req);
+
+      /** 超时保护：10 秒内未返回则丢弃 */
+      setTimeout(() => {
+        if (pendingEmbed.has(id)) {
+          pendingEmbed.delete(id);
+          resolve({ embedding: [], inferMs: 0 });
         }
       }, 10_000);
     });
@@ -342,6 +414,7 @@ export class ClipService {
       this.worker = null;
     }
     this.initialized = false;
-    pendingRequests.clear();
+    pendingClassify.clear();
+    pendingEmbed.clear();
   }
 }

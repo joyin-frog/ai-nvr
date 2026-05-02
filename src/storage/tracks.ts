@@ -57,6 +57,8 @@ interface TrackRecord {
   altFingerprints?: AltFingerprint[];
   /** CLIP 零样本分类的语义标签（如 "a black dog"） */
   semanticLabel?: string;
+  /** CLIP 图像嵌入向量（512 维，L2 归一化），用于高精度 ReID */
+  clipEmbedding?: number[];
 }
 
 const TRACKS_META_FILE = "tracks.json";
@@ -232,6 +234,14 @@ export class TrackStorage {
     this.scheduleSave();
   }
 
+  /** 设置 CLIP 图像嵌入向量（用于高精度 ReID） */
+  setClipEmbedding(trackId: number, embedding: number[]): void {
+    const record = this.tracks.get(trackId);
+    if (!record) return;
+    record.clipEmbedding = embedding;
+    this.scheduleSave();
+  }
+
   /** 获取所有追踪目标 */
   listTracks(): TrackInfo[] {
     return [...this.tracks.values()].map(r => ({
@@ -260,20 +270,19 @@ export class TrackStorage {
 
   /**
    * 批量获取未命名目标的匹配建议
-   * 对每个未命名且有 dhash 的目标，查找同标签已命名目标中最相似的
-   * 使用多快照指纹匹配（主指纹 + 备选指纹取最优距离）
+   * 优先使用 CLIP embedding，回退到 dHash + 颜色 + LBP
    */
   getSuggestions(): Array<{ trackId: number; label: string; suggestedName: string; distance: number }> {
-    /** 收集所有已命名目标（有 dhash） */
+    /** 收集所有已命名目标（有 dhash 或 CLIP embedding） */
     const named: TrackRecord[] = [];
     for (const r of this.tracks.values()) {
-      if (r.customName && r.dhash) named.push(r);
+      if (r.customName && (r.dhash || r.clipEmbedding?.length)) named.push(r);
     }
     if (named.length === 0) return [];
 
     const results: Array<{ trackId: number; label: string; suggestedName: string; distance: number }> = [];
     for (const r of this.tracks.values()) {
-      if (r.customName || !r.dhash) continue;
+      if (r.customName || (!r.dhash && !r.clipEmbedding?.length)) continue;
       let bestDist = Infinity;
       let bestName = "";
       for (const n of named) {
@@ -344,6 +353,11 @@ export class TrackStorage {
     if (!target.snapshotFile && source.snapshotFile) {
       target.snapshotFile = source.snapshotFile;
       target.bestSnapshotScore = source.bestSnapshotScore;
+    }
+
+    /** 继承 CLIP embedding（目标没有时使用源的） */
+    if (!target.clipEmbedding?.length && source.clipEmbedding?.length) {
+      target.clipEmbedding = source.clipEmbedding;
     }
 
     /** 合并备选指纹 */
@@ -697,11 +711,17 @@ export class TrackStorage {
   /**
    * 计算两个目标之间的最优距离（主指纹 + 备选指纹取最小值）
    * 每个目标最多 3 个指纹（1 主 + 2 备选），取所有组合中的最小距离
+   * 优先使用 CLIP embedding（高精度语义匹配），否则回退到传统特征
    */
   static computeBestDistance(
-    recA: { dhash?: string; colorHist?: number[]; lbpHist?: number[]; altFingerprints?: AltFingerprint[] },
-    recB: { dhash?: string; colorHist?: number[]; lbpHist?: number[]; altFingerprints?: AltFingerprint[] },
+    recA: { dhash?: string; colorHist?: number[]; lbpHist?: number[]; altFingerprints?: AltFingerprint[]; clipEmbedding?: number[] },
+    recB: { dhash?: string; colorHist?: number[]; lbpHist?: number[]; altFingerprints?: AltFingerprint[]; clipEmbedding?: number[] },
   ): number {
+    /** CLIP embedding 优先：双方都有嵌入时直接用余弦距离（1 - cosine_similarity） */
+    if (recA.clipEmbedding?.length && recB.clipEmbedding?.length) {
+      return TrackStorage.clipEmbeddingDistance(recA.clipEmbedding, recB.clipEmbedding);
+    }
+    /** 回退到传统指纹匹配 */
     if (!recA.dhash || !recB.dhash) return 1;
     let best = TrackStorage.computeAppearanceDistance(
       recA.dhash, recB.dhash, recA.colorHist, recB.colorHist, recA.lbpHist, recB.lbpHist,
@@ -725,6 +745,20 @@ export class TrackStorage {
       }
     }
     return best;
+  }
+
+  /**
+   * 计算两个 CLIP embedding 的余弦距离（1 - cosine_similarity）
+   * 向量已 L2 归一化，余弦距离 = 1 - 点积
+   */
+  static clipEmbeddingDistance(a: number[], b: number[]): number {
+    if (a.length !== b.length || a.length === 0) return 1;
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i]! * b[i]!;
+    }
+    /** 夹紧到 [0, 2] 范围（浮点误差可能导致轻微超出） */
+    return Math.max(0, Math.min(2, 1 - dot));
   }
 
   /**
@@ -790,7 +824,7 @@ export class TrackStorage {
 
   /**
    * 查找与指定目标外观相似的已命名目标
-   * 综合使用 dHash（结构）+ 颜色直方图（颜色）+ LBP（纹理）
+   * 优先使用 CLIP embedding（高精度），回退到 dHash + 颜色 + LBP
    */
   findSimilar(
     trackId: number,
@@ -803,29 +837,37 @@ export class TrackStorage {
     colorHist?: number[],
     /** LBP 纹理直方图（可选，提供时参与匹配） */
     lbpHist?: number[],
+    /** CLIP 图像嵌入向量（可选，提供时优先使用） */
+    clipEmbedding?: number[],
   ): Array<{ trackId: number; customName: string; distance: number }> {
-    if (!dhash) return [];
+    if (!dhash && !clipEmbedding?.length) return [];
 
     /** 当前查询目标的完整指纹 */
-    const queryRec = { dhash, colorHist, lbpHist };
+    const queryRec = { dhash, colorHist, lbpHist, clipEmbedding };
 
     /** 同标签匹配结果 + 跨标签匹配结果 */
     const sameLabel: Array<{ trackId: number; customName: string; distance: number }> = [];
     const crossLabel: Array<{ trackId: number; customName: string; distance: number }> = [];
 
+    /** CLIP embedding 匹配时使用更严格的阈值（语义距离更可靠） */
+    const hasClip = !!clipEmbedding?.length;
+    const effectiveMaxDist = hasClip ? Math.min(maxDistance, 0.35) : maxDistance;
+
     for (const record of this.tracks.values()) {
       if (record.trackId === trackId) continue;
-      if (!record.customName || !record.dhash) continue;
+      if (!record.customName) continue;
+      /** 双方都没有 CLIP embedding 且没有 dHash 时跳过 */
+      if (!record.clipEmbedding?.length && !record.dhash) continue;
 
-      /** 使用最优距离（主指纹 + 备选指纹） */
+      /** 使用最优距离（优先 CLIP embedding） */
       const combinedDist = TrackStorage.computeBestDistance(queryRec, record);
 
       if (record.label === label) {
-        if (combinedDist <= maxDistance) {
+        if (combinedDist <= effectiveMaxDist) {
           sameLabel.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
         }
       } else {
-        if (combinedDist <= maxDistance * 1.2) {
+        if (combinedDist <= effectiveMaxDist * 1.2) {
           crossLabel.push({ trackId: record.trackId, customName: record.customName, distance: combinedDist });
         }
       }
