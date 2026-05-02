@@ -1154,6 +1154,7 @@ onUnmounted(() => {
             ref="recordingsPanel"
             :cameras="cameras"
             :track-labels="trackLabelsMap"
+            :active="activeTab === 'recordings'"
           />
           <CameraStatusPanel
             v-if="activeTab === 'status'"
@@ -1208,6 +1209,7 @@ onUnmounted(() => {
           ref="recordingsPanel"
           :cameras="cameras"
           :track-labels="trackLabelsMap"
+          :active="activeTab === 'recordings'"
         />
         <CameraStatusPanel
           v-if="activeTab === 'status'"

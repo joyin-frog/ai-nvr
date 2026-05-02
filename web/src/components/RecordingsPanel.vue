@@ -50,6 +50,8 @@ const props = defineProps<{
   cameras: Array<{ id: string; name: string }>
   /** 追踪标签映射：cameraId -> trackId -> 自定义名称 */
   trackLabels?: Record<string, Record<number, string>>
+  /** 是否为当前激活的标签页 */
+  active?: boolean
 }>()
 
 const recordings = ref<Recording[]>([])
@@ -1641,9 +1643,16 @@ watch(selectedRecording, (rec) => {
 
 onMounted(() => {
   loadRecordings()
-  /** 定时刷新录像列表（30 秒间隔） */
-  refreshTimer = setInterval(loadRecordings, 30000)
 })
+
+/** 监听 active 状态：激活时启动定时刷新，离开时停止 */
+watch(() => props.active, (isActive) => {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+  if (isActive) {
+    loadRecordings()
+    refreshTimer = setInterval(loadRecordings, 30000)
+  }
+}, { immediate: true })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
