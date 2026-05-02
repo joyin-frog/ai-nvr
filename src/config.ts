@@ -4,6 +4,19 @@ import yaml from "js-yaml";
 import { type AiConfig, type DetectMode } from "@/ai/types";
 import { type ClipConfig } from "@/ai/clip-service";
 
+/** 配置文件写操作互斥锁（防止并发 TOCTOU 竞态） */
+let configWriteQueue: Promise<void> = Promise.resolve();
+function withConfigLock<T>(fn: () => T): Promise<T> {
+  const prev = configWriteQueue;
+  let resolve_: (value: void) => void;
+  configWriteQueue = new Promise<void>(r => { resolve_ = r; });
+  return prev.then(() => {
+    const result = fn();
+    resolve_();
+    return result;
+  });
+}
+
 /** RTSP 流地址来源（直接连摄像机） */
 export interface StreamSource {
   /** 主码流 RTSP 地址 */
@@ -265,64 +278,70 @@ export function getConfigPath(): string {
 }
 
 /** 添加摄像头到配置文件并写回 YAML */
-export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number; group?: string }): void {
-  const raw = readFileSync(configFilePath, "utf-8");
-  const doc = yaml.load(raw) as Record<string, unknown>;
+export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number; group?: string }): Promise<void> {
+  return withConfigLock(() => {
+    const raw = readFileSync(configFilePath, "utf-8");
+    const doc = yaml.load(raw) as Record<string, unknown>;
 
-  const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+    const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
 
-  camerasNode[cam.id] = {
-    enabled: true,
-    friendly_name: cam.friendlyName,
-    stream: { hd: cam.hdUrl, sd: cam.sdUrl },
-    ...(cam.group ? { group: cam.group } : {}),
-    record: { enabled: true, continuous: { days: 0 }, motion: { days: 7 } },
-    detect: { enabled: true, width: 0, height: 0, fps: cam.detectFps ?? 25 },
-  };
+    camerasNode[cam.id] = {
+      enabled: true,
+      friendly_name: cam.friendlyName,
+      stream: { hd: cam.hdUrl, sd: cam.sdUrl },
+      ...(cam.group ? { group: cam.group } : {}),
+      record: { enabled: true, continuous: { days: 0 }, motion: { days: 7 } },
+      detect: { enabled: true, width: 0, height: 0, fps: cam.detectFps ?? 25 },
+    };
 
-  const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-  writeFileSync(configFilePath, yamlContent, "utf-8");
+    const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
+    writeFileSync(configFilePath, yamlContent, "utf-8");
+  });
 }
 
 /** 删除摄像头从配置文件 */
-export function removeCameraFromConfig(cameraId: string): void {
-  const raw = readFileSync(configFilePath, "utf-8");
-  const doc = yaml.load(raw) as Record<string, unknown>;
+export function removeCameraFromConfig(cameraId: string): Promise<void> {
+  return withConfigLock(() => {
+    const raw = readFileSync(configFilePath, "utf-8");
+    const doc = yaml.load(raw) as Record<string, unknown>;
 
-  const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
-  delete camerasNode[cameraId];
+    const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+    delete camerasNode[cameraId];
 
-  const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-  writeFileSync(configFilePath, yamlContent, "utf-8");
+    const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
+    writeFileSync(configFilePath, yamlContent, "utf-8");
+  });
 }
 
 /** 更新摄像头名称 */
-export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string; group?: string }): void {
-  const raw = readFileSync(configFilePath, "utf-8");
-  const doc = yaml.load(raw) as Record<string, unknown>;
+export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string; group?: string }): Promise<void> {
+  return withConfigLock(() => {
+    const raw = readFileSync(configFilePath, "utf-8");
+    const doc = yaml.load(raw) as Record<string, unknown>;
 
-  const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+    const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
 
-  const cam = camerasNode[cameraId];
-  if (!cam) throw new Error(`摄像头 ${cameraId} 不存在`);
+    const cam = camerasNode[cameraId];
+    if (!cam) throw new Error(`摄像头 ${cameraId} 不存在`);
 
-  if (updates.friendlyName) {
-    (cam as Record<string, unknown>).friendly_name = updates.friendlyName;
-  }
-  if (updates.hdUrl) {
-    const stream = (cam as Record<string, unknown>).stream as Record<string, unknown> | undefined;
-    if (stream) stream.hd = updates.hdUrl;
-  }
-  if (updates.sdUrl) {
-    const stream = (cam as Record<string, unknown>).stream as Record<string, unknown> | undefined;
-    if (stream) stream.sd = updates.sdUrl;
-  }
-  if (updates.group !== undefined) {
-    (cam as Record<string, unknown>).group = updates.group;
-  }
+    if (updates.friendlyName) {
+      (cam as Record<string, unknown>).friendly_name = updates.friendlyName;
+    }
+    if (updates.hdUrl) {
+      const stream = (cam as Record<string, unknown>).stream as Record<string, unknown> | undefined;
+      if (stream) stream.hd = updates.hdUrl;
+    }
+    if (updates.sdUrl) {
+      const stream = (cam as Record<string, unknown>).stream as Record<string, unknown> | undefined;
+      if (stream) stream.sd = updates.sdUrl;
+    }
+    if (updates.group !== undefined) {
+      (cam as Record<string, unknown>).group = updates.group;
+    }
 
-  const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-  writeFileSync(configFilePath, yamlContent, "utf-8");
+    const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
+    writeFileSync(configFilePath, yamlContent, "utf-8");
+  });
 }
 
 /** 监听配置文件变更，触发回调 */

@@ -383,7 +383,7 @@ export function startServer(
 
       /** 添加摄像头 */
       if (url.pathname === "/api/cameras" && req.method === "POST") {
-        return req.json().then((body: unknown) => {
+        return req.json().then(async (body: unknown) => {
           const obj = body as Record<string, unknown>;
           const id = obj.id as string | undefined;
           const friendlyName = obj.friendlyName as string | undefined;
@@ -392,7 +392,7 @@ export function startServer(
           if (!id || !friendlyName || !hdUrl || !sdUrl) {
             return new Response("Missing required fields: id, friendlyName, hdUrl, sdUrl", { status: 400 });
           }
-          addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined, group: obj.group as string | undefined });
+          await addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined, group: obj.group as string | undefined });
           /** 触发配置热重载 */
           const newConfig = loadConfig();
           cameraManager.reloadConfig(newConfig);
@@ -426,9 +426,9 @@ export function startServer(
         const cameraId = cameraByIdMatch[1]!;
 
         if (req.method === "PATCH") {
-          return req.json().then((body: unknown) => {
+          return req.json().then(async (body: unknown) => {
             const obj = body as Record<string, unknown>;
-            updateCameraInConfig(cameraId, {
+            await updateCameraInConfig(cameraId, {
               friendlyName: obj.friendlyName as string | undefined,
               hdUrl: obj.hdUrl as string | undefined,
               sdUrl: obj.sdUrl as string | undefined,
@@ -441,7 +441,7 @@ export function startServer(
         }
 
         if (req.method === "DELETE") {
-          removeCameraFromConfig(cameraId);
+          await removeCameraFromConfig(cameraId);
           const newConfig = loadConfig();
           cameraManager.reloadConfig(newConfig);
           return Response.json({ ok: true });
