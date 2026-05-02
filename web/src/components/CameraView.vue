@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 
@@ -982,9 +982,20 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
     /** 有自定义名称时简化显示（名称 + 置信度），无名称时显示完整信息 + 右键提示 */
     /** semanticLabel（CLIP 分类）优先于原始 label */
     const displayLabel = d.semanticLabel || d.label
+    /** 停留时间后缀（超过 5 秒才显示） */
+    let dwellSuffix = ''
+    if (tid) {
+      const firstSeen = getTrackFirstSeen(tid)
+      if (firstSeen) {
+        const dwellSec = (Date.now() - firstSeen) / 1000
+        if (dwellSec >= 5) {
+          dwellSuffix = dwellSec < 60 ? ` ${Math.round(dwellSec)}s` : ` ${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`
+        }
+      }
+    }
     const text = customName
-      ? `${customName} ${(d.score * 100).toFixed(0)}%`
-      : `${tid ? `#${tid} ` : ''}${displayLabel} ${(d.score * 100).toFixed(0)}%`
+      ? `${customName} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
+      : `${tid ? `#${tid} ` : ''}${displayLabel} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
 
     const textMetrics = ctx.measureText(text)
     const labelH = 18
@@ -1060,6 +1071,16 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       if (d.velocity) {
         const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
         if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
+      }
+      /** 停留时间 */
+      if (tid) {
+        const firstSeen = getTrackFirstSeen(tid)
+        if (firstSeen) {
+          const dwellSec = (Date.now() - firstSeen) / 1000
+          if (dwellSec >= 3) {
+            lines.push(`停留: ${dwellSec < 60 ? Math.round(dwellSec) + 's' : `${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`}`)
+          }
+        }
       }
       /** 未命名目标显示匹配建议 + 命名提示 */
       if (!isNamed && tid) {

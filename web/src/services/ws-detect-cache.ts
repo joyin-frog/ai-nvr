@@ -15,11 +15,36 @@ const versions = new Map<string, number>()
 /** 每个摄像头的 AI 推理耗时 */
 const inferMsMap = new Map<string, number>()
 
+/** 每个 trackId 的首次出现时间戳（用于计算停留时长） */
+const trackFirstSeen = new Map<number, number>()
+
 /** 存入检测结果 */
 export function putDetections(cameraId: string, dets: Detection[], inferMs?: number): void {
   detections.set(cameraId, dets)
   versions.set(cameraId, (versions.get(cameraId) ?? 0) + 1)
   if (inferMs != null) inferMsMap.set(cameraId, inferMs)
+  /** 记录首次出现时间 */
+  const now = Date.now()
+  const activeIds = new Set<number>()
+  for (const d of dets) {
+    if (d.trackId != null) {
+      activeIds.add(d.trackId)
+      if (!trackFirstSeen.has(d.trackId)) {
+        trackFirstSeen.set(d.trackId, now)
+      }
+    }
+  }
+  /** 清除已消失目标的记录 */
+  for (const [id] of trackFirstSeen) {
+    if (!activeIds.has(id)) {
+      trackFirstSeen.delete(id)
+    }
+  }
+}
+
+/** 获取目标首次出现时间 */
+export function getTrackFirstSeen(trackId: number): number | undefined {
+  return trackFirstSeen.get(trackId)
 }
 
 /** 读取检测结果（返回 null 表示无新检测） */
