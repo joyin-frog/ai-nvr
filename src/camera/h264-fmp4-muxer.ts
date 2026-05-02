@@ -409,6 +409,8 @@ export class H264Fmp4Extractor {
       /** 根据配置选择编码器（支持硬件加速） */
       const encoderArgs = this.getTranscodeArgs();
       args.push(...encoderArgs);
+      /** 转码模式限制线程数避免多路并发时 CPU 过载 */
+      args.push("-threads", "2");
     } else {
       /** 零转码 copy — CPU 开销极低 */
       args.push("-c:v", "copy");
