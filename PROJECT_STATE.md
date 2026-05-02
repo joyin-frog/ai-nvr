@@ -66,6 +66,7 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 - 帧驱动连续检测模式：detect:frame 事件触发，80% 间隔节流，比定时器延迟更低
 - ByteTrack 追踪器：min_hits=3 机制防止短暂误检产生幽灵 ID
 - CLIP 零样本分类：jina-clip-v2 为检测目标生成语义标签，全链路贯通
+- 丰富候选标签：10 类目标各 8-20 个描述变体，颜色/动作/状态全覆盖
 - 外观匹配：dHash + 颜色直方图 + LBP 纹理特征
 - 自动关联：高置信度匹配自动命名同名目标
 - 语义标签全链路：CLIP → Detector → BehaviorAnalyzer → EventBus → 持久化 → WS → 前端 → 通知
@@ -95,6 +96,8 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 - **录像缩略图**: 异步生成 + 磁盘缓存，不阻塞事件循环
 - **录像导出**: 异步非阻塞（裁剪/合并/GIF/ZIP），不冻结服务器
 - **录像回放**: 检测框二分查找 + 智能倍速 + A-B 循环 + 缩略图预览
+- **用户偏好**: SQLite 后端存储 + Vue composable，跨设备配置同步
+- **录像时长**: MP4 moov atom 精确解析，非依赖文件 mtime
 
 ## 模块说明
 | 模块 | 文件 | 职责 |
@@ -117,7 +120,8 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 | EventStorage | `src/storage/events.ts` | bun:sqlite 事件持久化 |
 | TrackStorage | `src/storage/tracks.ts` | 追踪目标快照 + dHash 外观匹配 |
 | AlertEngine | `src/alert/engine.ts` | 告警规则引擎 |
-| MotionRecorder | `src/storage/recorder.ts` | 变动触发录像 |
+| MotionRecorder | `src/storage/recorder.ts` | 变动触发录像，MP4 精确时长解析 |
+| PreferencesStorage | `src/storage/preferences.ts` | 用户偏好 SQLite key-value 存储 |
 
 ## 配置 (nvr_config.yml)
 ```yaml
