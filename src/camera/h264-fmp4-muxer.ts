@@ -777,7 +777,8 @@ class VideoToFmp4Muxer {
     data.writeUInt32BE(0x40000000, 68);  /** matrix[8] = 1.0 (2.30) */
     data.writeUInt32BE(w << 16, 72);     /** width 16.16 */
     data.writeUInt32BE(h << 16, 76);     /** height 16.16 */
-    return this.fullBox("tkhd", 1, data);
+    /** flags: enabled(1) + in_movie(2) + in_preview(4) = 7 */
+    return this.fullBox("tkhd", 7, data);
   }
 
   private buildMdhd(): Buffer {
@@ -884,7 +885,7 @@ class VideoToFmp4Muxer {
 
     const mfhd = this.box("mfhd", this.u32(this.sequenceNumber));
 
-    const tfhdData = Buffer.allocUnsafe(8);
+    const tfhdData = Buffer.allocUnsafe(4);
     tfhdData.writeUInt32BE(1, 0);
     const tfhd = this.fullBox("tfhd", 0x020000, tfhdData);
 
@@ -893,7 +894,7 @@ class VideoToFmp4Muxer {
     const tfdt = this.fullBox("tfdt", 0, tfdtDataV1, 1);
 
     const sampleCount = this.segmentFrames.length;
-    const trunFlags = 0x000F01;
+    const trunFlags = 0x000701;
     const trunDataSize = 4 + 4 + sampleCount * 12;
     const trunData = Buffer.allocUnsafe(trunDataSize);
     let off = 0;
