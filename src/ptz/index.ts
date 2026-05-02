@@ -41,6 +41,8 @@ export interface PtzCameraConfig {
   username: string;
   /** 密码 */
   password: string;
+  /** NVR 通道号（默认 1） */
+  channel: number;
 }
 
 /** PTZ 驱动统一接口 */
@@ -172,6 +174,7 @@ export class PtzController {
         port: config.port,
         username: config.username,
         password: config.password,
+        channel: config.channel,
       });
       await driver.connect();
       this.drivers.set(config.cameraId, driver);

@@ -222,6 +222,7 @@ for (const cam of config.cameras) {
       port: cam.ptz.port,
       username: cam.ptz.username,
       password: cam.ptz.password,
+      channel: cam.ptz.channel ?? 1,
     }).then(() => {
       console.log(`[PTZ] ${cam.id} 已注册`);
     }).catch((err) => {

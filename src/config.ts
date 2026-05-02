@@ -26,6 +26,8 @@ export interface PtzConfig {
   username: string;
   /** 密码 */
   password: string;
+  /** NVR 通道号（默认 1） */
+  channel?: number;
 }
 
 /** 单个摄像头配置 */
@@ -104,6 +106,11 @@ export interface AppConfig {
 function parsePtzConfig(cam: Record<string, unknown>): PtzConfig | undefined {
   const ptz = cam.ptz as Record<string, unknown> | undefined;
   if (!ptz || ptz.enabled !== true) return undefined;
+  /** 从 RTSP 流地址推断 NVR 通道号（如 stream1&channel=2 → 2） */
+  const hdStream = ((cam.stream as Record<string, unknown>)?.hd as string) ?? "";
+  const channelMatch = hdStream.match(/[&?]channel=(\d+)/);
+  const channel = channelMatch ? parseInt(channelMatch[1]!, 10) : 1;
+
   return {
     enabled: true,
     driver: (ptz.driver as "onvif" | "tplink") ?? "onvif",
@@ -111,6 +118,7 @@ function parsePtzConfig(cam: Record<string, unknown>): PtzConfig | undefined {
     port: (ptz.port as number) ?? 80,
     username: ptz.username as string,
     password: ptz.password as string,
+    channel: (ptz.channel as number) ?? channel,
   };
 }
 
