@@ -898,9 +898,11 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
 
     /** 绘制标签背景和文字 */
     /** 有自定义名称时简化显示（名称 + 置信度），无名称时显示完整信息 + 右键提示 */
+    /** semanticLabel（CLIP 分类）优先于原始 label */
+    const displayLabel = d.semanticLabel || d.label
     const text = customName
       ? `${customName} ${(d.score * 100).toFixed(0)}%`
-      : `${tid ? `#${tid} ` : ''}${d.label} ${(d.score * 100).toFixed(0)}%`
+      : `${tid ? `#${tid} ` : ''}${displayLabel} ${(d.score * 100).toFixed(0)}%`
 
     const textMetrics = ctx.measureText(text)
     const labelH = 18

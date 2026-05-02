@@ -12,6 +12,8 @@ export interface Detection {
   velocity?: { dx: number; dy: number }
   /** 主色调名称（如 "red", "blue"） */
   dominantColor?: string
+  /** CLIP 零样本分类语义标签（如 "a black dog", "a person walking"） */
+  semanticLabel?: string
 }
 
 /** 事件载荷类型 */
