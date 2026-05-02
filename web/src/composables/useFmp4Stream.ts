@@ -149,7 +149,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ]
   }
 
-  /** 追赶直播：延迟较小时加速播放，延迟较大时直接 seek */
+  /** 追赶直播：渐进式加速，延迟过大直接 seek */
   function catchUpToLive() {
     const video = videoRef.value
     if (!video || !sourceBuffer) return
@@ -163,8 +163,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       /** 延迟过大（>2.4s）直接 seek 到最新 */
       video.currentTime = end - 0.1
     } else if (delay > LIVE_CATCHUP_THRESHOLD) {
-      /** 中等延迟（0.8-2.4s）加速播放渐进追赶 */
-      video.playbackRate = 1.5
+      /** 渐进追赶：延迟越大速度越快，最大 1.3x（避免明显加速感） */
+      const rate = Math.min(1.3, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) / 4)
+      video.playbackRate = rate
     } else if (delay < 0.3 && video.playbackRate !== 1) {
       /** 追上后恢复正常速度 */
       video.playbackRate = 1
@@ -316,9 +317,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function queueAppend(data: ArrayBuffer) {
     if (appending) {
       pendingQueue.push(data)
-      /** 队列溢出保护：丢弃最旧的段，防止内存无限增长 */
+      /** 队列溢出保护：只保留最新段，丢弃旧的（实时流优先展示最新画面） */
       if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
-        pendingQueue.shift()
+        const newest = pendingQueue[pendingQueue.length - 1]!
+        pendingQueue = [newest]
       }
       return
     }
@@ -329,7 +331,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (!sourceBuffer || sourceBuffer.updating) {
       pendingQueue.push(data)
       if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
-        pendingQueue.shift()
+        const newest = pendingQueue[pendingQueue.length - 1]!
+        pendingQueue = [newest]
       }
       return
     }
