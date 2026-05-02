@@ -165,21 +165,18 @@ export class EventStorage {
 
   /**
    * 批量统计所有追踪目标的行为事件数量
-   * 从 detail JSON 中提取 trackId 并聚合
-   * 返回 trackId → 事件数量映射
+   * 使用 SQLite json_extract 直接在 SQL 层聚合，避免全量加载到 JS 内存
    */
   countByTrackId(): Map<number, number> {
     const result = new Map<number, number>();
     try {
       const rows = this.db.query(
-        `SELECT detail FROM events WHERE type LIKE 'track:%'`
-      ).all() as Array<{ detail: string | null }>;
+        `SELECT json_extract(detail, '$.trackId') as tid, COUNT(*) as cnt
+         FROM events WHERE type LIKE 'track:%' AND json_extract(detail, '$.trackId') IS NOT NULL
+         GROUP BY tid`
+      ).all() as Array<{ tid: number; cnt: number }>;
       for (const row of rows) {
-        if (!row.detail) continue;
-        const data = JSON.parse(row.detail) as { trackId?: number };
-        if (data.trackId) {
-          result.set(data.trackId, (result.get(data.trackId) ?? 0) + 1);
-        }
+        result.set(row.tid, row.cnt);
       }
     } catch { /* ignore parse errors */ }
     return result;
