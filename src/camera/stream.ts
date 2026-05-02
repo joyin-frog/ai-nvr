@@ -72,7 +72,10 @@ class JpegFrameSplitter {
     this.frameChunks.push(data.subarray(0, frameEnd));
     this.frameSize += frameEnd;
 
-    const frame = Buffer.concat(this.frameChunks, this.frameSize);
+    /** 单 chunk 快速路径：跳过 Buffer.concat 的分配和拷贝 */
+    const frame = this.frameChunks.length === 1
+      ? this.frameChunks[0]!
+      : Buffer.concat(this.frameChunks, this.frameSize);
     frames.push(frame);
 
     /** 重置帧状态 */

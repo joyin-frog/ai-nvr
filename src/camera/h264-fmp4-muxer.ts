@@ -37,6 +37,8 @@ class Fmp4StreamParser {
   private pendingChunks: Buffer[] = [];
   /** 已解析出的完整 box 列表（等待组装为 segment） */
   private completedBoxes: Array<{ type: string; data: Buffer }> = [];
+  /** media segment 中是否已收集到 moof（标志位替代 Array.some） */
+  private hasMoof = false;
   /** 是否已收集到 init segment (ftyp + moov) */
   private initCollected = false;
   /** 缓存的 init segment */
@@ -56,7 +58,8 @@ class Fmp4StreamParser {
 
   feed(data: Buffer, eventBus: EventBus, cameraId: string): void {
     if (this.pendingChunks.length === 0 && this.buffer.length === 0) {
-      this.buffer = Buffer.from(data);
+      /** data 来自 spawn stdout 的 data 事件，是独立 Buffer，可直接引用 */
+      this.buffer = data as typeof this.buffer;
     } else {
       this.pendingChunks.push(data);
     }
@@ -88,8 +91,7 @@ class Fmp4StreamParser {
   /** 将 pending chunks 合并到 buffer */
   private flattenIfNeeded(): void {
     if (this.pendingChunks.length === 0) return;
-    this.pendingChunks.unshift(this.buffer);
-    this.buffer = Buffer.concat(this.pendingChunks);
+    this.buffer = Buffer.concat([this.buffer, ...this.pendingChunks]);
     this.pendingChunks = [];
   }
 
@@ -158,9 +160,10 @@ class Fmp4StreamParser {
     } else {
       /** 收集 media segment: moof + mdat */
       this.completedBoxes.push({ type, data });
+      if (type === "moof") this.hasMoof = true;
 
       /** moof 后面跟的 mdat 组成一个完整的 media segment */
-      if (type === "mdat" && this.completedBoxes.some(b => b.type === "moof")) {
+      if (type === "mdat" && this.hasMoof) {
         const mediaData = concat2(this.completedBoxes[0]!.data, this.completedBoxes[1]!.data);
 
         /** 缓存最近一个 media segment（用于新客户端首帧） */
@@ -168,6 +171,7 @@ class Fmp4StreamParser {
 
         eventBus.emit("fmp4:segment", { cameraId, data: mediaData });
         this.completedBoxes.length = 0;
+        this.hasMoof = false;
 
         /** FPS 统计 */
         this.segmentCount++;

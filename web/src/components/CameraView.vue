@@ -21,6 +21,7 @@ const DOMINANT_COLOR_MAP: Record<string, string> = {
 }
 /** 缓存 prefers-reduced-motion（避免每帧 matchMedia 调用） */
 const PREFERS_REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const DPR = window.devicePixelRatio || 1
 const props = defineProps<{
   cameraId: string
   name: string
@@ -180,7 +181,7 @@ function drawStaticLayer(cssW: number, cssH: number) {
   staticLayerLastKey = key
   staticLayerDirty = false
 
-  const dpr = window.devicePixelRatio || 1
+  const dpr = DPR
   const canvasW = Math.round(cssW * dpr)
   const canvasH = Math.round(cssH * dpr)
   if (sCanvas.width !== canvasW || sCanvas.height !== canvasH) {
@@ -246,7 +247,7 @@ function drawOverlayOnce() {
   if (!canvas || !video) return
 
   /** 使用缓存的 CSS 像素尺寸（由 ResizeObserver 维护，避免每帧强制布局重排） */
-  const dpr = window.devicePixelRatio || 1
+  const dpr = DPR
   const cssW = cachedCssW
   const cssH = cachedCssH
   if (cssW === 0 || cssH === 0) return

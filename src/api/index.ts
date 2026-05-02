@@ -77,6 +77,7 @@ const wsClients = new Set<WsClient>();
 /** WebSocket 心跳检测：每 30 秒 ping，60 秒无 pong 关闭假死连接 */
 const WS_PING_INTERVAL = 30_000;
 const WS_PONG_TIMEOUT = 60_000;
+const textEncoder = new TextEncoder();
 const wsLastPong = new WeakMap<WsClient, number>();
 let wsHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 function startWsHeartbeat() {
@@ -780,9 +781,9 @@ export function startServer(
 
               try {
                 const header = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${payload.data.length}\r\n\r\n`;
-                controller.enqueue(new TextEncoder().encode(header));
+                controller.enqueue(textEncoder.encode(header));
                 controller.enqueue(payload.data);
-                controller.enqueue(new TextEncoder().encode("\r\n"));
+                controller.enqueue(textEncoder.encode("\r\n"));
                 if (Date.now() - lastStreamLog >= 10000) {
                   console.log(`[Perf][MJPEG][${cameraId}] ${streamFrames}帧/10s`);
                   streamFrames = 0;
@@ -804,9 +805,9 @@ export function startServer(
             /** 立即发送当前帧（如果有） */
             if (frame) {
               const initHeader = `${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`;
-              controller.enqueue(new TextEncoder().encode(initHeader));
+              controller.enqueue(textEncoder.encode(initHeader));
               controller.enqueue(frame);
-              controller.enqueue(new TextEncoder().encode("\r\n"));
+              controller.enqueue(textEncoder.encode("\r\n"));
             }
             resetIdle();
           },
