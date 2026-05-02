@@ -217,6 +217,7 @@ for (const cam of config.cameras) {
   if (cam.ptz?.enabled) {
     ptzController.register({
       cameraId: cam.id,
+      driver: cam.ptz.driver ?? "onvif",
       hostname: cam.ptz.host,
       port: cam.ptz.port,
       username: cam.ptz.username,

@@ -25,9 +25,19 @@ declare module "onvif/promises" {
     utcTime?: string
   }
 
+  interface ServiceUri {
+    protocol?: string
+    hostname?: string
+    port?: string
+    path?: string
+    href?: string
+    [key: string]: unknown
+  }
+
   class Cam {
     username?: string
     password?: string
+    uri?: Record<string, ServiceUri>
     constructor(options: CamOptions)
     connect(): Promise<void>
     continuousMove(options: MoveOptions): Promise<unknown>

@@ -16,9 +16,11 @@ export interface StreamSource {
 export interface PtzConfig {
   /** 是否启用 PTZ */
   enabled: boolean;
-  /** ONVIF 设备主机地址 */
+  /** 驱动类型: "onvif"（默认）或 "tplink" */
+  driver?: "onvif" | "tplink";
+  /** 设备主机地址 */
   host: string;
-  /** ONVIF 端口 */
+  /** 端口（默认 80） */
   port: number;
   /** 用户名 */
   username: string;
@@ -104,6 +106,7 @@ function parsePtzConfig(cam: Record<string, unknown>): PtzConfig | undefined {
   if (!ptz || ptz.enabled !== true) return undefined;
   return {
     enabled: true,
+    driver: (ptz.driver as "onvif" | "tplink") ?? "onvif",
     host: ptz.host as string,
     port: (ptz.port as number) ?? 80,
     username: ptz.username as string,
