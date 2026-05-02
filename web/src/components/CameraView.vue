@@ -1091,16 +1091,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     /** 绘制圆角矩形框 + 半透明填充 */
     const r = Math.min(4, w / 4, h / 4)
     ctx.beginPath()
-    ctx.moveTo(x + r, y)
-    ctx.lineTo(x + w - r, y)
-    ctx.arcTo(x + w, y, x + w, y + r, r)
-    ctx.lineTo(x + w, y + h - r)
-    ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
-    ctx.lineTo(x + r, y + h)
-    ctx.arcTo(x, y + h, x, y + h - r, r)
-    ctx.lineTo(x, y + r)
-    ctx.arcTo(x, y, x + r, y, r)
-    ctx.closePath()
+    ctx.roundRect(x, y, w, h, r)
 
     ctx.fillStyle = fill
     ctx.fill()
@@ -1136,16 +1127,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
     /** 标签背景：圆角 + 不透明填充 */
     ctx.beginPath()
-    ctx.moveTo(x + 2, labelY - labelH)
-    ctx.lineTo(x + labelW - 2, labelY - labelH)
-    ctx.arcTo(x + labelW, labelY - labelH, x + labelW, labelY - labelH + 2, 2)
-    ctx.lineTo(x + labelW, labelY - 2)
-    ctx.arcTo(x + labelW, labelY, x + labelW - 2, labelY, 2)
-    ctx.lineTo(x + 2, labelY)
-    ctx.arcTo(x, labelY, x, labelY - 2, 2)
-    ctx.lineTo(x, labelY - labelH + 2)
-    ctx.arcTo(x, labelY - labelH, x + 2, labelY - labelH, 2)
-    ctx.closePath()
+    ctx.roundRect(x, labelY - labelH, labelW, labelH, 2)
     ctx.fillStyle = stroke
     ctx.fill()
     ctx.fillStyle = '#fff'
