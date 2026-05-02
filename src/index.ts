@@ -297,9 +297,9 @@ watchConfig(undefined, (newConfig) => {
   console.log(`[Config] 热重载完成，${newConfig.cameras.length} 个摄像头`);
 });
 
-/** 优雅退出 */
-process.on("SIGINT", () => {
-  console.log("\n[App] 正在关闭...");
+/** 优雅关闭函数 */
+function gracefulShutdown(signal: string): void {
+  console.log(`\n[App] 收到 ${signal}，正在关闭...`);
   recorder.stop();
   cameraManager.stop();
   behaviorAnalyzer.stop();
@@ -316,7 +316,10 @@ process.on("SIGINT", () => {
   trajectoryStorage.close();
   eventBus.clear();
   process.exit(0);
-});
+}
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 /** bun --watch 重启时不发 SIGINT，用 beforeExit 清理 ffmpeg 子进程 */
 process.on("beforeExit", () => {
