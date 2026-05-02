@@ -276,12 +276,19 @@ const client = new EventClient(authWsUrl('/api/events'))
 /** 动态标题：闪烁后自动恢复 */
 let titleTimer: ReturnType<typeof setTimeout> | null = null
 function flashTitle(message: string, duration = 5000) {
-  document.title = `⚠ ${message}`
-  if (titleTimer) clearTimeout(titleTimer)
-  titleTimer = setTimeout(() => {
-    const online = onlineCameras.value.length
-    document.title = `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online })}`
-    titleTimer = null
+  if (titleTimer) clearInterval(titleTimer)
+  let toggle = false
+  const alertTitle = `⚠ ${message}`
+  const normalTitle = () => `JK NVR - ${t('notify.titleOnline', { total: cameras.value.length, online: onlineCameras.value.length })}`
+  /** 交替闪烁标题（1 秒间隔） */
+  titleTimer = setInterval(() => {
+    toggle = !toggle
+    document.title = toggle ? alertTitle : normalTitle()
+  }, 1000)
+  /** 超时后停止闪烁，恢复正常标题 */
+  setTimeout(() => {
+    if (titleTimer) { clearInterval(titleTimer); titleTimer = null }
+    document.title = normalTitle()
   }, duration)
 }
 
