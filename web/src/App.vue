@@ -470,13 +470,23 @@ function togglePatrol() {
   }
 }
 
+/** 根据可见摄像头数量自动计算最佳网格列数 */
+const autoColumnCount = computed(() => {
+  const count = visibleCameras.value.length
+  if (count <= 1) return 1
+  if (count <= 4) return 2
+  if (count <= 9) return 3
+  if (count <= 16) return 4
+  return 5
+})
+
 /** 网格列数样式 */
 const gridStyle = computed(() => {
   if (fullscreenCamera.value) return {}
   if (isMobile.value) return { 'grid-template-columns': '1fr' }
   const n = gridCols.value
   if (n > 0) return { 'grid-template-columns': `repeat(${n}, 1fr)` }
-  return { 'grid-template-columns': 'repeat(auto-fit, minmax(400px, 1fr))' }
+  return { 'grid-template-columns': `repeat(${autoColumnCount.value}, 1fr)` }
 })
 
 /** 按 cameraOrder 排序的摄像头列表 */
