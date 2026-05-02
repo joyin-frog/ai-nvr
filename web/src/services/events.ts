@@ -33,6 +33,7 @@ export interface EventMap {
   'track:line-cross': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; lineId: number; lineName: string; direction: string }
   'track:loiter': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; durationMs: number }
   'track:match-suggest': { cameraId: string; timestamp: number; trackId: number; label: string; matches: Array<{ trackId: number; customName: string; distance: number }> }
+  'llm:scene': { cameraId: string; timestamp: number; description: string; trigger: string; inferMs: number }
 }
 
 /** 事件回调 */

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame } from './services/ws-frame-cache'
-import { putDetections, pushZoneNotification, pushMatchSuggestion } from './services/ws-detect-cache'
+import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -886,6 +886,12 @@ function setupEventListeners() {
     map[payload.cameraId] = camMap
     trackLabelsMap.value = { ...map }
     trackGallery.value?.loadTracks()
+  })
+
+  /** LLM 场景分析结果 → 推送到 CameraView overlay */
+  client.on('llm:scene', (payload) => {
+    putLlmDescription(payload.cameraId, payload.description, payload.timestamp)
+    eventPanel.value?.addEvent('llm:scene', payload.cameraId, `AI: ${payload.description}`)
   })
 
 }

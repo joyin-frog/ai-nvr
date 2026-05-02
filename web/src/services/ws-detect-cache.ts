@@ -146,3 +146,31 @@ export function getMatchSuggestionForTrack(cameraId: string, trackId: number): s
   }
   return null
 }
+
+/**
+ * LLM 场景描述缓存
+ * llm:scene 事件到达时存入，CameraView overlay 显示 AI 分析结果
+ */
+
+/** LLM 描述显示时长（ms） */
+const LLM_DESC_TTL = 15000
+
+/** 每个摄像头的最新 LLM 描述 */
+const llmDescriptions = new Map<string, { description: string; timestamp: number }>()
+
+/** 存储 LLM 场景描述 */
+export function putLlmDescription(cameraId: string, description: string, timestamp: number): void {
+  llmDescriptions.set(cameraId, { description, timestamp })
+}
+
+/** 获取并清理过期的 LLM 描述 */
+export function takeLlmDescription(cameraId: string): string | null {
+  const entry = llmDescriptions.get(cameraId)
+  if (!entry) return null
+  const now = Date.now()
+  if (now - entry.timestamp > LLM_DESC_TTL) {
+    llmDescriptions.delete(cameraId)
+    return null
+  }
+  return entry.description
+}

@@ -1,5 +1,6 @@
 import { type Detection } from "@/ai/types";
 import { type Fmp4InitSegment } from "@/camera/h264-fmp4-muxer";
+import { type LlmSceneResult } from "@/ai/multimodal-analyzer";
 
 /** 事件载荷类型定义 */
 export interface EventPayloads {
@@ -241,6 +242,9 @@ export interface EventPayloads {
     cameraId: string;
     data: Buffer;
   };
+
+  /** LLM 场景分析结果 */
+  "llm:scene": LlmSceneResult;
 
 }
 

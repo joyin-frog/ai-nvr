@@ -1,3 +1,5 @@
+import { type LlmConfig } from "./multimodal-analyzer";
+
 /** 单个检测结果 */
 export interface Detection {
   /** 检测到的物体类别（如 person, car, dog） */
@@ -60,4 +62,6 @@ export interface AiConfig {
   speedThreshold: number;
   /** 徘徊检测阈值（秒，目标在 ROI 内来回移动超过此时间触发，0 = 禁用） */
   loiterThreshold: number;
+  /** 多模态 LLM 配置 */
+  llm: LlmConfig;
 }

@@ -174,6 +174,7 @@ export function loadConfig(configPath?: string): AppConfig {
       autoMatchThreshold: (aiNode?.auto_match_threshold as number) ?? 0.25,
       speedThreshold: (aiNode?.speed_threshold as number) ?? 0.02,
       loiterThreshold: (aiNode?.loiter_threshold as number) ?? 0,
+      llm: parseLlmConfig(aiNode?.llm as Record<string, unknown> | undefined),
     },
     auth: {
       token: (authNode?.token as string) ?? "",
@@ -185,6 +186,32 @@ export function loadConfig(configPath?: string): AppConfig {
       dataDir: (doc.storage as Record<string, unknown>)?.data_dir as string
         ?? resolve(import.meta.dir, "../data"),
     },
+  };
+}
+
+/** 解析 LLM 配置 */
+function parseLlmConfig(llmNode: Record<string, unknown> | undefined): import("@/ai/types").AiConfig["llm"] {
+  if (!llmNode) {
+    return {
+      enabled: false,
+      apiUrl: "",
+      model: "",
+      maxTokens: 150,
+      interval: 10000,
+      imageWidth: 640,
+      systemPrompt: "",
+      triggers: [],
+    };
+  }
+  return {
+    enabled: (llmNode.enabled as boolean) ?? false,
+    apiUrl: (llmNode.api_url as string) ?? "",
+    model: (llmNode.model as string) ?? "",
+    maxTokens: (llmNode.max_tokens as number) ?? 150,
+    interval: (llmNode.interval as number) ?? 10000,
+    imageWidth: (llmNode.image_width as number) ?? 640,
+    systemPrompt: (llmNode.system_prompt as string) ?? "",
+    triggers: Array.isArray(llmNode.triggers) ? llmNode.triggers.filter((t: unknown): t is string => typeof t === "string") : [],
   };
 }
 

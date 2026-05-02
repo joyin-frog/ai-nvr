@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 
@@ -164,6 +164,12 @@ function drawOverlayOnce() {
     drawDetectionOverlay(ctx, cssW, cssH)
   } else {
     drawOSD(ctx, cssW, cssH)
+  }
+
+  /** LLM 场景描述（AI 分析覆盖层） */
+  const llmDesc = takeLlmDescription(props.cameraId)
+  if (llmDesc) {
+    drawLlmDescription(ctx, cssW, cssH, llmDesc)
   }
 }
 
@@ -546,6 +552,46 @@ function getColor(label: string, trackId?: number, customName?: string): { strok
 }
 
 /** Canvas overlay 绘制 OSD（摄像头名称 + 时钟 + FPS/延迟/AI指标） */
+/** 绘制 LLM 场景描述（左下角半透明条） */
+function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height: number, desc: string) {
+  ctx.save()
+  const fontSize = 12
+  ctx.font = `${fontSize}px sans-serif`
+  ctx.textBaseline = 'bottom'
+
+  /** 自动换行 */
+  const maxLineWidth = width - 16
+  const lines: string[] = []
+  let currentLine = ''
+  for (const ch of desc) {
+    const testLine = currentLine + ch
+    if (ctx.measureText(testLine).width > maxLineWidth) {
+      if (currentLine) lines.push(currentLine)
+      currentLine = ch
+    } else {
+      currentLine = testLine
+    }
+  }
+  if (currentLine) lines.push(currentLine)
+  /** 最多 3 行 */
+  const displayLines = lines.slice(0, 3)
+
+  const lineHeight = fontSize + 4
+  const pad = 6
+  const boxH = displayLines.length * lineHeight + pad * 2
+  /** 放在时钟上方 */
+  const boxY = height - 26 - boxH - 4
+
+  ctx.fillStyle = 'rgba(156, 39, 176, 0.7)'
+  ctx.fillRect(4, boxY, width - 8, boxH)
+
+  ctx.fillStyle = '#fff'
+  for (let i = 0; i < displayLines.length; i++) {
+    ctx.fillText(displayLines[i]!, 4 + pad, boxY + pad + (i + 1) * lineHeight - 4)
+  }
+  ctx.restore()
+}
+
 function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
   ctx.save()
 

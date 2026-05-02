@@ -30,6 +30,7 @@ import { PreferencesStorage } from "@/storage/preferences";
 import { CrossLineStorage } from "@/storage/cross-lines";
 import { TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { StorageFs } from "@/storage/storage-fs";
+import { MultimodalAnalyzer } from "@/ai/multimodal-analyzer";
 
 /**
  * 安装内存日志缓冲区（拦截 console.log/warn/error）
@@ -156,6 +157,12 @@ import { BehaviorAnalyzer } from "@/ai/behavior";
 const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage, runtimeConfig);
 behaviorAnalyzer.start();
 
+/** 多模态 LLM 分析器（场景语义描述） */
+const multimodalAnalyzer = new MultimodalAnalyzer(eventBus, runtimeConfig.get().ai.llm);
+if (runtimeConfig.get().ai.llm.enabled) {
+  multimodalAnalyzer.start();
+}
+
 /** 用户偏好设置存储 */
 const preferencesStorage = new PreferencesStorage(join(dataDir, "preferences.db"));
 
@@ -208,7 +215,7 @@ function flushPendingEvents() {
   eventStorage.insertMany(batch);
 }
 
-const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter"] as const;
+const RECORDED_EVENTS = ["motion", "detect", "camera:online", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "llm:scene"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -230,6 +237,9 @@ for (const eventType of RECORDED_EVENTS) {
     } else if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });
+    } else if (eventType === "llm:scene") {
+      const p = payload as { description: string; trigger: string; inferMs: number };
+      detail = JSON.stringify({ description: p.description, trigger: p.trigger, inferMs: p.inferMs });
     } else if (eventType.startsWith("track:")) {
       const p = payload as Record<string, unknown>;
       const obj: Record<string, unknown> = { trackId: p.trackId, label: p.label };
@@ -260,6 +270,7 @@ process.on("SIGINT", () => {
   recorder.stop();
   cameraManager.stop();
   behaviorAnalyzer.stop();
+  multimodalAnalyzer.stop();
   cleaner.stop();
   eventStorage.close();
   roiStorage.close();

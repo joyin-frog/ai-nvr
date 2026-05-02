@@ -135,7 +135,7 @@ export class RuntimeConfig {
   constructor(config: AppConfig) {
     this.settings = {
       motion: { ...config.motion },
-      ai: { ...config.ai },
+      ai: { ...config.ai, llm: { ...config.ai.llm } },
       cameraOverrides: {},
       recording: {
         mode: "motion",
@@ -207,6 +207,17 @@ export class RuntimeConfig {
       if (typeof a.speedThreshold === "number") this.settings.ai.speedThreshold = a.speedThreshold;
       if (typeof a.loiterThreshold === "number") this.settings.ai.loiterThreshold = a.loiterThreshold;
       if (Array.isArray(a.importantLabels)) this.settings.ai.importantLabels = a.importantLabels.filter((l: unknown): l is string => typeof l === "string");
+      if (a.llm && typeof a.llm === "object") {
+        const l = a.llm as Record<string, unknown>;
+        if (typeof l.enabled === "boolean") this.settings.ai.llm.enabled = l.enabled;
+        if (typeof l.apiUrl === "string") this.settings.ai.llm.apiUrl = l.apiUrl;
+        if (typeof l.model === "string") this.settings.ai.llm.model = l.model;
+        if (typeof l.maxTokens === "number") this.settings.ai.llm.maxTokens = l.maxTokens;
+        if (typeof l.interval === "number") this.settings.ai.llm.interval = l.interval;
+        if (typeof l.imageWidth === "number") this.settings.ai.llm.imageWidth = l.imageWidth;
+        if (typeof l.systemPrompt === "string") this.settings.ai.llm.systemPrompt = l.systemPrompt;
+        if (Array.isArray(l.triggers)) this.settings.ai.llm.triggers = l.triggers.filter((t: unknown): t is string => typeof t === "string");
+      }
     }
 
     if (obj.recording && typeof obj.recording === "object") {
