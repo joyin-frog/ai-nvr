@@ -102,8 +102,8 @@ export class MotionDetector {
     const pixels = new Uint8Array(data.buffer);
 
     try {
-    /** 构建 ROI mask（每60秒刷新一次） */
-    const roiKey = `${cameraId}:${Math.floor(timestamp / 60000)}`;
+    /** 构建 ROI mask（仅在配置变化时重建） */
+    const roiKey = this.getRoiCacheKey(cameraId, width, height);
     if (state.roiCacheKey !== roiKey) {
       state.roiMask = this.buildRoiMask(cameraId, width, height);
       state.roiCacheKey = roiKey;
@@ -173,6 +173,13 @@ export class MotionDetector {
    * 返回一个与图像同大小的 Uint8Array，1 = 在检测区域内，0 = 不在
    * 如果没有 ROI，返回 null（表示全图检测）
    */
+  /** 计算 ROI 缓存 key：只在多边形配置或分辨率变化时才重建 mask */
+  private getRoiCacheKey(cameraId: string, width: number, height: number): string {
+    const polygons = this.roiStorage.getEnabledPolygons(cameraId);
+    if (polygons.length === 0) return `${width}x${height}:none`;
+    return `${width}x${height}:${polygons.map(p => p.points.map(pt => `${pt.x.toFixed(4)},${pt.y.toFixed(4)}`).join(";")).join("|")}`;
+  }
+
   private buildRoiMask(cameraId: string, width: number, height: number): Uint8Array | null {
     const polygons = this.roiStorage.getEnabledPolygons(cameraId);
     if (polygons.length === 0) return null;
