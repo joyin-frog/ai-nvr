@@ -116,14 +116,15 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       })
     }
 
-    /** 解码错误时重连 */
+    /** 解码错误时重连（通过 scheduleReconnect 带退避和上限） */
     const onError = () => {
       const err = el.error
       if (err) {
         console.warn(`[fMP4] video error: code=${err.code} ${err.message}`)
-        /** MEDIA_ERR_DECODE (3) 或 MEDIA_ERR_SRC_NOT_SUPPORTED (4) → 重连 */
+        /** MEDIA_ERR_DECODE (3) 或 MEDIA_ERR_SRC_NOT_SUPPORTED (4) → 延迟重连 */
         if (err.code >= 3) {
-          connect()
+          ws?.close()
+          scheduleReconnect()
         }
       }
     }
