@@ -836,8 +836,16 @@ function drawHeatmapCache(width: number, height: number): OffscreenCanvas | null
   const gridCols = grid[0]?.length ?? 0
   if (!gridRows || !gridCols) return null
 
-  /** 缓存 key：网格数据摘要 + 尺寸 */
-  const key = `${width}:${height}:${maxCount}:${gridRows}x${gridCols}:${grid[0]?.[0]}:${grid[Math.floor(gridRows/2)]?.[Math.floor(gridCols/2)]}`
+  /** 缓存 key：网格非零值数量+总和+采样点，确保数据变化时 key 不同 */
+  let nonZeroCount = 0
+  let nonZeroSum = 0
+  for (let row = 0; row < gridRows; row++) {
+    for (let col = 0; col < gridCols; col++) {
+      const v = grid[row]?.[col] ?? 0
+      if (v > 0) { nonZeroCount++; nonZeroSum += v }
+    }
+  }
+  const key = `${width}:${height}:${maxCount}:${nonZeroCount}:${nonZeroSum}`
   if (heatmapCacheCanvas && heatmapCacheW === width && heatmapCacheH === height && heatmapCacheKey === key) {
     return heatmapCacheCanvas
   }
