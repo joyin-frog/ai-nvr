@@ -421,6 +421,8 @@ onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (activeTickTimer) clearInterval(activeTickTimer)
 })
+
+defineExpose({ loadTracks })
 </script>
 
 <template>

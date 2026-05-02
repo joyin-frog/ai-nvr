@@ -207,6 +207,7 @@ const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
 const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
+const trackGallery = ref<InstanceType<typeof TrackGallery> | null>(null)
 const showShortcuts = ref(false)
 
 /** 认证状态 */
@@ -865,6 +866,7 @@ function setupEventListeners() {
     }
     map[payload.cameraId] = camMap
     trackLabelsMap.value = { ...map }
+    trackGallery.value?.loadTracks()
   })
 
 }
@@ -1126,7 +1128,7 @@ onUnmounted(() => {
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-          <TrackGallery v-if="activeTab === 'tracks'" :cameras="cameras" @jump-to-recording="onPlayRecording" @view-live="onViewLive" />
+          <TrackGallery v-if="activeTab === 'tracks'" ref="trackGallery" :cameras="cameras" @jump-to-recording="onPlayRecording" @view-live="onViewLive" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
@@ -1180,7 +1182,7 @@ onUnmounted(() => {
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-        <TrackGallery v-if="activeTab === 'tracks'" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        <TrackGallery v-if="activeTab === 'tracks'" ref="trackGallery" :cameras="cameras" @jump-to-recording="onPlayRecording" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>
