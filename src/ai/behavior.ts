@@ -19,6 +19,8 @@ interface TrackZoneState {
   label: string;
   /** 用户名称 */
   trackName?: string;
+  /** CLIP 语义标签 */
+  semanticLabel?: string;
   /** 上次速度告警时间 */
   lastSpeedAlertAt: number;
   /** 上一帧中心点位置（用于越线检测） */
@@ -124,6 +126,7 @@ export class BehaviorAnalyzer {
       label: string;
       trackId?: number;
       trackName?: string;
+      semanticLabel?: string;
       box: { xmin: number; ymin: number; xmax: number; ymax: number };
       velocity?: { dx: number; dy: number };
     }>,
@@ -143,8 +146,9 @@ export class BehaviorAnalyzer {
       const cy = (det.box.ymin + det.box.ymax) / 2;
 
       const trackState = this.getOrCreateTrackState(cameraStates, det.trackId, det.label);
-      /** 同步最新的 trackName */
+      /** 同步最新的 trackName 和 semanticLabel */
       if (det.trackName) trackState.trackName = det.trackName;
+      if (det.semanticLabel) trackState.semanticLabel = det.semanticLabel;
 
       /** 越线检测（在区域检测之前，使用 prevCx/prevCy） */
       if (lines.length > 0 && trackState.prevCx !== undefined && trackState.prevCy !== undefined) {
@@ -166,6 +170,7 @@ export class BehaviorAnalyzer {
               trackId: det.trackId,
               label: det.label,
               trackName: trackState.trackName,
+              semanticLabel: trackState.semanticLabel,
               lineId: line.id,
               lineName: line.name,
               direction: crossResult,
@@ -196,6 +201,7 @@ export class BehaviorAnalyzer {
             trackId: det.trackId,
             label: det.label,
             trackName: trackState.trackName,
+            semanticLabel: trackState.semanticLabel,
             zoneId: zone.id,
             zoneName: zone.name,
           });
@@ -211,6 +217,7 @@ export class BehaviorAnalyzer {
               trackId: det.trackId,
               label: det.label,
               trackName: trackState.trackName,
+              semanticLabel: trackState.semanticLabel,
               zoneId: zone.id,
               zoneName: zone.name,
               dwellMs,
@@ -227,6 +234,7 @@ export class BehaviorAnalyzer {
             trackId: det.trackId,
             label: det.label,
             trackName: trackState.trackName,
+            semanticLabel: trackState.semanticLabel,
             zoneId: zone.id,
             zoneName: zone.name,
             dwellMs,
@@ -249,6 +257,7 @@ export class BehaviorAnalyzer {
             trackId,
             label: trackState.label,
             trackName: trackState.trackName,
+            semanticLabel: trackState.semanticLabel,
             zoneId,
             zoneName: zone?.name ?? "",
             dwellMs: timestamp - occ.enteredAt,
@@ -276,6 +285,7 @@ export class BehaviorAnalyzer {
         trackId: det.trackId,
         label: det.label,
         trackName: trackState.trackName,
+        semanticLabel: trackState.semanticLabel,
         speed,
         velocity: det.velocity,
       });
@@ -350,6 +360,7 @@ export class BehaviorAnalyzer {
           trackId: det.trackId,
           label: det.label,
           trackName: trackState.trackName,
+          semanticLabel: trackState.semanticLabel,
           zoneId,
           zoneName,
           durationMs: timestamp - recentPts[0]!.ts,

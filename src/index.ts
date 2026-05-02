@@ -246,8 +246,8 @@ for (const eventType of RECORDED_EVENTS) {
     if (eventType === "motion") {
       detail = JSON.stringify({ ratio: (payload as { ratio: number }).ratio });
     } else if (eventType === "detect") {
-      const p = payload as { detections: Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number; trackName?: string }> };
-      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId, trackName: d.trackName })) });
+      const p = payload as { detections: Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number; trackName?: string; semanticLabel?: string }> };
+      detail = JSON.stringify({ detections: p.detections.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId, trackName: d.trackName, semanticLabel: d.semanticLabel })) });
     } else if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });
@@ -258,10 +258,12 @@ for (const eventType of RECORDED_EVENTS) {
       const p = payload as Record<string, unknown>;
       const obj: Record<string, unknown> = { trackId: p.trackId, label: p.label };
       if (p.trackName) obj.trackName = p.trackName;
+      if (p.semanticLabel) obj.semanticLabel = p.semanticLabel;
       if (p.zoneId !== undefined) obj.zoneId = p.zoneId;
       if (p.zoneName) obj.zoneName = p.zoneName;
       if (p.dwellMs !== undefined) obj.dwellMs = p.dwellMs;
       if (p.score !== undefined) obj.score = p.score;
+      if (p.speed !== undefined) obj.speed = p.speed;
       detail = JSON.stringify(obj);
     }
     pendingEvents.push({ type: eventType, cameraId: (payload as { cameraId: string }).cameraId, timestamp: (payload as { timestamp: number }).timestamp ?? Date.now(), detail });

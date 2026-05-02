@@ -97,6 +97,8 @@ export interface EventPayloads {
     score: number;
     /** 用户自定义名称 */
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
   };
 
   /** 追踪目标消失 */
@@ -111,6 +113,8 @@ export interface EventPayloads {
     label: string;
     /** 用户自定义名称 */
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
   };
 
   /** 追踪目标标签更新（广播给其他客户端） */
@@ -127,6 +131,8 @@ export interface EventPayloads {
     trackId: number;
     label: string;
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
     /** ROI 区域 ID */
     zoneId: number;
     /** ROI 区域名称 */
@@ -140,6 +146,8 @@ export interface EventPayloads {
     trackId: number;
     label: string;
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
     /** ROI 区域 ID */
     zoneId: number;
     /** ROI 区域名称 */
@@ -155,6 +163,8 @@ export interface EventPayloads {
     trackId: number;
     label: string;
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
     /** ROI 区域 ID */
     zoneId: number;
     /** ROI 区域名称 */
@@ -170,6 +180,8 @@ export interface EventPayloads {
     trackId: number;
     label: string;
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
     /** 移动速度（归一化坐标/帧的向量长度） */
     speed: number;
     /** 速度向量 */
@@ -188,6 +200,8 @@ export interface EventPayloads {
     label: string;
     /** 用户自定义名称 */
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
     /** 检测线段 ID */
     lineId: number;
     /** 检测线段名称 */
@@ -222,6 +236,8 @@ export interface EventPayloads {
     trackId: number;
     label: string;
     trackName?: string;
+    /** CLIP 语义标签 */
+    semanticLabel?: string;
     /** 所在区域 ID（0 = 不在任何 ROI 区域内） */
     zoneId: number;
     zoneName: string;

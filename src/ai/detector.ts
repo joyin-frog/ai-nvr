@@ -538,6 +538,7 @@ export class AiDetector {
           label: target.label,
           score: target.score,
           trackName: trackName || undefined,
+          semanticLabel: target.trackId ? this.semanticLabelCache.get(target.trackId) : undefined,
         });
       }
       for (const target of trackResult.disappeared) {
@@ -548,6 +549,7 @@ export class AiDetector {
           trackId: target.trackId,
           label: target.label,
           trackName: trackName || undefined,
+          semanticLabel: target.trackId ? this.semanticLabelCache.get(target.trackId) : undefined,
         });
       }
 
