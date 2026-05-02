@@ -285,20 +285,65 @@ export class AiDetector {
   }
 
   /** 启动连续检测循环 */
+  private baseInterval = 0;
+  private globalIdleBoosted = false;
   private startContinuousLoop(interval: number): void {
     if (this.continuousTimer) clearInterval(this.continuousTimer);
+    this.baseInterval = interval;
     /** 定时器使用全局 interval，per-camera 间隔在 processQueue 中按摄像头分别判断 */
     this.continuousTimer = setInterval(() => {
       const now = Date.now();
       for (const [cameraId, frame] of this.latestFrames) {
-        const camInterval = this.runtimeConfig.getAiInterval(cameraId);
+        const camInterval = this.getEffectiveInterval(cameraId);
         if (now - frame.timestamp > camInterval * 3) continue;
         if (!this.detectQueue.includes(cameraId)) {
           this.detectQueue.push(cameraId);
         }
       }
       this.processQueue();
+      this.adjustGlobalInterval();
     }, interval);
+  }
+
+  /** 动态调整全局定时器：所有摄像头深度 idle 时降频，有活动时恢复 */
+  private adjustGlobalInterval(): void {
+    if (!this.continuousTimer || this.baseInterval === 0) return;
+    const allDeepIdle = this.latestFrames.size > 0 && [...this.emptyDetectStreak.values()].every(
+      s => s >= AiDetector.IDLE_SLOWDOWN_THRESHOLD * 2,
+    );
+    if (allDeepIdle && !this.globalIdleBoosted) {
+      /** 全部深度 idle：全局定时器降到 2x 间隔 */
+      clearInterval(this.continuousTimer);
+      this.continuousTimer = setInterval(() => {
+        const now = Date.now();
+        for (const [cameraId, frame] of this.latestFrames) {
+          const camInterval = this.getEffectiveInterval(cameraId);
+          if (now - frame.timestamp > camInterval * 3) continue;
+          if (!this.detectQueue.includes(cameraId)) {
+            this.detectQueue.push(cameraId);
+          }
+        }
+        this.processQueue();
+        this.adjustGlobalInterval();
+      }, this.baseInterval * 2);
+      this.globalIdleBoosted = true;
+    } else if (!allDeepIdle && this.globalIdleBoosted) {
+      /** 有活动目标：恢复原始间隔 */
+      clearInterval(this.continuousTimer);
+      this.continuousTimer = setInterval(() => {
+        const now = Date.now();
+        for (const [cameraId, frame] of this.latestFrames) {
+          const camInterval = this.getEffectiveInterval(cameraId);
+          if (now - frame.timestamp > camInterval * 3) continue;
+          if (!this.detectQueue.includes(cameraId)) {
+            this.detectQueue.push(cameraId);
+          }
+        }
+        this.processQueue();
+        this.adjustGlobalInterval();
+      }, this.baseInterval);
+      this.globalIdleBoosted = false;
+    }
   }
 
   /**
