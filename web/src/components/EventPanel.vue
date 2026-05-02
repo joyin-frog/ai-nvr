@@ -281,7 +281,7 @@ function addEvent(type: string, cameraId: string, detail: string) {
 function summarizeDetections(detections: Detection[]): string {
   const labelCounts = new Map<string, number>()
   for (const d of detections) {
-    const name = d.trackName ?? d.label
+    const name = d.trackName ?? d.semanticLabel ?? d.label
     labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1)
   }
   return [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(', ')
