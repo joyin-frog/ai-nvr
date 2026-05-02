@@ -898,6 +898,11 @@ function setupEventListeners() {
     const bName = payload.targetTrackName || payload.targetSemanticLabel || payload.targetLabel
     eventPanel.value?.addEvent('track:approach', payload.cameraId, `${aName} 接近 ${bName}`)
     pushZoneNotification(payload.cameraId, { type: 'approach', name: aName, zoneName: bName, timestamp: payload.timestamp, distance: payload.distance })
+    /** 已命名目标接近时发送浏览器通知 */
+    if (payload.trackName || payload.targetTrackName) {
+      const cam = cameras.value.find(c => c.id === payload.cameraId)
+      notify(`${aName} 接近 ${bName}`, cam?.name ?? payload.cameraId, payload.cameraId, 'track:approach')
+    }
   })
 
   client.on('track:match-suggest', (payload) => {
