@@ -333,26 +333,30 @@ watchConfig(undefined, (newConfig) => {
 });
 
 /** 优雅关闭函数 */
-function gracefulShutdown(signal: string): void {
+async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n[App] 收到 ${signal}，正在关闭...`);
-  recorder.stop();
   cameraManager.stop();
+  recorder.stop();
   behaviorAnalyzer.stop();
   multimodalAnalyzer.stop();
   clipService.dispose();
   aiDetector.dispose();
   cleaner.stop();
+  alertEngine.stop();
+  detectRuleEngine.stop();
   eventStorage.close();
   roiStorage.close();
   crossLineStorage.close();
   alertStorage.close();
-  detectRuleEngine.stop();
   detectRuleStorage.close();
   stateStorage.close();
   preferencesStorage.close();
   diskUsage.close();
   trajectoryStorage.close();
+  trackLabelStorage.close();
   eventBus.clear();
+  /** 给异步清理操作 500ms 完成（ffmpeg 进程终止、SQLite WAL 刷盘） */
+  await new Promise<void>(r => setTimeout(r, 500));
   process.exit(0);
 }
 

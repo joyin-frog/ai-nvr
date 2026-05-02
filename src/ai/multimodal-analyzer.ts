@@ -129,6 +129,7 @@ export class MultimodalAnalyzer {
     }
     this.lastAnalysisTime.clear();
     this.analyzing.clear();
+    this.latestFrames.clear();
   }
 
   /** 调度分析（带节流） */

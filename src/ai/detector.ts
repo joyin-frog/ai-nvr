@@ -108,8 +108,9 @@ export class AiDetector {
   /** 缓存刷新定时器 */
   private trackNameCacheTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** CLIP 语义标签缓存：trackId → semanticLabel */
+  /** CLIP 语义标签缓存：trackId → semanticLabel，最大条目数 */
   private semanticLabelCache = new Map<number, string>();
+  private static readonly MAX_SEMANTIC_CACHE_SIZE = 500;
 
   /** 接近检测：最近一次触发过的目标对（避免重复触发），key = "smallerId:largerId" */
   private approachCooldown = new Map<string, number>();
@@ -120,6 +121,34 @@ export class AiDetector {
 
   /** 每个摄像头正在分析中 */
   private analyzing = new Set<string>();
+
+  /** VLM API 全局并发信号量（限制同时进行的 VLM 调用数） */
+  private vlmConcurrency = 0;
+  /** 最大并发 VLM 调用数 */
+  private static readonly MAX_VLM_CONCURRENCY = 3;
+  /** 等待 VLM 信号量释放的队列 */
+  private vlmWaitQueue: Array<() => void> = [];
+
+  /** 获取 VLM 调用许可（信号量），超出并发上限时排队等待 */
+  private acquireVlm(): Promise<void> {
+    if (this.vlmConcurrency < AiDetector.MAX_VLM_CONCURRENCY) {
+      this.vlmConcurrency++;
+      return Promise.resolve();
+    }
+    return new Promise<void>(resolve => {
+      this.vlmWaitQueue.push(resolve);
+    });
+  }
+
+  /** 释放 VLM 调用许可 */
+  private releaseVlm(): void {
+    const next = this.vlmWaitQueue.shift();
+    if (next) {
+      next();
+    } else {
+      this.vlmConcurrency--;
+    }
+  }
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -200,6 +229,7 @@ export class AiDetector {
       this.latestFrames.delete(cameraId);
       this.lastDetectTime.delete(cameraId);
       this.lastDetectFingerprint.delete(cameraId);
+      this.emptyDetectStreak.delete(cameraId);
       this.trackers.delete(cameraId);
       this.analyzing.delete(cameraId);
       this.trackNameCache.forEach((_v, k) => { if (k.startsWith(`${cameraId}:`)) this.trackNameCache.delete(k); });
@@ -322,6 +352,10 @@ export class AiDetector {
     this.detectQueue = [];
     this.detectQueueSet.clear();
     this.lastDetectTime.clear();
+    this.lastDetectFingerprint.clear();
+    this.emptyDetectStreak.clear();
+    this.vlmWaitQueue = [];
+    this.vlmConcurrency = 0;
   }
 
   /** 运行时切换检测模式 */
@@ -570,8 +604,14 @@ export class AiDetector {
     try {
       const t0 = performance.now();
 
-      /** 调用 VLM API 分析帧 */
-      const vlmResult = await this.analyzeWithVlm(jpeg, cameraId, timestamp);
+      /** 获取 VLM 并发许可（超出上限时排队等待） */
+      await this.acquireVlm();
+      let vlmResult: Awaited<ReturnType<typeof this.analyzeWithVlm>>;
+      try {
+        vlmResult = await this.analyzeWithVlm(jpeg, cameraId, timestamp);
+      } finally {
+        this.releaseVlm();
+      }
 
       /** 将 VLM 结果转为 Detection 格式 */
       const detections: Detection[] = vlmResult.objects.map(obj => ({
@@ -606,6 +646,11 @@ export class AiDetector {
         if (td.semanticLabel && td.trackId != null) {
           trackSemanticMap.set(td.trackId, td.semanticLabel);
           this.semanticLabelCache.set(td.trackId, td.semanticLabel);
+          /** LRU 淘汰：超过上限时删除最早的条目 */
+          if (this.semanticLabelCache.size > AiDetector.MAX_SEMANTIC_CACHE_SIZE) {
+            const oldest = this.semanticLabelCache.keys().next().value;
+            if (oldest != null) this.semanticLabelCache.delete(oldest);
+          }
         }
       }
 
@@ -637,6 +682,10 @@ export class AiDetector {
                   /** CLIP 结果仅在 VLM 没有描述时补充 */
                   if (top.length > 0 && top[0]!.score > 0.25 && !semanticLabel) {
                     this.semanticLabelCache.set(target.trackId, top[0]!.label);
+                    if (this.semanticLabelCache.size > AiDetector.MAX_SEMANTIC_CACHE_SIZE) {
+                      const oldest = this.semanticLabelCache.keys().next().value;
+                      if (oldest != null) this.semanticLabelCache.delete(oldest);
+                    }
                     if (this.trackStorage) {
                       this.trackStorage.setSemanticLabel(target.trackId, top[0]!.label);
                     }
