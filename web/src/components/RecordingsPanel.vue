@@ -353,11 +353,16 @@ function updatePlaybackDetections() {
     return
   }
   const t = currentAbsTime.value
-  /** 找到 timestamp <= t 的最后一个事件 */
-  let best = -1
-  for (let i = 0; i < playbackEvents.value.length; i++) {
-    if (playbackEvents.value[i]!.timestamp <= t) best = i
-    else break
+  /** 二分查找：找到 timestamp <= t 的最后一个事件 */
+  let lo = 0, hi = playbackEvents.value.length - 1, best = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (playbackEvents.value[mid]!.timestamp <= t) {
+      best = mid
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
   }
   /** 动态超时窗口：取前一个事件的间隔 × 1.5，最小 3 秒，最大 10 秒 */
   const eventTs = playbackEvents.value[best]!.timestamp
