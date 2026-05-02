@@ -108,9 +108,11 @@ export class FrameExtractor {
   /** 重连定时器 */
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** 看门狗定时器：检测 ffmpeg 卡死 */
-  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   /** 上一次接收到帧的时间 */
   private lastFrameTime = 0;
+  /** 看门狗超时阈值（毫秒） */
+  private static readonly WATCHDOG_TIMEOUT = 15_000;
   /** 当前是否在线（用于检测状态变化） */
   private online = false;
   /** 日志标签 */
@@ -198,12 +200,12 @@ export class FrameExtractor {
     const args: string[] = [
       "-rtsp_transport", "tcp",
       /** 低延迟：最小化缓冲和探测 */
-      "-fflags", "nobuffer",
+      "-fflags", "nobuffer+fastseek",
       "-flags", "low_delay",
       "-max_delay", "0",
       "-reorder_queue_size", "0",
-      "-analyzeduration", "500000",
-      "-probesize", "32768",
+      "-analyzeduration", "200000",
+      "-probesize", "16384",
       "-i", rtspUrl,
     ];
     if (vf) {
@@ -322,20 +324,23 @@ export class FrameExtractor {
     this.resetWatchdog();
   }
 
-  /** 重置看门狗定时器 */
+  /** 重置看门狗：更新最后帧时间（不再高频创建/销毁定时器） */
   private resetWatchdog(): void {
-    if (this.watchdogTimer) clearTimeout(this.watchdogTimer);
-    this.watchdogTimer = setTimeout(() => {
-      if (!this.proc) return;
-      console.warn(`${this.logTag} ffmpeg 15 秒无帧输出，可能卡死，强制重启`);
-      this.killProcess();
-    }, 15_000);
+    this.lastFrameTime = Date.now();
+    if (this.watchdogTimer) return;
+    this.watchdogTimer = setInterval(() => {
+      if (!this.proc) { this.clearWatchdog(); return; }
+      if (Date.now() - this.lastFrameTime > FrameExtractor.WATCHDOG_TIMEOUT) {
+        console.warn(`${this.logTag} ffmpeg 15 秒无帧输出，可能卡死，强制重启`);
+        this.killProcess();
+      }
+    }, 5000);
   }
 
   /** 清除看门狗定时器 */
   private clearWatchdog(): void {
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
     }
   }

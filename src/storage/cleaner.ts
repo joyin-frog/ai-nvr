@@ -1,6 +1,6 @@
 import { type RuntimeConfig } from "@/runtime-config";
 import { type EventStorage } from "@/storage/events";
-import { type AlertStorage } from "@/alert/storage";
+import { type DetectRuleStorage } from "@/detect-rule/storage";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type RecordingExporter } from "@/storage/export";
@@ -24,7 +24,7 @@ export class StorageCleaner {
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventStorage: EventStorage,
-    private alertStorage: AlertStorage,
+    private detectRuleStorage: DetectRuleStorage,
     private snapshotStorage: SnapshotStorage,
     private thumbnailGenerator: ThumbnailGenerator,
     private exporter: RecordingExporter,
@@ -97,9 +97,9 @@ export class StorageCleaner {
     const eventsCutoff = now - eventsDays * 86_400_000;
     report.events = this.eventStorage.purge(eventsCutoff);
 
-    /** 清理告警记录 */
+    /** 清理检测规则记录 */
     const alertsCutoff = now - alertsDays * 86_400_000;
-    report.alerts = this.alertStorage.purge(alertsCutoff);
+    report.alerts = this.detectRuleStorage.purge(alertsCutoff);
 
     /** 清理检测快照 */
     report.snapshots = await this.snapshotStorage.purge(snapshotsDays);

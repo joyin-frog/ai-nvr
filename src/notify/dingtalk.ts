@@ -21,6 +21,7 @@ const EVENT_LABELS: Record<string, string> = {
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
+  "detect:rule": "规则检测",
   "track:appeared": "目标出现",
   "track:disappeared": "目标消失",
   "track:enter-zone": "进入区域",
@@ -30,7 +31,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
 /**
  * 钉钉机器人通知推送
@@ -82,11 +83,12 @@ export class DingTalkNotifier {
           return `- ${name}${id} (${(d.score * 100).toFixed(0)}%)`;
         }).join("\n");
       }
-    } else if (event === "alert") {
+    } else if (event === "detect:rule") {
       const ruleName = payload.ruleName as string | undefined;
-      const detail = payload.detail as string | undefined;
-      body = `规则: ${ruleName ?? ""}`;
-      if (detail) body += `\n${detail}`;
+      const prompt = payload.prompt as string | undefined;
+      const result = payload.result as string | undefined;
+      const confidence = payload.confidence as number | undefined;
+      body = `规则: ${ruleName ?? ""}\n提示词: ${prompt ?? ""}\n结果: ${result ?? ""}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}`;
     } else if (event === "camera:offline") {
       body = "摄像头已断开连接";
     } else if (event === "track:appeared") {

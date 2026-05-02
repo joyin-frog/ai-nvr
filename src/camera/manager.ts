@@ -24,8 +24,8 @@ export class CameraManager {
   private fmp4Extractors = new Map<string, H264Fmp4Extractor>();
   /** 摄像头 ID → 是否使用双流模式 */
   private dualStreamFlags = new Map<string, boolean>();
-  /** 摄像头 ID → 最新一帧（显示流，高清） */
-  private latestFrames = new Map<string, Buffer>();
+  /** 摄像头 ID → 最新一帧（显示流，带时间戳） */
+  private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 当前摄像头配置列表 */
   private cameraConfigs: CameraConfig[] = [];
 
@@ -40,8 +40,8 @@ export class CameraManager {
   start(): void {
     this.cameraConfigs = this.config.cameras;
     /** 显示流的帧用于前端显示和录像 */
-    this.eventBus.on("frame", ({ cameraId, data }) => {
-      this.latestFrames.set(cameraId, data);
+    this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
+      this.latestFrames.set(cameraId, { data, timestamp });
     });
 
     for (const cam of this.cameraConfigs) {
@@ -59,8 +59,13 @@ export class CameraManager {
     this.dualStreamFlags.clear();
   }
 
-  /** 获取最新一帧（显示流） */
+  /** 获取最新一帧数据（显示流） */
   getLatestFrame(cameraId: string): Buffer | undefined {
+    return this.latestFrames.get(cameraId)?.data;
+  }
+
+  /** 获取最新一帧带时间戳（显示流） */
+  getLatestFrameWithTimestamp(cameraId: string): { data: Buffer; timestamp: number } | undefined {
     return this.latestFrames.get(cameraId);
   }
 

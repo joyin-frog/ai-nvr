@@ -10,6 +10,9 @@ import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
 import { type AlertStorage } from "@/alert/storage";
+import { type DetectRuleStorage } from "@/detect-rule/storage";
+import { type DetectRuleEngine } from "@/detect-rule/engine";
+import { type StateStorage } from "@/state/storage";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
@@ -25,44 +28,6 @@ import { getLogs } from "@/log-buffer";
 import { realpath } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import { spawn } from "node:child_process";
-
-/**
- * 异步安全文件服务：检查文件存在 + 路径遍历防护 + 返回 Response
- * 替代 existsSync + realpathSync + statSync 模式
- */
-async function serveFileSafe(
-  filePath: string,
-  allowedRoot: string,
-  contentType: string,
-  extraHeaders?: Record<string, string>,
-): Promise<Response> {
-  const file = Bun.file(filePath);
-  const size = await file.size;
-  if (size === undefined) return new Response("Not Found", { status: 404 });
-
-  /** 异步路径遍历防护 */
-  const resolved = await realpath(filePath);
-  if (!resolved.startsWith(allowedRoot)) return new Response("Forbidden", { status: 403 });
-
-  return new Response(file, {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(size),
-      ...extraHeaders,
-    },
-  });
-}
-
-/**
- * 异步检查文件是否存在 + 路径遍历防护（不返回文件，只做验证）
- */
-async function checkFileSafe(filePath: string, allowedRoot: string): Promise<boolean> {
-  const file = Bun.file(filePath);
-  const size = await file.size;
-  if (size === undefined) return false;
-  const resolved = await realpath(filePath);
-  return resolved.startsWith(allowedRoot);
-}
 
 /** 异步执行 ffmpeg 并收集 stdout/stderr */
 function runFfmpegAsync(ffmpegPath: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stderr?: string }> {
@@ -151,7 +116,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:match-suggest", "llm:scene"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:match-suggest", "llm:scene", "state:changed"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -184,6 +149,9 @@ export function startServer(
   trajectoryStorage?: import("@/storage/track-trajectory").TrackTrajectoryStorage,
   multimodalAnalyzer?: import("@/ai/multimodal-analyzer").MultimodalAnalyzer,
   clipService?: import("@/ai/clip-service").ClipService,
+  detectRuleStorage?: DetectRuleStorage,
+  detectRuleEngine?: DetectRuleEngine,
+  stateStorage?: StateStorage,
 ): void {
   /** 缓存 storageRoot 的 realpath（路径不变，避免每次请求重复解析） */
   let cachedStorageRoot: string | null = null;
@@ -509,7 +477,7 @@ export function startServer(
         return req.json().then(async (body: unknown) => {
           const opts = body as {
             events?: boolean;
-            alerts?: boolean;
+            detectRules?: boolean;
             snapshots?: boolean;
             alertSnapshots?: boolean;
             thumbnails?: boolean;
@@ -524,9 +492,9 @@ export function startServer(
             const count = eventStorage.purge(Date.now() + 1);
             results.events = `已删除 ${count} 条事件`;
           }
-          if (opts.alerts) {
-            const count = alertStorage.purge(Date.now() + 1);
-            results.alerts = `已删除 ${count} 条告警`;
+          if (opts.detectRules && detectRuleStorage) {
+            const count = detectRuleStorage.purgeAll();
+            results.detectRules = `已删除 ${count} 条检测记录`;
           }
           if (opts.snapshots) {
             const count = await snapshotStorage.purgeAll();
@@ -613,7 +581,7 @@ export function startServer(
               }
               summary = [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
             }
-          } else if (ev.type === "alert" && alertSnapshotStorage) {
+          } else if ((ev.type === "alert" || ev.type === "detect:rule") && alertSnapshotStorage) {
             const snapPath = alertSnapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
             if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
             if (ev.detail) {
@@ -1476,79 +1444,167 @@ export function startServer(
         }
       }
 
-      /** 告警规则列表 */
-      if (url.pathname === "/api/alerts/rules" && req.method === "GET") {
-        return Response.json(alertStorage.listRules());
+      /** 检测规则列表 */
+      if (url.pathname === "/api/detect-rules" && req.method === "GET" && detectRuleStorage) {
+        return Response.json(detectRuleStorage.listRules());
       }
 
-      /** 添加告警规则 */
-      if (url.pathname === "/api/alerts/rules" && req.method === "POST") {
+      /** 添加检测规则 */
+      if (url.pathname === "/api/detect-rules" && req.method === "POST" && detectRuleStorage) {
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
-          const eventType = obj.eventType as string | undefined;
-          if (!name || !eventType) return new Response("Missing name or eventType", { status: 400 });
-          const id = alertStorage.addRule({
+          const cameraId = obj.cameraId as string | undefined;
+          const prompt = obj.prompt as string | undefined;
+          if (!name || !cameraId || !prompt) return new Response("Missing name, cameraId or prompt", { status: 400 });
+          const id = detectRuleStorage.addRule({
             name,
-            eventType,
-            cameraId: (obj.cameraId as string) ?? "",
-            labels: (obj.labels as string) ?? "",
-            trackNames: (obj.trackNames as string) ?? "",
-            windowSeconds: (obj.windowSeconds as number) ?? 60,
-            threshold: (obj.threshold as number) ?? 3,
-            cooldownSeconds: (obj.cooldownSeconds as number) ?? 300,
-            silentStart: (obj.silentStart as string) ?? "",
-            silentEnd: (obj.silentEnd as string) ?? "",
-            minCount: (obj.minCount as number) ?? 0,
+            cameraId,
             roiId: (obj.roiId as number) ?? 0,
-            minSpeed: (obj.minSpeed as number) ?? 0,
+            prompt,
+            intervalMs: (obj.intervalMs as number) ?? 5000,
+            cooldownMs: (obj.cooldownMs as number) ?? 30000,
+            imageWidth: (obj.imageWidth as number) ?? 0,
+            stateIds: (obj.stateIds as number[]) ?? [],
+            schedule: (obj.schedule as string) ?? "",
+            saveOriginal: (obj.saveOriginal as boolean) ?? true,
+          });
+          detectRuleEngine?.reloadRules();
+          return Response.json({ id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 更新检测规则 */
+      const detectRuleMatch = url.pathname.match(/^\/api\/detect-rules\/(\d+)$/);
+      if (detectRuleMatch && req.method === "PATCH" && detectRuleStorage) {
+        const ruleId = Number(detectRuleMatch[1]!);
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const updates: Record<string, unknown> = {};
+          for (const key of ["name", "cameraId", "roiId", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal"] as const) {
+            if (obj[key] !== undefined) updates[key] = obj[key];
+          }
+          detectRuleStorage.updateRule(ruleId, updates as never);
+          detectRuleEngine?.reloadRules();
+          return Response.json({ ok: true });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 删除检测规则 */
+      if (detectRuleMatch && req.method === "DELETE" && detectRuleStorage) {
+        const ruleId = Number(detectRuleMatch[1]!);
+        detectRuleStorage.removeRule(ruleId);
+        detectRuleEngine?.reloadRules();
+        return Response.json({ ok: true });
+      }
+
+      /** 检测规则历史记录 */
+      if (url.pathname === "/api/detect-rules/history" && detectRuleStorage) {
+        const records = detectRuleStorage.queryRecords({
+          cameraId: url.searchParams.get("cameraId") ?? undefined,
+          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
+          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
+          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
+          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+        });
+        const total = detectRuleStorage.countRecords({
+          cameraId: url.searchParams.get("cameraId") ?? undefined,
+          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
+          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
+        });
+        return Response.json({ records, total });
+      }
+
+      // ===== 状态管理 API =====
+
+      /** 列出所有状态 */
+      if (url.pathname === "/api/states" && req.method === "GET" && stateStorage) {
+        return Response.json(stateStorage.listStates());
+      }
+
+      /** 创建状态 */
+      if (url.pathname === "/api/states" && req.method === "POST" && stateStorage) {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const name = obj.name as string | undefined;
+          if (!name) return new Response("Missing name", { status: 400 });
+          const id = stateStorage.addState({
+            name,
+            description: (obj.description as string) ?? "",
+            cameraId: (obj.cameraId as string) ?? "",
+            valueType: (obj.valueType as "boolean" | "string" | "number") ?? "boolean",
+            initialValue: (obj.initialValue as string) ?? "",
+            notifyOnChange: (obj.notifyOnChange as boolean) ?? false,
+            enabled: (obj.enabled as boolean) ?? true,
           });
           return Response.json({ id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
-      /** 更新告警规则 */
-      const alertRuleMatch = url.pathname.match(/^\/api\/alerts\/rules\/(\d+)$/);
-      if (alertRuleMatch && req.method === "PATCH") {
-        const ruleId = Number(alertRuleMatch[1]!);
+      /** 更新状态定义 */
+      const stateMatch = url.pathname.match(/^\/api\/states\/(\d+)$/);
+      if (stateMatch && req.method === "PATCH" && stateStorage) {
+        const stateId = Number(stateMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
-          const updates: Record<string, unknown> = {};
-          for (const key of ["name", "eventType", "cameraId", "labels", "trackNames", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "minCount", "roiId", "minSpeed"]) {
-            if (obj[key] !== undefined) updates[key] = obj[key];
-          }
-          alertStorage.updateRule(ruleId, updates as never);
+          stateStorage.updateState(stateId, obj as never);
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
-      /** 删除告警规则 */
-      if (alertRuleMatch && req.method === "DELETE") {
-        const ruleId = Number(alertRuleMatch[1]!);
-        alertStorage.removeRule(ruleId);
+      /** 删除状态 */
+      if (stateMatch && req.method === "DELETE" && stateStorage) {
+        const stateId = Number(stateMatch[1]!);
+        stateStorage.removeState(stateId);
         return Response.json({ ok: true });
       }
 
-      /** 告警历史 */
-      if (url.pathname === "/api/alerts/history") {
-        const alerts = alertStorage.queryAlerts({
+      /** 手动设置状态值 */
+      const stateValueMatch = url.pathname.match(/^\/api\/states\/(\d+)\/value$/);
+      if (stateValueMatch && req.method === "PATCH" && stateStorage) {
+        const stateId = Number(stateValueMatch[1]!);
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const newValue = obj.value as string | undefined;
+          if (newValue === undefined) return new Response("Missing value", { status: 400 });
+          const change = stateStorage.setValue(stateId, newValue, "manual", 0);
+          if (change) {
+            const stateDef = stateStorage.getState(stateId);
+            eventBus.emit("state:changed", {
+              stateId: change.stateId,
+              stateName: change.stateName,
+              cameraId: change.cameraId,
+              oldValue: change.oldValue,
+              newValue: change.newValue,
+              source: "manual",
+              sourceRuleId: 0,
+              timestamp: change.timestamp,
+              notify: stateDef?.notifyOnChange ?? false,
+            });
+          }
+          return Response.json({ changed: !!change });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 状态变更历史 */
+      if (url.pathname === "/api/states/history" && stateStorage) {
+        const records = stateStorage.queryChanges({
+          stateId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
           limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
           offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
         });
-        /** 为每条告警附加快照 URL */
-        const enrichedAlerts = alerts.map(a => {
-          const snapshotUrl = alertSnapshotStorage?.findSnapshotPath(a.cameraId, a.timestamp);
-          return { ...a, snapshotUrl: snapshotUrl ? `/api/alert-snapshots/${snapshotUrl}` : null };
-        });
-        const total = alertStorage.countAlerts({
+        const total = stateStorage.countChanges({
+          stateId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
         });
-        return Response.json({ alerts: enrichedAlerts, total });
+        return Response.json({ records, total });
       }
 
       /** 存储清理状态 */
@@ -2164,6 +2220,18 @@ export function startServer(
   /** 每路摄像头最新帧缓存 */
   const latestFrameByCamera = new Map<string, { data: Buffer; timestamp: number }>();
 
+  /** 缓存 importantLabels Set，避免每次 detect 事件重建 */
+  let cachedImportantSet: Set<string> | null = null;
+  let cachedImportantLabels = "";
+  function getImportantSet(): Set<string> | null {
+    const labels = runtimeConfig.get().ai.importantLabels.join(",");
+    if (labels !== cachedImportantLabels) {
+      cachedImportantLabels = labels;
+      cachedImportantSet = labels.length > 0 ? new Set(runtimeConfig.get().ai.importantLabels.map(l => l.toLowerCase())) : null;
+    }
+    return cachedImportantSet;
+  }
+
   /**
    * 根据客户端订阅摄像头数量计算帧推送节流间隔
    * 1-2 路: 30fps (33ms)，3-4 路: 25fps (40ms)，5-8 路: 20fps (50ms)，9+ 路: 15fps (67ms)
@@ -2238,8 +2306,8 @@ export function startServer(
   function schedulePush() {
     if (pushScheduled) return;
     pushScheduled = true;
-    /** 用 setImmediate 或 setTimeout(0) 实现微任务延迟 */
-    setTimeout(flushFrames, 0);
+    /** 用 setImmediate 在当前事件循环 tick 结束后立即推送，比 setTimeout(0) 更快 */
+    setImmediate(flushFrames);
   }
 
   /** 预分配 header 长度 buffer（4 字节复用） */
@@ -2267,8 +2335,7 @@ export function startServer(
           header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, changed: false, inferMs: detectPayload.inferMs };
         } else {
           /** 只推送 importantLabels 中的检测结果给前端，减少 WS 带宽 */
-          const importantLabels = runtimeConfig.get().ai.importantLabels;
-          const importantSet = importantLabels.length > 0 ? new Set(importantLabels.map(l => l.toLowerCase())) : null;
+          const importantSet = getImportantSet();
           const filteredDetections = importantSet
             ? detectPayload.detections.filter(d => importantSet.has((d.label as string).toLowerCase()))
             : detectPayload.detections;

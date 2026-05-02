@@ -9,6 +9,7 @@ const EVENT_LABELS: Record<string, string> = {
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
+  "detect:rule": "规则检测",
   "track:appeared": "目标出现",
   "track:disappeared": "目标消失",
   "track:enter-zone": "进入区域",
@@ -33,7 +34,7 @@ const EVENT_COLORS: Record<string, string> = {
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
 
 /**
  * 邮件告警通知
@@ -87,11 +88,14 @@ export class EmailNotifier {
         ).join("");
         detailHtml = `<tr><td colspan="2"><strong>检测目标</strong></td></tr>${rows}`;
       }
-    } else if (event === "alert") {
+    } else if (event === "detect:rule") {
       const ruleName = payload.ruleName as string | undefined;
-      const detail = payload.detail as string | undefined;
-      detailHtml = `<tr><td>告警规则</td><td>${ruleName ?? ""}</td></tr>`;
-      if (detail) detailHtml += `<tr><td>详情</td><td>${detail}</td></tr>`;
+      const prompt = payload.prompt as string | undefined;
+      const result = payload.result as string | undefined;
+      const confidence = payload.confidence as number | undefined;
+      detailHtml = `<tr><td>检测规则</td><td>${ruleName ?? ""}</td></tr>`;
+      if (prompt) detailHtml += `<tr><td>提示词</td><td>${prompt}</td></tr>`;
+      if (result) detailHtml += `<tr><td>AI 结果</td><td>${result}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}</td></tr>`;
     } else if (event === "camera:offline") {
       detailHtml = `<tr><td>状态</td><td style="color:#d9534f">已断开连接</td></tr>`;
     } else if (event === "track:appeared") {

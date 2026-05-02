@@ -13,17 +13,45 @@ import { authWsUrl } from '../services/auth'
 const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
-/** 保留当前播放位置前多少秒缓冲区（实时监控最小缓冲即可） */
-const BUFFER_RETAIN_SECONDS = 1
+/** 全局共享 prune 循环：避免每个 fMP4 实例独立 setInterval */
+const activeStreams = new Set<{ pruneBuffer: () => void; catchUpToLive: () => void }>()
+let sharedPruneTimer: ReturnType<typeof setInterval> | null = null
+let sharedPruneRefCount = 0
+
+function registerStream(stream: { pruneBuffer: () => void; catchUpToLive: () => void }) {
+  activeStreams.add(stream)
+  sharedPruneRefCount++
+  if (!sharedPruneTimer) {
+    sharedPruneTimer = setInterval(() => {
+      for (const s of activeStreams) {
+        s.pruneBuffer()
+        s.catchUpToLive()
+      }
+    }, 100)
+  }
+}
+
+function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () => void }) {
+  activeStreams.delete(stream)
+  sharedPruneRefCount--
+  if (sharedPruneRefCount <= 0 && sharedPruneTimer) {
+    clearInterval(sharedPruneTimer)
+    sharedPruneTimer = null
+    sharedPruneRefCount = 0
+  }
+}
+
+/** 保留当前播放位置前多少秒缓冲区（服务端 GOP=8 帧 ~320ms，0.5s 缓冲足够） */
+const BUFFER_RETAIN_SECONDS = 0.5
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 0.3
+const LIVE_CATCHUP_THRESHOLD = 0.2
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 0.8
+const LIVE_SEEK_THRESHOLD = 0.6
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
-const MAX_PENDING_SEGMENTS = 10
+const MAX_PENDING_SEGMENTS = 4
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
@@ -51,8 +79,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   /** 重连次数 */
   let retryCount = 0
-  /** 清理缓冲区定时器 */
-  let pruneTimer: ReturnType<typeof setInterval> | null = null
   /** 当前使用的 codec */
   let currentCodec = ''
   /** FPS 统计（使用 requestVideoFrameCallback 精确测量实际视频帧率） */
@@ -61,6 +87,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let videoFrameCallbackId: number | null = null
   /** video 元素事件处理器引用（用于清理） */
   let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
+  /** 待重初始化的 init segment（ffmpeg 重启后等待第一个 media segment 一起处理） */
+  let pendingInit: ArrayBuffer | null = null
+
   /** 解码检测定时器：连接后一段时间内 videoWidth=0 则判定为解码失败 */
   let decodeCheckTimer: ReturnType<typeof setTimeout> | null = null
   /** pruneBuffer 是否正在执行中（防止 remove 和 append 竞争） */
@@ -169,8 +198,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       /** 延迟过大直接 seek 到最新 */
       video.currentTime = end - 0.05
     } else if (delay > LIVE_CATCHUP_THRESHOLD) {
-      /** 渐进追赶：延迟越大速度越快，最大 2x */
-      const rate = Math.min(2.0, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) / 2)
+      /** 渐进追赶：延迟越大速度越快，最大 4x */
+      const rate = Math.min(4.0, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) * 5)
       if (video.playbackRate !== rate) {
         video.playbackRate = rate
       }
@@ -184,9 +213,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let currentBlobUrl: string | null = null
 
   /** 连接 fMP4 流 */
+  const streamHandle = { pruneBuffer, catchUpToLive }
   function connect() {
     disconnect()
     pendingQueue = []
+    pendingInit = null
     appending = false
     pruning = false
     currentCodec = ''
@@ -257,38 +288,32 @@ export function useFmp4Stream(cameraId: Ref<string>) {
             return
           }
           /** 新 SourceBuffer：直接 append init segment */
+          pendingInit = null
           doAppend(fmp4Data)
         } else {
           /**
            * 同 codec：ffmpeg 重启/分辨率变化后重发 init segment
-           * 必须先清理旧缓冲区再 append，否则新旧 media segment 混合导致解码异常闪烁
+           * 缓存 init segment，等下一个 media segment 到来时再一起重建缓冲区
+           * 这样避免在收到 init 和 media 之间出现黑屏
            */
+          pendingInit = fmp4Data
           pendingQueue = []
-          if (sourceBuffer && !sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
-            /** 先移除旧缓冲区数据 */
-            pruning = true
-            appending = false
-            try {
-              sourceBuffer.remove(
-                sourceBuffer.buffered.start(0),
-                sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1),
-              )
-            } catch {
-              pruning = false
-            }
-            /** remove 完成后 onUpdateEnd 会处理 init segment append */
-            pendingQueue.push(fmp4Data)
-          } else if (sourceBuffer?.updating || pruning) {
-            /** 正在更新中，排队等待 */
-            pendingQueue.push(fmp4Data)
-          } else {
-            doAppend(fmp4Data)
-          }
         }
       } else if (type === FMP4_TYPE_MEDIA) {
         /** slice 创建独立 ArrayBuffer，避免将 type 标记字节传入 MSE */
         const fmp4Data = raw.slice(1).buffer
-        queueAppend(fmp4Data)
+
+        /** 有待处理的 init segment：先 append 新数据，再异步清理旧缓冲区 */
+        if (pendingInit) {
+          const initData = pendingInit
+          pendingInit = null
+          /** 直接 append init + media，不先 remove — 新数据到来后视频立刻有内容，消除黑闪 */
+          doAppend(initData)
+          queueAppend(fmp4Data)
+          /** 延迟清理旧缓冲区（等新数据 append 完成后由 pruneBuffer 异步处理） */
+        } else {
+          queueAppend(fmp4Data)
+        }
       }
     }
 
@@ -432,11 +457,17 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     /** 确保 video 播放位置在有效缓冲区内 */
     if (wasAppending && videoRef.value && sourceBuffer && sourceBuffer.buffered.length > 0) {
       const video = videoRef.value
-      const bufStart = sourceBuffer.buffered.start(0)
       const bufEnd = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
-      /** currentTime 落在缓冲区外 → seek 到缓冲区起点附近 */
-      if (video.currentTime < bufStart || video.currentTime > bufEnd) {
-        video.currentTime = bufEnd - 0.1
+      /** 取最新的 buffered range（最后一个 range 是最新 append 的数据） */
+      const lastRangeIdx = sourceBuffer.buffered.length - 1
+      const latestStart = sourceBuffer.buffered.start(lastRangeIdx)
+      const latestEnd = sourceBuffer.buffered.end(lastRangeIdx)
+      /** currentTime 落在最新 range 之外 → seek 到最新数据末尾附近 */
+      if (video.currentTime < latestStart || video.currentTime > latestEnd) {
+        const target = Math.max(latestStart, bufEnd - 0.1)
+        if (Math.abs(video.currentTime - target) > 0.1) {
+          video.currentTime = target
+        }
       }
     }
 
@@ -473,18 +504,54 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function pruneBuffer() {
     if (!sourceBuffer || !videoRef.value || sourceBuffer.updating || appending || pruning) return
     const buffered = sourceBuffer.buffered
-    if (buffered.length > 0) {
-      const currentTime = videoRef.value.currentTime
-      const start = buffered.start(0)
-      const behindDuration = currentTime - start
-      /** 只在已播放缓冲区超过保留时长+1秒时才清理（减少 remove 调用频率） */
-      if (behindDuration > BUFFER_RETAIN_SECONDS + 1) {
+    if (buffered.length === 0) return
+
+    const currentTime = videoRef.value.currentTime
+
+    /** 如果有多个 buffered range（init segment 切换后旧 range 残留），清理掉当前 range 之前的所有旧 range */
+    if (buffered.length > 1) {
+      /** 找到 currentTime 所在的 range */
+      let activeIdx = -1
+      for (let i = 0; i < buffered.length; i++) {
+        if (currentTime >= buffered.start(i) && currentTime <= buffered.end(i)) {
+          activeIdx = i
+          break
+        }
+      }
+      /** 如果 currentTime 不在任何 range 中，清理到最新 range 的起点 */
+      if (activeIdx <= 0) {
+        const latestStart = buffered.start(buffered.length - 1)
+        if (currentTime < latestStart) {
+          pruning = true
+          try {
+            sourceBuffer.remove(buffered.start(0), latestStart)
+          } catch {
+            pruning = false
+          }
+          return
+        }
+      }
+      /** 清理 activeIdx 之前的所有旧 range */
+      if (activeIdx > 0) {
         pruning = true
         try {
-          sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
+          sourceBuffer.remove(buffered.start(0), buffered.start(activeIdx))
         } catch {
           pruning = false
         }
+        return
+      }
+    }
+
+    /** 单 range：正常清理已播放部分 */
+    const start = buffered.start(0)
+    const behindDuration = currentTime - start
+    if (behindDuration > BUFFER_RETAIN_SECONDS + 1) {
+      pruning = true
+      try {
+        sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
+      } catch {
+        pruning = false
       }
     }
   }
@@ -522,10 +589,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       clearTimeout(decodeCheckTimer)
       decodeCheckTimer = null
     }
-    if (pruneTimer) {
-      clearInterval(pruneTimer)
-      pruneTimer = null
-    }
+    unregisterStream(streamHandle)
     ws?.close()
     ws = null
     if (sourceBuffer && mediaSource && mediaSource.readyState === 'open') {
@@ -547,6 +611,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       currentBlobUrl = null
     }
     currentCodec = ''
+    pendingInit = null
     pendingQueue = []
     appending = false
     pruning = false
@@ -556,12 +621,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     failed.value = false
   }
 
-  /** 定期清理缓冲区 + 追赶直播（独立于 append 链路，避免竞争） */
-  pruneTimer = setInterval(() => {
-    pruneBuffer()
-    /** pruneBuffer 可能设 pruning=true，catchUpToLive 会检查 */
-    catchUpToLive()
-  }, 300)
+  /** 注册到全局共享 prune 循环（避免每个实例独立 setInterval） */
+  registerStream(streamHandle)
 
   /** 页面隐藏时暂停 fMP4 流（节省带宽），可见时恢复 */
   let wasConnectedBeforeHidden = false

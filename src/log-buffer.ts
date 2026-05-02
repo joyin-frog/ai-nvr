@@ -19,8 +19,33 @@ export interface LogEntry {
 /** 环形缓冲区最大条数 */
 const MAX_ENTRIES = 500;
 
-/** 日志缓冲区 */
-const entries: LogEntry[] = [];
+/** 环形日志缓冲区 */
+const ring = new Array<LogEntry | undefined>(MAX_ENTRIES);
+let ringHead = 0;
+let ringTail = 0;
+let ringCount = 0;
+
+/** O(1) 追加 */
+function ringPush(entry: LogEntry): void {
+  ring[ringTail] = entry;
+  ringTail = (ringTail + 1) % MAX_ENTRIES;
+  if (ringCount < MAX_ENTRIES) {
+    ringCount++;
+  } else {
+    ring[ringHead] = undefined;
+    ringHead = (ringHead + 1) % MAX_ENTRIES;
+  }
+}
+
+/** 收集所有条目（保持时间顺序） */
+function ringToArray(): LogEntry[] {
+  const result: LogEntry[] = [];
+  for (let i = 0; i < ringCount; i++) {
+    const e = ring[(ringHead + i) % MAX_ENTRIES];
+    if (e) result.push(e);
+  }
+  return result;
+}
 
 /** 从消息中提取 [Tag] 前缀 */
 function extractTag(args: unknown[]): { tag: string; msg: string } {
@@ -39,8 +64,7 @@ const origError = console.error;
 
 function pushEntry(level: "log" | "warn" | "error", args: unknown[]): void {
   const { tag, msg } = extractTag(args);
-  entries.push({ ts: Date.now(), level, tag, msg });
-  if (entries.length > MAX_ENTRIES) entries.shift();
+  ringPush({ ts: Date.now(), level, tag, msg });
 }
 
 /** 安装拦截器 */
@@ -72,12 +96,12 @@ export function getLogs(options: {
   const levelMap: Record<string, number> = { log: 0, warn: 1, error: 2 };
   const limit = options.limit ?? 100;
 
-  let filtered = entries;
+  let filtered = ringToArray();
   if (options.tag) {
-    filtered = filtered.filter(e => e.tag === options.tag);
+    filtered = filtered.filter((e: LogEntry) => e.tag === options.tag);
   }
   if (minLevel > 0) {
-    filtered = filtered.filter(e => (levelMap[e.level] ?? 0) >= minLevel);
+    filtered = filtered.filter((e: LogEntry) => (levelMap[e.level] ?? 0) >= minLevel);
   }
 
   return filtered.slice(-limit);

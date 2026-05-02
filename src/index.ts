@@ -19,6 +19,9 @@ import { SnapshotStorage } from "@/storage/snapshots";
 import { RoiStorage } from "@/storage/roi";
 import { AlertStorage } from "@/alert/storage";
 import { AlertEngine } from "@/alert/engine";
+import { DetectRuleStorage } from "@/detect-rule/storage";
+import { DetectRuleEngine } from "@/detect-rule/engine";
+import { StateStorage } from "@/state/storage";
 import { ThumbnailGenerator } from "@/storage/thumbnails";
 import { StorageCleaner } from "@/storage/cleaner";
 import { DiskUsage } from "@/storage/disk-usage";
@@ -176,6 +179,15 @@ alertEngine.setSaveAlertSnapshot((cameraId, timestamp, jpeg) => {
 });
 alertEngine.start();
 
+/** 检测规则引擎 */
+const detectRuleStorage = new DetectRuleStorage(join(dataDir, "detect-rules.db"));
+const stateStorage = new StateStorage(join(dataDir, "state.db"));
+const detectRuleEngine = new DetectRuleEngine(eventBus, detectRuleStorage, cameraManager, runtimeConfig, roiStorage, stateStorage);
+detectRuleEngine.setSaveSnapshot((cameraId, timestamp, jpeg) => {
+  alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
+});
+detectRuleEngine.start();
+
 /** 行为分析器（区域进入/离开/停留/越线语义事件） */
 import { BehaviorAnalyzer } from "@/ai/behavior";
 const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage, runtimeConfig);
@@ -210,7 +222,7 @@ const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs);
 
 /** 统一存储清理管理器 */
-const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, detectRuleStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
 cleaner.start();
 
 /** 磁盘用量统计已在上方创建 */
@@ -237,7 +249,7 @@ for (const cam of config.cameras) {
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, detectRuleStorage, detectRuleEngine, stateStorage);
 
 /** 自动记录事件到 SQLite */
 /** 事件收集缓冲区（同一微任务周期内的事件批量写入） */
@@ -252,7 +264,7 @@ function flushPendingEvents() {
 }
 
 /** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
-const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "llm:scene"] as const;
+const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "llm:scene", "state:changed"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -282,6 +294,9 @@ for (const eventType of RECORDED_EVENTS) {
     } else if (eventType === "llm:scene") {
       const p = payload as { description: string; trigger: string; inferMs: number };
       detail = JSON.stringify({ description: p.description, trigger: p.trigger, inferMs: p.inferMs });
+    } else if (eventType === "state:changed") {
+      const p = payload as { stateName: string; oldValue: string; newValue: string; source: string; notify: boolean };
+      detail = JSON.stringify({ stateName: p.stateName, oldValue: p.oldValue, newValue: p.newValue, source: p.source, notify: p.notify });
     } else if (eventType.startsWith("track:")) {
       const p = payload as Record<string, unknown>;
       const obj: Record<string, unknown> = { trackId: p.trackId, label: p.label };
@@ -327,6 +342,9 @@ function gracefulShutdown(signal: string): void {
   roiStorage.close();
   crossLineStorage.close();
   alertStorage.close();
+  detectRuleEngine.stop();
+  detectRuleStorage.close();
+  stateStorage.close();
   preferencesStorage.close();
   diskUsage.close();
   trajectoryStorage.close();

@@ -22,6 +22,14 @@ export type Fmp4Segment = Fmp4InitSegment | Fmp4MediaSegment;
  * 解析 ffmpeg 输出的 fMP4 二进制流，拆分为 init/media segment
  * ffmpeg 使用 `-f mp4 -movflags frag_keyframe+empty_moov+default_base_moof` 输出标准 fMP4
  */
+/** O(1) 快速拼接两个 Buffer（避免 Buffer.concat 对 2 元素数组的迭代开销） */
+function concat2(a: Buffer, b: Buffer): Buffer {
+  const result = Buffer.allocUnsafe(a.length + b.length);
+  a.copy(result, 0);
+  b.copy(result, a.length);
+  return result;
+}
+
 class Fmp4StreamParser {
   /** 未处理的缓冲区 */
   private buffer = Buffer.alloc(0);
@@ -135,8 +143,8 @@ class Fmp4StreamParser {
         this.extractCodecFromMoov(data);
         this.extractDimensionsFromMoov(data);
 
-        /** 组装 init segment: ftyp + moov */
-        const initData = Buffer.concat(this.completedBoxes.map(b => b.data));
+        /** 组装 init segment: ftyp + moov（恰好 2 个 box，避免 Buffer.concat 开销） */
+        const initData = concat2(this.completedBoxes[0]!.data, this.completedBoxes[1]!.data);
         const init: Fmp4InitSegment = {
           type: "init",
           codec: this.codec,
@@ -153,7 +161,7 @@ class Fmp4StreamParser {
 
       /** moof 后面跟的 mdat 组成一个完整的 media segment */
       if (type === "mdat" && this.completedBoxes.some(b => b.type === "moof")) {
-        const mediaData = Buffer.concat(this.completedBoxes.map(b => b.data));
+        const mediaData = concat2(this.completedBoxes[0]!.data, this.completedBoxes[1]!.data);
 
         /** 缓存最近一个 media segment（用于新客户端首帧） */
         this.lastMediaData = mediaData;
@@ -298,6 +306,8 @@ export class H264Fmp4Extractor {
   private parser = new Fmp4StreamParser();
   private running = false;
   private online = false;
+  /** 看门狗超时阈值（毫秒） */
+  private static readonly WATCHDOG_TIMEOUT = 15_000;
   private retryCount = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** 看门狗：检测 ffmpeg 卡死（无数据输出） */
@@ -305,8 +315,6 @@ export class H264Fmp4Extractor {
   private logTag: string;
   /** 缓存 init segment（新客户端连接时发送） */
   private cachedInit: Fmp4InitSegment | null = null;
-  /** copy 模式是否失败过（HEVC 等不兼容编码） */
-  private lastCopyFailed = false;
 
   constructor(
     private config: CameraConfig,
@@ -356,28 +364,38 @@ export class H264Fmp4Extractor {
   /** codec 类型（固定返回 avc，因为 ffmpeg 输出 h264） */
   get detectedCodec(): "avc" | null { return "avc"; }
 
-  /** 获取转码编码器参数（支持硬件加速） */
-  private getTranscodeArgs(): string[] {
+  /**
+   * 始终重编码为 H.264 ultrafast — 保证极低延迟
+   * copy 模式虽然 CPU 零开销，但摄像头 GOP 通常 1-2 秒，
+   * 导致 PTZ 操作后要等关键帧才能看到画面变化（延迟 1-2s）
+   * ultrafast 重编码 CPU 开销很低（~2% 单核/路），但 GOP 完全可控
+   */
+  private getEncoderArgs(): string[] {
     const encoder = this.runtimeConfig?.get().recording.encoder ?? "libx264";
     switch (encoder) {
       case "h264_v4l2m2m":
-        return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p"];
+        return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
+          "-g", "8", "-keyint_min", "4"];
       case "h264_vaapi":
         return [
           "-vaapi_device", "/dev/dri/renderD128",
           "-c:v", "h264_vaapi",
           "-vf", "format=nv12,hwupload",
           "-qp", "23",
+          "-g", "8", "-keyint_min", "4",
         ];
       case "h264_nvenc":
-        return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-cq", "23"];
+        return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
+          "-cq", "23", "-g", "8", "-keyint_min", "4"];
       default:
         return [
           "-c:v", "libx264",
-          "-preset", "superfast",
+          "-preset", "ultrafast",
           "-tune", "zerolatency",
           "-crf", "23",
-          "-x264-params", "keyint=10:min-keyint=5:bframes=0",
+          "-g", "8",
+          "-keyint_min", "4",
+          "-x264-params", "bframes=0:nal-hrd=cbr",
         ];
     }
   }
@@ -385,43 +403,35 @@ export class H264Fmp4Extractor {
   private spawnFfmpeg(): void {
     /**
      * 使用 ffmpeg 直接输出 fMP4 格式
-     * 策略：先尝试 copy（零 CPU 开销），copy 失败时 fallback 到 libx264 转码
-     * copy 模式：摄像头输出 H.264 → 直接封装 fMP4，CPU 接近 0
-     * transcode 模式：HEVC 等不兼容编码 → libx264 转码
+     * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 8帧 ~320ms@25fps）
+     * 兼容 H.264/HEVC 等任意摄像头编码
      */
-    const isTranscode = this.lastCopyFailed;
     const args = [
       "-rtsp_transport", "tcp",
-      /** 两种模式都启用低延迟 */
-      "-fflags", "nobuffer",
+      "-fflags", "nobuffer+fastseek",
       "-flags", "low_delay",
       "-max_delay", "0",
       "-reorder_queue_size", "0",
     ];
 
     args.push(
-      "-analyzeduration", "500000",
-      "-probesize", "32768",
+      "-analyzeduration", "200000",
+      "-probesize", "16384",
       "-i", this.rtspUrl,
     );
 
-    if (isTranscode) {
-      /** 根据配置选择编码器（支持硬件加速） */
-      const encoderArgs = this.getTranscodeArgs();
-      args.push(...encoderArgs);
-      /** 转码模式限制线程数避免多路并发时 CPU 过载 */
-      args.push("-threads", "2");
-    } else {
-      /** 零转码 copy — CPU 开销极低 */
-      args.push("-c:v", "copy");
-    }
+    /** 始终重编码：保证 GOP 可控，PTZ 后 ~320ms 即可看到画面变化 */
+    const encoderArgs = this.getEncoderArgs();
+    args.push(...encoderArgs);
+    /** 限制线程数避免多路并发时 CPU 过载 */
+    args.push("-threads", "2");
 
     args.push(
       "-an",
       "-f", "mp4",
       "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      /** 强制每 0.033 秒切割一个 fMP4 段（30 segments/sec），实现最低延迟 */
-      "-frag_duration", "0.033",
+      /** 强制每 0.02 秒切割一个 fMP4 段（50 segments/sec），实现最低延迟 */
+      "-frag_duration", "0.02",
       "pipe:1",
     );
 
@@ -453,12 +463,6 @@ export class H264Fmp4Extractor {
       const msg = chunk.toString().trim();
       if (msg.includes("error") || msg.includes("Error")) {
         console.error(`${this.logTag} ffmpeg error:`, msg);
-      }
-      /** 检测 HEVC 码流 — copy 模式下立即 kill 进程并回退到转码 */
-      if (!this.lastCopyFailed && (msg.includes("hevc") || msg.includes("HEVC") || msg.includes("hvc1"))) {
-        this.lastCopyFailed = true;
-        console.log(`${this.logTag} 检测到 HEVC 码流，立即切换到转码模式`);
-        this.killProcess();
       }
     });
 
@@ -494,21 +498,26 @@ export class H264Fmp4Extractor {
     }
   }
 
-  /** 重置看门狗定时器（每次收到数据时调用） */
+  /** 上次收到数据的时间 */
+  private lastDataTime = 0;
+
+  /** 重置看门狗：更新最后数据时间（不再高频创建/销毁定时器） */
   private resetWatchdog(): void {
-    if (this.watchdogTimer) clearTimeout(this.watchdogTimer);
-    this.watchdogTimer = setTimeout(() => {
-      if (!this.proc) return;
-      console.warn(`${this.logTag} ffmpeg 15 秒无数据输出，可能卡死，强制重启`);
-      this.killProcess();
-      /** killProcess 后 exit 事件会触发 scheduleReconnect */
-    }, 15_000);
+    this.lastDataTime = Date.now();
+    if (this.watchdogTimer) return;
+    this.watchdogTimer = setInterval(() => {
+      if (!this.proc) { this.clearWatchdog(); return; }
+      if (Date.now() - this.lastDataTime > H264Fmp4Extractor.WATCHDOG_TIMEOUT) {
+        console.warn(`${this.logTag} ffmpeg 15 秒无数据输出，可能卡死，强制重启`);
+        this.killProcess();
+      }
+    }, 5000);
   }
 
   /** 清除看门狗定时器 */
   private clearWatchdog(): void {
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
     }
   }

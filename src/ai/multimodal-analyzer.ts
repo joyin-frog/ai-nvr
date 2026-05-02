@@ -1,4 +1,5 @@
 import { type EventBus } from "@/event-bus";
+import sharp from "sharp";
 
 /** 多模态 LLM 配置 */
 export interface LlmConfig {
@@ -163,8 +164,7 @@ export class MultimodalAnalyzer {
     let imageDataUrl: string;
     if (this.config.imageWidth > 0) {
       /** 缩放图片减少传输和推理开销 */
-      const sharp = await import("sharp");
-      const resized = await sharp.default(jpeg)
+      const resized = await sharp(jpeg)
         .resize(this.config.imageWidth)
         .jpeg({ quality: 80 })
         .toBuffer();

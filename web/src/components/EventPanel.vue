@@ -15,8 +15,6 @@ interface Detection {
   trackName?: string
   /** CLIP 语义标签（如 "a person wearing dark clothes"） */
   semanticLabel?: string
-  /** 用户自定义名称（如 "张三"） */
-  trackName?: string
 }
 
 const { t, locale } = useI18n()
@@ -266,6 +264,8 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'track:loiter': { labelKey: 'event.trackLoiter', bg: '#795548', color: '#fff' },
   'track:match-suggest': { labelKey: 'event.trackMatchSuggest', bg: '#9C27B0', color: '#fff' },
   'llm:scene': { labelKey: 'event.llmScene', bg: '#7C4DFF', color: '#fff' },
+  'detect:rule': { labelKey: 'event.detectRule', bg: '#FF6B6B', color: '#fff' },
+  'state:changed': { labelKey: 'event.stateChanged', bg: '#FF9800', color: '#fff' },
 }
 
 /** 从 detail 文本中提取变动比例（如 "变动 15.3%" → 15.3） */
@@ -550,6 +550,25 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       if (obj.label) items.push({ label: t('event.targets'), value: String(obj.label) })
       if (obj.speed !== undefined) items.push({ label: t('event.speed', '速度'), value: String(obj.speed) })
     }
+    /** AI 场景描述事件 */
+    if (e.type === 'llm:scene') {
+      if (obj.description) items.push({ label: t('event.description', '描述'), value: String(obj.description) })
+      if (obj.trigger) items.push({ label: t('event.trigger', '触发'), value: String(obj.trigger) })
+      if (obj.inferMs !== undefined) items.push({ label: t('event.inferTime', '推理耗时'), value: `${Math.round(obj.inferMs)}ms` })
+    }
+    /** 用户检测规则事件 */
+    if (e.type === 'detect:rule') {
+      if (obj.ruleName) items.push({ label: t('event.rule', '规则'), value: String(obj.ruleName) })
+      if (obj.prompt) items.push({ label: t('event.prompt', '提示词'), value: String(obj.prompt) })
+      if (obj.result) items.push({ label: t('event.result', '结果'), value: String(obj.result) })
+      if (obj.confidence !== undefined) items.push({ label: t('event.confidence', '置信度'), value: `${(obj.confidence * 100).toFixed(0)}%` })
+    }
+    /** 状态变更事件 */
+    if (e.type === 'state:changed') {
+      if (obj.stateName) items.push({ label: t('event.name'), value: String(obj.stateName) })
+      if (obj.oldValue !== undefined) items.push({ label: '→', value: `${obj.oldValue} → ${obj.newValue}` })
+      if (obj.source) items.push({ label: t('event.detail'), value: obj.source.startsWith('rule:') ? t('state.sourceRule') : t('state.sourceManual') })
+    }
   } catch {
     if (e.rawDetail) items.push({ label: t('event.detail'), value: e.rawDetail })
   }
@@ -647,6 +666,9 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
         <button :class="['type-chip', { active: filterType === 'track:loiter' }]" @click="filterType = 'track:loiter'; onFilterChange('type')">{{ t('event.trackLoiter', '徘徊') }}</button>
         <button :class="['type-chip', { active: filterType === 'track:appeared' }]" @click="filterType = 'track:appeared'; onFilterChange('type')">{{ t('event.trackAppeared', '出现') }}</button>
         <button :class="['type-chip', { active: filterType === 'track:disappeared' }]" @click="filterType = 'track:disappeared'; onFilterChange('type')">{{ t('event.trackDisappeared', '消失') }}</button>
+        <button :class="['type-chip', { active: filterType === 'detect:rule' }]" @click="filterType = 'detect:rule'; onFilterChange('type')">{{ t('event.detectRule', '检测规则') }}</button>
+        <button :class="['type-chip', { active: filterType === 'llm:scene' }]" @click="filterType = 'llm:scene'; onFilterChange('type')">{{ t('event.llmScene', 'AI场景') }}</button>
+        <button :class="['type-chip', { active: filterType === 'state:changed' }]" @click="filterType = 'state:changed'; onFilterChange('type')">{{ t('event.stateChanged', '状态变更') }}</button>
       </div>
       <button class="refresh-btn" @click="loadHistory" :disabled="loading">
         {{ t('event.refresh') }}
@@ -704,7 +726,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
           <div v-if="getTrackSnapshotUrl(e.type, e.rawDetail)" class="thumb-wrap track-thumb">
             <img :src="getTrackSnapshotUrl(e.type, e.rawDetail)!" class="event-thumb" alt="" />
           </div>
-          <div v-else-if="(e.type === 'detect' || e.type === 'alert') && e.snapshotUrl" class="thumb-wrap">
+          <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'llm:scene') && e.snapshotUrl" class="thumb-wrap">
             <img
               :src="authUrl(e.snapshotUrl)"
               class="event-thumb"
@@ -733,7 +755,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
           <div v-if="getTrackSnapshotUrl(e.type, e.rawDetail)" class="expand-snap-wrap">
             <img :src="getTrackSnapshotUrl(e.type, e.rawDetail)!" class="expand-snapshot" alt="" />
           </div>
-          <div v-else-if="(e.type === 'detect' || e.type === 'alert') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
+          <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'llm:scene') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
             <img
               :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshotMapByCamera.get(e.cameraId)"
               class="expand-snapshot"

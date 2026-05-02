@@ -20,56 +20,95 @@ export interface RecordingInfo {
 }
 
 /**
- * 环形帧缓冲区
- * 保存最近 N 帧 JPEG 数据
- * event 模式下保留最近 30-60 秒，motion 模式下保留最近 ~2 秒
+ * O(1) 环形帧缓冲区
+ * 保存最近 N 帧 JPEG 数据，push/drain 均为 O(1)
  */
 class FrameRingBuffer {
-  private frames: Array<{ data: Buffer; timestamp: number }> = [];
-  private maxSize: number;
+  private buf: Array<{ data: Buffer; timestamp: number } | undefined>;
+  private head = 0;
+  private tail = 0;
+  private count = 0;
+  private capacity: number;
 
   constructor(maxSize: number = 30) {
-    this.maxSize = maxSize;
+    this.capacity = maxSize;
+    this.buf = new Array(maxSize);
   }
 
-  /** 追加一帧 */
+  /** O(1) 追加一帧 */
   push(data: Buffer, timestamp: number): void {
-    this.frames.push({ data, timestamp });
-    if (this.frames.length > this.maxSize) {
-      this.frames.shift();
+    this.buf[this.tail] = { data, timestamp };
+    this.tail = (this.tail + 1) % this.capacity;
+    if (this.count < this.capacity) {
+      this.count++;
+    } else {
+      /** 满了，head 跟进（覆盖最旧帧） */
+      this.head = (this.head + 1) % this.capacity;
     }
   }
 
-  /** 取出所有缓冲帧（清空缓冲区） */
+  /** O(n) 取出所有缓冲帧（清空缓冲区），n = count */
   drain(): Array<{ data: Buffer; timestamp: number }> {
-    const result = this.frames;
-    this.frames = [];
+    if (this.count === 0) return [];
+    const result: Array<{ data: Buffer; timestamp: number }> = [];
+    for (let i = 0; i < this.count; i++) {
+      const idx = (this.head + i) % this.capacity;
+      const frame = this.buf[idx]!;
+      result.push(frame);
+      this.buf[idx] = undefined;
+    }
+    this.head = 0;
+    this.tail = 0;
+    this.count = 0;
     return result;
   }
 
-  /** 返回指定时间戳之后的所有帧（拷贝，不清空缓冲区） */
+  /** O(n) 返回指定时间戳之后的所有帧（拷贝，不清空） */
   snapshotFrom(afterTimestamp: number): Array<{ data: Buffer; timestamp: number }> {
-    const idx = this.frames.findIndex(f => f.timestamp > afterTimestamp);
-    if (idx === -1) return [];
-    return this.frames.slice(idx);
+    if (this.count === 0) return [];
+    const result: Array<{ data: Buffer; timestamp: number }> = [];
+    for (let i = 0; i < this.count; i++) {
+      const frame = this.buf[(this.head + i) % this.capacity]!;
+      if (frame.timestamp > afterTimestamp) {
+        for (let j = i; j < this.count; j++) {
+          result.push(this.buf[(this.head + j) % this.capacity]!);
+        }
+        return result;
+      }
+    }
+    return result;
   }
 
   /** 调整缓冲区大小 */
   resize(newMaxSize: number): void {
-    this.maxSize = newMaxSize;
-    if (this.frames.length > this.maxSize) {
-      this.frames = this.frames.slice(this.frames.length - this.maxSize);
+    if (newMaxSize === this.capacity) return;
+    const old = this.drain();
+    this.capacity = newMaxSize;
+    this.buf = new Array(newMaxSize);
+    this.head = 0;
+    this.tail = 0;
+    this.count = 0;
+    /** 只保留最新的 newMaxSize 帧 */
+    const start = Math.max(0, old.length - newMaxSize);
+    for (let i = start; i < old.length; i++) {
+      const f = old[i];
+      if (f) this.push(f.data, f.timestamp);
     }
   }
 
   /** 清空缓冲区 */
   clear(): void {
-    this.frames = [];
+    for (let i = 0; i < this.count; i++) {
+      this.buf[(this.head + i) % this.capacity] = undefined;
+    }
+    this.head = 0;
+    this.tail = 0;
+    this.count = 0;
   }
 
   /** 当前帧数 */
   get length(): number {
-    return this.frames.length;
+    return this.count;
   }
 }
 

@@ -8,6 +8,7 @@ import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescrip
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
+import { useNotification } from './composables/useNotification'
 import { useRegisterSW } from 'virtual:pwa-register/vue'
 import CameraView from './components/CameraView.vue'
 import EventPanel from './components/EventPanel.vue'
@@ -15,6 +16,8 @@ import RecordingsPanel from './components/RecordingsPanel.vue'
 import CameraStatusPanel from './components/CameraStatusPanel.vue'
 import CameraManagePanel from './components/CameraManagePanel.vue'
 import AlertPanel from './components/AlertPanel.vue'
+import DetectRulePanel from './components/DetectRulePanel.vue'
+import StatePanel from './components/StatePanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import LoginView from './components/LoginView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -35,7 +38,6 @@ interface CameraStatus {
   id: string
   name: string
   online: boolean
-  lastFrameAt: number
   group: string
   ptz: boolean
   width: number
@@ -61,7 +63,7 @@ interface CameraStatus {
 }
 
 /** 侧边栏激活的标签 */
-type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'tracks' | 'settings'
+type SidebarTab = 'events' | 'recordings' | 'status' | 'cameras' | 'alerts' | 'tracks' | 'states' | 'settings'
 const activeTab = ref<SidebarTab>('events')
 getPref<string>('nvr-active-tab', 'events').then(v => { activeTab.value = v as SidebarTab })
 
@@ -189,6 +191,8 @@ function checkMobile() {
 }
 
 const cameras = ref<CameraStatus[]>([])
+/** 每个摄像头的最后帧时间（非响应式，避免每帧触发 Vue proxy 开销） */
+const lastFrameAtMap = new Map<string, number>()
 /** 摄像头排序（ID 数组，持久化到后端偏好） */
 const cameraOrder = ref<string[]>([])
 getPref<string[]>('nvr-camera-order', []).then(v => { if (v.length > 0) cameraOrder.value = v })
@@ -197,7 +201,19 @@ const showBoxes = ref(true)
 /** 每个摄像头的追踪标签映射：cameraId -> { trackId: name } */
 const trackLabelsMap = ref<Record<string, Record<number, string>>>({})
 /** 每个摄像头的帧延迟（ms），基于 serverTimestamp - 接收时间差 */
+/** 每个摄像头的帧延迟（非响应式 Map，由 frameTicker 驱动同步到 reactive） */
+const frameLatencyMap = new Map<string, number>()
+/** 帧延迟的 reactive 副本（供模板使用，由 ticker 每 3 秒同步一次） */
 const frameLatency = ref<Record<string, number>>({})
+/** 低频 reactive ticker：每 3 秒触发一次模板重渲染（驱动 lastFrameAtMap 的模板求值） */
+const frameTicker = ref(0)
+setInterval(() => {
+  frameTicker.value++
+  /** 同步帧延迟到 reactive（供模板消费） */
+  const obj: Record<string, number> = {}
+  for (const [k, v] of frameLatencyMap) obj[k] = v
+  frameLatency.value = obj
+}, 3000)
 /** ROI 区域数据（按摄像头分组） */
 const roiDataMap = ref<Record<string, Array<{ id: number; name: string; points: string }>>>({})
 /** 越线检测线段数据（按摄像头分组） */
@@ -218,6 +234,8 @@ const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
 const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
+const detectRulePanel = ref<InstanceType<typeof DetectRulePanel> | null>(null)
+const statePanel = ref<InstanceType<typeof StatePanel> | null>(null)
 const showShortcuts = ref(false)
 
 /** 认证状态 */
@@ -377,7 +395,6 @@ async function loadCameras() {
       id: c.id,
       name: c.name,
       online: c.online,
-      lastFrameAt: c.lastFrameAt,
       group: c.group ?? '',
       ptz: c.ptz ?? false,
       width: c.width ?? 0,
@@ -678,46 +695,8 @@ function startApp() {
 }
 
 /** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
-/** 声音提醒配置 */
-const soundEnabled = ref(true)
-const soundVolume = ref(0.8)
-/** 触发声音的事件类型（空数组=所有事件都触发） */
-const soundEvents = ref<string[]>([])
-
-/** 所有可配置的声音事件类型 */
-const SOUND_EVENT_OPTIONS = [
-  { key: 'camera:offline', labelKey: 'settings.soundEventCameraOffline' },
-  { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
-  { key: 'alert', labelKey: 'settings.soundEventAlert' },
-  { key: 'detect', labelKey: 'settings.soundEventDetect' },
-  { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
-  { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
-  { key: 'motion', labelKey: 'settings.soundEventMotion' },
-] as const
-
-/** 从后端恢复声音配置 */
-getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
-getPref<number>('nvr-sound-volume', 80).then(v => { soundVolume.value = v / 100 })
-getPref<string[]>('nvr-sound-events', []).then(v => { soundEvents.value = v })
-
-/** Web Audio API 播放提示音 */
-let audioCtx: AudioContext | null = null
-function playAlertSound() {
-  if (!soundEnabled.value) return
-  if (!audioCtx) audioCtx = new AudioContext()
-  const ctx = audioCtx
-  const osc = ctx.createOscillator()
-  const gain = ctx.createGain()
-  osc.connect(gain)
-  gain.connect(ctx.destination)
-  osc.type = 'sine'
-  osc.frequency.setValueAtTime(880, ctx.currentTime)
-  osc.frequency.setValueAtTime(660, ctx.currentTime + 0.1)
-  gain.gain.setValueAtTime(soundVolume.value * 0.3, ctx.currentTime)
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
-  osc.start(ctx.currentTime)
-  osc.stop(ctx.currentTime + 0.3)
-}
+/** 声音提醒配置（从 composable 获取，notify 函数使用） */
+const { soundEvents, playAlertSound } = useNotification()
 
 function notify(title: string, body: string, cameraId?: string, eventType?: string) {
   /** 检查该事件类型是否在声音触发列表中 */
@@ -752,18 +731,11 @@ function setupEventListeners() {
   })
 
   client.on('frame', (payload) => {
-    /** 更新摄像头最后帧时间（防止"画面冻结"误判） */
-    const cam = getCamera(payload.cameraId)
-    if (cam) cam.lastFrameAt = payload.timestamp ?? Date.now()
-    /** 计算帧延迟（ms）：当前时间 - 服务端帧时间戳 */
+    /** 更新摄像头最后帧时间（非响应式 Map，避免每帧触发 Vue proxy 开销） */
+    lastFrameAtMap.set(payload.cameraId, payload.timestamp ?? Date.now())
+    /** 计算帧延迟（非响应式 Map，避免每帧触发 Vue proxy） */
     if (payload.timestamp) {
-      const latency = Math.max(0, Date.now() - payload.timestamp)
-      /** 只在延迟变化超过 50ms 时触发响应式更新，减少 GC 压力 */
-      if (Math.abs((frameLatency.value[payload.cameraId] ?? 0) - latency) > 50) {
-        frameLatency.value = { ...frameLatency.value, [payload.cameraId]: latency }
-      } else {
-        frameLatency.value[payload.cameraId] = latency
-      }
+      frameLatencyMap.set(payload.cameraId, Math.max(0, Date.now() - payload.timestamp))
     }
     /** 缓存 WS 帧数据供 CameraView rAF poll 消费（跳过 Vue 响应式） */
     if (payload.jpegData) {
@@ -812,6 +784,13 @@ function setupEventListeners() {
     alertPanel.value?.addAlert(payload)
     notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId, 'alert')
     flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
+  })
+
+  client.on('detect:rule', (payload) => {
+    eventPanel.value?.addEvent('detect:rule', payload.cameraId, `${t('detectRule.title')}: ${payload.ruleName}`)
+    detectRulePanel.value?.addRecord(payload)
+    notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId, 'detect:rule')
+    flashTitle(`${t('detectRule.title')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 
   client.on('track:appeared', (payload) => {
@@ -1108,7 +1087,7 @@ onUnmounted(() => {
                 :data-camera-id="cam.id"
                 :name="cam.name"
                 :online="cam.online"
-                :last-frame-at="cam.lastFrameAt"
+                :last-frame-at="lastFrameAtMap.get(cam.id) ?? 0 + frameTicker * 0"
                 :ptz="cam.ptz"
                 :video-width="cam.width"
                 :video-height="cam.height"
@@ -1160,6 +1139,10 @@ onUnmounted(() => {
             @click="switchTab('alerts')"
           >⚠ {{ t('tab.alerts') }}</button>
           <button
+            :class="['tab-btn', { active: activeTab === 'states' }]"
+            @click="switchTab('states')"
+          >◉ {{ t('tab.states') }}</button>
+          <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
           >⚙ {{ t('tab.settings') }}</button>
@@ -1178,7 +1161,8 @@ onUnmounted(() => {
             :cameras="cameras"
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-          <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          <DetectRulePanel v-if="activeTab === 'alerts'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+          <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
@@ -1210,6 +1194,10 @@ onUnmounted(() => {
           @click="switchTab('alerts')"
         >⚠ {{ t('tab.alerts') }}</button>
         <button
+          :class="['tab-btn', { active: activeTab === 'states' }]"
+          @click="switchTab('states')"
+        >◉ {{ t('tab.states') }}</button>
+        <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
         >⚙ {{ t('tab.settings') }}</button>
@@ -1228,7 +1216,8 @@ onUnmounted(() => {
           :cameras="cameras"
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
-        <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        <DetectRulePanel v-if="activeTab === 'alerts'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

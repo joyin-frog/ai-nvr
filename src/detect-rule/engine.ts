@@ -2,6 +2,8 @@ import { type EventBus } from "@/event-bus";
 import { type DetectRule, DetectRuleStorage } from "@/detect-rule/storage";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type RoiStorage } from "@/storage/roi";
+import { type StateStorage } from "@/state/storage";
+import sharp from "sharp";
 
 /** 帧获取接口（由 CameraManager 实现） */
 export interface FrameProvider {
@@ -16,6 +18,8 @@ interface VlmRuleResult {
   confidence: number;
   /** AI 描述 */
   description: string;
+  /** 状态更新（可选） */
+  states?: Array<{ id: number; value: string }>;
 }
 
 /** 检测规则系统 prompt */
@@ -33,12 +37,35 @@ Rules:
 - When in doubt, set matched to false
 - Do not include any text outside the JSON object`;
 
+/** 带状态评估的系统 prompt 后缀 */
+const STATE_PROMPT_SUFFIX = `
+
+Additionally, evaluate the following states based on the current image. Include a "states" array in your JSON response:
+"states": [{"id": <state_id>, "value": "<new_value>"}, ...]
+
+State definitions:
+{stateDefinitions}
+
+For boolean states, use "true" or "false". For string/number states, use the appropriate value.`;
+
+/** 时段配置接口 */
+interface ScheduleConfig {
+  enabled: boolean;
+  /** "HH:MM" 格式 */
+  start: string;
+  /** "HH:MM" 格式 */
+  end: string;
+  /** 0=周日, 1=周一, ..., 6=周六 */
+  days: number[];
+}
+
 /** 全局最大并发 VLM 调用数 */
 const MAX_CONCURRENT = 3;
 
 /**
  * 检测规则引擎
  * 每条规则独立定时器，定时取帧发送给 VLM 分析
+ * 支持状态评估、时段控制、per-rule 分辨率、原图保存
  */
 export class DetectRuleEngine {
   private eventBus: EventBus;
@@ -46,13 +73,12 @@ export class DetectRuleEngine {
   private frameProvider: FrameProvider;
   private runtimeConfig: RuntimeConfig;
   private roiStorage?: RoiStorage;
+  private stateStorage?: StateStorage;
 
   /** 每条规则的定时器 */
   private timers = new Map<number, ReturnType<typeof setInterval>>();
   /** 每条规则上次触发时间（冷却） */
   private lastTriggerTime = new Map<number, number>();
-  /** 正在分析中的摄像头 */
-  private analyzing = new Set<string>();
   /** 当前并发数 */
   private concurrent = 0;
   /** 排队等待的任务 */
@@ -72,12 +98,14 @@ export class DetectRuleEngine {
     frameProvider: FrameProvider,
     runtimeConfig: RuntimeConfig,
     roiStorage?: RoiStorage,
+    stateStorage?: StateStorage,
   ) {
     this.eventBus = eventBus;
     this.storage = storage;
     this.frameProvider = frameProvider;
     this.runtimeConfig = runtimeConfig;
     this.roiStorage = roiStorage;
+    this.stateStorage = stateStorage;
   }
 
   /** 设置快照保存回调 */
@@ -99,7 +127,6 @@ export class DetectRuleEngine {
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
     this.lastTriggerTime.clear();
-    this.analyzing.clear();
     this.queue = [];
     this.concurrent = 0;
   }
@@ -128,7 +155,7 @@ export class DetectRuleEngine {
       }
     }
 
-    /** 启动新规则/更新已有规则 */
+    /** 启动新规则 */
     for (const rule of rules) {
       if (!this.timers.has(rule.id)) {
         this.startRuleTimer(rule);
@@ -148,11 +175,14 @@ export class DetectRuleEngine {
     this.timers.set(rule.id, timer);
   }
 
-  /** 调度执行（带并发控制） */
+  /** 调度执行（带并发控制 + 时段检查） */
   private scheduleExecution(rule: DetectRule): void {
     /** 冷却检查 */
     const lastTime = this.lastTriggerTime.get(rule.id) ?? 0;
     if (Date.now() - lastTime < rule.cooldownMs) return;
+
+    /** 时段检查 */
+    if (!this.isInSchedule(rule)) return;
 
     /** 帧存在检查 */
     const frame = this.frameProvider.getLatestFrame(rule.cameraId);
@@ -166,10 +196,41 @@ export class DetectRuleEngine {
     this.executeRule(rule, frame, Date.now());
   }
 
+  /** 检查当前时间是否在规则配置的启用时段内 */
+  private isInSchedule(rule: DetectRule): boolean {
+    if (!rule.schedule) return true;
+    let config: ScheduleConfig;
+    try {
+      config = JSON.parse(rule.schedule) as ScheduleConfig;
+    } catch {
+      return true;
+    }
+    if (!config.enabled) return false;
+
+    const now = new Date();
+    /** 检查星期 */
+    if (config.days.length > 0 && !config.days.includes(now.getDay())) return false;
+
+    /** 检查时段 */
+    const [startH, startM] = config.start.split(":").map(Number);
+    const [endH, endM] = config.end.split(":").map(Number);
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const startMinutes = (startH ?? 0) * 60 + (startM ?? 0);
+    const endMinutes = (endH ?? 23) * 60 + (endM ?? 59);
+
+    if (startMinutes <= endMinutes) {
+      return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    }
+    /** 跨午夜（如 22:00 - 06:00） */
+    return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+  }
+
   /** 处理排队任务 */
   private processQueue(): void {
     while (this.queue.length > 0 && this.concurrent < MAX_CONCURRENT) {
       const item = this.queue.shift()!;
+      /** 时段检查 */
+      if (!this.isInSchedule(item.rule)) continue;
       const frame = this.frameProvider.getLatestFrame(item.rule.cameraId);
       if (frame) {
         this.executeRule(item.rule, frame, item.timestamp);
@@ -187,15 +248,15 @@ export class DetectRuleEngine {
       /** 准备图片 */
       let jpeg = frame;
       if (rule.roiId > 0 && this.roiStorage) {
-        jpeg = await this.cropToRoi(frame, rule.roiId, rule.cameraId) ?? frame;
+        jpeg = await this.cropToRoi(frame, rule.roiId) ?? frame;
       }
 
-      /** 缩放图片 */
+      /** 缩放图片（per-rule 分辨率覆盖全局配置） */
+      const imageWidth = rule.imageWidth > 0 ? rule.imageWidth : llmConfig.imageWidth;
       let imageDataUrl: string;
-      if (llmConfig.imageWidth > 0) {
-        const sharp = await import("sharp");
-        const resized = await sharp.default(jpeg)
-          .resize(llmConfig.imageWidth)
+      if (imageWidth > 0) {
+        const resized = await sharp(jpeg)
+          .resize(imageWidth)
           .jpeg({ quality: 80 })
           .toBuffer();
         imageDataUrl = `data:image/jpeg;base64,${resized.toString("base64")}`;
@@ -206,9 +267,23 @@ export class DetectRuleEngine {
       /** 语言约束 */
       const lang = this.runtimeConfig.get().language;
       const langInstruction = lang.startsWith("zh") ? "\nIMPORTANT: Write the description in Chinese (中文)." : "";
-      const systemPrompt = RULE_SYSTEM_PROMPT + langInstruction;
 
-      /** 调用 VLM */
+      /** 状态评估 prompt（当规则关联了状态时） */
+      let statePrompt = "";
+      if (rule.stateIds.length > 0 && this.stateStorage) {
+        const allStates = this.stateStorage.listStates();
+        const linkedStates = allStates.filter(s => rule.stateIds.includes(s.id));
+        if (linkedStates.length > 0) {
+          const defs = linkedStates.map(s =>
+            `- ID ${s.id}: "${s.name}" (type: ${s.valueType}, current: "${s.currentValue}")${s.description ? ` — ${s.description}` : ""}`
+          ).join("\n");
+          statePrompt = STATE_PROMPT_SUFFIX.replace("{stateDefinitions}", defs);
+        }
+      }
+
+      const systemPrompt = RULE_SYSTEM_PROMPT + langInstruction + statePrompt;
+
+      /** 调用 VLM（有关联状态时增加 max_tokens） */
       const body = {
         model: llmConfig.model,
         messages: [
@@ -221,7 +296,7 @@ export class DetectRuleEngine {
             ],
           },
         ],
-        max_tokens: 200,
+        max_tokens: rule.stateIds.length > 0 ? 400 : 200,
         temperature: 0.1,
       };
 
@@ -247,7 +322,7 @@ export class DetectRuleEngine {
       /** 解析 VLM 返回 */
       const vlmResult = this.parseVlmResponse(content);
 
-      /** 冷却更新（不管是否匹配都更新冷却时间） */
+      /** 冷却更新 */
       this.lastTriggerTime.set(rule.id, timestamp);
 
       /** 写入记录 */
@@ -258,14 +333,40 @@ export class DetectRuleEngine {
         JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt }),
       );
 
+      /** 处理状态更新 */
+      if (vlmResult.states && this.stateStorage) {
+        for (const stateUpdate of vlmResult.states) {
+          const change = this.stateStorage.setValue(stateUpdate.id, stateUpdate.value, `rule:${rule.id}`, rule.id);
+          if (change) {
+            const stateDef = this.stateStorage.getState(stateUpdate.id);
+            this.eventBus.emit("state:changed", {
+              stateId: change.stateId,
+              stateName: change.stateName,
+              cameraId: change.cameraId,
+              oldValue: change.oldValue,
+              newValue: change.newValue,
+              source: change.source,
+              sourceRuleId: change.sourceRuleId,
+              timestamp: change.timestamp,
+              notify: stateDef?.notifyOnChange ?? false,
+            });
+          }
+        }
+      }
+
       if (vlmResult.matched) {
-        /** 保存快照 */
+        /** 保存快照（原图优先） */
         if (this.saveSnapshot) {
-          this.saveSnapshot(rule.cameraId, timestamp, frame);
+          if (rule.saveOriginal) {
+            /** 保存原图（未经 ROI 裁剪和缩放的帧） */
+            this.saveSnapshot(rule.cameraId, timestamp, frame);
+          } else {
+            this.saveSnapshot(rule.cameraId, timestamp, jpeg);
+          }
         }
 
         /** 发出事件 */
-        this.eventBus.emit("detect:rule" as never, {
+        this.eventBus.emit("detect:rule", {
           ruleId: rule.id,
           ruleName: rule.name,
           cameraId: rule.cameraId,
@@ -274,7 +375,7 @@ export class DetectRuleEngine {
           result: vlmResult.description,
           confidence: vlmResult.confidence,
           detail: JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt }),
-        } as never);
+        });
 
         console.log(`[DetectRuleEngine] 规则 "${rule.name}" 匹配 (${(vlmResult.confidence * 100).toFixed(0)}%): ${vlmResult.description.slice(0, 80)}`);
       }
@@ -293,10 +394,17 @@ export class DetectRuleEngine {
     if (jsonMatch) {
       try {
         const obj = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+        const states = Array.isArray(obj.states)
+          ? (obj.states as Array<Record<string, unknown>>).map(s => ({
+            id: typeof s.id === "number" ? s.id : 0,
+            value: typeof s.value === "string" ? s.value : String(s.value),
+          })).filter(s => s.id > 0)
+          : undefined;
         return {
           matched: obj.matched === true,
           confidence: typeof obj.confidence === "number" ? obj.confidence : 0.5,
           description: typeof obj.description === "string" ? obj.description : content,
+          states,
         };
       } catch {
         // JSON 解析失败，走 fallback
@@ -336,12 +444,11 @@ export class DetectRuleEngine {
     maxX = Math.min(1, maxX + padX);
     maxY = Math.min(1, maxY + padY);
 
-    const sharp = await import("sharp");
-    const meta = await sharp.default(frame).metadata();
+    const meta = await sharp(frame).metadata();
     const w = meta.width ?? 640;
     const h = meta.height ?? 480;
 
-    return sharp.default(frame)
+    return sharp(frame)
       .extract({
         left: Math.round(minX * w),
         top: Math.round(minY * h),

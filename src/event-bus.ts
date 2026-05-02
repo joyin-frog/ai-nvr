@@ -83,6 +83,26 @@ export interface EventPayloads {
     detail: string;
   };
 
+  /** 检测规则匹配事件 */
+  "detect:rule": {
+    /** 规则 ID */
+    ruleId: number;
+    /** 规则名称 */
+    ruleName: string;
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 用户提示词 */
+    prompt: string;
+    /** AI 分析结果描述 */
+    result: string;
+    /** 置信度 0-1 */
+    confidence: number;
+    /** 详细信息 JSON */
+    detail: string;
+  };
+
   /** 追踪目标出现 */
   "track:appeared": {
     /** 摄像头 ID */
@@ -287,6 +307,28 @@ export interface EventPayloads {
 
   /** LLM 场景分析结果 */
   "llm:scene": LlmSceneResult;
+
+  /** 状态变更事件：检测规则更新了关联状态的值 */
+  "state:changed": {
+    /** 状态 ID */
+    stateId: number;
+    /** 状态名称 */
+    stateName: string;
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 旧值 */
+    oldValue: string;
+    /** 新值 */
+    newValue: string;
+    /** 来源（manual / rule:规则ID / system） */
+    source: string;
+    /** 来源规则 ID */
+    sourceRuleId: number;
+    /** 时间戳 */
+    timestamp: number;
+    /** 是否需要通知用户 */
+    notify: boolean;
+  };
 
 }
 

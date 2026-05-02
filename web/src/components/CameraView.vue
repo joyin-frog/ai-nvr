@@ -2122,39 +2122,37 @@ onUnmounted(() => {
       @mouseleave="onPanEnd"
     >
       <div class="camera-content" :style="{ transform: zoomTransform }">
-        <!-- fMP4/MSE 模式：video 硬件解码 -->
-        <template v-if="online">
-          <div class="mse-wrapper">
-            <video
-              :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
-              class="camera-video"
-              :style="{ filter: imageFilter }"
-              autoplay muted playsinline
-              @contextmenu.prevent="onCanvasContext"
-            />
-            <canvas
-              ref="staticCanvasRef"
-              class="camera-overlay static-overlay"
-              style="pointer-events: none;"
-            />
-            <canvas
-              ref="overlayCanvas"
-              class="camera-overlay dynamic-overlay"
-              @contextmenu.prevent="onCanvasContext"
-              @dblclick="onOverlayDblClick"
-              @mousemove="onOverlayMouseMove"
-              @mouseleave="onOverlayMouseLeave"
-              @touchstart="onTouchStart"
-              @touchmove="onTouchMove"
-              @touchend="onTouchEnd"
-            />
-          </div>
-        </template>
-        <div v-else class="camera-placeholder">
-          <div v-if="online" class="placeholder-icon">&#9679;</div>
-          <div v-else class="placeholder-icon offline-icon">&#10005;</div>
-          <span>{{ online ? t('camera.waiting') : t('camera.cameraOffline') }}</span>
-          <span v-if="!online && lastSeenText" class="last-seen">{{ lastSeenText }}</span>
+        <!-- fMP4/MSE 模式：video 硬件解码 — 始终渲染，避免 online 抖动导致销毁重建黑闪 -->
+        <div class="mse-wrapper">
+          <video
+            :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
+            class="camera-video"
+            :style="{ filter: imageFilter }"
+            autoplay muted playsinline
+            @contextmenu.prevent="onCanvasContext"
+          />
+          <canvas
+            ref="staticCanvasRef"
+            class="camera-overlay static-overlay"
+            style="pointer-events: none;"
+          />
+          <canvas
+            ref="overlayCanvas"
+            class="camera-overlay dynamic-overlay"
+            @contextmenu.prevent="onCanvasContext"
+            @dblclick="onOverlayDblClick"
+            @mousemove="onOverlayMouseMove"
+            @mouseleave="onOverlayMouseLeave"
+            @touchstart="onTouchStart"
+            @touchmove="onTouchMove"
+            @touchend="onTouchEnd"
+          />
+        </div>
+        <!-- placeholder 叠加层：离线时覆盖在视频上方，不销毁视频元素 -->
+        <div v-show="!online" class="camera-placeholder">
+          <div class="placeholder-icon offline-icon">&#10005;</div>
+          <span>{{ t('camera.cameraOffline') }}</span>
+          <span v-if="lastSeenText" class="last-seen">{{ lastSeenText }}</span>
         </div>
 
         <!-- 检测框由 Canvas overlay 绘制（不再使用 HTML TransitionGroup） -->
@@ -2244,7 +2242,7 @@ onUnmounted(() => {
 }
 
 .camera-view.offline {
-  opacity: 0.7;
+  /* 不再降低整体 opacity，避免在线恢复时视频区域闪烁变暗 */
 }
 
 .camera-header {
@@ -2501,12 +2499,17 @@ onUnmounted(() => {
 }
 
 .camera-placeholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  background: #1a1a2e;
   color: #444;
   font-size: 13px;
+  z-index: 5;
 }
 
 .last-seen {

@@ -36,10 +36,14 @@ export interface EventMap {
   'track:loiter': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string; durationMs: number }
   'track:match-suggest': { cameraId: string; timestamp: number; trackId: number; label: string; matches: Array<{ trackId: number; customName: string; distance: number }> }
   'llm:scene': { cameraId: string; timestamp: number; description: string; trigger: string; inferMs: number }
+  'state:changed': { stateId: number; stateName: string; cameraId: string; oldValue: string; newValue: string; source: string; sourceRuleId: number; timestamp: number; notify: boolean }
 }
 
-/** 事件回调 */
-type EventCallback<T extends keyof EventMap> = (payload: EventMap[T]) => void
+/** 内部存储用通用回调类型 */
+type AnyEventCallback = (payload: Record<string, unknown>) => void
+
+/** 对外暴露的事件回调类型（保持类型安全） */
+export type EventCallback<T extends keyof EventMap> = (payload: EventMap[T]) => void
 
 /** 连接状态 */
 export type ConnectionState = 'connected' | 'connecting' | 'disconnected'
@@ -51,7 +55,7 @@ export type ConnectionState = 'connected' | 'connecting' | 'disconnected'
  */
 export class EventClient {
   private ws: WebSocket | null = null
-  private listeners = new Map<string, Set<EventCallback<keyof EventMap>>>()
+  private listeners = new Map<string, Set<AnyEventCallback>>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private url: string
   /** 重连次数（用于指数退避） */
@@ -190,8 +194,8 @@ export class EventClient {
       this.listeners.set(event, new Set())
     }
     const set = this.listeners.get(event)!
-    set.add(cb as EventCallback<keyof EventMap>)
-    return () => set.delete(cb as EventCallback<keyof EventMap>)
+    set.add(cb as unknown as AnyEventCallback)
+    return () => set.delete(cb as unknown as AnyEventCallback)
   }
 
   /** 断开 */

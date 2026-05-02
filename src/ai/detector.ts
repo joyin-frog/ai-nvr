@@ -7,6 +7,7 @@ import { TrackStorage } from "@/storage/tracks";
 import { type TrackLabelStorage } from "@/storage/track-labels";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { ClipService } from "./clip-service";
+import sharp from "sharp";
 
 /** VLM 分析结果（从 JSON 响应中解析） */
 interface VlmDetection {
@@ -354,8 +355,7 @@ export class AiDetector {
     /** 缩放图片减少传输和推理开销 */
     const resizeImage = async (img: Buffer): Promise<string> => {
       if (llmConfig.imageWidth > 0) {
-        const sharpMod = await import("sharp");
-        const resized = await sharpMod.default(img)
+        const resized = await sharp(img)
           .resize(llmConfig.imageWidth)
           .jpeg({ quality: 80 })
           .toBuffer();
