@@ -157,8 +157,8 @@ function drawStaticLayer(cssW: number, cssH: number) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
 
-  /** OSD（摄像头名称 + 时钟 + FPS/延迟/AI指标 + 检测摘要） */
-  drawOSD(ctx, cssW, cssH)
+  /** 静态 OSD（摄像头名称） */
+  drawStaticOSD(ctx, cssW, cssH)
 
   /** 静态元素（ROI + 越线，使用离屏缓存） */
   const staticCache = drawStaticCache(cssW, cssH)
@@ -248,11 +248,14 @@ function drawOverlayOnce() {
   overlayLastH = cssH
   overlayDirty = false
 
-  /** 绘制动态层（检测框 + 轨迹 + 通知） */
+  /** 绘制动态层（时钟 + FPS/延迟/AI指标 + 检测框 + 轨迹 + 通知） */
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, cssW, cssH)
+
+  /** 动态 OSD（时钟 + FPS/延迟/AI指标 + 检测摘要，始终显示） */
+  drawDynamicOSD(ctx, cssW, cssH)
 
   if (hasFrame.value && props.showBoxes) {
     drawDynamicOverlay(ctx, cssW, cssH)
@@ -288,8 +291,6 @@ let clockTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
   const mi = String(now.getMinutes()).padStart(2, '0')
   const s = String(now.getSeconds()).padStart(2, '0')
   clockText.value = `${y}-${mo}-${d} ${h}:${mi}:${s}`
-  /** 时钟变化时标记静态层 dirty（OSD 在静态层） */
-  staticLayerDirty = true
 }, 1000)
 /** 立即初始化 */
 {
@@ -698,21 +699,25 @@ function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height
   ctx.restore()
 }
 
-function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
+/** 绘制静态 OSD（摄像头名称，几乎不变） */
+function drawStaticOSD(ctx: CanvasRenderingContext2D, width: number, _height: number) {
   ctx.save()
-
-  /** 左上角：摄像头名称 */
   if (props.name) {
     ctx.font = 'bold 13px monospace'
     ctx.textBaseline = 'top'
-    const nameText = props.name
-    const nm = ctx.measureText(nameText)
+    const nm = ctx.measureText(props.name)
     const pad = 4
     ctx.fillStyle = 'rgba(0,0,0,0.5)'
     ctx.fillRect(4, 4, nm.width + pad * 2, 18)
     ctx.fillStyle = '#fff'
-    ctx.fillText(nameText, 4 + pad, 6)
+    ctx.fillText(props.name, 4 + pad, 6)
   }
+  ctx.restore()
+}
+
+/** 绘制动态 OSD（时钟 + FPS/延迟/AI指标 + 检测摘要，频繁变化） */
+function drawDynamicOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.save()
 
   /** 左下角：时钟 */
   if (clockText.value) {
