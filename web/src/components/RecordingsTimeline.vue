@@ -321,6 +321,32 @@ function onSegmentLeave() {
   tooltip.value = null
 }
 
+/** 鼠标滚轮缩放时间范围 */
+function onTimelineWheel(e: WheelEvent) {
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+
+  const bar = timelineEl.value
+  if (!bar) return
+  const rect = bar.getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+
+  if (e.deltaY < 0) {
+    /** 放大：day → hour（根据鼠标位置定位到对应小时） */
+    if (viewMode.value === 'day') {
+      const { start, end } = timeRange.value
+      const mouseTime = start + pct * (end - start)
+      selectedHour.value = new Date(mouseTime).getHours()
+      viewMode.value = 'hour'
+    }
+  } else {
+    /** 缩小：hour → day */
+    if (viewMode.value === 'hour') {
+      viewMode.value = 'day'
+    }
+  }
+}
+
 /** 格式化日期标签 */
 const dateLabel = computed(() => {
   if (viewMode.value === 'day') {
@@ -347,7 +373,7 @@ function onEventMarkerClick(timestamp: number) {
 </script>
 
 <template>
-  <div class="timeline-container">
+  <div class="timeline-container" @wheel="onTimelineWheel">
     <!-- 控制栏 -->
     <div class="timeline-controls">
       <button class="nav-btn" @click="prevPeriod">&#9664;</button>
