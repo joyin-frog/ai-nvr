@@ -1,14 +1,16 @@
 /**
  * AI 检测 Worker 线程
- * 在独立线程中运行 ONNX 模型推理，避免阻塞主线程 HTTP 服务
+ * 使用 jina-clip-v2 零样本分类替代 YOLO 目标检测
+ * 对全图做语义化识别，输出场景级标签和图像嵌入
  */
 import { parentPort, workerData } from "node:worker_threads";
-import { pipeline, env as transformersEnv, type ObjectDetectionPipeline, RawImage } from "@huggingface/transformers";
+import { AutoModel, AutoProcessor, RawImage, env as transformersEnv } from "@huggingface/transformers";
 import sharp from "sharp";
 
 /** 设置模型下载源 */
 const hfEndpoint = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 transformersEnv.remoteHost = `${hfEndpoint}/`;
+transformersEnv.cacheDir = (workerData as { cacheDir: string }).cacheDir;
 
 /** Worker 启动参数 */
 interface WorkerInit {
@@ -25,6 +27,8 @@ interface DetectRequest {
   inputWidth: number;
   threshold: number;
   maxDetections: number;
+  /** 候选标签列表 */
+  labels: string[];
 }
 
 /** 推理响应 */
@@ -37,105 +41,156 @@ interface DetectResult {
     score: number;
     box: { xmin: number; ymin: number; xmax: number; ymax: number };
   }>;
+  /** 图像嵌入向量（用于外观匹配） */
+  embedding: number[];
   fingerprint: string;
   inferMs: number;
   resizeMs: number;
   error?: string;
 }
 
-let detector: ObjectDetectionPipeline | null = null;
+let model: Awaited<ReturnType<typeof AutoModel.from_pretrained>> | null = null;
+let processor: Awaited<ReturnType<typeof AutoProcessor.from_pretrained>> | null = null;
+
 const init = workerData as WorkerInit;
 
-transformersEnv.cacheDir = init.cacheDir;
-
-/** 当前正在推理的请求 ID（推理锁） */
 let currentRequestId = 0;
-
-/** 最新待处理的请求（新请求覆盖旧的，实现自动跳帧） */
 let pendingReq: DetectRequest | null = null;
-/** 推理进行中 */
 let busy = false;
+
+/** 默认候选标签 */
+const DEFAULT_LABELS = [
+  "a person",
+  "a car",
+  "a truck",
+  "a bus",
+  "a motorcycle",
+  "a bicycle",
+  "a dog",
+  "a cat",
+  "empty scene",
+];
+
+/** 文本嵌入缓存 */
+let cachedLabels: string[] = [];
+let cachedTextEmbeddings: Float32Array | null = null;
 
 /** 加载模型 */
 async function loadModel(): Promise<void> {
-  console.log(`[AI Worker] 加载模型: ${init.model}`);
-  detector = await pipeline("object-detection", init.model, {
-    device: "cpu",
+  console.log(`[CLIP Worker] 加载模型: ${init.model}`);
+  processor = await AutoProcessor.from_pretrained(init.model);
+  model = await AutoModel.from_pretrained(init.model, {
+    dtype: "q4",
   });
-  console.log(`[AI Worker] 模型加载完成`);
+  console.log(`[CLIP Worker] 模型加载完成`);
   parentPort?.postMessage({ type: "ready" });
 }
 
-/** 执行推理 */
+/** 预计算文本嵌入（标签变化时重新计算） */
+async function ensureTextEmbeddings(labels: string[]): Promise<void> {
+  if (!model || !processor) return;
+  if (cachedLabels.length === labels.length && cachedLabels.every((l, i) => l === labels[i]) && cachedTextEmbeddings) {
+    return;
+  }
+  cachedLabels = labels;
+  const inputs = await processor(labels, null, { padding: true, truncation: true });
+  const output = await model(inputs);
+  const textData = output.l2norm_text_embeddings.data as Float32Array;
+  const dim = output.l2norm_text_embeddings.dims.at(-1) ?? 1024;
+  const batchSize = output.l2norm_text_embeddings.dims[0] ?? labels.length;
+
+  cachedTextEmbeddings = new Float32Array(batchSize * dim);
+  for (let i = 0; i < batchSize; i++) {
+    for (let j = 0; j < dim; j++) {
+      cachedTextEmbeddings[i * dim + j] = textData[i * dim + j]!;
+    }
+  }
+}
+
+/** 执行零样本分类推理 */
 async function detect(req: DetectRequest): Promise<void> {
-  if (!detector) return;
+  if (!model || !processor) return;
 
   currentRequestId = req.id;
+  const labels = req.labels.length > 0 ? req.labels : DEFAULT_LABELS;
 
   const result: DetectResult = {
     id: req.id,
     cameraId: req.cameraId,
     timestamp: req.timestamp,
     detections: [],
+    embedding: [],
     fingerprint: "",
     inferMs: 0,
     resizeMs: 0,
   };
 
   try {
-    /** 缩放 + 转为 RawImage（跳过 JPEG 重编码，直接输出 RGB 像素） */
-    let inferenceInput: RawImage | Blob;
+    const t0 = performance.now();
+
+    /** 缩放 + 转为 RawImage */
+    const inferW = req.inputWidth > 0 ? req.inputWidth : 640;
+    const { data, info } = await sharp(req.jpeg)
+      .resize(inferW)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    result.resizeMs = performance.now() - t0;
+
+    const rawImage = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
+
+    /** 图像推理 */
+    const inputs = await processor(null, [rawImage], { padding: true, truncation: true });
     const t1 = performance.now();
-    if (req.inputWidth > 0) {
-      const { data, info } = await sharp(req.jpeg)
-        .resize(req.inputWidth)
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      result.resizeMs = performance.now() - t1;
-      inferenceInput = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
-    } else {
-      result.resizeMs = performance.now() - t1;
-      inferenceInput = new Blob([req.jpeg]);
+    const output = await model(inputs);
+    result.inferMs = performance.now() - t1;
+
+    /** 提取图像嵌入 */
+    const imageData = output.l2norm_image_embeddings.data as Float32Array;
+    const dim = output.l2norm_image_embeddings.dims.at(-1) ?? 1024;
+    const imageEmbed = imageData.slice(0, dim);
+    result.embedding = Array.from(imageEmbed);
+
+    /** 预计算文本嵌入 */
+    await ensureTextEmbeddings(labels);
+    if (!cachedTextEmbeddings) return;
+
+    /** 计算每个标签的相似度（余弦相似度 = 点积，因为已 L2 归一化） */
+    const scores: Array<{ label: string; score: number }> = [];
+    for (let l = 0; l < labels.length; l++) {
+      let dot = 0;
+      for (let j = 0; j < dim; j++) {
+        dot += imageEmbed[j]! * cachedTextEmbeddings[l * dim + j]!;
+      }
+      scores.push({ label: labels[l]!, score: dot });
     }
 
-    /** 推理 */
-    const t2 = performance.now();
-    const raw = await detector(inferenceInput, {
-      threshold: req.threshold,
-      percentage: true,
-    });
-    result.inferMs = performance.now() - t2;
+    /** 过滤 "empty" 类标签，只保留有意义的目标标签 */
+    const emptyLabels = new Set(["empty scene", "empty background", "no objects", "nothing"]);
+    const filtered = scores
+      .filter(s => !emptyLabels.has(s.label) && s.score >= req.threshold)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, req.maxDetections);
 
-    /** 解析结果 */
-    result.detections = (raw as Array<{
-      score: number;
-      label: string;
-      box: { xmin: number; ymin: number; xmax: number; ymax: number };
-    }>)
-      .slice(0, req.maxDetections)
-      .map(item => ({
-        label: item.label,
-        score: item.score,
-        box: item.box,
-      }));
+    /** 全图检测结果（框覆盖整图，因为 CLIP 不做空间定位） */
+    result.detections = filtered.map(s => ({
+      label: s.label,
+      score: Math.min(s.score, 1),
+      box: { xmin: 0, ymin: 0, xmax: 1, ymax: 1 },
+    }));
 
-    /** 计算指纹 */
+    /** 指纹 */
     result.fingerprint = result.detections.length === 0 ? ""
-      : result.detections
-        .map(d => `${d.label}:${Math.round(d.box.xmin * 20)},${Math.round(d.box.ymin * 20)},${Math.round(d.box.xmax * 20)},${Math.round(d.box.ymax * 20)}`)
-        .sort()
-        .join("|");
+      : result.detections.map(d => `${d.label}:${d.score.toFixed(2)}`).sort().join("|");
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
   }
 
-  /** 只有当前请求才返回结果（跳过被覆盖的旧请求） */
   if (currentRequestId === req.id) {
     parentPort?.postMessage({ type: "result", data: result });
   }
 }
 
-/** 处理下一个待处理请求 */
 async function drainPending(): Promise<void> {
   while (pendingReq) {
     const req = pendingReq;
@@ -145,11 +200,9 @@ async function drainPending(): Promise<void> {
   busy = false;
 }
 
-/** 监听主线程消息 */
 parentPort?.on("message", (msg: { type: string; data?: DetectRequest }) => {
   if (msg.type === "detect" && msg.data) {
     if (busy) {
-      /** 推理进行中 → 覆盖旧待处理请求（自动跳帧） */
       pendingReq = msg.data;
     } else {
       busy = true;
@@ -159,6 +212,6 @@ parentPort?.on("message", (msg: { type: string; data?: DetectRequest }) => {
 });
 
 loadModel().catch((err) => {
-  console.error(`[AI Worker] 模型加载失败:`, err);
+  console.error(`[CLIP Worker] 模型加载失败:`, err);
   parentPort?.postMessage({ type: "error", error: String(err) });
 });

@@ -405,6 +405,7 @@ export default {
     modelDescYolosSmall: 'DETR架构，较老模型',
     modelDescYolosTiny: 'DETR架构，极小模型',
     modelDescDetrR50: '经典DETR模型',
+    modelDescJinaClipV2: 'Jina CLIP v2 零样本分类（语义识别，推荐）',
     importantLabels: '重要标签（逗号分隔）',
     importantLabelsHint: '仅推送这些标签的检测结果到前端，留空=全部',
     connection: '连接',

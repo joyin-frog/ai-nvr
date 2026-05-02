@@ -403,6 +403,7 @@ export default {
     modelDescYolosSmall: 'DETR architecture, older model',
     modelDescYolosTiny: 'DETR architecture, tiny model',
     modelDescDetrR50: 'Classic DETR model',
+    modelDescJinaClipV2: 'Jina CLIP v2 zero-shot classification (semantic, recommended)',
     importantLabels: 'Important labels (comma separated)',
     importantLabelsHint: 'Only push these labels to frontend, empty = all',
     connection: 'Connection',

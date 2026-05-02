@@ -21,6 +21,7 @@ function saveBackendUrl() {
 
 /** 预设 AI 模型列表 */
 const PRESET_MODELS = [
+  { id: 'jinaai/jina-clip-v2', name: 'Jina CLIP v2', descKey: 'settings.modelDescJinaClipV2' },
   { id: 'onnx-community/yolo26m-ONNX', name: 'YOLO26m', descKey: 'settings.modelDescYolo26m' },
   { id: 'onnx-community/yolo26l-ONNX', name: 'YOLO26l', descKey: 'settings.modelDescYolo26l' },
   { id: 'onnx-community/yolo26x-ONNX', name: 'YOLO26x', descKey: 'settings.modelDescYolo26x' },

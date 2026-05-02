@@ -39,6 +39,8 @@ interface WorkerDetectResult {
     score: number;
     box: { xmin: number; ymin: number; xmax: number; ymax: number };
   }>;
+  /** 图像嵌入向量（CLIP） */
+  embedding: number[];
   fingerprint: string;
   inferMs: number;
   resizeMs: number;
@@ -209,6 +211,9 @@ export class AiDetector {
       const aiConfig = this.runtimeConfig.get().ai;
       pendingRequests.set(id, { resolve, cameraId, jpeg, timestamp });
 
+      /** 将 importantLabels 转为 CLIP 候选文本标签 */
+      const labels = aiConfig.importantLabels.map(l => `a ${l}`);
+
       this.worker?.postMessage({
         type: "detect",
         data: {
@@ -219,6 +224,7 @@ export class AiDetector {
           inputWidth: this.runtimeConfig.getAiInputWidth(cameraId),
           threshold: this.runtimeConfig.getAiThreshold(cameraId),
           maxDetections: aiConfig.maxDetections,
+          labels,
         },
       });
     });

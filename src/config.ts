@@ -163,7 +163,7 @@ export function loadConfig(configPath?: string): AppConfig {
     },
     ai: {
       enabled: (aiNode?.enabled as boolean) ?? true,
-      model: (aiNode?.model as string) ?? "onnx-community/rfdetr_nano-ONNX",
+      model: (aiNode?.model as string) ?? "jinaai/jina-clip-v2",
       threshold: (aiNode?.threshold as number) ?? 0.5,
       maxDetections: (aiNode?.max_detections as number) ?? 20,
       inputWidth: (aiNode?.input_width as number) ?? 640,

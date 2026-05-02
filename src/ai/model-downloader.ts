@@ -9,12 +9,19 @@ const MODEL_FILES = ["config.json", "preprocessor_config.json", "onnx/model.onnx
 /**
  * 健壮地下载模型文件，支持断点续传和重试
  * 下载完成后 transformers.js 会直接从缓存目录读取，无需重复下载
+ * 对于非 ONNX 格式的模型（如 jina-clip-v2），跳过预下载，由 transformers.js 自动处理
  */
 export async function ensureModelCached(
   modelId: string,
   cacheDir: string,
   endpoint?: string,
 ): Promise<void> {
+  /** 非 ONNX 模型（如 jina-clip-v2）由 transformers.js 自动下载 */
+  if (!modelId.includes("ONNX") && !modelId.includes("onnx")) {
+    console.log(`[ModelDownloader] ${modelId} 非 ONNX 模型，跳过预下载（由 transformers.js 自动处理）`);
+    return;
+  }
+
   const hfHost = endpoint ?? process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
   const modelDir = join(cacheDir, modelId);
 
