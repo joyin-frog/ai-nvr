@@ -732,62 +732,65 @@ class VideoToFmp4Muxer {
 
   private buildMvhd(): Buffer {
     /**
-     * version 0 mvhd layout:
-     * 0:  version(1) + flags(3)
-     * 4:  creation_time(4)
-     * 8:  modification_time(4)
-     * 12: timescale(4)
-     * 16: duration(4)
-     * 20: rate(4) = 0x00010000 (1.0)
-     * 24: volume(2) = 0x0100 (1.0)
-     * 26: reserved(10)
-     * 36: matrix(36) = identity
-     * 72: pre_defined(24)
-     * 96: next_track_ID(4)
+     * fullBox 已写入 version+flags(4)，data 紧随其后：
+     * data[0-3]:   creation_time
+     * data[4-7]:   modification_time
+     * data[8-11]:  timescale
+     * data[12-15]: duration
+     * data[16-19]: rate (0x00010000 = 1.0)
+     * data[20-21]: volume (0x0100 = 1.0)
+     * data[22-31]: reserved
+     * data[32-67]: matrix (identity)
+     * data[68-91]: pre_defined
+     * data[92-95]: next_track_ID
      */
-    const data = Buffer.alloc(100);
-    data.writeUInt32BE(1000, 12);      /** timescale = 1000 */
-    data.writeUInt32BE(0x00010000, 20); /** rate = 1.0 */
-    data.writeUInt16BE(0x0100, 24);     /** volume = 1.0 */
-    /** identity matrix at offset 36 */
-    data.writeUInt32BE(0x00010000, 36);
-    data.writeUInt32BE(0x00010000, 52);
-    data.writeUInt32BE(0x40000000, 68);
-    data.writeUInt32BE(2, 96);          /** next_track_ID */
-    return this.box("mvhd", data);
+    const data = Buffer.alloc(96);
+    data.writeUInt32BE(1000, 8);       /** timescale = 1000 */
+    data.writeUInt32BE(0x00010000, 16); /** rate = 1.0 */
+    data.writeUInt16BE(0x0100, 20);     /** volume = 1.0 */
+    /** identity matrix: data[32..67] */
+    data.writeUInt32BE(0x00010000, 32);
+    data.writeUInt32BE(0x00010000, 48);
+    data.writeUInt32BE(0x40000000, 64);
+    data.writeUInt32BE(2, 92);          /** next_track_ID */
+    return this.fullBox("mvhd", 0, data);
   }
 
   private buildTkhd(w: number, h: number): Buffer {
     /**
-     * version 0 tkhd layout:
-     * 0:  version(1) + flags(3) — flags=1 (track enabled)
-     * 4:  creation_time(4)
-     * 8:  modification_time(4)
-     * 12: track_ID(4) = 1
-     * 16: reserved(4)
-     * 20: duration(4)
-     * 24: reserved(8)
-     * 32: layer(2) + alternate_group(2) + volume(2) + reserved(2)
-     * 40: matrix(36) — identity: [1,0,0, 0,1,0, 0,0,1] in 16.16/2.30
-     * 76: width(4) 16.16 fixed-point
-     * 80: height(4) 16.16 fixed-point
+     * version 0 tkhd — fullBox data (version+flags 在 fullBox 中):
+     * data[0-3]:   creation_time
+     * data[4-7]:   modification_time
+     * data[8-11]:  track_ID = 1
+     * data[12-15]: reserved
+     * data[16-19]: duration
+     * data[20-27]: reserved(8)
+     * data[28-35]: layer(2) + altGroup(2) + volume(2) + reserved(2)
+     * data[36-71]: matrix(36) identity
+     * data[72-75]: width 16.16
+     * data[76-79]: height 16.16
      */
-    const data = Buffer.alloc(84);
-    data.writeUInt32BE(1, 0);            /** flags=1 (track enabled) */
-    data.writeUInt32BE(1, 12);           /** track_id=1 */
-    data.writeUInt32BE(0x00010000, 40);  /** matrix[0] = 1.0 */
-    data.writeUInt32BE(0x00010000, 56);  /** matrix[4] = 1.0 */
-    data.writeUInt32BE(0x40000000, 72);  /** matrix[8] = 1.0 (2.30) */
-    data.writeUInt32BE(w << 16, 76);     /** width 16.16 */
-    data.writeUInt32BE(h << 16, 80);     /** height 16.16 */
-    return this.box("tkhd", data);
+    const data = Buffer.alloc(80);
+    data.writeUInt32BE(1, 8);            /** track_id=1 */
+    data.writeUInt32BE(0x00010000, 36);  /** matrix[0] = 1.0 */
+    data.writeUInt32BE(0x00010000, 52);  /** matrix[4] = 1.0 */
+    data.writeUInt32BE(0x40000000, 68);  /** matrix[8] = 1.0 (2.30) */
+    data.writeUInt32BE(w << 16, 72);     /** width 16.16 */
+    data.writeUInt32BE(h << 16, 76);     /** height 16.16 */
+    return this.fullBox("tkhd", 1, data);
   }
 
   private buildMdhd(): Buffer {
-    /** version 0 mdhd: version(1) + flags(3) + creation_time(4) + modification_time(4) + timescale(4) + duration(4) = 24 bytes */
-    const data = Buffer.alloc(24);
-    data.writeUInt32BE(90000, 12);
-    return this.box("mdhd", data);
+    /**
+     * version 0 mdhd — fullBox payload:
+     * data[0-3]:  creation_time
+     * data[4-7]:  modification_time
+     * data[8-11]: timescale
+     * data[12-15]: duration
+     */
+    const data = Buffer.alloc(16);
+    data.writeUInt32BE(90000, 8);
+    return this.fullBox("mdhd", 0, data);
   }
 
   private buildHdlr(): Buffer {
@@ -832,10 +835,10 @@ class VideoToFmp4Muxer {
   }
 
   private buildTrex(): Buffer {
-    const data = Buffer.alloc(24);
-    data.writeUInt32BE(1, 0);
-    data.writeUInt32BE(1, 4);
-    return this.box("trex", data);
+    const data = Buffer.alloc(20);
+    data.writeUInt32BE(1, 0);   /** track_ID */
+    data.writeUInt32BE(1, 4);   /** default_sample_description_index */
+    return this.fullBox("trex", 0, data);
   }
 
   /** 发送当前 segment */
