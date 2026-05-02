@@ -16,8 +16,11 @@ const FMP4_TYPE_MEDIA = 0x02
 /** 保留当前播放位置前多少秒缓冲区 */
 const BUFFER_RETAIN_SECONDS = 4
 
-/** 播放延迟超过此值（秒）时自动 seek 到最新位置 */
-const LIVE_CATCHUP_THRESHOLD = 0.8
+/** 播放延迟超过此值（秒）时开始渐进追赶 */
+const LIVE_CATCHUP_THRESHOLD = 1.5
+
+/** 延迟超过此值（秒）直接 seek 到最新 */
+const LIVE_SEEK_THRESHOLD = 4.0
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
 const MAX_PENDING_SEGMENTS = 8
@@ -60,6 +63,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
   /** 解码检测定时器：连接后一段时间内 videoWidth=0 则判定为解码失败 */
   let decodeCheckTimer: ReturnType<typeof setTimeout> | null = null
+  /** pruneBuffer 是否正在执行中（防止 remove 和 append 竞争） */
+  let pruning = false
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
@@ -153,21 +158,23 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   /** 追赶直播：渐进式加速，延迟过大直接 seek */
   function catchUpToLive() {
     const video = videoRef.value
-    if (!video || !sourceBuffer) return
+    if (!video || !sourceBuffer || sourceBuffer.updating) return
     const buffered = sourceBuffer.buffered
     if (buffered.length === 0) return
 
     const end = buffered.end(buffered.length - 1)
     const delay = end - video.currentTime
 
-    if (delay > LIVE_CATCHUP_THRESHOLD * 3) {
-      /** 延迟过大（>2.4s）直接 seek 到最新 */
+    if (delay > LIVE_SEEK_THRESHOLD) {
+      /** 延迟过大直接 seek 到最新 */
       video.currentTime = end - 0.1
     } else if (delay > LIVE_CATCHUP_THRESHOLD) {
-      /** 渐进追赶：延迟越大速度越快，最大 1.3x（避免明显加速感） */
-      const rate = Math.min(1.3, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) / 4)
-      video.playbackRate = rate
-    } else if (delay < 0.3 && video.playbackRate !== 1) {
+      /** 渐进追赶：延迟越大速度越快，最大 1.2x */
+      const rate = Math.min(1.2, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) / 8)
+      if (video.playbackRate !== rate) {
+        video.playbackRate = rate
+      }
+    } else if (video.playbackRate !== 1) {
       /** 追上后恢复正常速度 */
       video.playbackRate = 1
     }
@@ -181,6 +188,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     disconnect()
     pendingQueue = []
     appending = false
+    pruning = false
     currentCodec = ''
     fpsFrameCount = 0
     fpsStartTime = performance.now()
@@ -322,7 +330,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   }
 
   function queueAppend(data: ArrayBuffer) {
-    if (appending) {
+    if (appending || pruning) {
       pendingQueue.push(data)
       /** 队列溢出保护：只保留最新段，丢弃旧的（实时流优先展示最新画面） */
       if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
@@ -335,7 +343,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   }
 
   function doAppend(data: ArrayBuffer) {
-    if (!sourceBuffer || sourceBuffer.updating) {
+    if (!sourceBuffer || sourceBuffer.updating || pruning) {
       pendingQueue.push(data)
       if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
         const newest = pendingQueue[pendingQueue.length - 1]!
@@ -353,6 +361,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         console.warn('[fMP4] QuotaExceeded，清理缓冲区并重试')
         /** 清理全部已缓冲数据 */
         if (!sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
+          pruning = true
           try {
             sourceBuffer.remove(sourceBuffer.buffered.start(0), sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1))
           } catch { /* ignore */ }
@@ -368,9 +377,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     console.warn('[fMP4] SourceBuffer error，尝试清理缓冲区')
     if (!sourceBuffer) return
     appending = false
+    pruning = false
     pendingQueue = []
     /** 清理已缓冲的数据 */
-    if (!sourceBuffer.updating && mediaSource.readyState === 'open') {
+    if (!sourceBuffer.updating && mediaSource?.readyState === 'open') {
       const buffered = sourceBuffer.buffered
       if (buffered.length > 0) {
         try {
@@ -381,24 +391,22 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   }
 
   function onUpdateEnd() {
+    /** 区分 append 完成还是 remove 完成 */
+    const wasAppending = appending
+    const wasPruning = pruning
     appending = false
+    pruning = false
 
-    /** 处理队列中的段 */
-    if (pendingQueue.length > 0) {
-      /** 合并所有 pending 段一次 append */
-      const total = pendingQueue.reduce((sum, b) => sum + b.byteLength, 0)
-      const merged = new Uint8Array(total)
-      let offset = 0
-      for (const buf of pendingQueue) {
-        merged.set(new Uint8Array(buf), offset)
-        offset += buf.byteLength
-      }
-      pendingQueue = []
-      doAppend(merged.buffer)
+    /** remove 完成：如果有等待的数据，立即处理 */
+    if (wasPruning && pendingQueue.length > 0) {
+      drainPending()
+      return
     }
 
-    /** 清除已播放缓冲区 */
-    pruneBuffer()
+    /** append 完成：处理队列中的段 */
+    if (wasAppending && pendingQueue.length > 0) {
+      drainPending()
+    }
 
     /** 自动播放 */
     if (videoRef.value && videoRef.value.paused && sourceBuffer?.buffered.length) {
@@ -412,14 +420,26 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       videoWidth.value = videoRef.value.videoWidth
       videoHeight.value = videoRef.value.videoHeight
     }
-
-    /** 追赶直播 */
-    catchUpToLive()
   }
 
-  /** 清除已播放的缓冲区，防止内存增长 */
+  /** 从 pendingQueue 取出所有段合并 append */
+  function drainPending() {
+    if (pendingQueue.length === 0 || !sourceBuffer || sourceBuffer.updating) return
+    /** 合并所有 pending 段一次 append */
+    const total = pendingQueue.reduce((sum, b) => sum + b.byteLength, 0)
+    const merged = new Uint8Array(total)
+    let offset = 0
+    for (const buf of pendingQueue) {
+      merged.set(new Uint8Array(buf), offset)
+      offset += buf.byteLength
+    }
+    pendingQueue = []
+    doAppend(merged.buffer)
+  }
+
+  /** 清除已播放的缓冲区，防止内存增长（只在定时器中调用，避免与 append 竞争） */
   function pruneBuffer() {
-    if (!sourceBuffer || !videoRef.value || sourceBuffer.updating) return
+    if (!sourceBuffer || !videoRef.value || sourceBuffer.updating || appending || pruning) return
     const buffered = sourceBuffer.buffered
     if (buffered.length > 0) {
       const currentTime = videoRef.value.currentTime
@@ -427,9 +447,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       const behindDuration = currentTime - start
       /** 只在已播放缓冲区超过 2 倍保留时长时才清理（减少 remove 调用频率） */
       if (behindDuration > BUFFER_RETAIN_SECONDS * 2) {
+        pruning = true
         try {
           sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
-        } catch { /* ignore */ }
+        } catch {
+          pruning = false
+        }
       }
     }
   }
@@ -494,17 +517,19 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     currentCodec = ''
     pendingQueue = []
     appending = false
+    pruning = false
     connected.value = false
     playing.value = false
     fps.value = 0
     failed.value = false
   }
 
-  /** 定期清理缓冲区 + 追赶直播 */
+  /** 定期清理缓冲区 + 追赶直播（独立于 append 链路，避免竞争） */
   pruneTimer = setInterval(() => {
     pruneBuffer()
+    /** pruneBuffer 可能设 pruning=true，catchUpToLive 会检查 */
     catchUpToLive()
-  }, 5000)
+  }, 3000)
 
   /** 页面隐藏时暂停 fMP4 流（节省带宽），可见时恢复 */
   let wasConnectedBeforeHidden = false
