@@ -2202,10 +2202,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 双流模式标记 -->
-      <div v-if="online && hasFrame && dualStream" class="dual-stream-badge" :title="`HD显示 + SD检测(${(detectFps ?? 0).toFixed(0)}fps)`">
-        HD+SD
-      </div>
       <!-- 实时目标计数 -->
       <div v-if="online && hasFrame && showBoxes && detectCount > 0" class="detect-count-badge">
         {{ detectionSummary }}
@@ -2536,20 +2532,6 @@ onUnmounted(() => {
 }
 
 /* 检测框叠加层 */
-.dual-stream-badge {
-  position: absolute;
-  bottom: 6px;
-  right: 90px;
-  background: rgba(78, 205, 196, 0.75);
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 9px;
-  font-weight: 700;
-  font-family: 'Courier New', Courier, monospace;
-  color: #fff;
-  pointer-events: none;
-}
-
 .detect-count-badge {
   position: absolute;
   top: 6px;

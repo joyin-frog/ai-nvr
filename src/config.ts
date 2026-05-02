@@ -214,6 +214,7 @@ function parseLlmConfig(llmNode: Record<string, unknown> | undefined): import("@
       imageWidth: 640,
       systemPrompt: "",
       triggers: [],
+      contextIntervalMs: 0,
     };
   }
   return {
@@ -225,6 +226,7 @@ function parseLlmConfig(llmNode: Record<string, unknown> | undefined): import("@
     imageWidth: (llmNode.image_width as number) ?? 640,
     systemPrompt: (llmNode.system_prompt as string) ?? "",
     triggers: Array.isArray(llmNode.triggers) ? llmNode.triggers.filter((t: unknown): t is string => typeof t === "string") : [],
+    contextIntervalMs: (llmNode.context_interval_ms as number) ?? 0,
   };
 }
 

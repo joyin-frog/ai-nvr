@@ -710,7 +710,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
               class="event-thumb"
               alt=""
             />
-            <div v-if="e.type === 'detect' && showDetectionBoxes && e.snapshotDetections?.length" class="thumb-boxes">
+            <div v-if="(e.type === 'detect' || e.type === 'alert') && showDetectionBoxes && e.snapshotDetections?.length" class="thumb-boxes">
               <div
                 v-for="(d, i) in e.snapshotDetections"
                 :key="i"
@@ -739,7 +739,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
               class="expand-snapshot"
               alt=""
             />
-            <div v-if="e.type === 'detect' && showDetectionBoxes && e.snapshotDetections?.length" class="expand-boxes">
+            <div v-if="(e.type === 'detect' || e.type === 'alert') && showDetectionBoxes && e.snapshotDetections?.length" class="expand-boxes">
               <div
                 v-for="(d, i) in e.snapshotDetections"
                 :key="i"

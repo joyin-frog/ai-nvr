@@ -31,14 +31,22 @@ interface VlmAnalysisResult {
 }
 
 /** VLM 检测 prompt（要求输出结构化 JSON，包含 bbox_2d 坐标） */
-const VLM_SYSTEM_PROMPT = `You are an intelligent surveillance camera analyzer. Analyze the image and describe each object. Output a JSON array with each detected item's category, bounding box (bbox_2d as [x1, y1, x2, y2] in pixels), label, and count.
+const VLM_SYSTEM_PROMPT = `You are a real-time surveillance camera analyzer. Detect ALL visible objects in the image.
 
-Output format (JSON array only, no markdown):
-[{"bbox_2d": [x1, y1, x2, y2], "label": "person", "count": 1, "description": "a person wearing dark clothes walking"}]
+For each object, output a JSON object with:
+- "bbox_2d": [x1, y1, x2, y2] in PIXELS (tight bounding box around the object)
+- "label": one of: person, car, truck, bus, motorcycle, bicycle, dog, cat, bird, bag, box, other
+- "count": always 1 (each bbox is one object)
+- "description": short description including color, size, activity, distinctive features
 
-Important labels: person, car, truck, bus, motorcycle, bicycle, dog, cat, bird, bag, box, other.
-description: include color, size, activity, distinctive features.
-Respond ONLY with the JSON array, nothing else.`;
+Output a JSON array ONLY. No markdown, no explanation.
+Example: [{"bbox_2d": [120, 45, 280, 400], "label": "person", "count": 1, "description": "person in black jacket walking"}]
+
+Rules:
+- Draw the TIGHTEST possible bounding box around each object
+- If multiple objects of the same type exist, create separate entries
+- Include partially visible objects at image edges
+- Never return an empty array if any object is visible`;
 
 /**
  * AI 目标检测器
@@ -107,8 +115,15 @@ export class AiDetector {
   /** 注入 MotionDetector 引用（用于查询最新帧差异比率，跳过静态帧推理） */
   private motionDetector: { getLatestRatio(cameraId: string): number } | null = null;
 
+  /** 注入 Recorder 引用（用于从帧缓冲区取上下文帧） */
+  private recorder: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> } | null = null;
+
   setMotionDetector(md: { getLatestRatio(cameraId: string): number }): void {
     this.motionDetector = md;
+  }
+
+  setRecorder(rec: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> }): void {
+    this.recorder = rec;
   }
 
   /** 异步初始化 */
@@ -331,35 +346,55 @@ export class AiDetector {
   private static readonly STATIC_RATIO_THRESHOLD = 0.005;
 
   /** 调用 VLM API 分析帧画面 */
-  private async analyzeWithVlm(jpeg: Buffer): Promise<VlmAnalysisResult> {
+  private async analyzeWithVlm(jpeg: Buffer, cameraId: string, timestamp: number): Promise<VlmAnalysisResult> {
     const t0 = performance.now();
     const aiConfig = this.runtimeConfig.get().ai;
     const llmConfig = aiConfig.llm;
 
     /** 缩放图片减少传输和推理开销 */
-    let imageDataUrl: string;
-    if (llmConfig.imageWidth > 0) {
-      const sharpMod = await import("sharp");
-      const resized = await sharpMod.default(jpeg)
-        .resize(llmConfig.imageWidth)
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      imageDataUrl = `data:image/jpeg;base64,${resized.toString("base64")}`;
-    } else {
-      imageDataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    const resizeImage = async (img: Buffer): Promise<string> => {
+      if (llmConfig.imageWidth > 0) {
+        const sharpMod = await import("sharp");
+        const resized = await sharpMod.default(img)
+          .resize(llmConfig.imageWidth)
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        return `data:image/jpeg;base64,${resized.toString("base64")}`;
+      }
+      return `data:image/jpeg;base64,${img.toString("base64")}`;
+    };
+
+    /** 根据用户语言配置注入语言约束 */
+    const lang = this.runtimeConfig.get().language;
+    const langInstruction = lang.startsWith("zh") ? "\nIMPORTANT: Write ALL descriptions in Chinese (中文)." : "";
+    const systemPrompt = VLM_SYSTEM_PROMPT + langInstruction;
+
+    /** 构建 user content：当前帧 + 上下文帧 */
+    const imageDataUrl = await resizeImage(jpeg);
+    const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+      { type: "text", text: "Analyze this surveillance camera image (latest frame):" },
+      { type: "image_url", image_url: { url: imageDataUrl } },
+    ];
+
+    /** 从帧缓冲区取上下文帧 */
+    if (this.recorder && llmConfig.contextIntervalMs > 0) {
+      const contextFrames = this.recorder.getContextFrames(cameraId, timestamp, llmConfig.contextIntervalMs);
+      for (let i = 0; i < contextFrames.length; i++) {
+        const ctxUrl = await resizeImage(contextFrames[i]!.data);
+        const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
+        userContent.push({
+          type: "text",
+          text: `Context frame from ${agoSec}s ago:`,
+        });
+        userContent.push({ type: "image_url", image_url: { url: ctxUrl } });
+      }
     }
 
     const body = {
       model: llmConfig.model,
       messages: [
-        { role: "system", content: VLM_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Analyze this surveillance camera image:" },
-            { type: "image_url", image_url: { url: imageDataUrl } },
-          ],
-        },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
       ],
       max_tokens: llmConfig.maxTokens,
       temperature: 0.3,
@@ -526,7 +561,7 @@ export class AiDetector {
       const t0 = performance.now();
 
       /** 调用 VLM API 分析帧 */
-      const vlmResult = await this.analyzeWithVlm(jpeg);
+      const vlmResult = await this.analyzeWithVlm(jpeg, cameraId, timestamp);
 
       /** 将 VLM 结果转为 Detection 格式 */
       const detections: Detection[] = vlmResult.objects.map(obj => ({

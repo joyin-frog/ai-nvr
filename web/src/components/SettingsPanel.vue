@@ -76,6 +76,7 @@ function toggleSoundEvent(key: string) {
 
 /** 运行时设置 */
 interface RuntimeSettings {
+  language: string
   motion: {
     threshold: number
     cooldown: number
@@ -176,18 +177,6 @@ async function loadSettings() {
     const res = await authFetch('/api/settings')
     if (res.ok) {
       settings.value = await res.json()
-      /** 确保 email.smtp 有默认值，避免模板中 null 引用 */
-      if (settings.value && !settings.value.notify.email.smtp) {
-        settings.value.notify.email.smtp = { host: '', port: 465, secure: true, user: '', pass: '' }
-      }
-      /** 确保 watermark 有默认值（向后兼容旧版后端） */
-      if (settings.value && !settings.value.recording.watermark) {
-        settings.value.recording.watermark = { enabled: true, namePosition: 'top-left', timePosition: 'bottom-left', fontSize: 24 }
-      }
-      /** 确保 clip 有默认值（向后兼容） */
-      if (settings.value && !settings.value.ai.clip) {
-        settings.value.ai.clip = { enabled: false, model: 'jinaai/jina-clip-v2', embeddingDim: 512 }
-      }
     }
   } catch {
     // ignore
@@ -469,6 +458,13 @@ onMounted(() => {
             <button class="reload-btn" @click="saveBackendUrl">{{ t('settings.save') }}</button>
           </div>
         </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.language') }}</span>
+          <select v-model="settings.language" class="input">
+            <option value="zh-CN">中文</option>
+            <option value="en">English</option>
+          </select>
+        </label>
       </section>
 
       <!-- 变动检测 -->
@@ -584,6 +580,7 @@ onMounted(() => {
           <select v-model="settings.recording.mode" class="input">
             <option value="motion">{{ t('settings.recordingMotion') }}</option>
             <option value="continuous">{{ t('settings.recordingContinuous') }}</option>
+            <option value="event">{{ t('settings.recordingEvent', '事件驱动') }}</option>
           </select>
         </label>
         <label v-if="settings.recording.mode === 'motion'" class="field">
@@ -594,6 +591,24 @@ onMounted(() => {
           <span class="field-label">{{ t('settings.segmentDuration') }}</span>
           <input type="number" v-model.number="settings.recording.segmentDuration" step="60" min="60" max="3600" class="input" />
         </label>
+        <template v-if="settings.recording.mode === 'event'">
+          <p class="section-desc">{{ t('settings.eventModeDesc', 'AI 检测到有效事件时自动保存前后视频，无事件时数据仅在内存中暂存。') }}</p>
+          <label class="field">
+            <span class="field-label">{{ t('settings.eventPreMs', '事件前保留') }}</span>
+            <input type="number" v-model.number="settings.recording.eventPreMs" step="1000" min="1000" max="120000" class="input" />
+            <span class="field-hint">{{ t('settings.eventPreMsHint', '毫秒，建议 10000-30000') }}</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.eventPostMs', '事件后保留') }}</span>
+            <input type="number" v-model.number="settings.recording.eventPostMs" step="1000" min="1000" max="120000" class="input" />
+            <span class="field-hint">{{ t('settings.eventPostMsHint', '毫秒，建议 15000-60000') }}</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.bufferDurationMs', '内存缓冲时长') }}</span>
+            <input type="number" v-model.number="settings.recording.bufferDurationMs" step="1000" min="5000" max="120000" class="input" />
+            <span class="field-hint">{{ t('settings.bufferDurationMsHint', '毫秒，建议 ≥ eventPreMs') }}</span>
+          </label>
+        </template>
         <label class="field">
           <span class="field-label">{{ t('settings.retentionDays') }}</span>
           <input type="number" v-model.number="settings.recording.retentionDays" step="1" min="1" max="90" class="input" />

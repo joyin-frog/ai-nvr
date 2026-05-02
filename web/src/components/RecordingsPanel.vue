@@ -1268,7 +1268,7 @@ async function deleteRecording(rec: Recording) {
     const res = await authFetch(`/api/recordings/${rec.filename}`, { method: 'DELETE' })
     if (res.ok) {
       if (selectedRecording.value?.filename === rec.filename) closePlayer()
-      recordings.value = recordings.value.filter(r => r.filename !== rec.filename)
+      loadRecordings()
     }
   } catch {
     // ignore
@@ -1280,16 +1280,38 @@ async function batchDelete() {
   if (selectedFiles.value.size === 0) return
   if (!await confirmDialog(t('recording.confirmBatchDelete', { count: selectedFiles.value.size }))) return
   const toDelete = new Set(selectedFiles.value)
-  for (const filename of toDelete) {
-    try {
-      await authFetch(`/api/recordings/${filename}`, { method: 'DELETE' })
-    } catch {
-      // ignore individual failures
-    }
+  try {
+    await authFetch('/api/recordings/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: [...toDelete] }),
+    })
+  } catch {
+    // ignore
   }
   if (selectedRecording.value && toDelete.has(selectedRecording.value.filename)) closePlayer()
-  recordings.value = recordings.value.filter(r => !toDelete.has(r.filename))
   selectedFiles.value = new Set()
+  loadRecordings()
+}
+
+/** 删除某个录像之前的所有录像 */
+async function deleteBefore(rec: Recording) {
+  const dateStr = new Date(rec.startTime).toLocaleString()
+  if (!await confirmDialog(t('recording.confirmDeleteBefore', { time: dateStr }))) return
+  try {
+    const body: Record<string, unknown> = { before: rec.startTime }
+    if (filterCamera.value) body.cameraId = filterCamera.value
+    const res = await authFetch('/api/recordings/purge-before', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      loadRecordings()
+    }
+  } catch {
+    // ignore
+  }
 }
 
 /** 批量收藏/取消收藏选中录像 */
@@ -2013,6 +2035,7 @@ defineExpose({ loadRecordings, playAtTime })
           </button>
           <button class="rec-download" @click.stop="downloadRecording(rec)" :title="t('recording.download')">&#x2B07;</button>
           <button class="rec-delete" @click.stop="deleteRecording(rec)" :title="t('recording.delete')">&#10005;</button>
+          <button v-if="vidx > 0" class="rec-delete-before" @click.stop="deleteBefore(rec)" :title="t('recording.deleteBefore')">⏏</button>
         </div>
       </div>
       <div :style="{ height: virtualPaddingBottom + 'px' }" />
@@ -2543,7 +2566,7 @@ defineExpose({ loadRecordings, playAtTime })
 
 .search-clear-btn:hover { background: #FFD93D20; }
 
-.rec-delete {
+.rec-delete, .rec-delete-before {
   background: none;
   border: none;
   color: #555;
@@ -2573,6 +2596,7 @@ defineExpose({ loadRecordings, playAtTime })
 
 .recording-item:hover .rec-star,
 .recording-item:hover .rec-delete,
+.recording-item:hover .rec-delete-before,
 .recording-item:hover .rec-download {
   opacity: 1;
 }
@@ -2581,7 +2605,7 @@ defineExpose({ loadRecordings, playAtTime })
   color: #FFD93D;
 }
 
-.rec-delete:hover {
+.rec-delete:hover, .rec-delete-before:hover {
   color: #e74c3c;
 }
 
@@ -3456,6 +3480,7 @@ defineExpose({ loadRecordings, playAtTime })
 
   .rec-star,
   .rec-delete,
+  .rec-delete-before,
   .rec-download {
     opacity: 0.6;
   }

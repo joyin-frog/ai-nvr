@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
@@ -20,12 +21,11 @@ export interface RecordingInfo {
 
 /**
  * 环形帧缓冲区
- * 保存最近 N 帧 JPEG 数据，用于 motion 触发前的预缓冲录像
+ * 保存最近 N 帧 JPEG 数据
+ * event 模式下保留最近 30-60 秒，motion 模式下保留最近 ~2 秒
  */
 class FrameRingBuffer {
-  /** 缓冲帧数组 */
   private frames: Array<{ data: Buffer; timestamp: number }> = [];
-  /** 最大帧数（约 2 秒 @15fps） */
   private maxSize: number;
 
   constructor(maxSize: number = 30) {
@@ -47,9 +47,29 @@ class FrameRingBuffer {
     return result;
   }
 
+  /** 返回指定时间戳之后的所有帧（拷贝，不清空缓冲区） */
+  snapshotFrom(afterTimestamp: number): Array<{ data: Buffer; timestamp: number }> {
+    const idx = this.frames.findIndex(f => f.timestamp > afterTimestamp);
+    if (idx === -1) return [];
+    return this.frames.slice(idx);
+  }
+
+  /** 调整缓冲区大小 */
+  resize(newMaxSize: number): void {
+    this.maxSize = newMaxSize;
+    if (this.frames.length > this.maxSize) {
+      this.frames = this.frames.slice(this.frames.length - this.maxSize);
+    }
+  }
+
   /** 清空缓冲区 */
   clear(): void {
     this.frames = [];
+  }
+
+  /** 当前帧数 */
+  get length(): number {
+    return this.frames.length;
   }
 }
 
@@ -78,10 +98,20 @@ interface RecordingState {
 /** drawtext 水印默认字体路径 */
 const DEFAULT_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
 
+/** event 模式下触发录像的事件类型列表 */
+const DEFAULT_EVENT_TRIGGERS = [
+  "detect",
+  "track:appeared",
+  "track:enter-zone",
+  "track:loiter",
+  "track:line-cross",
+  "alert",
+];
+
 /**
  * 录像器
+ * 支持三种模式：motion（变动触发）/ continuous（持续录制）/ event（事件驱动）
  * 通过 EventBus 接收帧数据，用 ffmpeg pipe 输入编码为 MP4
- * 不单独拉 RTSP 流，复用帧提取器的唯一连接
  */
 export class MotionRecorder {
   private states = new Map<string, RecordingState>();
@@ -97,12 +127,16 @@ export class MotionRecorder {
   private unsubFrame: (() => void) | null = null;
   /** motion 事件取消订阅 */
   private unsubMotion: (() => void) | null = null;
+  /** event 模式事件取消订阅列表 */
+  private unsubEvents: (() => void)[] = [];
   /** 过期录像清理定时器 */
   private purgeTimer: ReturnType<typeof setInterval> | null = null;
   /** 存储文件系统 */
   private storageFs: StorageFs;
-  /** 每路摄像头的帧预缓冲区（motion 触发前保留 ~2 秒帧） */
-  private preBuffers = new Map<string, FrameRingBuffer>();
+  /** 每路摄像头的帧缓冲区（motion 模式 = 预缓冲 ~2 秒，event 模式 = 环形缓冲 ~30 秒） */
+  private ringBuffers = new Map<string, FrameRingBuffer>();
+  /** event 模式下每路摄像头缓冲区的上次写入时间（独立于 ffmpeg 写入时间） */
+  private bufferLastWrite = new Map<string, number>();
 
   constructor(storagePath: string, ffmpegPath: string, private eventBus: EventBus, runtimeConfig: RuntimeConfig, storageFs: StorageFs) {
     this.storagePath = storagePath;
@@ -119,8 +153,49 @@ export class MotionRecorder {
   /** 移除摄像头 */
   unregisterStream(cameraId: string): void {
     this.forceStop(cameraId);
-    this.preBuffers.delete(cameraId);
+    this.ringBuffers.delete(cameraId);
+    this.bufferLastWrite.delete(cameraId);
     this.states.delete(cameraId);
+  }
+
+  /** 获取或创建指定摄像头的环形缓冲区 */
+  private getOrCreateBuffer(cameraId: string): FrameRingBuffer {
+    let buf = this.ringBuffers.get(cameraId);
+    if (!buf) {
+      const config = this.runtimeConfig.get().recording;
+      const size = config.mode === "event"
+        ? Math.ceil(config.bufferDurationMs / MotionRecorder.WRITE_THROTTLE_MS)
+        : 30;
+      buf = new FrameRingBuffer(size);
+      this.ringBuffers.set(cameraId, buf);
+    }
+    return buf;
+  }
+
+  /**
+   * 从帧缓冲区中按时间间隔取上下文帧
+   * 用于 VLM 多帧检测：取当前帧之前、按 intervalMs 间隔均匀分布的历史帧
+   */
+  getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames: number = 3): Array<{ data: Buffer; timestamp: number }> {
+    const buf = this.ringBuffers.get(cameraId);
+    if (!buf || intervalMs <= 0) return [];
+    const all = buf.snapshotFrom(0);
+    if (all.length === 0) return [];
+    const result: Array<{ data: Buffer; timestamp: number }> = [];
+    for (let i = 1; i <= maxFrames; i++) {
+      const targetTime = now - intervalMs * i;
+      /** 找最接近 targetTime 的帧 */
+      let best = -1;
+      let bestDist = Infinity;
+      for (let j = 0; j < all.length; j++) {
+        const dist = Math.abs(all[j]!.timestamp - targetTime);
+        if (dist < bestDist) { bestDist = dist; best = j; }
+      }
+      if (best >= 0 && bestDist < intervalMs * 0.5) {
+        result.unshift(all[best]!);
+      }
+    }
+    return result;
   }
 
   /** 启动：订阅帧事件 + 根据模式初始化录制 */
@@ -128,12 +203,20 @@ export class MotionRecorder {
     /** 确保录像根目录存在 */
     await this.storageFs.ensureDir("recordings/.keep");
 
-    /** 订阅帧事件，写入正在录像的 ffmpeg 进程 */
+    /** 订阅帧事件，写入缓冲区和正在录像的 ffmpeg 进程 */
     this.unsubFrame = this.eventBus.on("frame", ({ cameraId, data }) => {
       this.writeFrame(cameraId, data);
     });
 
     const mode = this.runtimeConfig.get().recording.mode;
+    this.startMode(mode);
+
+    /** 定期清理过期录像 */
+    this.purgeTimer = setInterval(() => this.purgeOldRecordings(), 3600_000);
+  }
+
+  /** 根据模式启动对应的订阅 */
+  private startMode(mode: string): void {
     if (mode === "continuous") {
       /** 持续录制模式延迟启动（等帧提取器连接成功后再开始） */
       setTimeout(() => {
@@ -141,12 +224,13 @@ export class MotionRecorder {
           this.startContinuous(cameraId);
         }
       }, 3000);
+    } else if (mode === "event") {
+      this.startEventMode();
     } else {
-      /** 变动触发模式 */
+      /** motion 触发模式 */
       this.unsubMotion = this.eventBus.on("motion", ({ cameraId, timestamp }) => {
         const state = this.getOrCreateState(cameraId);
         state.lastMotionTime = timestamp;
-        /** motion 触发时进入 boost 模式（2 秒内 ~30fps，捕获关键时刻） */
         state.boostUntil = timestamp + MotionRecorder.WRITE_BOOST_DURATION_MS;
 
         if (!state.recording) {
@@ -156,9 +240,6 @@ export class MotionRecorder {
         }
       });
     }
-
-    /** 定期清理过期录像 */
-    this.purgeTimer = setInterval(() => this.purgeOldRecordings(), 3600_000);
   }
 
   /** 停止所有录像 */
@@ -167,10 +248,7 @@ export class MotionRecorder {
       this.unsubFrame();
       this.unsubFrame = null;
     }
-    if (this.unsubMotion) {
-      this.unsubMotion();
-      this.unsubMotion = null;
-    }
+    this.cleanupModeSubscriptions();
     if (this.purgeTimer) {
       clearInterval(this.purgeTimer);
       this.purgeTimer = null;
@@ -180,46 +258,131 @@ export class MotionRecorder {
     }
   }
 
+  /** 清理所有模式订阅 */
+  private cleanupModeSubscriptions(): void {
+    if (this.unsubMotion) {
+      this.unsubMotion();
+      this.unsubMotion = null;
+    }
+    for (const unsub of this.unsubEvents) {
+      unsub();
+    }
+    this.unsubEvents = [];
+  }
+
   /** 运行时切换录制模式 */
   reloadMode(): void {
     const mode = this.runtimeConfig.get().recording.mode;
     console.log(`[Recorder] 模式切换: ${mode}`);
 
-    if (mode === "continuous") {
-      if (this.unsubMotion) {
-        this.unsubMotion();
-        this.unsubMotion = null;
-      }
-      for (const [cameraId] of this.states) {
-        const state = this.states.get(cameraId);
-        if (state?.stopTimer) {
-          clearTimeout(state.stopTimer);
-          state.stopTimer = null;
-        }
-      }
-      for (const [cameraId] of this.cameraNames) {
-        this.startContinuous(cameraId);
-      }
-    } else {
-      for (const [cameraId] of this.states) {
-        const state = this.states.get(cameraId);
-        if (state?.continuousTimer) {
-          clearTimeout(state.continuousTimer);
-          state.continuousTimer = null;
-        }
-      }
-      if (!this.unsubMotion) {
-        this.unsubMotion = this.eventBus.on("motion", ({ cameraId, timestamp }) => {
-          const state = this.getOrCreateState(cameraId);
-          state.lastMotionTime = timestamp;
-          if (!state.recording) {
-            this.startRecording(cameraId, timestamp);
-          } else {
-            this.scheduleStop(cameraId);
-          }
-        });
+    /** 先停止所有当前模式 */
+    this.cleanupModeSubscriptions();
+    for (const [cameraId] of this.states) {
+      this.forceStop(cameraId);
+    }
+
+    /** event 模式下调整缓冲区大小 */
+    if (mode === "event") {
+      const config = this.runtimeConfig.get().recording;
+      const size = Math.ceil(config.bufferDurationMs / MotionRecorder.WRITE_THROTTLE_MS);
+      for (const [, buf] of this.ringBuffers) {
+        buf.resize(size);
       }
     }
+
+    this.startMode(mode);
+  }
+
+  /** event 模式：订阅触发事件 */
+  private startEventMode(): void {
+    const config = this.runtimeConfig.get().recording;
+    const triggers = config.eventTriggers.length > 0 ? config.eventTriggers : DEFAULT_EVENT_TRIGGERS;
+
+    /** detect 事件 — 仅当检测到目标时触发 */
+    if (triggers.includes("detect")) {
+      const unsub = this.eventBus.on("detect", ({ cameraId, timestamp, detections }) => {
+        if (detections && detections.length > 0) {
+          this.onEventTrigger(cameraId, timestamp, "detect");
+        }
+      });
+      this.unsubEvents.push(unsub);
+    }
+
+    /** track 类事件 */
+    if (triggers.includes("track:appeared")) {
+      this.unsubEvents.push(this.eventBus.on("track:appeared", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "track:appeared");
+      }));
+    }
+    if (triggers.includes("track:enter-zone")) {
+      this.unsubEvents.push(this.eventBus.on("track:enter-zone", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "track:enter-zone");
+      }));
+    }
+    if (triggers.includes("track:leave-zone")) {
+      this.unsubEvents.push(this.eventBus.on("track:leave-zone", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "track:leave-zone");
+      }));
+    }
+    if (triggers.includes("track:loiter")) {
+      this.unsubEvents.push(this.eventBus.on("track:loiter", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "track:loiter");
+      }));
+    }
+    if (triggers.includes("track:line-cross")) {
+      this.unsubEvents.push(this.eventBus.on("track:line-cross", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "track:line-cross");
+      }));
+    }
+
+    /** alert 事件 */
+    if (triggers.includes("alert")) {
+      this.unsubEvents.push(this.eventBus.on("alert", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "alert");
+      }));
+    }
+  }
+
+  /** event 模式：事件触发录像 */
+  private onEventTrigger(cameraId: string, timestamp: number, eventType: string): void {
+    const state = this.getOrCreateState(cameraId);
+
+    if (state.recording) {
+      /** 已在录像 → 重置 postEventMs 定时器（延长录像） */
+      console.log(`[Recorder] ${cameraId} 事件 ${eventType} 延长录像`);
+      state.boostUntil = timestamp + MotionRecorder.WRITE_BOOST_DURATION_MS;
+      this.scheduleEventStop(cameraId);
+    } else {
+      /** 不在录像 → 从环形缓冲区取事件前帧 + 启动 ffmpeg */
+      const config = this.runtimeConfig.get().recording;
+      const preTime = timestamp - config.eventPreMs;
+      const buf = this.getOrCreateBuffer(cameraId);
+      const preFrames = buf.snapshotFrom(preTime);
+
+      const recordingStart = preFrames.length > 0 ? preFrames[0]!.timestamp : timestamp;
+      console.log(`[Recorder] ${cameraId} 事件 ${eventType} 触发录像, 预缓冲帧: ${preFrames.length}`);
+      this.startRecordingInternal(cameraId, recordingStart, preFrames);
+      this.scheduleEventStop(cameraId);
+    }
+  }
+
+  /** event 模式：延迟停止录像 */
+  private scheduleEventStop(cameraId: string): void {
+    const state = this.states.get(cameraId);
+    if (!state?.recording) return;
+
+    if (state.stopTimer) {
+      clearTimeout(state.stopTimer);
+    }
+
+    const postMs = this.runtimeConfig.get().recording.eventPostMs;
+    state.stopTimer = setTimeout(() => {
+      if (state.proc) {
+        state.proc.stdin?.end();
+      }
+      state.stopTimer = null;
+      console.log(`[Recorder] ${cameraId} 事件录像结束（事件后超时 ${postMs}ms）`);
+    }, postMs);
   }
 
   /** 根据配置返回 ffmpeg 编码器参数 */
@@ -251,20 +414,26 @@ export class MotionRecorder {
   /** motion 触发后 boost 持续时间 */
   private static readonly WRITE_BOOST_DURATION_MS = 2000;
 
-  /** 将帧数据写入录像进程 */
+  /** 将帧数据写入录像进程或缓冲区 */
   private writeFrame(cameraId: string, jpegData: Buffer): void {
-    const state = this.states.get(cameraId);
     const now = Date.now();
+    const mode = this.runtimeConfig.get().recording.mode;
+
+    /** event 模式下始终写入环形缓冲区（独立于 ffmpeg 写入时间，确保录像结束后缓冲区有最新帧） */
+    if (mode === "event") {
+      const buf = this.getOrCreateBuffer(cameraId);
+      if (now - (this.bufferLastWrite.get(cameraId) ?? 0) >= MotionRecorder.WRITE_THROTTLE_MS) {
+        buf.push(jpegData, now);
+        this.bufferLastWrite.set(cameraId, now);
+      }
+    }
+
+    const state = this.states.get(cameraId);
 
     if (!state?.recording || !state.proc?.stdin?.writable || state.writing) {
-      /** 不在录像状态 → 缓存到预缓冲区（motion 触发模式） */
-      if (this.runtimeConfig.get().recording.mode !== "continuous") {
-        let buf = this.preBuffers.get(cameraId);
-        if (!buf) {
-          buf = new FrameRingBuffer(30);
-          this.preBuffers.set(cameraId, buf);
-        }
-        /** 预缓冲也做帧率节流 */
+      /** 不在录像状态 → 缓存到缓冲区（motion 触发模式） */
+      if (mode === "motion") {
+        const buf = this.getOrCreateBuffer(cameraId);
         if (now - (state?.lastWriteTime ?? 0) >= MotionRecorder.WRITE_THROTTLE_MS) {
           buf.push(jpegData, now);
         }
@@ -288,6 +457,11 @@ export class MotionRecorder {
   /** 录像列表缓存 */
   private listCache = new Map<string, { data: RecordingInfo[]; expiry: number }>();
   private static readonly LIST_CACHE_TTL = 30_000;
+
+  /** 清除录像列表缓存 */
+  invalidateListCache(): void {
+    this.listCache.clear();
+  }
 
   /** 列出录像文件 — 从 SQLite 索引查询，不扫描文件系统 */
   listRecordings(cameraId?: string, since?: number, until?: number): RecordingInfo[] {
@@ -332,8 +506,26 @@ export class MotionRecorder {
     });
 
     const sorted = filtered.sort((a, b) => b.startTime - a.startTime);
-    this.listCache.set(cacheKey, { data: sorted, expiry: Date.now() + MotionRecorder.LIST_CACHE_TTL });
-    return sorted;
+
+    /** 清理幽灵索引：文件已不存在但索引还在的记录 */
+    const stalePaths: string[] = [];
+    const valid = sorted.filter(r => {
+      const fullPath = join(this.storagePath, r.filename);
+      if (!existsSync(fullPath)) {
+        stalePaths.push(r.filename);
+        return false;
+      }
+      return true;
+    });
+    for (const p of stalePaths) {
+      this.storageFs.fileIndex.removeFile("recordings", p);
+    }
+    if (stalePaths.length > 0) {
+      console.log(`[Recorder] 清理 ${stalePaths.length} 条幽灵索引`);
+    }
+
+    this.listCache.set(cacheKey, { data: valid, expiry: Date.now() + MotionRecorder.LIST_CACHE_TTL });
+    return valid;
   }
 
   /** 获取录像文件路径 */
@@ -368,13 +560,20 @@ export class MotionRecorder {
     }, segmentSec * 1000);
   }
 
-  /** 开始录像（变动触发模式） */
+  /** 开始录像（motion 触发模式） */
   private startRecording(cameraId: string, timestamp: number): void {
-    this.startRecordingInternal(cameraId, timestamp);
+    /** motion 模式使用 drain 清空预缓冲 */
+    const buf = this.getOrCreateBuffer(cameraId);
+    const preFrames = buf.drain();
+    this.startRecordingInternal(cameraId, timestamp, preFrames);
   }
 
   /** 启动录像：通过 ffmpeg pipe 接收 JPEG 帧并编码为 MP4 */
-  private async startRecordingInternal(cameraId: string, timestamp: number): Promise<void> {
+  private async startRecordingInternal(
+    cameraId: string,
+    timestamp: number,
+    preFrames?: Array<{ data: Buffer; timestamp: number }>,
+  ): Promise<void> {
     const state = this.getOrCreateState(cameraId);
 
     /** 防御性清理：如果旧 ffmpeg 进程还在运行，先 kill */
@@ -473,16 +672,13 @@ export class MotionRecorder {
     state.recording = true;
     state.proc = proc;
     state.startTime = timestamp;
+    state.boostUntil = timestamp + MotionRecorder.WRITE_BOOST_DURATION_MS;
 
-    /** 写入预缓冲帧（motion 触发前的帧，确保不丢失触发瞬间的画面） */
-    const preBuffer = this.preBuffers.get(cameraId);
-    if (preBuffer) {
-      const frames = preBuffer.drain();
-      if (frames.length > 0) {
-        console.log(`[Recorder] ${cameraId} 写入预缓冲帧: ${frames.length} 帧`);
-        for (const frame of frames) {
-          proc.stdin?.write(frame.data);
-        }
+    /** 写入预缓冲帧（事件前/motion 前的帧） */
+    if (preFrames && preFrames.length > 0) {
+      console.log(`[Recorder] ${cameraId} 写入预缓冲帧: ${preFrames.length} 帧`);
+      for (const frame of preFrames) {
+        proc.stdin?.write(frame.data);
       }
     }
   }
@@ -525,7 +721,7 @@ export class MotionRecorder {
     }
   }
 
-  /** 延迟停止录像（最后一次 motion 后等待一段时间） */
+  /** 延迟停止录像（motion 模式：最后一次 motion 后等待一段时间） */
   private scheduleStop(cameraId: string): void {
     const state = this.states.get(cameraId);
     if (!state?.recording) return;

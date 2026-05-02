@@ -377,7 +377,7 @@ export class H264Fmp4Extractor {
           "-preset", "superfast",
           "-tune", "zerolatency",
           "-crf", "23",
-          "-x264-params", "keyint=30:min-keyint=15:bframes=0",
+          "-x264-params", "keyint=10:min-keyint=5:bframes=0",
         ];
     }
   }
@@ -400,8 +400,8 @@ export class H264Fmp4Extractor {
     ];
 
     args.push(
-      "-analyzeduration", "1000000",
-      "-probesize", "500000",
+      "-analyzeduration", "500000",
+      "-probesize", "32768",
       "-i", this.rtspUrl,
     );
 
@@ -420,8 +420,8 @@ export class H264Fmp4Extractor {
       "-an",
       "-f", "mp4",
       "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      /** 强制每 0.05 秒切割一个 fMP4 段（20 segments/sec），实现高帧率低延迟 */
-      "-frag_duration", "0.05",
+      /** 强制每 0.033 秒切割一个 fMP4 段（30 segments/sec），实现最低延迟 */
+      "-frag_duration", "0.033",
       "pipe:1",
     );
 

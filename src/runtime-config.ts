@@ -67,8 +67,8 @@ export interface NotifyConfig {
   email: EmailConfig;
 }
 
-/** 录像模式：变动触发 / 持续录制 */
-export type RecordingMode = "motion" | "continuous";
+/** 录像模式：变动触发 / 持续录制 / 事件驱动 */
+export type RecordingMode = "motion" | "continuous" | "event";
 
 /** 水印位置 */
 export type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -87,6 +87,8 @@ export interface WatermarkConfig {
 
 /** 运行时可修改的设置 */
 export interface RuntimeSettings {
+  /** 界面和 AI 输出语言 */
+  language: string;
   /** 全局变动检测配置 */
   motion: MotionConfig;
   /** AI 检测配置 */
@@ -107,6 +109,14 @@ export interface RuntimeSettings {
     encoder: string;
     /** 水印配置 */
     watermark: WatermarkConfig;
+    /** 事件前保留时长（ms，仅 event 模式，从环形缓冲区取） */
+    eventPreMs: number;
+    /** 事件后保留时长（ms，仅 event 模式，持续收集） */
+    eventPostMs: number;
+    /** 环形缓冲时长（ms，仅 event 模式） */
+    bufferDurationMs: number;
+    /** 触发录像的事件类型列表（仅 event 模式） */
+    eventTriggers: string[];
   };
   /** Webhook 通知配置 */
   webhook: WebhookConfig;
@@ -134,6 +144,7 @@ export class RuntimeConfig {
 
   constructor(config: AppConfig) {
     this.settings = {
+      language: "zh-CN",
       motion: { ...config.motion },
       ai: { ...config.ai, llm: { ...config.ai.llm }, clip: { ...config.ai.clip } },
       cameraOverrides: {},
@@ -149,6 +160,10 @@ export class RuntimeConfig {
           timePosition: "bottom-left",
           fontSize: 24,
         },
+        eventPreMs: 15000,
+        eventPostMs: 30000,
+        bufferDurationMs: 30000,
+        eventTriggers: ["detect", "track:appeared", "track:enter-zone", "track:loiter", "track:line-cross", "alert"],
       },
       webhook: {
         urls: [],
@@ -185,6 +200,8 @@ export class RuntimeConfig {
     if (!body || typeof body !== "object") return this.settings;
     const obj = body as Record<string, unknown>;
 
+    if (typeof obj.language === "string") this.settings.language = obj.language;
+
     if (obj.motion && typeof obj.motion === "object") {
       const m = obj.motion as Record<string, unknown>;
       if (typeof m.threshold === "number") this.settings.motion.threshold = m.threshold;
@@ -217,6 +234,7 @@ export class RuntimeConfig {
         if (typeof l.imageWidth === "number") this.settings.ai.llm.imageWidth = l.imageWidth;
         if (typeof l.systemPrompt === "string") this.settings.ai.llm.systemPrompt = l.systemPrompt;
         if (Array.isArray(l.triggers)) this.settings.ai.llm.triggers = l.triggers.filter((t: unknown): t is string => typeof t === "string");
+        if (typeof l.contextIntervalMs === "number") this.settings.ai.llm.contextIntervalMs = l.contextIntervalMs;
       }
       if (a.clip && typeof a.clip === "object") {
         const c = a.clip as Record<string, unknown>;
@@ -238,11 +256,15 @@ export class RuntimeConfig {
 
     if (obj.recording && typeof obj.recording === "object") {
       const r = obj.recording as Record<string, unknown>;
-      if (r.mode === "motion" || r.mode === "continuous") this.settings.recording.mode = r.mode;
+      if (r.mode === "motion" || r.mode === "continuous" || r.mode === "event") this.settings.recording.mode = r.mode;
       if (typeof r.postMotionDuration === "number") this.settings.recording.postMotionDuration = r.postMotionDuration;
       if (typeof r.retentionDays === "number") this.settings.recording.retentionDays = r.retentionDays;
       if (typeof r.segmentDuration === "number") this.settings.recording.segmentDuration = r.segmentDuration;
       if (typeof r.encoder === "string") this.settings.recording.encoder = r.encoder;
+      if (typeof r.eventPreMs === "number") this.settings.recording.eventPreMs = r.eventPreMs;
+      if (typeof r.eventPostMs === "number") this.settings.recording.eventPostMs = r.eventPostMs;
+      if (typeof r.bufferDurationMs === "number") this.settings.recording.bufferDurationMs = r.bufferDurationMs;
+      if (Array.isArray(r.eventTriggers)) this.settings.recording.eventTriggers = r.eventTriggers.filter((t: unknown): t is string => typeof t === "string");
       if (r.watermark && typeof r.watermark === "object") {
         const wm = r.watermark as Record<string, unknown>;
         if (typeof wm.enabled === "boolean") this.settings.recording.watermark.enabled = wm.enabled;

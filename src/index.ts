@@ -88,6 +88,10 @@ const storageFs = new StorageFs(dataDir, diskUsage);
 
 /** 录像器（通过 EventBus 接收帧，不单独拉 RTSP 流） */
 const recorder = new MotionRecorder(join(dataDir, "recordings"), config.ffmpegPath, eventBus, runtimeConfig, storageFs);
+/** 文件删除时自动清除录像列表缓存 */
+storageFs.onDelete = (relativePath) => {
+  if (relativePath.startsWith("recordings/")) recorder.invalidateListCache();
+};
 /** 注册摄像头友好名称（用于录像水印） */
 for (const cam of config.cameras) {
   recorder.registerCameraName(cam.id, cam.friendlyName);

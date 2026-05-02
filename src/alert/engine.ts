@@ -181,14 +181,14 @@ export class AlertEngine {
       if (rule.eventType !== "detect") continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
 
-      /** 标签过滤（同时匹配原始 label 和 semanticLabel）+ 数量统计 */
+      /** 标签过滤（同时匹配原始 label 和 semanticLabel，支持子字符串匹配）+ 数量统计 */
       let matchedDetections = detections;
       if (rule.labels) {
-        const requiredLabels = new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()));
+        const keywords = rule.labels.split(",").map(l => l.trim().toLowerCase()).filter(Boolean);
         matchedDetections = detections.filter(d => {
-          const matchLabel = requiredLabels.has(d.label.toLowerCase());
-          const matchSemantic = d.semanticLabel && requiredLabels.has(d.semanticLabel.toLowerCase());
-          return matchLabel || matchSemantic;
+          const labelLower = d.label.toLowerCase();
+          const semanticLower = d.semanticLabel?.toLowerCase() ?? "";
+          return keywords.some(kw => labelLower.includes(kw) || semanticLower.includes(kw));
         });
         if (matchedDetections.length === 0) continue;
       }
@@ -227,10 +227,21 @@ export class AlertEngine {
         const nameTag = name ? ` (${name})` : "";
         return `${d.label}#${d.trackId ?? "?"}${nameTag}(${(d.score * 100).toFixed(0)}%)`;
       }).join(", ");
-      const detail = rule.minCount > 0
-        ? JSON.stringify({ detections: labels, count: matchedDetections.length })
-        : JSON.stringify({ detections: labels });
-      this.checkRule(rule, cameraId, timestamp, detail);
+      /** 包含 bbox 数据用于前端标注叠加 */
+      const detailObj: Record<string, unknown> = { detections: labels };
+      if (rule.minCount > 0) detailObj.count = matchedDetections.length;
+      if (matchedDetections.some(d => d.box)) {
+        detailObj.boxes = matchedDetections
+          .filter(d => d.box)
+          .map(d => ({
+            label: d.label,
+            score: d.score,
+            trackId: d.trackId,
+            semanticLabel: d.semanticLabel,
+            box: d.box,
+          }));
+      }
+      this.checkRule(rule, cameraId, timestamp, JSON.stringify(detailObj));
     }
   }
 

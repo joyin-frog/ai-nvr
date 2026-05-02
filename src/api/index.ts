@@ -586,7 +586,7 @@ export function startServer(
          * motion 事件：提取 ratio
          * 快照 URL 按需生成，不逐条查文件系统
          */
-        const events = rawEvents.map(ev => {
+        const eventPromises = rawEvents.map(async (ev) => {
           let summary: string | null = null;
           let snapshotUrl: string | null = null;
           let detections: unknown = null;
@@ -595,6 +595,9 @@ export function startServer(
             const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
             if (snapPath) {
               snapshotUrl = `/api/snapshots/${snapPath}`;
+              /** 从快照 JSON 元数据读取完整检测数据（含 bbox） */
+              const meta = await snapshotStorage.getSnapshotMeta(snapPath);
+              if (meta?.detections) detections = meta.detections;
             }
             /** 从 detail 提取标签摘要（兼容新旧格式） */
             const detailObj = JSON.parse(ev.detail);
@@ -646,6 +649,7 @@ export function startServer(
             starred: ev.starred,
           };
         });
+        const events = await Promise.all(eventPromises);
         return Response.json({ events, total });
       }
 
@@ -1057,7 +1061,7 @@ export function startServer(
         const storageRoot = await getRecFsRoot();
         const resolved = await realpath(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
-        storageFs.deleteFile(relPath);
+        await storageFs.deleteFile(relPath, { category: "recordings" });
         return Response.json({ ok: true });
       }
 
@@ -1128,6 +1132,49 @@ export function startServer(
           thumbnailGenerator.pregenerateAsync(tasks).catch(() => {})
           return Response.json({ queued: tasks.length })
         })
+      }
+
+      /** 批量删除录像 */
+      if (url.pathname === "/api/recordings/batch-delete" && req.method === "POST") {
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const files = obj.files;
+          if (!Array.isArray(files)) return Response.json({ error: "files required" }, { status: 400 });
+          const storageRoot = await getRecFsRoot();
+          let deleted = 0;
+          let failed = 0;
+          for (const relPath of files) {
+            if (typeof relPath !== "string") { failed++; continue; }
+            /** 路径遍历防护 */
+            if (relPath.includes("..")) { failed++; continue; }
+            const filePath = storageFs.resolve(`recordings/${relPath}`);
+            const resolved = await realpath(filePath).catch(() => "");
+            if (!resolved.startsWith(storageRoot)) { failed++; continue; }
+            if ((await Bun.file(filePath).size) === undefined) { failed++; continue; }
+            storageFs.deleteFile(`recordings/${relPath}`, { category: "recordings" });
+            deleted++;
+          }
+          return Response.json({ deleted, failed });
+        });
+      }
+
+      /** 删除指定时间之前的所有录像 */
+      if (url.pathname === "/api/recordings/purge-before" && req.method === "POST") {
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const before = obj.before as number | undefined;
+          const cameraId = obj.cameraId as string | undefined;
+          if (!before) return Response.json({ error: "before timestamp required" }, { status: 400 });
+          const allRecordings = recorder.listRecordings(cameraId || undefined);
+          const toDelete = allRecordings.filter(r => r.startTime < before);
+          let deleted = 0;
+          for (const rec of toDelete) {
+            await storageFs.deleteFile(`recordings/${rec.filename}`, { category: "recordings" });
+            deleted++;
+          }
+          console.log(`[API] 删除 ${deleted} 个旧录像 (before ${new Date(before).toISOString()})`);
+          return Response.json({ deleted, total: allRecordings.length });
+        });
       }
 
       /** 录像导出：裁剪视频片段 */

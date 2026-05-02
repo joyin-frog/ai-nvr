@@ -16,6 +16,8 @@ export class StorageFs {
   diskUsage: DiskUsage;
   /** 文件元数据索引 */
   fileIndex: FileIndex;
+  /** 文件删除后的回调（用于通知 recorder 清除缓存） */
+  onDelete?: (relativePath: string) => void;
 
   constructor(dataRoot: string, diskUsage: DiskUsage) {
     this.dataRoot = dataRoot;
@@ -59,8 +61,9 @@ export class StorageFs {
   async deleteFile(relativePath: string, indexMeta?: { category: string }): Promise<boolean> {
     const fullPath = this.resolve(relativePath);
     const size = await this.trackRemove(relativePath);
-    if (size === 0) return false;
-    await unlink(fullPath);
+    if (size > 0) {
+      await unlink(fullPath);
+    }
 
     if (indexMeta) {
       const indexPath = relativePath.startsWith(indexMeta.category + "/")
@@ -68,7 +71,8 @@ export class StorageFs {
         : relativePath;
       this.fileIndex.removeFile(indexMeta.category, indexPath);
     }
-    return true;
+    this.onDelete?.(relativePath);
+    return size > 0;
   }
 
   /**

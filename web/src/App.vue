@@ -15,7 +15,6 @@ import RecordingsPanel from './components/RecordingsPanel.vue'
 import CameraStatusPanel from './components/CameraStatusPanel.vue'
 import CameraManagePanel from './components/CameraManagePanel.vue'
 import AlertPanel from './components/AlertPanel.vue'
-import TrackGallery from './components/TrackGallery.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import LoginView from './components/LoginView.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -219,7 +218,6 @@ const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<InstanceType<typeof RecordingsPanel> | null>(null)
 const cameraManagePanel = ref<InstanceType<typeof CameraManagePanel> | null>(null)
 const alertPanel = ref<InstanceType<typeof AlertPanel> | null>(null)
-const trackGallery = ref<InstanceType<typeof TrackGallery> | null>(null)
 const showShortcuts = ref(false)
 
 /** 认证状态 */
@@ -468,11 +466,8 @@ function switchTab(tab: SidebarTab) {
 
 /** 跳转到追踪目标 */
 function onJumpToTrack(trackId: number) {
-  activeTab.value = 'tracks'
-  setPref('nvr-active-tab', 'tracks')
-  nextTick(() => {
-    trackGallery.value?.selectTrack(trackId)
-  })
+  activeTab.value = 'alerts'
+  setPref('nvr-active-tab', 'alerts')
 }
 
 /** 进入全屏单路 */
@@ -480,11 +475,6 @@ function enterFullscreen(cameraId: string) {
   fullscreenCamera.value = cameraId
   /** 同时请求浏览器全屏 */
   document.documentElement.requestFullscreen?.().catch(() => { /* ignore */ })
-}
-
-/** 从追踪目标跳转到实时画面 */
-function onViewLive(cameraId: string) {
-  enterFullscreen(cameraId)
 }
 
 /** 退出全屏回到网格 */
@@ -924,7 +914,6 @@ function setupEventListeners() {
     }
     map[payload.cameraId] = camMap
     trackLabelsMap.value = { ...map }
-    trackGallery.value?.loadTracks()
   })
 
   /** LLM 场景分析结果 → 推送到 CameraView overlay */
@@ -1171,10 +1160,6 @@ onUnmounted(() => {
             @click="switchTab('alerts')"
           >⚠ {{ t('tab.alerts') }}</button>
           <button
-            :class="['tab-btn', { active: activeTab === 'tracks' }]"
-            @click="switchTab('tracks')"
-          >❖ {{ t('tab.tracks', '目标') }}</button>
-          <button
             :class="['tab-btn', { active: activeTab === 'settings' }]"
             @click="switchTab('settings')"
           >⚙ {{ t('tab.settings') }}</button>
@@ -1194,7 +1179,6 @@ onUnmounted(() => {
           />
           <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
           <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-          <TrackGallery v-if="activeTab === 'tracks'" ref="trackGallery" :cameras="cameras" @jump-to-recording="onPlayRecording" @view-live="onViewLive" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
@@ -1226,10 +1210,6 @@ onUnmounted(() => {
           @click="switchTab('alerts')"
         >⚠ {{ t('tab.alerts') }}</button>
         <button
-          :class="['tab-btn', { active: activeTab === 'tracks' }]"
-          @click="switchTab('tracks')"
-        >◉ {{ t('tab.tracks', '目标') }}</button>
-        <button
           :class="['tab-btn', { active: activeTab === 'settings' }]"
           @click="switchTab('settings')"
         >⚙ {{ t('tab.settings') }}</button>
@@ -1249,7 +1229,6 @@ onUnmounted(() => {
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-        <TrackGallery v-if="activeTab === 'tracks'" ref="trackGallery" :cameras="cameras" @jump-to-recording="onPlayRecording" @view-live="onViewLive" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

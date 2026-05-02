@@ -13,17 +13,17 @@ import { authWsUrl } from '../services/auth'
 const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
-/** 保留当前播放位置前多少秒缓冲区（实时监控无需大缓冲，2秒足以应对网络抖动） */
-const BUFFER_RETAIN_SECONDS = 2
+/** 保留当前播放位置前多少秒缓冲区（实时监控最小缓冲即可） */
+const BUFFER_RETAIN_SECONDS = 1
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 0.4
+const LIVE_CATCHUP_THRESHOLD = 0.3
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 1.2
+const LIVE_SEEK_THRESHOLD = 0.8
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
-const MAX_PENDING_SEGMENTS = 20
+const MAX_PENDING_SEGMENTS = 10
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
@@ -167,10 +167,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
     if (delay > LIVE_SEEK_THRESHOLD) {
       /** 延迟过大直接 seek 到最新 */
-      video.currentTime = end - 0.1
+      video.currentTime = end - 0.05
     } else if (delay > LIVE_CATCHUP_THRESHOLD) {
-      /** 渐进追赶：延迟越大速度越快，最大 1.5x */
-      const rate = Math.min(1.5, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) / 4)
+      /** 渐进追赶：延迟越大速度越快，最大 2x */
+      const rate = Math.min(2.0, 1.0 + (delay - LIVE_CATCHUP_THRESHOLD) / 2)
       if (video.playbackRate !== rate) {
         video.playbackRate = rate
       }
@@ -457,8 +457,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   /** 从 pendingQueue 取出所有段合并 append */
   function drainPending() {
     if (pendingQueue.length === 0 || !sourceBuffer || sourceBuffer.updating) return
-    /** 限制合并段数量，避免一次 append 过大导致解码延迟 */
-    const batch = pendingQueue.splice(0, 8)
+    /** 限制合并段数量，减少单次 append 延迟 */
+    const batch = pendingQueue.splice(0, 3)
     const total = batch.reduce((sum, b) => sum + b.byteLength, 0)
     const merged = new Uint8Array(total)
     let offset = 0
@@ -561,7 +561,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     pruneBuffer()
     /** pruneBuffer 可能设 pruning=true，catchUpToLive 会检查 */
     catchUpToLive()
-  }, 800)
+  }, 300)
 
   /** 页面隐藏时暂停 fMP4 流（节省带宽），可见时恢复 */
   let wasConnectedBeforeHidden = false

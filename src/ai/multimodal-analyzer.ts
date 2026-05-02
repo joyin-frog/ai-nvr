@@ -18,6 +18,8 @@ export interface LlmConfig {
   systemPrompt: string;
   /** 分析触发条件：哪些事件触发 LLM 分析 */
   triggers: string[];
+  /** 检测时附带上文帧的间隔（ms，0=仅当前帧，如 3000=同时发送前 3s/6s/9s 的帧） */
+  contextIntervalMs: number;
 }
 
 /** LLM 场景分析结果 */
