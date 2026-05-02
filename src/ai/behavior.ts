@@ -221,26 +221,27 @@ export class BehaviorAnalyzer {
       }
     }
 
-    /** 清理本帧不再活跃的 trackId — 它们可能已经离开所有区域 */
+    /** 清理本帧不再活跃的 trackId */
     for (const [trackId, trackState] of cameraStates) {
       if (activeTrackIds.has(trackId)) continue;
-      if (trackState.zones.size === 0) continue;
 
       /** 目标不再被检测到，视为离开所有区域 */
-      for (const [zoneId, occ] of trackState.zones) {
-        const zone = zones.find(z => z.id === zoneId);
-        this.eventBus.emit("track:leave-zone", {
-          cameraId,
-          timestamp,
-          trackId,
-          label: trackState.label,
-          trackName: trackState.trackName,
-          zoneId,
-          zoneName: zone?.name ?? "",
-          dwellMs: timestamp - occ.enteredAt,
-        });
+      if (trackState.zones.size > 0) {
+        for (const [zoneId, occ] of trackState.zones) {
+          const zone = zones.find(z => z.id === zoneId);
+          this.eventBus.emit("track:leave-zone", {
+            cameraId,
+            timestamp,
+            trackId,
+            label: trackState.label,
+            trackName: trackState.trackName,
+            zoneId,
+            zoneName: zone?.name ?? "",
+            dwellMs: timestamp - occ.enteredAt,
+          });
+        }
+        trackState.zones.clear();
       }
-      trackState.zones.clear();
       cameraStates.delete(trackId);
     }
 
