@@ -481,9 +481,6 @@ export class AiDetector {
       const changed = result.fingerprint !== prevFp;
       this.lastDetectFingerprint.set(cameraId, result.fingerprint);
 
-      /** 缓存最新帧和检测结果（用于按需生成标注图） */
-      this.annotator.setLatestFrame(cameraId, jpeg, trackResult.detections);
-
       /** 发射追踪目标出现/消失事件 */
       for (const target of trackResult.appeared) {
         const trackName = this.lookupTrackName(cameraId, target.trackId);
@@ -531,6 +528,9 @@ export class AiDetector {
           return { ...d, trackName: trackName || undefined, dominantColor };
         })
         : trackResult.detections;
+
+      /** 缓存最新帧和 enriched 检测结果（用于按需生成标注图） */
+      this.annotator.setLatestFrame(cameraId, jpeg, enricheddetections);
 
       this.eventBus.emit("detect", {
         cameraId,

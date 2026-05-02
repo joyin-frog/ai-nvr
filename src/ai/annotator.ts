@@ -69,21 +69,26 @@ export class Annotator {
 
     for (const det of detections) {
       const { xmin, ymin, xmax, ymax } = det.box;
-      const color = LABEL_COLORS[det.label] ?? DEFAULT_COLOR;
+      /** 优先使用主色调，然后按类别颜色，最后默认色 */
+      const color = det.dominantColor ?? LABEL_COLORS[det.label] ?? DEFAULT_COLOR;
       /** 归一化坐标 (0-1) 转为像素坐标 */
       const px = xmin * width;
       const py = ymin * height;
       const pw = (xmax - xmin) * width;
       const ph = (ymax - ymin) * height;
 
-      /** 检测框 */
+      /** 检测框：有自定义名称的用实线粗框，否则虚线 */
+      const strokeDash = det.trackName ? "" : ' stroke-dasharray="6 3"';
+      const strokeWidth = det.trackName ? 4 : 2;
       svgElements.push(
-        `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="none" stroke="${color}" stroke-width="3"/>`,
+        `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="none" stroke="${color}" stroke-width="${strokeWidth}"${strokeDash}/>`,
       );
 
-      /** 标签背景 + 文字 */
-      const trackPrefix = "trackId" in det ? `#${(det as { trackId: number }).trackId} ` : "";
-      const labelText = `${trackPrefix}${det.label} ${(det.score * 100).toFixed(0)}%`;
+      /** 标签：优先显示自定义名称，否则显示 #trackId label */
+      const trackPrefix = det.trackId != null ? `#${det.trackId} ` : "";
+      const labelText = det.trackName
+        ? `${det.trackName} ${(det.score * 100).toFixed(0)}%`
+        : `${trackPrefix}${det.label} ${(det.score * 100).toFixed(0)}%`;
       const fontSize = Math.max(14, Math.min(width, height) / 30);
       /** 估算文字宽度：中文等宽字符约 1.0em，ASCII 约 0.6em */
       let charWidthSum = 0;

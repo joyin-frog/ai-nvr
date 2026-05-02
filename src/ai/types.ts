@@ -15,6 +15,10 @@ export interface Detection {
   trackId?: number;
   /** 运动速度向量（归一化坐标/帧，可选） */
   velocity?: { dx: number; dy: number };
+  /** 用户自定义名称（外观匹配或手动命名） */
+  trackName?: string;
+  /** 主色调（十六进制颜色，如 #FF6B6B） */
+  dominantColor?: string;
 }
 
 /** AI 检测事件载荷 */
