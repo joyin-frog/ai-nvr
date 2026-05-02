@@ -320,9 +320,10 @@ async function loadPlaybackDetections(rec: Recording) {
       playbackBehaviorEvents.value = (data.events as Array<{ timestamp: number; type: string; detail: string | null }>)
         .filter(e => e.detail)
         .map(e => {
-          const d = JSON.parse(e.detail!) as { trackName?: string; label?: string; zoneName?: string; lineName?: string; dwellMs?: number }
+          const d = JSON.parse(e.detail!) as { trackName?: string; label?: string; semanticLabel?: string; zoneName?: string; lineName?: string; dwellMs?: number }
           const parts: string[] = []
           if (d.trackName) parts.push(d.trackName)
+          else if (d.semanticLabel) parts.push(d.semanticLabel)
           else if (d.label) parts.push(d.label)
           if (d.zoneName) parts.push(d.zoneName)
           if (d.lineName) parts.push(d.lineName)
