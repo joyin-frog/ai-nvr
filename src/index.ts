@@ -190,7 +190,7 @@ const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath);
 
 /** 统一存储清理管理器 */
-const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage);
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, alertStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
 cleaner.start();
 
 /** 磁盘用量统计已在上方创建 */

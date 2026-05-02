@@ -120,6 +120,14 @@ export class TrackLabelStorage {
     return result.changes > 0;
   }
 
+  /** 清理超过指定天数的标签记录（由 StorageCleaner 调用） */
+  purge(retentionDays: number): number {
+    const cutoff = Math.floor(Date.now() / 1000) - retentionDays * 86400;
+    const stmt = this.db.prepare("DELETE FROM track_labels WHERE last_seen_at < ?");
+    const result = stmt.run(cutoff);
+    return result.changes;
+  }
+
   /** 关闭数据库 */
   close(): void {
     this.db.close();

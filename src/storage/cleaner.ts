@@ -8,6 +8,7 @@ import { type TrackStorage } from "@/storage/tracks";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type MotionRecorder } from "@/storage/recorder";
+import { type TrackLabelStorage } from "@/storage/track-labels";
 
 /** 磁盘压力等级 */
 type DiskPressure = "normal" | "warning" | "critical";
@@ -32,6 +33,7 @@ export class StorageCleaner {
     private trackStorage?: TrackStorage,
     private alertSnapshotStorage?: SnapshotStorage,
     private trajectoryStorage?: TrackTrajectoryStorage,
+    private trackLabelStorage?: TrackLabelStorage,
   ) {}
 
   /** 启动定时清理（每小时执行一次） */
@@ -78,7 +80,7 @@ export class StorageCleaner {
     const cleanup = this.runtimeConfig.get().cleanup;
     const { pressure, usedPercent } = this.getDiskPressure();
     const now = Date.now();
-    const report: CleanupReport = { events: 0, alerts: 0, snapshots: 0, thumbnails: 0, exports: 0, tracks: 0 };
+    const report: CleanupReport = { events: 0, alerts: 0, snapshots: 0, thumbnails: 0, exports: 0, tracks: 0, trackLabels: 0 };
 
     /** 磁盘压力日志 */
     if (pressure !== "normal") {
@@ -123,18 +125,23 @@ export class StorageCleaner {
       this.trajectoryStorage.cleanup(snapshotsDays);
     }
 
+    /** 清理过期追踪标签 */
+    if (this.trackLabelStorage) {
+      report.trackLabels = this.trackLabelStorage.purge(snapshotsDays);
+    }
+
     /** 磁盘压力时触发录像加速清理 */
     if (pressure !== "normal") {
       const recordingsDays = this.effectiveRetention(this.runtimeConfig.get().recording.retentionDays, pressure, usedPercent);
       this.recorder.purgeOldRecordings(recordingsDays);
     }
 
-    const total = report.events + report.alerts + report.snapshots + report.exports + report.tracks;
+    const total = report.events + report.alerts + report.snapshots + report.exports + report.tracks + report.trackLabels;
     if (total > 0 || pressure !== "normal") {
       const daysInfo = pressure !== "normal"
         ? ` (保留天数: 事件${eventsDays}d 告警${alertsDays}d 快照${snapshotsDays}d 缩略图${thumbnailsDays}d)`
         : "";
-      console.log(`[Cleaner] 清理完成: ${report.events} 事件, ${report.alerts} 告警, ${report.snapshots} 快照, ${report.exports} 导出, ${report.tracks} 追踪目标${daysInfo}`);
+      console.log(`[Cleaner] 清理完成: ${report.events} 事件, ${report.alerts} 告警, ${report.snapshots} 快照, ${report.exports} 导出, ${report.tracks} 追踪目标, ${report.trackLabels} 标签${daysInfo}`);
     }
 
     return report;
@@ -164,6 +171,7 @@ export interface CleanupReport {
   thumbnails: number;
   exports: number;
   tracks: number;
+  trackLabels: number;
 }
 
 /** 存储统计 */
