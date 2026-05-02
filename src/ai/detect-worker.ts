@@ -157,14 +157,27 @@ async function detect(req: DetectRequest): Promise<void> {
     if (!cachedTextEmbeddings) return;
 
     /** 计算每个标签的相似度（余弦相似度 = 点积，因为已 L2 归一化） */
-    const scores: Array<{ label: string; score: number }> = [];
+    const rawScores: Array<{ label: string; score: number }> = [];
     for (let l = 0; l < labels.length; l++) {
       let dot = 0;
       for (let j = 0; j < dim; j++) {
         dot += imageEmbed[j]! * cachedTextEmbeddings[l * dim + j]!;
       }
-      scores.push({ label: labels[l]!, score: dot });
+      rawScores.push({ label: labels[l]!, score: dot });
     }
+
+    /** 使用 softmax 将 cosine similarity 转为概率分布（温度系数缩放） */
+    const temperature = 0.01;
+    const maxScore = Math.max(...rawScores.map(s => s.score));
+    const expScores = rawScores.map(s => ({
+      label: s.label,
+      expScore: Math.exp((s.score - maxScore) / temperature),
+    }));
+    const expSum = expScores.reduce((sum, s) => sum + s.expScore, 0);
+    const scores = expScores.map(s => ({
+      label: s.label,
+      score: s.expScore / expSum,
+    }));
 
     /** 过滤 "empty" 类标签，只保留有意义的目标标签 */
     const emptyLabels = new Set(["empty scene", "empty background", "no objects", "nothing"]);
