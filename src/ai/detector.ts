@@ -255,12 +255,21 @@ export class AiDetector {
     });
 
     if (config.mode === "continuous") {
+      /** 帧驱动模式：每收到新帧时检查间隔，满足条件立即推理 */
       this.unsubFrame = this.eventBus.on("detect:frame", ({ cameraId, data, timestamp }) => {
         this.latestFrames.set(cameraId, { data, timestamp });
+        const camInterval = this.runtimeConfig.getAiInterval(cameraId);
+        const lastTime = this.lastDetectTime.get(cameraId) ?? 0;
+        if (timestamp - lastTime >= camInterval * 0.8) {
+          this.detect(cameraId, data, timestamp).catch(err => {
+            console.error(`[AiDetector] 检测失败 [${cameraId}]:`, err);
+          });
+        }
       });
 
+      /** 定时器兜底：防止帧事件丢失时漏检 */
       this.startContinuousLoop(config.interval);
-      console.log(`[AiDetector] 连续检测模式，间隔 ${config.interval}ms`);
+      console.log(`[AiDetector] 连续检测模式（帧驱动），间隔 ${config.interval}ms`);
     } else {
       this.unsubMotion = this.eventBus.on("motion", ({ cameraId, data, timestamp }) => {
         this.detect(cameraId, data, timestamp);
@@ -385,6 +394,9 @@ export class AiDetector {
 
     const aiConfig = this.runtimeConfig.get().ai;
     if (!aiConfig.enabled) return;
+
+    /** 更新最后推理时间（防止帧驱动模式重复触发） */
+    this.lastDetectTime.set(cameraId, Date.now());
 
     try {
       const t0 = performance.now();
