@@ -299,6 +299,8 @@ export class H264Fmp4Extractor {
   private online = false;
   private retryCount = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 看门狗：检测 ffmpeg 卡死（无数据输出） */
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private logTag: string;
   /** 缓存 init segment（新客户端连接时发送） */
   private cachedInit: Fmp4InitSegment | null = null;
@@ -322,6 +324,7 @@ export class H264Fmp4Extractor {
 
   stop(): void {
     this.running = false;
+    this.clearWatchdog();
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -417,6 +420,8 @@ export class H264Fmp4Extractor {
         console.log(`${this.logTag} 流上线 (codec=${this.parser.lastInitSegment?.codec ?? "unknown"}, ${this.parser.videoWidth}x${this.parser.videoHeight})`);
       }
       this.retryCount = 0;
+      /** 收到数据，重置看门狗 */
+      this.resetWatchdog();
     });
 
     this.proc.stderr?.on("data", (chunk: Buffer) => {
@@ -434,6 +439,7 @@ export class H264Fmp4Extractor {
 
     this.proc.on("exit", (code) => {
       console.log(`${this.logTag} ffmpeg 退出, code=${code}`);
+      this.clearWatchdog();
       this.parser.reset();
       /** 清除缓存的 init segment（ffmpeg 重启后旧 init 不再兼容） */
       this.cachedInit = null;
@@ -443,6 +449,9 @@ export class H264Fmp4Extractor {
       }
       this.scheduleReconnect();
     });
+
+    /** 启动看门狗：15 秒无数据则认为卡死 */
+    this.resetWatchdog();
   }
 
   private killProcess(): void {
@@ -453,6 +462,25 @@ export class H264Fmp4Extractor {
       proc.stderr?.destroy();
       proc.kill("SIGKILL");
       proc.unref();
+    }
+  }
+
+  /** 重置看门狗定时器（每次收到数据时调用） */
+  private resetWatchdog(): void {
+    if (this.watchdogTimer) clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = setTimeout(() => {
+      if (!this.proc) return;
+      console.warn(`${this.logTag} ffmpeg 15 秒无数据输出，可能卡死，强制重启`);
+      this.killProcess();
+      /** killProcess 后 exit 事件会触发 scheduleReconnect */
+    }, 15_000);
+  }
+
+  /** 清除看门狗定时器 */
+  private clearWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
     }
   }
 
