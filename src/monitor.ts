@@ -1,5 +1,5 @@
 import { type EventBus } from "@/event-bus";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 
 /** 单个摄像头的运行指标 */
 export interface CameraMetrics {
@@ -89,9 +89,11 @@ export class SystemMonitor {
   private static readonly LOW_FPS_CHECK_INTERVAL = 10;
   /** 低帧率检查定时器 */
   private lowFpsTimer: ReturnType<typeof setInterval> | null = null;
-  /** ffmpeg 进程统计缓存（5 秒刷新） */
+  /** ffmpeg 进程统计缓存 */
   private ffmpegCache = { count: 0, rssMb: 0, updatedAt: 0 };
-  private static readonly FFMPEG_CACHE_TTL = 15_000;
+  private static readonly FFMPEG_CACHE_TTL = 30_000;
+  /** 后台 ffmpeg 扫描是否正在运行 */
+  private ffmpegScanning = false;
 
   constructor(
     private eventBus: EventBus,
@@ -229,26 +231,14 @@ export class SystemMonitor {
       };
     });
 
-    /** 统计 ffmpeg 子进程数和内存占用（5 秒缓存，直接读 /proc 避免 execSync 开销） */
+    /** 统计 ffmpeg 子进程数和内存占用（后台异步刷新，不阻塞 API 响应） */
     const now = Date.now();
-    if (now - this.ffmpegCache.updatedAt > SystemMonitor.FFMPEG_CACHE_TTL) {
-      let count = 0;
-      let rss = 0;
-      try {
-        const entries = readdirSync("/proc");
-        for (const entry of entries) {
-          if (!/^\d+$/.test(entry)) continue;
-          try {
-            const cmdline = readFileSync(`/proc/${entry}/cmdline`, "utf-8");
-            if (!cmdline.includes("ffmpeg")) continue;
-            count++;
-            const status = readFileSync(`/proc/${entry}/status`, "utf-8");
-            const match = status.match(/VmRSS:\s+(\d+)\s+kB/);
-            if (match) rss += parseInt(match[1]!) / 1024;
-          } catch { /* 进程可能已退出 */ }
-        }
-      } catch { /* ignore */ }
-      this.ffmpegCache = { count, rssMb: rss, updatedAt: now };
+    if (now - this.ffmpegCache.updatedAt > SystemMonitor.FFMPEG_CACHE_TTL && !this.ffmpegScanning) {
+      this.ffmpegScanning = true;
+      this.scanFfmpegProcesses().then(cache => {
+        this.ffmpegCache = { ...cache, updatedAt: Date.now() };
+        this.ffmpegScanning = false;
+      }).catch(() => { this.ffmpegScanning = false; });
     }
     const { count: ffmpegProcessCount, rssMb: ffmpegTotalRssMb } = this.ffmpegCache;
 
@@ -264,5 +254,24 @@ export class SystemMonitor {
       startedAt: this.startedAt,
       serverTime: Date.now(),
     };
+  }
+
+  /** 后台异步扫描 ffmpeg 进程（不阻塞事件循环） */
+  private async scanFfmpegProcesses(): Promise<{ count: number; rssMb: number }> {
+    let count = 0;
+    let rss = 0;
+    const entries = await readdir("/proc");
+    for (const entry of entries) {
+      if (!/^\d+$/.test(entry)) continue;
+      try {
+        const cmdline = await readFile(`/proc/${entry}/cmdline`, "utf-8");
+        if (!cmdline.includes("ffmpeg")) continue;
+        count++;
+        const status = await readFile(`/proc/${entry}/status`, "utf-8");
+        const match = status.match(/VmRSS:\s+(\d+)\s+kB/);
+        if (match) rss += parseInt(match[1]!) / 1024;
+      } catch { /* 进程可能已退出 */ }
+    }
+    return { count, rssMb: rss };
   }
 }
