@@ -93,7 +93,29 @@ watch(rootEl, (el, oldEl) => {
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
 /** 静态叠加层 canvas（OSD + ROI + 越线 + 热力图 + 区域计数，只在数据变化时重绘） */
 const staticCanvasRef = ref<HTMLCanvasElement | null>(null)
+/** 缓存的 canvas CSS 尺寸（由 ResizeObserver 更新，避免每帧 getBoundingClientRect） */
+let cachedCssW = 0
+let cachedCssH = 0
+let canvasResizeObserver: ResizeObserver | null = null
 let overlayVfcId: number | null = null
+
+/** 监听 canvas 元素挂载，设置 ResizeObserver 缓存尺寸 */
+watch(overlayCanvas, (canvas) => {
+  canvasResizeObserver?.disconnect()
+  if (canvas) {
+    cachedCssW = Math.round(canvas.getBoundingClientRect().width)
+    cachedCssH = Math.round(canvas.getBoundingClientRect().height)
+    canvasResizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) {
+        const size = entry.borderBoxSize?.[0] ?? entry.contentRect
+        cachedCssW = Math.round(size.inlineSize)
+        cachedCssH = Math.round(size.blockSize)
+      }
+    })
+    canvasResizeObserver.observe(canvas)
+  }
+}, { immediate: true })
 /** rAF fallback（浏览器不支持 requestVideoFrameCallback 时使用） */
 let overlayRafId: number | null = null
 /** overlay 是否需要重绘（检测结果或尺寸变化时标记为 dirty） */
@@ -222,11 +244,10 @@ function drawOverlayOnce() {
   const video = fmp4.videoRef.value
   if (!canvas || !video) return
 
-  /** 使用 CSS 像素尺寸，保证字体/线条在不同分辨率下大小一致 */
-  const rect = canvas.getBoundingClientRect()
+  /** 使用缓存的 CSS 像素尺寸（由 ResizeObserver 维护，避免每帧强制布局重排） */
   const dpr = window.devicePixelRatio || 1
-  const cssW = Math.round(rect.width)
-  const cssH = Math.round(rect.height)
+  const cssW = cachedCssW
+  const cssH = cachedCssH
   if (cssW === 0 || cssH === 0) return
 
   const canvasW = Math.round(cssW * dpr)
@@ -2082,6 +2103,10 @@ onUnmounted(() => {
     viewportObserver.disconnect()
     viewportObserver = null
   }
+  if (canvasResizeObserver) {
+    canvasResizeObserver.disconnect()
+    canvasResizeObserver = null
+  }
   fmp4.disconnect()
   stopOverlayLoop()
   if (frozenTimer) clearInterval(frozenTimer)
@@ -2091,6 +2116,9 @@ onUnmounted(() => {
   trackTrails.clear()
   smoothedBoxes.clear()
   trackVelocities.clear()
+  trackSnapshotCache.clear()
+  fadeOutBoxes.clear()
+  snapshotLoading.clear()
 })
 </script>
 

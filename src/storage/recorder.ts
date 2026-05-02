@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
@@ -546,25 +546,8 @@ export class MotionRecorder {
 
     const sorted = filtered.sort((a, b) => b.startTime - a.startTime);
 
-    /** 清理幽灵索引：文件已不存在但索引还在的记录 */
-    const stalePaths: string[] = [];
-    const valid = sorted.filter(r => {
-      const fullPath = join(this.storagePath, r.filename);
-      if (!existsSync(fullPath)) {
-        stalePaths.push(r.filename);
-        return false;
-      }
-      return true;
-    });
-    for (const p of stalePaths) {
-      this.storageFs.fileIndex.removeFile("recordings", p);
-    }
-    if (stalePaths.length > 0) {
-      console.log(`[Recorder] 清理 ${stalePaths.length} 条幽灵索引`);
-    }
-
-    this.listCache.set(cacheKey, { data: valid, expiry: Date.now() + MotionRecorder.LIST_CACHE_TTL });
-    return valid;
+    this.listCache.set(cacheKey, { data: sorted, expiry: Date.now() + MotionRecorder.LIST_CACHE_TTL });
+    return sorted;
   }
 
   /** 获取录像文件路径 */
@@ -818,6 +801,25 @@ export class MotionRecorder {
     if (deleted > 0) {
       console.log(`[Recorder] 清理过期录像: ${deleted} 个文件`);
     }
+
+    /** 异步清理幽灵索引：索引中有记录但文件已不存在 */
+    const allEntries = this.storageFs.fileIndex.listFiles({ category: "recordings" });
+    const stalePaths: string[] = [];
+    for (const r of allEntries) {
+      const fullPath = join(this.storagePath, r.relativePath);
+      try {
+        await stat(fullPath);
+      } catch {
+        stalePaths.push(r.relativePath);
+      }
+    }
+    for (const p of stalePaths) {
+      this.storageFs.fileIndex.removeFile("recordings", p);
+    }
+    if (stalePaths.length > 0) {
+      console.log(`[Recorder] 清理 ${stalePaths.length} 条幽灵索引`);
+    }
+
     this.listCache.clear();
   }
 

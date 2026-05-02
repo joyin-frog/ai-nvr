@@ -1363,6 +1363,9 @@ onUnmounted(() => {
 .camera-cell {
   border-radius: 8px;
   transition: opacity 0.2s;
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
 }
 
 .empty-state {

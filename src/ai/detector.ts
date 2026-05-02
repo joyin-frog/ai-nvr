@@ -396,17 +396,16 @@ export class AiDetector {
       { type: "image_url", image_url: { url: imageDataUrl } },
     ];
 
-    /** 从帧缓冲区取上下文帧 */
+    /** 从帧缓冲区取上下文帧（并行 resize 减少延迟） */
     if (this.recorder && llmConfig.contextIntervalMs > 0) {
       const contextFrames = this.recorder.getContextFrames(cameraId, timestamp, llmConfig.contextIntervalMs);
-      for (let i = 0; i < contextFrames.length; i++) {
-        const ctxUrl = await resizeImage(contextFrames[i]!.data);
-        const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
-        userContent.push({
-          type: "text",
-          text: `Context frame from ${agoSec}s ago:`,
-        });
-        userContent.push({ type: "image_url", image_url: { url: ctxUrl } });
+      if (contextFrames.length > 0) {
+        const ctxUrls = await Promise.all(contextFrames.map(f => resizeImage(f.data)));
+        for (let i = 0; i < contextFrames.length; i++) {
+          const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
+          userContent.push({ type: "text", text: `Context frame from ${agoSec}s ago:` });
+          userContent.push({ type: "image_url", image_url: { url: ctxUrls[i]! } });
+        }
       }
     }
 

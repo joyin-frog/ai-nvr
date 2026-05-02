@@ -36,6 +36,8 @@ export interface EventMap {
   'track:loiter': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string; durationMs: number }
   'track:match-suggest': { cameraId: string; timestamp: number; trackId: number; label: string; matches: Array<{ trackId: number; customName: string; distance: number }> }
   'llm:scene': { cameraId: string; timestamp: number; description: string; trigger: string; inferMs: number }
+  'detect:rule': { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number }
+  'track:approach': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; targetTrackId: number; targetLabel: string; targetTrackName?: string; targetSemanticLabel?: string; distance: number }
   'state:changed': { stateId: number; stateName: string; cameraId: string; oldValue: string; newValue: string; source: string; sourceRuleId: number; timestamp: number; notify: boolean }
 }
 
@@ -47,6 +49,9 @@ export type EventCallback<T extends keyof EventMap> = (payload: EventMap[T]) => 
 
 /** 连接状态 */
 export type ConnectionState = 'connected' | 'connecting' | 'disconnected'
+
+/** 全局 TextDecoder 单例（避免每条消息创建新实例） */
+const textDecoder = new TextDecoder()
 
 /**
  * 事件 WebSocket 客户端
@@ -151,7 +156,7 @@ export class EventClient {
     const headerBytes = buf.slice(4, 4 + headerLen)
     let header: Record<string, unknown>
     try {
-      header = JSON.parse(new TextDecoder().decode(headerBytes))
+      header = JSON.parse(textDecoder.decode(headerBytes))
     } catch {
       return
     }
