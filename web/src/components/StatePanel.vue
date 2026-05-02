@@ -3,8 +3,10 @@ import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 import { confirmDialog } from '../composables/useConfirm'
+import { useToast } from '../composables/useToast'
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 
 interface StateDef {
   id: number
@@ -39,6 +41,7 @@ const records = ref<StateChange[]>([])
 const activeTab = ref<'rules' | 'history'>('rules')
 const showAdd = ref(false)
 const editingId = ref<number | null>(null)
+const saving = ref(false)
 
 /** 添加/编辑表单 */
 const formName = ref('')
@@ -66,8 +69,10 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleString()
 }
 
-function displayValue(val: string, type: string): string {
-  if (type === 'boolean') return val === 'true' ? '✓' : '✗'
+/** type 传 'auto' 时根据值内容自动推断是否为 boolean */
+function displayValue(val: string, type: 'boolean' | 'string' | 'number' | 'auto'): string {
+  const isBool = type === 'boolean' || (type === 'auto' && (val === 'true' || val === 'false'))
+  if (isBool) return val === 'true' ? '✓' : '✗'
   return val
 }
 
@@ -128,8 +133,9 @@ function startAdd() {
 }
 
 async function addState() {
-  if (!formName.value.trim()) return
-  await authFetch('/api/states', {
+  if (!formName.value.trim() || saving.value) return
+  saving.value = true
+  const res = await authFetch('/api/states', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -141,6 +147,11 @@ async function addState() {
       notifyOnChange: formNotify.value,
     }),
   })
+  saving.value = false
+  if (!res.ok) {
+    toastError(t('alert.saveFailed'))
+    return
+  }
   showAdd.value = false
   resetForm()
   await loadStates()
@@ -148,7 +159,7 @@ async function addState() {
 
 async function saveEdit() {
   if (!editingId.value) return
-  await authFetch(`/api/states/${editingId.value}`, {
+  const res = await authFetch(`/api/states/${editingId.value}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -160,33 +171,49 @@ async function saveEdit() {
       notifyOnChange: formNotify.value,
     }),
   })
+  if (!res.ok) {
+    toastError(t('alert.saveFailed'))
+    return
+  }
   editingId.value = null
   resetForm()
   await loadStates()
 }
 
 async function toggleState(state: StateDef) {
-  await authFetch(`/api/states/${state.id}`, {
+  const res = await authFetch(`/api/states/${state.id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled: !state.enabled }),
   })
+  if (!res.ok) {
+    toastError(t('alert.saveFailed'))
+    return
+  }
   await loadStates()
 }
 
 async function toggleBoolValue(state: StateDef) {
   const newVal = state.currentValue === 'true' ? 'false' : 'true'
-  await authFetch(`/api/states/${state.id}/value`, {
+  const res = await authFetch(`/api/states/${state.id}/value`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: newVal }),
   })
+  if (!res.ok) {
+    toastError(t('alert.saveFailed'))
+    return
+  }
   await loadStates()
 }
 
 async function deleteState(id: number) {
   if (!await confirmDialog(t('alert.confirmDelete'))) return
-  await authFetch(`/api/states/${id}`, { method: 'DELETE' })
+  const res = await authFetch(`/api/states/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    toastError(t('alert.deleteFailed'))
+    return
+  }
   await loadStates()
 }
 
@@ -248,7 +275,7 @@ defineExpose({ loadStates, loadRecords })
         </label>
       </div>
       <div class="form-actions">
-        <button class="btn-primary" @click="addState">{{ t('alert.confirmAdd') }}</button>
+        <button class="btn-primary" :disabled="saving" @click="addState">{{ saving ? t('settings.aiModelLoading') : t('alert.confirmAdd') }}</button>
         <button class="btn-secondary" @click="cancelEdit">{{ t('manage.cancel') }}</button>
       </div>
     </div>
@@ -460,6 +487,10 @@ defineExpose({ loadStates, loadRecords })
   padding: 6px 16px;
   font-weight: 600;
   cursor: pointer;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .btn-secondary {
   background: #333;
