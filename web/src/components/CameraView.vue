@@ -7,6 +7,7 @@ import { useFmp4Stream } from '../composables/useFmp4Stream'
 import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
+import { registerShortcut } from '../composables/useKeyboard'
 
 const { t } = useI18n()
 const { setPref, getPref } = usePreferences()
@@ -42,6 +43,8 @@ const props = defineProps<{
   roiRegions?: Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>
   /** 越线检测线段列表（归一化坐标） */
   crossLines?: Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>
+  /** 当前是否全屏显示（用于注册缩放快捷键） */
+  isFullscreen?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -2041,6 +2044,28 @@ function resetZoom() {
   panX.value = 0
   panY.value = 0
 }
+
+/** 全屏模式下注册缩放快捷键 */
+let unregZoomIn: (() => void) | null = null
+let unregZoomOut: (() => void) | null = null
+let unregZoomReset: (() => void) | null = null
+
+watch(() => props.isFullscreen, (fs) => {
+  unregZoomIn?.()
+  unregZoomOut?.()
+  unregZoomReset?.()
+  unregZoomIn = unregZoomOut = unregZoomReset = null
+  if (fs) {
+    unregZoomIn = registerShortcut({ key: '+', description: t('camera.zoomIn', '放大'), handler: () => { zoomLevel.value = Math.min(5, zoomLevel.value + 0.5) } })
+    /** = 键也用于放大（和 + 同键位） */
+    const unregEq = registerShortcut({ key: '=', description: t('camera.zoomIn', '放大'), handler: () => { zoomLevel.value = Math.min(5, zoomLevel.value + 0.5) } })
+    unregZoomOut = registerShortcut({ key: '-', description: t('camera.zoomOut', '缩小'), handler: () => { zoomLevel.value = Math.max(1, zoomLevel.value - 0.5); if (zoomLevel.value <= 1) resetZoom() } })
+    unregZoomReset = registerShortcut({ key: '0', description: t('camera.resetZoom', '重置缩放'), handler: resetZoom })
+    /** 把 = 的清理函数也绑定到 unregZoomIn 上 */
+    const origUnreg = unregZoomIn
+    unregZoomIn = () => { origUnreg?.(); unregEq?.() }
+  }
+}, { immediate: true })
 
 onUnmounted(() => {
   if (viewportObserver) {

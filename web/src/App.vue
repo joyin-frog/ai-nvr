@@ -1129,6 +1129,7 @@ onUnmounted(() => {
                 :detect-fps="cam.detectFps"
                 :roi-regions="parsedRoiMap[cam.id]"
                 :cross-lines="crossLineDataMap[cam.id]"
+                :is-fullscreen="fullscreenCamera === cam.id"
                 @fullscreen="enterFullscreen"
                 @jump-to-recording="onPlayRecording"
                 @jump-to-track="onJumpToTrack"
