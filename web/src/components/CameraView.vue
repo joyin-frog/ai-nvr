@@ -476,7 +476,15 @@ async function togglePip() {
 }
 function checkFrozen() {
   if (!props.online) { frozen.value = false; return }
-  frozen.value = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
+  /** JPEG 帧超时检测 */
+  const jpegFrozen = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
+  /** fMP4 流检测：已连接但 fps=0 超过 15 秒（排除刚连接的初始阶段） */
+  const fmp4Connected = fmp4.connected.value
+  const fmp4Fps = fmp4.fps.value
+  const fmp4Playing = fmp4.playing.value
+  /** fMP4 连接且不在播放中（或 fps=0），说明流卡住了 */
+  const fmp4Frozen = fmp4Connected && !fmp4Playing && fmp4.videoRef.value && fmp4.videoRef.value.readyState >= 2
+  frozen.value = jpegFrozen || !!fmp4Frozen
 }
 watch(() => props.online, (on) => {
   if (on) {
@@ -499,6 +507,8 @@ watch(() => props.online, (on) => {
 let localDetections: Detection[] = []
 let consumedDetectVersion = 0
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
+/** fMP4 恢复播放时清除 frozen 状态 */
+watch(() => fmp4.playing.value, (playing) => { if (playing && frozen.value) frozen.value = false })
 
 /** 画面比例：优先用 MSE video 尺寸，回退到 props */
 const cameraBodyStyle = computed(() => {
