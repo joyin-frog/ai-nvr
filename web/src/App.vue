@@ -295,16 +295,58 @@ function onDragOver(e: DragEvent) {
 }
 
 function onDrop(targetId: string) {
-  if (!dragCameraId.value || dragCameraId.value === targetId) return
+  reorderCamera(targetId)
+}
+
+/** 触摸拖拽排序状态 */
+let touchDragId: string | null = null
+let touchDragTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 触摸开始：长按 500ms 进入拖拽模式 */
+function onTouchStart(cameraId: string) {
+  touchDragTimer = setTimeout(() => {
+    touchDragId = cameraId
+    dragCameraId.value = cameraId
+  }, 500)
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (!touchDragId) {
+    if (touchDragTimer) { clearTimeout(touchDragTimer); touchDragTimer = null }
+    return
+  }
+  e.preventDefault()
+  const touch = e.touches[0]!
+  const el = document.elementFromPoint(touch.clientX, touch.clientY)
+  if (!el) return
+  const cell = el.closest('.camera-cell') as HTMLElement | null
+  if (!cell) return
+  const targetId = visibleCameras.value.find(c => cell.querySelector(`[data-camera-id="${c.id}"]`))?.id
+  if (targetId && targetId !== touchDragId) {
+    reorderCamera(targetId)
+  }
+}
+
+function onTouchEnd() {
+  if (touchDragTimer) { clearTimeout(touchDragTimer); touchDragTimer = null }
+  touchDragId = null
+  dragCameraId.value = null
+}
+
+/** 通用排序逻辑 */
+function reorderCamera(targetId: string) {
+  const sourceId = dragCameraId.value || touchDragId
+  if (!sourceId || sourceId === targetId) return
   const ids = sortedCameras.value.map(c => c.id)
-  const fromIdx = ids.indexOf(dragCameraId.value)
+  const fromIdx = ids.indexOf(sourceId)
   const toIdx = ids.indexOf(targetId)
   if (fromIdx < 0 || toIdx < 0) return
   ids.splice(fromIdx, 1)
-  ids.splice(toIdx, 0, dragCameraId.value)
+  ids.splice(toIdx, 0, sourceId)
   cameraOrder.value = ids
   localStorage.setItem('nvr-camera-order', JSON.stringify(ids))
   dragCameraId.value = null
+  touchDragId = null
 }
 
 /** 加载摄像头列表 */
@@ -1003,9 +1045,13 @@ onUnmounted(() => {
               @dragstart="onDragStart(cam.id)"
               @dragover="onDragOver"
               @drop="onDrop(cam.id)"
+              @touchstart="onTouchStart(cam.id)"
+              @touchmove="onTouchMove"
+              @touchend="onTouchEnd"
             >
               <CameraView
                 :camera-id="cam.id"
+                :data-camera-id="cam.id"
                 :name="cam.name"
                 :online="cam.online"
                 :last-frame-at="cam.lastFrameAt"
