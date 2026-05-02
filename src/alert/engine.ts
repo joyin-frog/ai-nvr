@@ -170,7 +170,7 @@ export class AlertEngine {
   }
 
   /** 处理 detect 事件（需要标签过滤 + 数量条件 + 命名匹配 + ROI 过滤） */
-  private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number; trackId?: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number } }>): void {
+  private onDetect(cameraId: string, timestamp: number, detections: Array<{ label: string; score: number; trackId?: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; semanticLabel?: string }>): void {
     this.refreshRules();
     this.refreshTrackNames(cameraId);
 
@@ -178,11 +178,15 @@ export class AlertEngine {
       if (rule.eventType !== "detect") continue;
       if (rule.cameraId && rule.cameraId !== cameraId) continue;
 
-      /** 标签过滤 + 数量统计 */
+      /** 标签过滤（同时匹配原始 label 和 semanticLabel）+ 数量统计 */
       let matchedDetections = detections;
       if (rule.labels) {
         const requiredLabels = new Set(rule.labels.split(",").map(l => l.trim().toLowerCase()));
-        matchedDetections = detections.filter(d => requiredLabels.has(d.label.toLowerCase()));
+        matchedDetections = detections.filter(d => {
+          const matchLabel = requiredLabels.has(d.label.toLowerCase());
+          const matchSemantic = d.semanticLabel && requiredLabels.has(d.semanticLabel.toLowerCase());
+          return matchLabel || matchSemantic;
+        });
         if (matchedDetections.length === 0) continue;
       }
 
