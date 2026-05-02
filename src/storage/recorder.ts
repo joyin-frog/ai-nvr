@@ -653,6 +653,24 @@ export class MotionRecorder {
     state.recording = false;
   }
 
+  /** 删除所有录像文件，返回删除的文件数量 */
+  purgeAll(): number {
+    let count = 0;
+    const camDirs = readdirSync(this.storagePath);
+    for (const camDir of camDirs) {
+      const camPath = join(this.storagePath, camDir);
+      if (!statSync(camPath).isDirectory()) continue;
+      const files = readdirSync(camPath);
+      for (const file of files) {
+        if (!file.endsWith(".mp4")) continue;
+        unlinkSync(join(camPath, file));
+        count++;
+      }
+    }
+    this.listCache.clear();
+    return count;
+  }
+
   /** 清理过期录像（可传入自定义保留天数，用于磁盘感知加速清理） */
   purgeOldRecordings(overrideRetentionDays?: number): void {
     const retentionDays = overrideRetentionDays ?? this.runtimeConfig.get().recording.retentionDays;

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readdirSync, statSync, unlinkSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, statSync, unlinkSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
 import { type Detection } from "@/ai/types";
@@ -184,6 +184,21 @@ export class SnapshotStorage {
       this.metaCache.set(relativePath, null);
       return null;
     }
+  }
+
+  /** 删除所有快照数据，返回删除的文件数量 */
+  purgeAll(): number {
+    let count = 0;
+    const camDirs = readdirSync(this.storagePath);
+    for (const camDir of camDirs) {
+      const camPath = join(this.storagePath, camDir);
+      if (!statSync(camPath).isDirectory()) continue;
+      rmSync(camPath, { recursive: true, force: true });
+      count++;
+    }
+    this.pathCache.clear();
+    this.metaCache.clear();
+    return count;
   }
 
   /** 清理过期快照（公开，返回清理数量） */

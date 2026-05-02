@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, createWriteStream } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, createWriteStream, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import * as archiver from "archiver";
 
@@ -232,6 +232,23 @@ export class RecordingExporter {
 
       archive.finalize();
     });
+  }
+
+  /** 删除所有导出文件，返回删除的文件数量 */
+  purgeAll(): number {
+    let count = 0;
+    const files = readdirSync(this.exportDir);
+    for (const file of files) {
+      const filePath = join(this.exportDir, file);
+      const stat = statSync(filePath);
+      if (stat.isDirectory()) {
+        rmSync(filePath, { recursive: true, force: true });
+      } else {
+        unlinkSync(filePath);
+      }
+      count++;
+    }
+    return count;
   }
 
   /** 清理超过指定小时的导出文件 */

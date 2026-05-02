@@ -102,6 +102,18 @@ export class ThumbnailGenerator {
     return `${hash.toString(36)}_${Math.round(timeSeconds)}.jpg`;
   }
 
+  /** 删除所有缩略图缓存，返回删除的文件数量 */
+  purgeAll(): number {
+    let count = 0;
+    const files = readdirSync(this.cacheDir);
+    for (const file of files) {
+      const filePath = join(this.cacheDir, file);
+      unlinkSync(filePath);
+      count++;
+    }
+    return count;
+  }
+
   /** 清理过期缓存（超过 retentionDays 天的） */
   purge(retentionDays: number): void {
     const cutoff = Date.now() - retentionDays * 86_400_000;

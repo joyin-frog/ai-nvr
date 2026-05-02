@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
 import { type Detection } from "@/ai/types";
@@ -410,6 +410,25 @@ export class TrackStorage {
     this.tracks.delete(trackId);
     this.scheduleSave();
     return true;
+  }
+
+  /**
+   * 删除所有追踪数据（快照文件 + 元数据），返回删除的记录数量
+   */
+  purgeAll(): number {
+    const count = this.tracks.size;
+    /** 删除所有快照文件（.jpg） */
+    const files = readdirSync(this.storagePath);
+    for (const file of files) {
+      if (file === TRACKS_META_FILE) continue;
+      if (file.endsWith(".jpg")) {
+        unlinkSync(join(this.storagePath, file));
+      }
+    }
+    this.tracks.clear();
+    this.invalidateListCache();
+    this.saveNow();
+    return count;
   }
 
   /**

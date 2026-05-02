@@ -170,6 +170,13 @@ export class TrackTrajectoryStorage {
       .run(trackId);
   }
 
+  /** 删除所有轨迹数据，返回删除的行数 */
+  purgeAll(): number {
+    const count = (this.db.prepare("SELECT COUNT(*) as cnt FROM trajectory_points").get() as { cnt: number }).cnt;
+    this.db.exec("DELETE FROM trajectory_points");
+    return count;
+  }
+
   /** 清理超过指定天数的轨迹数据 */
   cleanup(maxAgeDays: number): number {
     const cutoff = Date.now() - maxAgeDays * 86_400_000;

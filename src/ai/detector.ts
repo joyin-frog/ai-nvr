@@ -1,14 +1,4 @@
-import { Worker } from "node:worker_threads";
-import { ensureModelCached } from "./model-downloader";
 import { ObjectTracker, initNextTrackId } from "./tracker";
-
-/** 设置模型下载源（HF_ENDPOINT 仅对 Python SDK 生效，JS 库需设置 env.remoteHost） */
-const hfEndpoint = process.env.HF_ENDPOINT ?? "https://huggingface.co";
-
-/** 模型加载最大重试次数 */
-const MAX_RETRIES = 3;
-/** 重试基础延迟（毫秒） */
-const RETRY_BASE_DELAY = 5000;
 import { type Detection, type DetectMode } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
@@ -17,50 +7,47 @@ import { TrackStorage } from "@/storage/tracks";
 import { type TrackLabelStorage } from "@/storage/track-labels";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { ClipService } from "./clip-service";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
-/** Worker 推理请求 ID */
-let requestId = 0;
-/** 等待中的推理请求 */
-const pendingRequests = new Map<number, {
-  resolve: (result: WorkerDetectResult) => void;
-  cameraId: string;
-  jpeg: Buffer;
-  timestamp: number;
-}>();
-
-/** Worker 推理结果类型 */
-interface WorkerDetectResult {
-  id: number;
-  cameraId: string;
-  timestamp: number;
-  detections: Array<{
-    label: string;
-    score: number;
-    box: { xmin: number; ymin: number; xmax: number; ymax: number };
-  }>;
-  /** 图像嵌入向量（CLIP） */
-  embedding: number[];
-  fingerprint: string;
-  inferMs: number;
-  resizeMs: number;
-  error?: string;
+/** VLM 分析结果（从 JSON 响应中解析） */
+interface VlmDetection {
+  /** 目标标签（person/car/dog 等） */
+  label: string;
+  /** 置信度（0-1） */
+  score: number;
+  /** 可选的边界框（归一化 0-1），VLM 可能无法精确输出 */
+  box?: { xmin: number; ymin: number; xmax: number; ymax: number };
+  /** VLM 生成的语义描述 */
+  description?: string;
 }
+
+/** VLM API 返回的结构化结果 */
+interface VlmAnalysisResult {
+  /** 检测到的目标列表 */
+  objects: VlmDetection[];
+  /** 场景整体描述 */
+  scene: string;
+  /** 推理耗时 ms */
+  inferMs: number;
+}
+
+/** VLM 检测 prompt（要求输出结构化 JSON，包含 bbox_2d 坐标） */
+const VLM_SYSTEM_PROMPT = `You are an intelligent surveillance camera analyzer. Analyze the image and describe each object. Output a JSON array with each detected item's category, bounding box (bbox_2d as [x1, y1, x2, y2] in pixels), label, and count.
+
+Output format (JSON array only, no markdown):
+[{"bbox_2d": [x1, y1, x2, y2], "label": "person", "count": 1, "description": "a person wearing dark clothes walking"}]
+
+Important labels: person, car, truck, bus, motorcycle, bicycle, dog, cat, bird, bag, box, other.
+description: include color, size, activity, distinctive features.
+Respond ONLY with the JSON array, nothing else.`;
 
 /**
  * AI 目标检测器
- * 推理在 Worker 线程执行，不阻塞主线程 HTTP 服务
+ * 使用 VLM（视觉语言模型）API 进行帧分析，替代本地 YOLO 推理
+ * 保留 ByteTrack 追踪、CLIP 分类、外观匹配等下游能力
  */
 export class AiDetector {
-  /** Worker 线程 */
-  private worker: Worker | null = null;
   /** 是否已初始化 */
   private initialized = false;
-  /** 当前加载的模型名称 */
-  private currentModel = "";
-  /** 模型是否正在加载中 */
-  private loading = false;
   /** 连续检测定时器 */
   private continuousTimer: ReturnType<typeof setInterval> | null = null;
   /** 每个摄像头最新帧缓存（用于连续检测） */
@@ -100,16 +87,22 @@ export class AiDetector {
   /** 接近距离阈值（归一化 0-1） */
   private static readonly APPROACH_DISTANCE_THRESHOLD = 0.15;
 
+  /** 每个摄像头正在分析中 */
+  private analyzing = new Set<string>();
+
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
     private annotator: Annotator,
-    private modelCacheDir: string,
+    modelCacheDir: string,
     private trackStorage?: TrackStorage,
     private trackLabelStorage?: TrackLabelStorage,
     private trajectoryStorage?: TrackTrajectoryStorage,
     private clipService?: ClipService,
-  ) {}
+  ) {
+    /** modelCacheDir 在 VLM 模式下不再使用（YOLO Worker 已移除），但保留参数兼容性 */
+    void modelCacheDir;
+  }
 
   /** 注入 MotionDetector 引用（用于查询最新帧差异比率，跳过静态帧推理） */
   private motionDetector: { getLatestRatio(cameraId: string): number } | null = null;
@@ -118,7 +111,7 @@ export class AiDetector {
     this.motionDetector = md;
   }
 
-  /** 异步初始化：加载模型 */
+  /** 异步初始化 */
   async init(): Promise<void> {
     const config = this.runtimeConfig.get().ai;
     if (!config.enabled) {
@@ -126,10 +119,15 @@ export class AiDetector {
       return;
     }
 
-    /** 预下载模型文件 */
-    await ensureModelCached(config.model, this.modelCacheDir, hfEndpoint);
+    /** 验证 VLM API 可用性 */
+    const llmConfig = config.llm;
+    if (!llmConfig.apiUrl || !llmConfig.model) {
+      console.warn("[AiDetector] VLM API 未配置（api_url 或 model 为空），AI 检测无法启动");
+      return;
+    }
 
-    await this.loadModel(config.model);
+    console.log(`[AiDetector] VLM 模式: ${llmConfig.model} @ ${llmConfig.apiUrl}`);
+    this.initialized = true;
 
     /** 从持久化存储恢复 trackId 计数器，避免重启后 ID 重叠导致命名失效 */
     if (this.trackStorage) {
@@ -152,111 +150,6 @@ export class AiDetector {
     }
   }
 
-  /** 启动 Worker 线程并加载模型 */
-  private async loadModel(modelName: string): Promise<void> {
-    console.log(`[AiDetector] 正在加载模型: ${modelName} (Worker 线程)...`);
-    this.loading = true;
-
-    /** 销毁旧 Worker */
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
-
-    /** Worker 文件路径 */
-    const workerPath = join(dirname(fileURLToPath(import.meta.url)), "detect-worker.ts");
-
-    return new Promise<void>((resolve, reject) => {
-      let lastError: unknown;
-      let attempt = 0;
-
-      const tryLoad = () => {
-        attempt++;
-        if (attempt > MAX_RETRIES) {
-          this.loading = false;
-          reject(lastError);
-          return;
-        }
-
-        console.log(`[AiDetector] 第 ${attempt}/${MAX_RETRIES} 次尝试加载...`);
-
-        const worker = new Worker(workerPath, {
-          workerData: { model: modelName, cacheDir: this.modelCacheDir },
-        } as ConstructorParameters<typeof Worker>[1] & { workerData: unknown });
-
-        worker.on("message", (msg: { type: string; data?: WorkerDetectResult; error?: string }) => {
-          if (msg.type === "ready") {
-            this.worker = worker;
-            this.currentModel = modelName;
-            this.loading = false;
-            this.initialized = true;
-            console.log(`[AiDetector] 模型加载完成: ${modelName}`);
-            resolve();
-          } else if (msg.type === "result" && msg.data) {
-            const result = msg.data;
-            const pending = pendingRequests.get(result.id);
-            if (pending) {
-              pendingRequests.delete(result.id);
-              pending.resolve(result);
-            }
-          } else if (msg.type === "error") {
-            lastError = new Error(msg.error);
-            worker.terminate();
-            if (attempt < MAX_RETRIES) {
-              const delay = RETRY_BASE_DELAY * attempt;
-              console.log(`[AiDetector] ${delay / 1000}s 后重试...`);
-              setTimeout(tryLoad, delay);
-            } else {
-              tryLoad();
-            }
-          }
-        });
-
-        worker.on("error", (err: Error) => {
-          lastError = err;
-          console.error(`[AiDetector] Worker 错误: ${err.message}`);
-          worker.terminate();
-          if (attempt < MAX_RETRIES) {
-            const delay = RETRY_BASE_DELAY * attempt;
-            console.log(`[AiDetector] ${delay / 1000}s 后重试...`);
-            setTimeout(tryLoad, delay);
-          } else {
-            this.loading = false;
-            reject(lastError);
-          }
-        });
-      };
-
-      tryLoad();
-    });
-  }
-
-  /** 向 Worker 发送推理请求 */
-  private requestDetect(cameraId: string, jpeg: Buffer, timestamp: number): Promise<WorkerDetectResult> {
-    return new Promise((resolve) => {
-      const id = ++requestId;
-      const aiConfig = this.runtimeConfig.get().ai;
-      pendingRequests.set(id, { resolve, cameraId, jpeg, timestamp });
-
-      /** importantLabels 用于过滤检测结果（YOLO 使用 COCO 80 类，直接传标签名） */
-      const labels = aiConfig.importantLabels;
-
-      this.worker?.postMessage({
-        type: "detect",
-        data: {
-          id,
-          cameraId,
-          jpeg,
-          timestamp,
-          inputWidth: this.runtimeConfig.getAiInputWidth(cameraId),
-          threshold: this.runtimeConfig.getAiThreshold(cameraId),
-          maxDetections: aiConfig.maxDetections,
-          labels,
-        },
-      });
-    });
-  }
-
   /** 摄像头离线清理取消订阅 */
   private unsubCameraOffline: (() => void) | null = null;
 
@@ -270,8 +163,8 @@ export class AiDetector {
       this.lastDetectTime.delete(cameraId);
       this.lastDetectFingerprint.delete(cameraId);
       this.trackers.delete(cameraId);
+      this.analyzing.delete(cameraId);
       this.trackNameCache.forEach((_v, k) => { if (k.startsWith(`${cameraId}:`)) this.trackNameCache.delete(k); });
-      this.semanticLabelCache.forEach((_v, k) => { /* trackId 是全局的，离线时不清理 */ });
     });
 
     if (config.mode === "continuous") {
@@ -304,7 +197,6 @@ export class AiDetector {
   private startContinuousLoop(interval: number): void {
     if (this.continuousTimer) clearInterval(this.continuousTimer);
     this.baseInterval = interval;
-    /** 定时器使用全局 interval，per-camera 间隔在 processQueue 中按摄像头分别判断 */
     this.continuousTimer = setInterval(() => {
       const now = Date.now();
       for (const [cameraId, frame] of this.latestFrames) {
@@ -326,7 +218,6 @@ export class AiDetector {
       s => s >= AiDetector.IDLE_SLOWDOWN_THRESHOLD * 2,
     );
     if (allDeepIdle && !this.globalIdleBoosted) {
-      /** 全部深度 idle：全局定时器降到 2x 间隔 */
       clearInterval(this.continuousTimer);
       this.continuousTimer = setInterval(() => {
         const now = Date.now();
@@ -342,7 +233,6 @@ export class AiDetector {
       }, this.baseInterval * 2);
       this.globalIdleBoosted = true;
     } else if (!allDeepIdle && this.globalIdleBoosted) {
-      /** 有活动目标：恢复原始间隔 */
       clearInterval(this.continuousTimer);
       this.continuousTimer = setInterval(() => {
         const now = Date.now();
@@ -360,16 +250,11 @@ export class AiDetector {
     }
   }
 
-  /**
-   * 并行发起所有待检测摄像头的推理请求
-   * 不串行等待，Worker 内部 auto-skip 机制保证处理最新帧
-   */
   /** 获取有效检测间隔（考虑智能降频） */
   private getEffectiveInterval(cameraId: string): number {
     const baseInterval = this.runtimeConfig.getAiInterval(cameraId);
     const streak = this.emptyDetectStreak.get(cameraId) ?? 0;
     if (streak < AiDetector.IDLE_SLOWDOWN_THRESHOLD) return baseInterval;
-    /** 每超过阈值 5 次，倍数 +1，最高 4 倍 */
     const multiplier = Math.min(
       1 + Math.floor((streak - AiDetector.IDLE_SLOWDOWN_THRESHOLD) / AiDetector.IDLE_SLOWDOWN_THRESHOLD),
       AiDetector.MAX_IDLE_MULTIPLIER,
@@ -382,16 +267,12 @@ export class AiDetector {
     const batch = this.detectQueue.splice(0);
     for (const cameraId of batch) {
       const camInterval = this.getEffectiveInterval(cameraId);
-      /** 始终使用该摄像头的最新帧（跳过中间帧） */
       const frame = this.latestFrames.get(cameraId);
       if (!frame) continue;
-      /** 帧太旧 → 跳过 */
       if (now - frame.timestamp > camInterval * 3) continue;
-      /** 推理间隔保护：避免同一摄像头过于频繁推理 */
       const lastTime = this.lastDetectTime.get(cameraId) ?? 0;
       if (now - lastTime < camInterval * 0.8) continue;
       this.lastDetectTime.set(cameraId, now);
-      /** 不 await — 并行发起推理，结果通过 Promise 异步处理 */
       this.detect(cameraId, frame.data, frame.timestamp).catch(err => {
         console.error(`[AiDetector] 检测失败 [${cameraId}]:`, err);
       });
@@ -421,33 +302,6 @@ export class AiDetector {
     this.lastDetectTime.clear();
   }
 
-  /** 运行时切换模型 */
-  async reloadModel(modelName?: string): Promise<{ ok: boolean; model: string; error?: string }> {
-    const target = modelName ?? this.runtimeConfig.get().ai.model;
-    if (target === this.currentModel) {
-      return { ok: true, model: this.currentModel };
-    }
-    if (this.loading) {
-      return { ok: false, model: this.currentModel, error: "模型正在加载中" };
-    }
-
-    this.initialized = false;
-    try {
-      await this.loadModel(target);
-      const ai = this.runtimeConfig.get().ai;
-      this.runtimeConfig.patch({ ai: { ...ai, model: target } });
-      return { ok: true, model: this.currentModel };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[AiDetector] 模型加载失败: ${msg}`);
-      if (this.currentModel) {
-        console.log(`[AiDetector] 回退到模型: ${this.currentModel}`);
-        await this.loadModel(this.currentModel);
-      }
-      return { ok: false, model: this.currentModel, error: msg };
-    }
-  }
-
   /** 运行时切换检测模式 */
   setMode(mode: DetectMode, interval?: number): void {
     const ai = this.runtimeConfig.get().ai;
@@ -463,20 +317,188 @@ export class AiDetector {
 
   /** 获取当前模型信息 */
   getModelInfo(): { model: string; loading: boolean; initialized: boolean } {
-    return { model: this.currentModel, loading: this.loading, initialized: this.initialized };
+    const llmConfig = this.runtimeConfig.get().ai.llm;
+    return { model: llmConfig.model || "vlm", loading: false, initialized: this.initialized };
+  }
+
+  /** 兼容旧的 reloadModel API（VLM 模式下为空操作） */
+  async reloadModel(): Promise<{ ok: boolean; model: string; error?: string }> {
+    const llmConfig = this.runtimeConfig.get().ai.llm;
+    return { ok: true, model: llmConfig.model || "vlm" };
   }
 
   /** 静态帧跳过：motion ratio 低于此阈值且上一帧也是空结果时跳过推理 */
   private static readonly STATIC_RATIO_THRESHOLD = 0.005;
 
-  /** 执行目标检测（委托 Worker 线程推理） */
+  /** 调用 VLM API 分析帧画面 */
+  private async analyzeWithVlm(jpeg: Buffer): Promise<VlmAnalysisResult> {
+    const t0 = performance.now();
+    const aiConfig = this.runtimeConfig.get().ai;
+    const llmConfig = aiConfig.llm;
+
+    /** 缩放图片减少传输和推理开销 */
+    let imageDataUrl: string;
+    if (llmConfig.imageWidth > 0) {
+      const sharpMod = await import("sharp");
+      const resized = await sharpMod.default(jpeg)
+        .resize(llmConfig.imageWidth)
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      imageDataUrl = `data:image/jpeg;base64,${resized.toString("base64")}`;
+    } else {
+      imageDataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    }
+
+    const body = {
+      model: llmConfig.model,
+      messages: [
+        { role: "system", content: VLM_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Analyze this surveillance camera image:" },
+            { type: "image_url", image_url: { url: imageDataUrl } },
+          ],
+        },
+      ],
+      max_tokens: llmConfig.maxTokens,
+      temperature: 0.3,
+    };
+
+    const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
+      ? llmConfig.apiUrl
+      : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`VLM API ${response.status}: ${text.slice(0, 200)}`);
+    }
+
+    const result = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = result.choices?.[0]?.message?.content?.trim() ?? "";
+    const inferMs = performance.now() - t0;
+
+    /** 解析 VLM 输出为结构化结果 */
+    return this.parseVlmResponse(content, inferMs);
+  }
+
+  /** 解析 VLM 返回的 JSON（支持数组格式和对象格式） */
+  private parseVlmResponse(content: string, inferMs: number): VlmAnalysisResult {
+    /** 提取 JSON */
+    let jsonStr = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1]!.trim();
+    }
+
+    /** 尝试找到 JSON 边界 */
+    const arrayStart = jsonStr.indexOf("[");
+    const objStart = jsonStr.indexOf("{");
+
+    let parsed: unknown;
+    if (arrayStart >= 0 && (objStart < 0 || arrayStart < objStart)) {
+      /** 数组格式：[{"bbox_2d": [...], "label": "person", ...}, ...] */
+      const end = jsonStr.lastIndexOf("]");
+      if (end > arrayStart) {
+        jsonStr = jsonStr.slice(arrayStart, end + 1);
+      }
+    } else if (objStart >= 0) {
+      /** 对象格式：{"objects": [...], "scene": "..."} */
+      const end = jsonStr.lastIndexOf("}");
+      if (end > objStart) {
+        jsonStr = jsonStr.slice(objStart, end + 1);
+      }
+    }
+
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      return { objects: [], scene: content, inferMs };
+    }
+
+    /** 提取对象列表和场景描述 */
+    let rawObjects: Array<Record<string, unknown>> = [];
+    let scene = "";
+
+    if (Array.isArray(parsed)) {
+      /** 直接是数组格式 */
+      rawObjects = parsed;
+    } else if (parsed && typeof parsed === "object") {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.objects)) {
+        rawObjects = obj.objects;
+      }
+      if (typeof obj.scene === "string") scene = obj.scene;
+    }
+
+    /** 获取图片尺寸（用于 bbox 像素→归一化转换） */
+    const imageWidth = this.runtimeConfig.get().ai.inputWidth || 640;
+    const imageHeight = Math.round(imageWidth * 9 / 16); /** 假设 16:9 */
+
+    const validLabels = this.runtimeConfig.get().ai.importantLabels;
+    const objects: VlmDetection[] = [];
+
+    for (const raw of rawObjects) {
+      const label = typeof raw.label === "string" ? raw.label : "";
+      if (!label) continue;
+
+      /** 标签过滤 */
+      if (validLabels.length > 0 && !validLabels.includes(label.toLowerCase()) && !validLabels.includes(label)) continue;
+
+      /** 解析 bbox_2d 像素坐标 → 归一化 0-1 */
+      let box: VlmDetection["box"];
+      if (Array.isArray(raw.bbox_2d) && raw.bbox_2d.length >= 4) {
+        const coords = raw.bbox_2d.map(Number);
+        if (coords.every(c => !isNaN(c))) {
+          box = {
+            xmin: Math.max(0, Math.min(1, coords[0]! / imageWidth)),
+            ymin: Math.max(0, Math.min(1, coords[1]! / imageHeight)),
+            xmax: Math.max(0, Math.min(1, coords[2]! / imageWidth)),
+            ymax: Math.max(0, Math.min(1, coords[3]! / imageHeight)),
+          };
+        }
+      }
+
+      const score = typeof raw.score === "number"
+        ? Math.min(1, Math.max(0, raw.score))
+        : 0.8; /** VLM 不一定输出 score，给默认值 */
+
+      objects.push({
+        label: label.toLowerCase(),
+        score,
+        box,
+        description: typeof raw.description === "string" ? raw.description : undefined,
+      });
+    }
+
+    return {
+      objects: objects.slice(0, this.runtimeConfig.get().ai.maxDetections),
+      scene,
+      inferMs,
+    };
+  }
+
+  /** 执行目标检测（调用 VLM API） */
   private async detect(cameraId: string, jpeg: Buffer, timestamp: number): Promise<void> {
-    if (!this.initialized || !this.worker) return;
+    if (!this.initialized) return;
 
     const aiConfig = this.runtimeConfig.get().ai;
     if (!aiConfig.enabled) return;
 
-    /** 静态帧跳过：ratio 极低且上一帧也是空结果 → 跳过推理，直接发射无变化事件 */
+    /** 防止同一摄像头并发分析 */
+    if (this.analyzing.has(cameraId)) return;
+    this.analyzing.add(cameraId);
+
+    /** 静态帧跳过：ratio 极低且上一帧也是空结果 → 跳过推理 */
     if (this.motionDetector && aiConfig.mode === "continuous") {
       const ratio = this.motionDetector.getLatestRatio(cameraId);
       const streak = this.emptyDetectStreak.get(cameraId) ?? 0;
@@ -492,29 +514,31 @@ export class AiDetector {
           changed: false,
           inferMs: 0,
         });
+        this.analyzing.delete(cameraId);
         return;
       }
     }
 
-    /** 更新最后推理时间（防止帧驱动模式重复触发） */
+    /** 更新最后推理时间 */
     this.lastDetectTime.set(cameraId, Date.now());
 
     try {
       const t0 = performance.now();
 
-      /** 推理在 Worker 线程执行 */
-      const result = await this.requestDetect(cameraId, jpeg, timestamp);
+      /** 调用 VLM API 分析帧 */
+      const vlmResult = await this.analyzeWithVlm(jpeg);
 
-      if (result.error) {
-        console.error(`[AiDetector] Worker 推理失败: ${result.error}`);
-        return;
-      }
-
-      const detections: Detection[] = result.detections.map(item => ({
-        label: item.label,
-        score: item.score,
-        box: item.box,
+      /** 将 VLM 结果转为 Detection 格式 */
+      const detections: Detection[] = vlmResult.objects.map(obj => ({
+        label: obj.label,
+        score: obj.score,
+        box: obj.box ?? { xmin: 0, ymin: 0, xmax: 0, ymax: 0 },
+        semanticLabel: obj.description,
       }));
+
+      /** 过滤低置信度 */
+      const threshold = this.runtimeConfig.getAiThreshold(cameraId);
+      const filtered = detections.filter(d => d.score >= threshold);
 
       /** 目标追踪：跨帧保持同一 ID */
       let tracker = this.trackers.get(cameraId);
@@ -522,11 +546,28 @@ export class AiDetector {
         tracker = new ObjectTracker();
         this.trackers.set(cameraId, tracker);
       }
-      const trackResult = tracker.update(detections);
+      const trackResult = tracker.update(filtered);
 
       /** 新目标出现时保存裁剪快照到 TrackStorage */
+      /** 建立 trackId → semanticLabel 的映射 */
+      const trackSemanticMap = new Map<number, string>();
+      for (const d of filtered) {
+        if (d.semanticLabel && d.trackId != null) {
+          trackSemanticMap.set(d.trackId, d.semanticLabel);
+        }
+      }
+      /** tracker.update 后 trackId 分配到 appeared 目标，需要从 detections 的追踪结果中获取 */
+      for (const td of trackResult.detections) {
+        if (td.semanticLabel && td.trackId != null) {
+          trackSemanticMap.set(td.trackId, td.semanticLabel);
+          this.semanticLabelCache.set(td.trackId, td.semanticLabel);
+        }
+      }
+
       if (this.trackStorage && trackResult.appeared.length > 0) {
         for (const target of trackResult.appeared) {
+          const semanticLabel = trackSemanticMap.get(target.trackId);
+
           this.trackStorage.upsert(
             target.trackId,
             target.label,
@@ -536,29 +577,34 @@ export class AiDetector {
             target.box,
             target.score,
           ).then(() => {
-            /** 快照保存后，执行 CLIP 零样本分类（同时产出 image embedding） */
             const record = this.trackStorage!.getRecord(target.trackId);
 
+            /** 保存 VLM 语义描述 */
+            if (semanticLabel && this.trackStorage) {
+              this.trackStorage.setSemanticLabel(target.trackId, semanticLabel);
+            }
+
+            /** CLIP 分类（可选，补充更丰富的语义标签） */
             if (this.clipService && target.box) {
               this.clipService.classifyTarget(jpeg, target.box, target.label)
                 .then(result => {
-                  /** 零样本分类结果 */
                   const top = ClipService.getTopLabels(result, 1);
-                  if (top.length > 0 && top[0]!.score > 0.15) {
+                  /** CLIP 结果仅在 VLM 没有描述时补充 */
+                  if (top.length > 0 && top[0]!.score > 0.25 && !semanticLabel) {
                     this.semanticLabelCache.set(target.trackId, top[0]!.label);
                     if (this.trackStorage) {
                       this.trackStorage.setSemanticLabel(target.trackId, top[0]!.label);
                     }
-                    console.log(`[AiDetector] CLIP 分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
+                    console.log(`[AiDetector] CLIP 补充分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
                   }
 
-                  /** 复用同一推理产出的 image embedding（无需二次推理） */
+                  /** CLIP image embedding 用于 ReID */
                   const clipEmbedding = result.imageEmbedding;
                   if (clipEmbedding?.length && this.trackStorage) {
                     this.trackStorage.setClipEmbedding(target.trackId, clipEmbedding);
                   }
 
-                  /** 用 embedding 做高精度 ReID 匹配 */
+                  /** 外观匹配 */
                   if (!record?.dhash && !clipEmbedding?.length) return;
                   const matches = this.trackStorage!.findSimilar(
                     target.trackId, cameraId, target.label,
@@ -594,6 +640,7 @@ export class AiDetector {
           }).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
         }
       }
+
       /** 更新已有活跃目标的 lastSeen/hitCount */
       if (this.trackStorage && trackResult.detections.length > 0) {
         const appearedIds = new Set(trackResult.appeared.map(a => a.trackId));
@@ -601,51 +648,6 @@ export class AiDetector {
           .filter(d => d.trackId != null && !appearedIds.has(d.trackId));
         if (existing.length > 0) {
           this.trackStorage.touchSeen(existing.map(d => ({ trackId: d.trackId!, cameraId })), timestamp);
-          /** 对置信度最高的已有目标尝试更新快照（每帧最多 3 个，按置信度降序） */
-          existing.sort((a, b) => b.score - a.score);
-          const candidates = existing.filter(d => d.box).slice(0, 3);
-          for (const det of candidates) {
-            this.trackStorage.tryUpdateSnapshot(det.trackId!, cameraId, jpeg, det.box!, det.score)
-              .then(updated => {
-                if (!updated) return;
-                const rec = this.trackStorage!.getRecord(det.trackId!);
-                if (!rec || rec.customName || (!rec.dhash && !rec.clipEmbedding?.length)) return;
-                /** 快照更新时重新做 CLIP 分类 + embedding（已有完整数据时跳过，减少 ~80% 推理） */
-                const hasFullClipData = rec.clipEmbedding?.length && rec.semanticLabel;
-                if (!hasFullClipData && this.clipService && det.box) {
-                  this.clipService.classifyTarget(jpeg, det.box, rec.label)
-                    .then(result => {
-                      /** 更新 semanticLabel（新快照可能提供更准确的分类） */
-                      const top = ClipService.getTopLabels(result, 1);
-                      if (top.length > 0 && top[0]!.score > 0.15) {
-                        this.semanticLabelCache.set(det.trackId!, top[0]!.label);
-                        this.trackStorage!.setSemanticLabel(det.trackId!, top[0]!.label);
-                      }
-                      /** 更新 CLIP embedding */
-                      if (result.imageEmbedding?.length) {
-                        this.trackStorage!.setClipEmbedding(det.trackId!, result.imageEmbedding);
-                      }
-                    })
-                    .catch(() => { /* CLIP 推理失败不影响主流程 */ });
-                }
-                const matches = this.trackStorage!.findSimilar(det.trackId!, cameraId, rec.label, rec.dhash ?? "", 0.4, rec.colorHist, rec.lbpHist, rec.clipEmbedding);
-                if (matches.length === 0) return;
-                const top = matches[0]!;
-                const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
-                if (autoThreshold > 0 && top.distance < autoThreshold && this.trackLabelStorage) {
-                  this.trackLabelStorage.upsert(cameraId, det.trackId!, rec.label, top.customName);
-                  this.trackStorage!.setCustomName(det.trackId!, top.customName);
-                  this.trackNameCache.delete(`${cameraId}:${det.trackId}`);
-                  this.eventBus.emit("track:label-updated", {
-                    cameraId,
-                    trackId: det.trackId,
-                    name: top.customName,
-                  });
-                  console.log(`[AiDetector] 延迟匹配: track#${det.trackId} → ${top.customName} (${(top.distance * 100).toFixed(0)}%)`);
-                }
-              })
-              .catch(() => { /* 快照更新失败不影响主流程 */ });
-          }
         }
       }
 
@@ -658,10 +660,11 @@ export class AiDetector {
         this.emptyDetectStreak.set(cameraId, 0);
       }
 
-      /** 去重（在标注前计算，避免无变化时浪费标注开销） */
+      /** 去重 */
+      const fp = JSON.stringify(vlmResult.objects.map(o => `${o.label}:${o.score?.toFixed(2)}`));
       const prevFp = this.lastDetectFingerprint.get(cameraId);
-      const changed = result.fingerprint !== prevFp;
-      this.lastDetectFingerprint.set(cameraId, result.fingerprint);
+      const changed = fp !== prevFp;
+      this.lastDetectFingerprint.set(cameraId, fp);
 
       /** 发射追踪目标出现/消失事件 */
       for (const target of trackResult.appeared) {
@@ -688,7 +691,7 @@ export class AiDetector {
         });
       }
 
-      /** 写入轨迹采样点（持久化追踪目标的位置历史） */
+      /** 写入轨迹采样点 */
       if (this.trajectoryStorage && trackResult.detections.length > 0) {
         const trajItems = trackResult.detections
           .filter(d => d.trackId != null && d.box)
@@ -712,11 +715,22 @@ export class AiDetector {
         return { ...d, trackName: trackName || undefined, dominantColor, semanticLabel };
       });
 
-      /** 缓存最新帧和 enriched 检测结果（用于按需生成标注图） */
+      /** 缓存最新帧和 enriched 检测结果 */
       this.annotator.setLatestFrame(cameraId, jpeg, enricheddetections);
 
-      /** 目标间接近检测：计算所有活跃目标两两之间的距离 */
+      /** 目标间接近检测 */
       this.detectApproaches(cameraId, timestamp, enricheddetections);
+
+      /** 发射场景描述事件（复用 llm:scene） */
+      if (vlmResult.scene) {
+        this.eventBus.emit("llm:scene", {
+          cameraId,
+          timestamp,
+          description: vlmResult.scene,
+          trigger: "detect",
+          inferMs: vlmResult.inferMs,
+        });
+      }
 
       this.eventBus.emit("detect", {
         cameraId,
@@ -724,25 +738,26 @@ export class AiDetector {
         detections: enricheddetections,
         frameImage: jpeg,
         changed,
-        inferMs: result.inferMs,
+        inferMs: vlmResult.inferMs,
       });
-      /** 只在有目标或推理耗时异常（>500ms）时打印性能日志，减少空检测噪声 */
-      if (trackResult.detections.length > 0 || result.inferMs > 500) {
+
+      if (trackResult.detections.length > 0 || vlmResult.inferMs > 1000) {
         const trackIds = trackResult.detections.map(d => `${d.label}#${d.trackId}`).join(", ");
-        console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
+        console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${vlmResult.inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
       }
     } catch (err) {
-      console.error(`[AiDetector] 检测失败:`, err);
+      console.error(`[AiDetector] VLM 检测失败:`, err);
+    } finally {
+      this.analyzing.delete(cameraId);
     }
   }
 
-  /** 检测目标间的接近事件（两两计算中心距离，低于阈值时触发） */
+  /** 检测目标间的接近事件 */
   private detectApproaches(
     cameraId: string,
     timestamp: number,
     detections: Array<{ trackId?: number; label: string; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackName?: string; semanticLabel?: string }>,
   ): void {
-    /** 至少需要 2 个有 trackId 和 box 的目标 */
     const targets = detections.filter(d => d.trackId != null && d.box);
     if (targets.length < 2) return;
 
@@ -762,7 +777,6 @@ export class AiDetector {
         const dist = Math.sqrt((aCx - bCx) ** 2 + (aCy - bCy) ** 2);
         if (dist >= threshold) continue;
 
-        /** 冷却期检查 */
         const pairKey = a.trackId! < b.trackId!
           ? `${a.trackId}:${b.trackId}`
           : `${b.trackId}:${a.trackId}`;
@@ -790,7 +804,6 @@ export class AiDetector {
       }
     }
 
-    /** 清理过期的冷却记录（超过 60 秒未触发的） */
     for (const [key, time] of this.approachCooldown) {
       if (now - time > 60_000) this.approachCooldown.delete(key);
     }
@@ -802,10 +815,6 @@ export class AiDetector {
     if (this.trackNameCacheTimer) {
       clearInterval(this.trackNameCacheTimer);
       this.trackNameCacheTimer = null;
-    }
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
     }
     this.initialized = false;
   }
@@ -832,10 +841,7 @@ export class AiDetector {
     return color || undefined;
   }
 
-  /**
-   * 命名后反向关联：扫描所有外观相似的未命名目标并自动关联
-   * 在 POST /api/track-labels 命名保存后调用
-   */
+  /** 命名后反向关联 */
   propagateName(trackId: number, name: string, sourceCameraId: string): void {
     if (!this.trackStorage || !this.trackLabelStorage) return;
     const record = this.trackStorage.getRecord(trackId);
@@ -844,7 +850,6 @@ export class AiDetector {
     const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
     if (autoThreshold <= 0) return;
 
-    /** 查找外观相似的目标 */
     const matches = this.trackStorage.findSimilar(
       trackId, sourceCameraId, record.label, record.dhash ?? "", 0.4,
       record.colorHist, record.lbpHist, record.clipEmbedding,
@@ -852,19 +857,15 @@ export class AiDetector {
 
     for (const match of matches) {
       if (match.distance >= autoThreshold) continue;
-      /** 跳过已命名的目标 */
       const matchRec = this.trackStorage.getRecord(match.trackId);
       if (matchRec?.customName) continue;
-      /** 为匹配的目标设置相同名称 */
       for (const camId of matchRec?.cameraIds ?? []) {
         this.trackLabelStorage.upsert(camId, match.trackId, matchRec?.label ?? record.label, name);
       }
       this.trackStorage.setCustomName(match.trackId, name);
-      /** 清除缓存 */
       for (const camId of matchRec?.cameraIds ?? []) {
         this.trackNameCache.delete(`${camId}:${match.trackId}`);
       }
-      /** 广播更新 */
       const camId = matchRec?.cameraIds[0] ?? sourceCameraId;
       this.eventBus.emit("track:label-updated", { cameraId: camId, trackId: match.trackId, name });
       console.log(`[AiDetector] 命名传播: track#${match.trackId} → ${name} (${(match.distance * 100).toFixed(0)}%)`);

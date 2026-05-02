@@ -216,6 +216,13 @@ export class AlertStorage {
     return result.count;
   }
 
+  /** 删除所有告警记录，返回删除的行数 */
+  purgeAll(): number {
+    const count = (this.db.query("SELECT COUNT(*) as cnt FROM alert_records").get() as { cnt: number }).cnt;
+    this.db.run("DELETE FROM alert_records");
+    return count;
+  }
+
   /** 清理过期告警记录 */
   purge(beforeTimestamp: number): number {
     const result = this.db.run("DELETE FROM alert_records WHERE timestamp < ?", [beforeTimestamp]);

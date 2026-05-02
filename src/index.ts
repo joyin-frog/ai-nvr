@@ -40,8 +40,7 @@ import { ClipService, setCustomCandidates } from "@/ai/clip-service";
 installLogBuffer();
 
 /**
- * 设置 Hugging Face 镜像（国内网络加速模型下载）
- * 注意：HF_ENDPOINT 仅对 Python SDK 生效，JS 库需要设置 env.remoteHost（在 detector.ts 中处理）
+ * 设置 Hugging Face 镜像（用于 CLIP 模型下载）
  */
 process.env.HF_ENDPOINT = process.env.HF_ENDPOINT ?? "https://hf-mirror.com";
 
@@ -94,15 +93,14 @@ for (const cam of config.cameras) {
 }
 recorder.start();
 
-/** AI 检测器（使用 RuntimeConfig，支持 API 热修改置信度/最大检测数） */
+/** AI 检测器（VLM 模式，使用 RuntimeConfig） */
 const annotator = new Annotator();
 const trackStorage = new TrackStorage(join(dataDir, "tracks"));
 const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
 const trajectoryStorage = new TrackTrajectoryStorage(join(dataDir, "track-trajectory.db"));
 
-/** CLIP 零样本分类服务（可选启用） */
+/** CLIP 零样本分类服务（可选启用，为 VLM 检测结果补充语义标签） */
 const clipService = new ClipService(config.ai.clip, join(dataDir, "models"));
-/** 启动时应用配置中的自定义候选标签 */
 if (config.ai.clip.candidates) {
   setCustomCandidates(config.ai.clip.candidates);
 }
@@ -130,7 +128,7 @@ motionDetector.start();
 /** 启动摄像头 */
 cameraManager.start();
 
-/** 异步初始化 AI 检测器（加载模型较慢） */
+/** 异步初始化 AI 检测器（VLM 模式，不需要加载本地模型） */
 aiDetector.init().then(() => {
   console.log("[App] AI 检测器初始化完成");
 }).catch((err) => {

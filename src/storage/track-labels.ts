@@ -120,6 +120,13 @@ export class TrackLabelStorage {
     return result.changes > 0;
   }
 
+  /** 删除所有标签记录，返回删除的行数 */
+  purgeAll(): number {
+    const count = (this.db.prepare("SELECT COUNT(*) as cnt FROM track_labels").get() as { cnt: number }).cnt;
+    this.db.exec("DELETE FROM track_labels");
+    return count;
+  }
+
   /** 清理超过指定天数的标签记录（由 StorageCleaner 调用） */
   purge(retentionDays: number): number {
     const cutoff = Math.floor(Date.now() / 1000) - retentionDays * 86400;

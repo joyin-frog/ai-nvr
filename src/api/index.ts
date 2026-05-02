@@ -453,6 +453,66 @@ export function startServer(
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
+      /** 一键清除数据（事件、告警、快照、缩略图、追踪目标、轨迹、导出文件） */
+      if (url.pathname === "/api/data/purge" && req.method === "POST") {
+        return req.json().then(async (body: unknown) => {
+          const opts = body as {
+            events?: boolean;
+            alerts?: boolean;
+            snapshots?: boolean;
+            alertSnapshots?: boolean;
+            thumbnails?: boolean;
+            tracks?: boolean;
+            trajectories?: boolean;
+            exports?: boolean;
+            recordings?: boolean;
+          };
+          const results: Record<string, string> = {};
+
+          if (opts.events) {
+            const count = eventStorage.purge(Date.now() + 1);
+            results.events = `已删除 ${count} 条事件`;
+          }
+          if (opts.alerts) {
+            const count = alertStorage.purge(Date.now() + 1);
+            results.alerts = `已删除 ${count} 条告警`;
+          }
+          if (opts.snapshots) {
+            const count = snapshotStorage.purgeAll();
+            results.snapshots = `已删除 ${count} 个检测快照`;
+          }
+          if (opts.alertSnapshots && alertSnapshotStorage) {
+            const count = alertSnapshotStorage.purgeAll();
+            results.alertSnapshots = `已删除 ${count} 个告警快照`;
+          }
+          if (opts.thumbnails) {
+            const count = thumbnailGenerator.purgeAll();
+            results.thumbnails = `已删除 ${count} 个缩略图`;
+          }
+          if (opts.tracks) {
+            const count = trackStorage.purgeAll();
+            results.tracks = `已删除 ${count} 个追踪目标`;
+            trackLabelStorage.purgeAll();
+            results.trackLabels = "已清除所有追踪命名";
+          }
+          if (opts.trajectories && trajectoryStorage) {
+            const count = trajectoryStorage.purgeAll();
+            results.trajectories = `已删除 ${count} 条轨迹`;
+          }
+          if (opts.exports) {
+            const count = exporter.purgeAll();
+            results.exports = `已删除 ${count} 个导出文件`;
+          }
+          if (opts.recordings) {
+            const count = recorder.purgeAll();
+            results.recordings = `已删除 ${count} 个录像文件`;
+          }
+
+          console.log(`[API] 一键清除: ${JSON.stringify(results)}`);
+          return Response.json({ ok: true, results });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
       /** 查询事件历史 */
       if (url.pathname === "/api/events/history") {
         const queryOpts = {
@@ -889,17 +949,18 @@ export function startServer(
 
       /** 录像文件播放（支持 Range 请求，MP4 seek 必需） */
       const recordingMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/(.+\.mp4)$/);
-      if (recordingMatch) {
+      if (recordingMatch && req.method === "GET") {
         const camId = recordingMatch[1]!;
         const filename = recordingMatch[2]!;
         const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
-        /** 防止路径遍历：确保解析后的路径仍在录像目录内 */
+        /** 异步文件检查：用 Bun.file() 代替同步 existsSync + statSync */
+        const file = Bun.file(filePath);
+        const fileSize = await file.size;
+        if (fileSize === undefined) return new Response("Not Found", { status: 404 });
+        /** 防止路径遍历 */
         const storageRoot = getStorageRoot();
         const resolved = realpathSync(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
-        const stat = statSync(filePath);
-        const fileSize = stat.size;
 
         /** 处理 Range 请求（浏览器 MP4 seek 必需） */
         const rangeHeader = req.headers.get("range");
@@ -925,7 +986,6 @@ export function startServer(
           }
         }
 
-        const file = Bun.file(filePath);
         return new Response(file, {
           headers: {
             "Content-Type": "video/mp4",
@@ -1409,15 +1469,10 @@ export function startServer(
         return Response.json(aiDetector.getModelInfo());
       }
 
-      /** 重新加载 AI 模型 */
+      /** 重新加载 AI 模型（VLM 模式下为空操作，保留 API 兼容） */
       if (url.pathname === "/api/ai/reload-model" && req.method === "POST") {
-        return req.json().then(async (body: unknown) => {
-          const obj = body as Record<string, unknown>;
-          const model = obj.model as string | undefined;
-          const result = await aiDetector.reloadModel(model);
-          if (!result.ok) return Response.json(result, { status: 400 });
-          return Response.json(result);
-        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+        const result = await aiDetector.reloadModel();
+        return Response.json(result);
       }
 
       // ===== PTZ 云台控制 =====
