@@ -1,5 +1,6 @@
 import { type EventBus } from "@/event-bus";
 import { type CameraConfig } from "@/config";
+import { type RuntimeConfig } from "@/runtime-config";
 import { spawn } from "node:child_process";
 
 /** fMP4 段类型 */
@@ -312,6 +313,7 @@ export class H264Fmp4Extractor {
     private ffmpegPath: string,
     private eventBus: EventBus,
     private rtspUrl: string,
+    private runtimeConfig?: RuntimeConfig,
   ) {
     this.logTag = `[Video-fMP4][${config.id}]`;
   }
@@ -354,6 +356,32 @@ export class H264Fmp4Extractor {
   /** codec 类型（固定返回 avc，因为 ffmpeg 输出 h264） */
   get detectedCodec(): "avc" | null { return "avc"; }
 
+  /** 获取转码编码器参数（支持硬件加速） */
+  private getTranscodeArgs(): string[] {
+    const encoder = this.runtimeConfig?.get().recording.encoder ?? "libx264";
+    switch (encoder) {
+      case "h264_v4l2m2m":
+        return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p"];
+      case "h264_vaapi":
+        return [
+          "-vaapi_device", "/dev/dri/renderD128",
+          "-c:v", "h264_vaapi",
+          "-vf", "format=nv12,hwupload",
+          "-qp", "23",
+        ];
+      case "h264_nvenc":
+        return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-cq", "23"];
+      default:
+        return [
+          "-c:v", "libx264",
+          "-preset", "superfast",
+          "-tune", "zerolatency",
+          "-crf", "23",
+          "-x264-params", "keyint=30:min-keyint=15:bframes=0",
+        ];
+    }
+  }
+
   private spawnFfmpeg(): void {
     /**
      * 使用 ffmpeg 直接输出 fMP4 格式
@@ -378,14 +406,9 @@ export class H264Fmp4Extractor {
     );
 
     if (isTranscode) {
-      /** copy 持续失败时回退到转码 */
-      args.push(
-        "-c:v", "libx264",
-        "-preset", "superfast",
-        "-tune", "zerolatency",
-        "-crf", "23",
-        "-x264-params", "keyint=30:min-keyint=15:bframes=0",
-      );
+      /** 根据配置选择编码器（支持硬件加速） */
+      const encoderArgs = this.getTranscodeArgs();
+      args.push(...encoderArgs);
     } else {
       /** 零转码 copy — CPU 开销极低 */
       args.push("-c:v", "copy");

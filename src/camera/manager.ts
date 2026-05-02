@@ -1,5 +1,6 @@
 import { type AppConfig, type CameraConfig } from "@/config";
 import { type EventBus } from "@/event-bus";
+import { type RuntimeConfig } from "@/runtime-config";
 import { type MotionRecorder } from "@/storage/recorder";
 import { FrameExtractor } from "./stream";
 import { H264Fmp4Extractor } from "./h264-fmp4-muxer";
@@ -32,6 +33,7 @@ export class CameraManager {
     private config: AppConfig,
     private eventBus: EventBus,
     private recorder: MotionRecorder,
+    private runtimeConfig: RuntimeConfig,
   ) {}
 
   /** 启动所有摄像头 */
@@ -171,7 +173,7 @@ export class CameraManager {
       /** HD 流：零转码 H.264 → fMP4（前端 MSE 解码，CPU 开销极低） */
       const fmp4Extractor = new H264Fmp4Extractor(
         cam, this.config.ffmpegPath, this.eventBus,
-        cam.stream.hd!,
+        cam.stream.hd!, this.runtimeConfig,
       );
       this.fmp4Extractors.set(cam.id, fmp4Extractor);
       fmp4Extractor.start();
@@ -190,7 +192,7 @@ export class CameraManager {
       if (url) {
         const fmp4Extractor = new H264Fmp4Extractor(
           cam, this.config.ffmpegPath, this.eventBus,
-          url,
+          url, this.runtimeConfig,
         );
         this.fmp4Extractors.set(cam.id, fmp4Extractor);
         fmp4Extractor.start();

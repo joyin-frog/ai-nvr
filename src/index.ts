@@ -106,7 +106,7 @@ const clipService = new ClipService(config.ai.clip, join(dataDir, "models"));
 const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage, trajectoryStorage, clipService);
 
 /** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
-const cameraManager = new CameraManager(config, eventBus, recorder);
+const cameraManager = new CameraManager(config, eventBus, recorder, runtimeConfig);
 
 /** ROI 检测区域存储（MotionDetector 需要） */
 const roiStorage = new RoiStorage(join(dataDir, "roi.db"));
