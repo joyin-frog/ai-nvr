@@ -68,8 +68,8 @@ export class CameraManager {
   }
 
   /** 获取所有摄像头状态 */
-  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number; streamFps: number }> {
-    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number; streamFps: number }> = [];
+  getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number; streamFps: number; streamCodec: string | null }> {
+    const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number; streamFps: number; streamCodec: string | null }> = [];
     for (const cam of this.cameraConfigs) {
       const display = this.displayExtractors.get(cam.id);
       const detect = this.detectExtractors.get(cam.id);
@@ -88,6 +88,7 @@ export class CameraManager {
         displayFps: Math.round(display?.fps ?? 0),
         detectFps: Math.round(detect?.fps ?? 0),
         streamFps: Math.round(fmp4?.fps ?? 0),
+        streamCodec: fmp4?.detectedCodec ?? null,
       });
     }
     return result;

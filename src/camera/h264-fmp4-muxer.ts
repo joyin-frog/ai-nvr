@@ -1018,6 +1018,9 @@ export class H264Fmp4Extractor {
 
   get lastFrameAt(): number { return this.online ? Date.now() : 0; }
 
+  /** 检测到的码流类型（avc/hevc） */
+  get detectedCodec(): CodecType | null { return this.muxer.detectedCodec; }
+
   /** 当前尝试的码流格式 */
   private tryFormat: "hevc" | "avc" = "hevc";
 
