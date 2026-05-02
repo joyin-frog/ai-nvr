@@ -134,6 +134,23 @@ export function startServer(
   multimodalAnalyzer?: import("@/ai/multimodal-analyzer").MultimodalAnalyzer,
   clipService?: import("@/ai/clip-service").ClipService,
 ): void {
+  /** 缓存 storageRoot 的 realpath（路径不变，避免每次请求重复解析） */
+  let cachedStorageRoot: string | null = null;
+  function getStorageRoot(): string {
+    if (!cachedStorageRoot) {
+      cachedStorageRoot = getStorageRoot();
+    }
+    return cachedStorageRoot;
+  }
+  /** 缓存 recordings fs 的 storageRoot */
+  let cachedRecFsRoot: string | null = null;
+  function getRecFsRoot(): string {
+    if (!cachedRecFsRoot) {
+      cachedRecFsRoot = getRecFsRoot();
+    }
+    return cachedRecFsRoot;
+  }
+
   /** 登录速率限制：IP → { count, resetAt } */
   const loginRateLimits = new Map<string, { count: number; resetAt: number }>();
   /** 定期清理过期的速率限制记录 */
@@ -882,7 +899,7 @@ export function startServer(
         const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
         if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
         /** 防止路径遍历：确保解析后的路径仍在录像目录内 */
-        const storageRoot = realpathSync(recorder.getRecordingPath("."));
+        const storageRoot = getStorageRoot();
         const resolved = realpathSync(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
         const stat = statSync(filePath);
@@ -930,7 +947,7 @@ export function startServer(
         const filePath = storageFs.resolve(relPath);
         if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
         /** 路径遍历防护 */
-        const storageRoot = realpathSync(storageFs.resolve("recordings"));
+        const storageRoot = getRecFsRoot();
         const resolved = realpathSync(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
         storageFs.deleteFile(relPath);
@@ -971,7 +988,7 @@ export function startServer(
         if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
 
         /** 防止路径遍历 */
-        const storageRoot = realpathSync(recorder.getRecordingPath("."));
+        const storageRoot = getStorageRoot();
         const resolved = realpathSync(videoPath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
@@ -991,7 +1008,7 @@ export function startServer(
           const files = obj.files as Array<{ filename: string; durationSec: number }> | undefined
           if (!files || !Array.isArray(files)) return new Response("Invalid body", { status: 400 })
 
-          const storageRoot = realpathSync(recorder.getRecordingPath("."))
+          const storageRoot = getStorageRoot()
           const tasks: Array<{ path: string; durationSec: number }> = []
           for (const f of files) {
             const videoPath = recorder.getRecordingPath(f.filename)
@@ -1022,7 +1039,7 @@ export function startServer(
           if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
 
           /** 防止路径遍历 */
-          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const storageRoot = getStorageRoot();
           const resolved = realpathSync(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
@@ -1045,7 +1062,7 @@ export function startServer(
           }
 
           /** 防止路径遍历：验证所有文件 */
-          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const storageRoot = getStorageRoot();
           const resolvedPaths: string[] = [];
           for (const relPath of files) {
             const videoPath = recorder.getRecordingPath(relPath);
@@ -1078,7 +1095,7 @@ export function startServer(
           const videoPath = recorder.getRecordingPath(file);
           if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
 
-          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const storageRoot = getStorageRoot();
           const resolved = realpathSync(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
@@ -1101,7 +1118,7 @@ export function startServer(
           }
 
           /** 防止路径遍历：验证所有文件 */
-          const storageRoot = realpathSync(recorder.getRecordingPath("."));
+          const storageRoot = getStorageRoot();
           const resolvedPaths: string[] = [];
           for (const relPath of files) {
             const videoPath = recorder.getRecordingPath(relPath);

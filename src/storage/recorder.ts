@@ -76,12 +76,20 @@ interface RecordingState {
   boostUntil: number;
 }
 
+/** MP4 时长解析缓存（filePath → durationMs），避免重复读文件） */
+const mp4DurationCache = new Map<string, number | null>();
+
 /**
  * 从 MP4 文件的 moov.mvhd atom 中解析视频时长（毫秒）
  * faststart 文件 moov 在文件头部，只需读前 64KB
  * 解析失败返回 null（调用方回退到 mtime）
  */
 function parseMp4DurationMs(filePath: string): number | null {
+  /** 优先查缓存 */
+  const cached = mp4DurationCache.get(filePath);
+  if (cached !== undefined) return cached;
+
+  let result: number | null = null;
   try {
     const stat = statSync(filePath);
     /** 只读前 64KB，faststart 文件的 moov 在这个范围内 */
@@ -111,19 +119,19 @@ function parseMp4DurationMs(filePath: string): number | null {
               /** version 0: timescale(u32) + duration(u32) */
               const timescale = buf.readUInt32BE(inner + 20);
               const duration = buf.readUInt32BE(inner + 24);
-              if (timescale > 0) return Math.round((duration / timescale) * 1000);
+              if (timescale > 0) { result = Math.round((duration / timescale) * 1000); break; }
             } else if (version === 1) {
               /** version 1: timescale(u32) + duration(u64) */
               const timescale = buf.readUInt32BE(inner + 28);
               const duration = Number(buf.readBigUInt64BE(inner + 32));
-              if (timescale > 0) return Math.round((duration / timescale) * 1000);
+              if (timescale > 0) { result = Math.round((duration / timescale) * 1000); break; }
             }
-            return null;
+            break;
           }
           if (innerSize < 8) break;
           inner += innerSize;
         }
-        return null;
+        break;
       }
 
       if (atomSize < 8) break;
@@ -132,7 +140,13 @@ function parseMp4DurationMs(filePath: string): number | null {
   } catch {
     // 文件可能正在写入或损坏
   }
-  return null;
+  mp4DurationCache.set(filePath, result);
+  /** 缓存上限保护 */
+  if (mp4DurationCache.size > 2000) {
+    const firstKey = mp4DurationCache.keys().next().value;
+    if (firstKey != null) mp4DurationCache.delete(firstKey);
+  }
+  return result;
 }
 
 /** drawtext 水印默认字体路径 */

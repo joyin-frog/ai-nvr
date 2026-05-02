@@ -25,6 +25,13 @@ export interface SnapshotInfo {
 export class SnapshotStorage {
   private storagePath: string;
 
+  /** 快照路径缓存：cameraId:timestamp → relativePath（写入时自动填充，避免 existsSync） */
+  private pathCache = new Map<string, string>();
+  /** 元数据缓存：relativePath → parsed JSON（避免重复 readFileSync） */
+  private metaCache = new Map<string, { cameraId: string; timestamp: number; detections: Detection[] } | null>();
+  /** 元数据缓存上限 */
+  private static readonly META_CACHE_MAX = 2000;
+
   constructor(storagePath: string, private eventBus: EventBus) {
     this.storagePath = storagePath;
     mkdirSync(storagePath, { recursive: true });
@@ -50,25 +57,32 @@ export class SnapshotStorage {
     const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
     const ms = String(date.getMilliseconds()).padStart(3, "0");
     const filename = `${dateStr}_${timeStr}_${ms}.jpg`;
+    const relativePath = `${cameraId}/${filename}`;
 
     const filePath = join(dir, filename);
     writeFileSync(filePath, frameImage);
 
+    /** 写入时同步更新路径缓存（写入必然成功，后续查找无需 existsSync） */
+    const pathKey = `${cameraId}:${timestamp}`;
+    this.pathCache.set(pathKey, relativePath);
+
     /** 保存检测结果元数据（JSON 侧文件） */
     if (detections && detections.length > 0) {
+      const meta = { cameraId, timestamp, detections };
       const metaPath = join(dir, `${dateStr}_${timeStr}_${ms}.json`);
-      writeFileSync(metaPath, JSON.stringify({
-        cameraId,
-        timestamp,
-        detections,
-      }));
+      writeFileSync(metaPath, JSON.stringify(meta));
+      /** 同步更新元数据缓存 */
+      this.metaCache.set(relativePath, meta);
+      if (this.metaCache.size > SnapshotStorage.META_CACHE_MAX) {
+        const firstKey = this.metaCache.keys().next().value;
+        if (firstKey != null) this.metaCache.delete(firstKey);
+      }
     }
 
-    /** 仅 DEBUG 模式打印快照保存日志 */
     if (process.env.DEBUG) {
-      console.log(`[Snapshot] 已保存: ${cameraId}/${filename} (${frameImage.length} bytes)`);
+      console.log(`[Snapshot] 已保存: ${relativePath} (${frameImage.length} bytes)`);
     }
-    return `${cameraId}/${filename}`;
+    return relativePath;
   }
 
   /** 列出快照 */
@@ -148,13 +162,26 @@ export class SnapshotStorage {
     return join(this.storagePath, relativePath);
   }
 
-  /** 获取快照的检测结果元数据 */
+  /** 获取快照的检测结果元数据（优先内存缓存） */
   getSnapshotMeta(relativePath: string): { cameraId: string; timestamp: number; detections: Detection[] } | null {
+    const cached = this.metaCache.get(relativePath);
+    if (cached !== undefined) return cached;
+
     const jsonPath = join(this.storagePath, relativePath.replace(/\.jpg$/, ".json"));
-    if (!existsSync(jsonPath)) return null;
+    if (!existsSync(jsonPath)) {
+      this.metaCache.set(relativePath, null);
+      return null;
+    }
     try {
-      return JSON.parse(readFileSync(jsonPath, "utf-8"));
+      const meta = JSON.parse(readFileSync(jsonPath, "utf-8")) as { cameraId: string; timestamp: number; detections: Detection[] };
+      this.metaCache.set(relativePath, meta);
+      if (this.metaCache.size > SnapshotStorage.META_CACHE_MAX) {
+        const firstKey = this.metaCache.keys().next().value;
+        if (firstKey != null) this.metaCache.delete(firstKey);
+      }
+      return meta;
     } catch {
+      this.metaCache.set(relativePath, null);
       return null;
     }
   }
@@ -177,7 +204,14 @@ export class SnapshotStorage {
           const stat = statSync(filePath);
           if (stat.mtimeMs < cutoff) {
             unlinkSync(filePath);
-            if (file.endsWith(".jpg")) count++;
+            if (file.endsWith(".jpg")) {
+              count++;
+              /** 清除对应的缓存条目 */
+              const relativePath = `${camDir}/${file}`;
+              this.metaCache.delete(relativePath);
+              const ts = this.parseTimestamp(file);
+              if (ts) this.pathCache.delete(`${camDir}:${ts}`);
+            }
           }
         }
       }
@@ -187,8 +221,13 @@ export class SnapshotStorage {
     return count;
   }
 
-  /** 根据 cameraId + timestamp 查找对应的快照相对路径 */
+  /** 根据 cameraId + timestamp 查找对应的快照相对路径（优先内存缓存） */
   findSnapshotPath(cameraId: string, timestamp: number): string | null {
+    /** 优先查内存缓存（saveSnapshot 写入时已填充，热路径零 I/O） */
+    const pathKey = `${cameraId}:${timestamp}`;
+    const cached = this.pathCache.get(pathKey);
+    if (cached !== undefined) return cached || null;
+
     const dir = join(this.storagePath, cameraId);
     const date = new Date(timestamp);
     const dateStr = date.toISOString().slice(0, 10);
@@ -196,8 +235,25 @@ export class SnapshotStorage {
     const ms = String(date.getMilliseconds()).padStart(3, "0");
     const filename = `${dateStr}_${timeStr}_${ms}.jpg`;
     const filePath = join(dir, filename);
-    if (existsSync(filePath)) return `${cameraId}/${filename}`;
+    if (existsSync(filePath)) {
+      const relativePath = `${cameraId}/${filename}`;
+      /** 回填缓存（历史数据首次查询后缓存） */
+      this.pathCache.set(pathKey, relativePath);
+      return relativePath;
+    }
+    /** 缓存未命中标记（空字符串表示不存在，避免重复 existsSync） */
+    this.pathCache.set(pathKey, "");
     return null;
+  }
+
+  /** 批量查找快照路径（单次调用，避免 N 次 findSnapshotPath 的 I/O 开销） */
+  batchFindSnapshotPaths(entries: Array<{ cameraId: string; timestamp: number }>): Map<string, string | null> {
+    const result = new Map<string, string | null>();
+    for (const { cameraId, timestamp } of entries) {
+      const path = this.findSnapshotPath(cameraId, timestamp);
+      result.set(`${cameraId}:${timestamp}`, path);
+    }
+    return result;
   }
 
   /** 从文件名解析时间戳 */
