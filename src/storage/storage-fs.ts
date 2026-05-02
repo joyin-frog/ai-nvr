@@ -1,9 +1,9 @@
-import { mkdirSync, unlinkSync, writeFileSync, copyFileSync, renameSync, statSync, existsSync } from "node:fs";
+import { mkdir, unlink, writeFile, copyFile, rename, stat, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { type DiskUsage } from "@/storage/disk-usage";
 
 /**
- * 存储文件系统封装
+ * 存储文件系统封装（异步版本）
  * 所有录像/快照/导出文件的增删改操作通过此接口
  * 自动触发 DiskUsage 增量统计更新
  */
@@ -23,22 +23,22 @@ export class StorageFs {
    * @param relativePath 相对于 dataRoot 的路径，如 "recordings/cam1/2024-01-01.mp4"
    * @param data 文件内容
    */
-  writeFile(relativePath: string, data: Buffer | Uint8Array | string): void {
+  async writeFile(relativePath: string, data: Buffer | Uint8Array | string): Promise<void> {
     const fullPath = this.resolve(relativePath);
-    mkdirSync(dirname(fullPath), { recursive: true });
-    writeFileSync(fullPath, data);
-    this.trackAdd(relativePath);
+    await mkdir(dirname(fullPath), { recursive: true });
+    await writeFile(fullPath, data);
+    await this.trackAdd(relativePath);
   }
 
   /**
    * 删除文件并记录增量
    * @param relativePath 相对路径
    */
-  deleteFile(relativePath: string): boolean {
+  async deleteFile(relativePath: string): Promise<boolean> {
     const fullPath = this.resolve(relativePath);
-    if (!existsSync(fullPath)) return false;
-    this.trackRemove(relativePath);
-    unlinkSync(fullPath);
+    const size = await this.trackRemove(relativePath);
+    if (size === 0) return false;
+    await unlink(fullPath);
     return true;
   }
 
@@ -46,50 +46,65 @@ export class StorageFs {
    * 确保目录存在
    * @param relativePath 相对路径（可以是文件路径，自动取 dirname）
    */
-  ensureDir(relativePath: string): void {
+  async ensureDir(relativePath: string): Promise<void> {
     const fullPath = this.resolve(relativePath);
-    mkdirSync(dirname(fullPath), { recursive: true });
+    await mkdir(dirname(fullPath), { recursive: true });
   }
 
   /**
    * 移动/重命名文件，更新增量
    */
-  renameFile(oldPath: string, newPath: string): void {
+  async renameFile(oldPath: string, newPath: string): Promise<void> {
     const oldFull = this.resolve(oldPath);
     const newFull = this.resolve(newPath);
-    this.ensureDir(newPath);
-    const size = statSync(oldFull).size;
-    renameSync(oldFull, newFull);
-    this.diskUsage.recordRemove(this.getDirName(oldPath), size);
-    this.diskUsage.recordAdd(this.getDirName(newPath), size);
+    await this.ensureDir(newPath);
+    const s = await stat(oldFull);
+    await rename(oldFull, newFull);
+    this.diskUsage.recordRemove(this.getDirName(oldPath), s.size);
+    this.diskUsage.recordAdd(this.getDirName(newPath), s.size);
   }
 
   /**
    * 复制文件，记录增量
    */
-  copyFile(srcPath: string, destPath: string): void {
+  async copyFile(srcPath: string, destPath: string): Promise<void> {
     const srcFull = this.resolve(srcPath);
     const destFull = this.resolve(destPath);
-    this.ensureDir(destPath);
-    copyFileSync(srcFull, destFull);
-    this.trackAdd(destPath);
+    await this.ensureDir(destPath);
+    await copyFile(srcFull, destFull);
+    await this.trackAdd(destPath);
   }
 
   /**
-   * 获取文件 stat（不追踪）
+   * 获取文件 stat（异步）
    */
-  stat(relativePath: string): { size: number; mtimeMs: number } | null {
+  async stat(relativePath: string): Promise<{ size: number; mtimeMs: number } | null> {
     const fullPath = this.resolve(relativePath);
-    if (!existsSync(fullPath)) return null;
-    const s = statSync(fullPath);
-    return { size: s.size, mtimeMs: s.mtimeMs };
+    try {
+      const s = await stat(fullPath);
+      return { size: s.size, mtimeMs: s.mtimeMs };
+    } catch {
+      return null;
+    }
   }
 
   /**
-   * 检查文件是否存在
+   * 检查文件是否存在（异步）
    */
-  exists(relativePath: string): boolean {
-    return existsSync(this.resolve(relativePath));
+  async exists(relativePath: string): Promise<boolean> {
+    try {
+      await stat(this.resolve(relativePath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 读取文件内容（异步）
+   */
+  async readFile(relativePath: string): Promise<Buffer> {
+    return readFile(this.resolve(relativePath));
   }
 
   /**
@@ -107,20 +122,24 @@ export class StorageFs {
   }
 
   /** 记录文件新增 */
-  private trackAdd(relativePath: string): void {
+  private async trackAdd(relativePath: string): Promise<void> {
     const fullPath = this.resolve(relativePath);
-    const size = statSync(fullPath).size;
+    const s = await stat(fullPath);
     const dirName = this.getDirName(relativePath);
-    this.diskUsage.recordAdd(dirName, size);
+    this.diskUsage.recordAdd(dirName, s.size);
   }
 
   /** 记录文件删除，返回文件大小 */
-  private trackRemove(relativePath: string): number {
+  private async trackRemove(relativePath: string): Promise<number> {
     const fullPath = this.resolve(relativePath);
-    const size = existsSync(fullPath) ? statSync(fullPath).size : 0;
-    const dirName = this.getDirName(relativePath);
-    this.diskUsage.recordRemove(dirName, size);
-    return size;
+    try {
+      const s = await stat(fullPath);
+      const dirName = this.getDirName(relativePath);
+      this.diskUsage.recordRemove(dirName, s.size);
+      return s.size;
+    } catch {
+      return 0;
+    }
   }
 
   /** 从相对路径提取一级子目录名 */

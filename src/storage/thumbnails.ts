@@ -83,6 +83,7 @@ export class ThumbnailGenerator {
 
       proc.on("exit", (code) => {
         clearTimeout(timer);
+        proc.unref();
         resolve(code === 0 && existsSync(outputPath) ? outputPath : null);
       });
 

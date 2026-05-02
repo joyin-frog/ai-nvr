@@ -284,6 +284,7 @@ export class RecordingExporter {
 
       proc.on("exit", (code) => {
         clearTimeout(timer);
+        proc.unref();
         resolve(code === 0);
       });
 

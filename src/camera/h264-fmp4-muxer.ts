@@ -468,6 +468,10 @@ export class H264Fmp4Extractor {
       this.parser.reset();
       /** 清除缓存的 init segment（ffmpeg 重启后旧 init 不再兼容） */
       this.cachedInit = null;
+      if (this.proc) {
+        this.proc.unref();
+        this.proc = null;
+      }
       if (this.online) {
         this.online = false;
         this.eventBus.emit("camera:offline", { cameraId: this.config.id });

@@ -21,9 +21,47 @@ import { type StorageFs } from "@/storage/storage-fs";
 import { addCameraToConfig, removeCameraFromConfig, updateCameraInConfig, loadConfig, type AuthConfig } from "@/config";
 import { checkAuth } from "@/auth";
 import { getLogs } from "@/log-buffer";
-import { existsSync, statSync, realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import { spawn } from "node:child_process";
+
+/**
+ * 异步安全文件服务：检查文件存在 + 路径遍历防护 + 返回 Response
+ * 替代 existsSync + realpathSync + statSync 模式
+ */
+async function serveFileSafe(
+  filePath: string,
+  allowedRoot: string,
+  contentType: string,
+  extraHeaders?: Record<string, string>,
+): Promise<Response> {
+  const file = Bun.file(filePath);
+  const size = await file.size;
+  if (size === undefined) return new Response("Not Found", { status: 404 });
+
+  /** 异步路径遍历防护 */
+  const resolved = await realpath(filePath);
+  if (!resolved.startsWith(allowedRoot)) return new Response("Forbidden", { status: 403 });
+
+  return new Response(file, {
+    headers: {
+      "Content-Type": contentType,
+      "Content-Length": String(size),
+      ...extraHeaders,
+    },
+  });
+}
+
+/**
+ * 异步检查文件是否存在 + 路径遍历防护（不返回文件，只做验证）
+ */
+async function checkFileSafe(filePath: string, allowedRoot: string): Promise<boolean> {
+  const file = Bun.file(filePath);
+  const size = await file.size;
+  if (size === undefined) return false;
+  const resolved = await realpath(filePath);
+  return resolved.startsWith(allowedRoot);
+}
 
 /** 异步执行 ffmpeg 并收集 stdout/stderr */
 function runFfmpegAsync(ffmpegPath: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stderr?: string }> {
@@ -31,9 +69,15 @@ function runFfmpegAsync(ffmpegPath: string, args: string[], timeoutMs: number): 
     const proc = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
     proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    const timer = setTimeout(() => { proc.kill("SIGKILL"); resolve({ ok: false, stderr }); }, timeoutMs);
-    proc.on("exit", (code) => { clearTimeout(timer); resolve({ ok: code === 0, stderr }); });
-    proc.on("error", () => { clearTimeout(timer); resolve({ ok: false }); });
+    const timer = setTimeout(() => {
+      proc.stdout?.destroy();
+      proc.stderr?.destroy();
+      proc.kill("SIGKILL");
+      proc.unref();
+      resolve({ ok: false, stderr });
+    }, timeoutMs);
+    proc.on("exit", (code) => { clearTimeout(timer); proc.unref(); resolve({ ok: code === 0, stderr }); });
+    proc.on("error", () => { clearTimeout(timer); proc.unref(); resolve({ ok: false }); });
   });
 }
 
@@ -44,13 +88,19 @@ function runFfmpegCapture(ffmpegPath: string, inputUrl: string, timeoutMs: numbe
     const proc = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "ignore"] });
     const chunks: Buffer[] = [];
     proc.stdout?.on("data", (chunk: Buffer) => { chunks.push(chunk); });
-    const timer = setTimeout(() => { proc.kill("SIGKILL"); resolve(null); }, timeoutMs);
+    const timer = setTimeout(() => {
+      proc.stdout?.destroy();
+      proc.kill("SIGKILL");
+      proc.unref();
+      resolve(null);
+    }, timeoutMs);
     proc.on("exit", () => {
       clearTimeout(timer);
+      proc.unref();
       const buf = Buffer.concat(chunks);
       resolve(buf.length > 100 ? buf : null);
     });
-    proc.on("error", () => { clearTimeout(timer); resolve(null); });
+    proc.on("error", () => { clearTimeout(timer); proc.unref(); resolve(null); });
   });
 }
 
@@ -136,17 +186,17 @@ export function startServer(
 ): void {
   /** 缓存 storageRoot 的 realpath（路径不变，避免每次请求重复解析） */
   let cachedStorageRoot: string | null = null;
-  function getStorageRoot(): string {
+  async function getStorageRoot(): Promise<string> {
     if (!cachedStorageRoot) {
-      cachedStorageRoot = realpathSync(recorder.getRecordingPath("."));
+      cachedStorageRoot = await realpath(recorder.getRecordingPath("."));
     }
     return cachedStorageRoot;
   }
   /** 缓存 recordings fs 的 storageRoot */
   let cachedRecFsRoot: string | null = null;
-  function getRecFsRoot(): string {
+  async function getRecFsRoot(): Promise<string> {
     if (!cachedRecFsRoot) {
-      cachedRecFsRoot = realpathSync(storageFs.resolve("recordings"));
+      cachedRecFsRoot = await realpath(storageFs.resolve("recordings"));
     }
     return cachedRecFsRoot;
   }
@@ -953,13 +1003,12 @@ export function startServer(
         const camId = recordingMatch[1]!;
         const filename = recordingMatch[2]!;
         const filePath = recorder.getRecordingPath(`${camId}/${filename}`);
-        /** 异步文件检查：用 Bun.file() 代替同步 existsSync + statSync */
         const file = Bun.file(filePath);
         const fileSize = await file.size;
         if (fileSize === undefined) return new Response("Not Found", { status: 404 });
-        /** 防止路径遍历 */
-        const storageRoot = getStorageRoot();
-        const resolved = realpathSync(filePath);
+        /** 异步路径遍历防护 */
+        const storageRoot = await getStorageRoot();
+        const resolved = await realpath(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
         /** 处理 Range 请求（浏览器 MP4 seek 必需） */
@@ -1001,10 +1050,10 @@ export function startServer(
         const filename = recordingMatch[2]!;
         const relPath = `recordings/${camId}/${filename}`;
         const filePath = storageFs.resolve(relPath);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
         /** 路径遍历防护 */
-        const storageRoot = getRecFsRoot();
-        const resolved = realpathSync(filePath);
+        const storageRoot = await getRecFsRoot();
+        const resolved = await realpath(filePath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
         storageFs.deleteFile(relPath);
         return Response.json({ ok: true });
@@ -1019,7 +1068,7 @@ export function startServer(
         const latestSnap = snapshotStorage.getLatestSnapshotPath(cameraId);
         if (latestSnap) {
           const snapFilePath = snapshotStorage.getSnapshotPath(latestSnap);
-          if (existsSync(snapFilePath)) {
+          if ((await Bun.file(snapFilePath).size) !== undefined) {
             return new Response(Bun.file(snapFilePath), {
               headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-cache" },
             });
@@ -1041,11 +1090,11 @@ export function startServer(
         if (!videoRelPath) return new Response("Missing file param", { status: 400 });
 
         const videoPath = recorder.getRecordingPath(videoRelPath);
-        if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
+        if ((await Bun.file(videoPath).size) === undefined) return new Response("Not Found", { status: 404 });
 
         /** 防止路径遍历 */
-        const storageRoot = getStorageRoot();
-        const resolved = realpathSync(videoPath);
+        const storageRoot = await getStorageRoot();
+        const resolved = await realpath(videoPath);
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
         const thumbPath = await thumbnailGenerator.getOrCreateAsync(resolved, timeSec);
@@ -1064,12 +1113,12 @@ export function startServer(
           const files = obj.files as Array<{ filename: string; durationSec: number }> | undefined
           if (!files || !Array.isArray(files)) return new Response("Invalid body", { status: 400 })
 
-          const storageRoot = getStorageRoot()
+          const storageRoot = await getStorageRoot()
           const tasks: Array<{ path: string; durationSec: number }> = []
           for (const f of files) {
             const videoPath = recorder.getRecordingPath(f.filename)
-            if (!existsSync(videoPath)) continue
-            const resolved = realpathSync(videoPath)
+            if ((await Bun.file(videoPath).size) === undefined) continue
+            const resolved = await realpath(videoPath)
             if (!resolved.startsWith(storageRoot)) continue
             tasks.push({ path: resolved, durationSec: f.durationSec })
           }
@@ -1092,11 +1141,11 @@ export function startServer(
           }
 
           const videoPath = recorder.getRecordingPath(file);
-          if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
+          if ((await Bun.file(videoPath).size) === undefined) return new Response("Not Found", { status: 404 });
 
           /** 防止路径遍历 */
-          const storageRoot = getStorageRoot();
-          const resolved = realpathSync(videoPath);
+          const storageRoot = await getStorageRoot();
+          const resolved = await realpath(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
           const result = await exporter.exportAsync(resolved, startSec, endSec, cameraId ?? "unknown");
@@ -1118,12 +1167,12 @@ export function startServer(
           }
 
           /** 防止路径遍历：验证所有文件 */
-          const storageRoot = getStorageRoot();
+          const storageRoot = await getStorageRoot();
           const resolvedPaths: string[] = [];
           for (const relPath of files) {
             const videoPath = recorder.getRecordingPath(relPath);
-            if (!existsSync(videoPath)) return new Response(`Not Found: ${relPath}`, { status: 404 });
-            const resolved = realpathSync(videoPath);
+            if ((await Bun.file(videoPath).size) === undefined) return new Response(`Not Found: ${relPath}`, { status: 404 });
+            const resolved = await realpath(videoPath);
             if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
             resolvedPaths.push(resolved);
           }
@@ -1149,10 +1198,10 @@ export function startServer(
           }
 
           const videoPath = recorder.getRecordingPath(file);
-          if (!existsSync(videoPath)) return new Response("Not Found", { status: 404 });
+          if ((await Bun.file(videoPath).size) === undefined) return new Response("Not Found", { status: 404 });
 
-          const storageRoot = getStorageRoot();
-          const resolved = realpathSync(videoPath);
+          const storageRoot = await getStorageRoot();
+          const resolved = await realpath(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
           const result = await exporter.toGifAsync(resolved, startSec, endSec, cameraId ?? "unknown");
@@ -1174,12 +1223,12 @@ export function startServer(
           }
 
           /** 防止路径遍历：验证所有文件 */
-          const storageRoot = getStorageRoot();
+          const storageRoot = await getStorageRoot();
           const resolvedPaths: string[] = [];
           for (const relPath of files) {
             const videoPath = recorder.getRecordingPath(relPath);
-            if (!existsSync(videoPath)) return new Response(`Not Found: ${relPath}`, { status: 404 });
-            const resolved = realpathSync(videoPath);
+            if ((await Bun.file(videoPath).size) === undefined) return new Response(`Not Found: ${relPath}`, { status: 404 });
+            const resolved = await realpath(videoPath);
             if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
             resolvedPaths.push(resolved);
           }
@@ -1196,19 +1245,19 @@ export function startServer(
       const exportDownloadMatch = url.pathname.match(/^\/api\/recordings\/export\/(.+\.(mp4|gif|zip))$/);
       if (exportDownloadMatch && req.method === "GET") {
         const filename = exportDownloadMatch[1]!;
-        const exportRoot = realpathSync(exporter.getExportPath("."));
+        const exportRoot = await realpath(exporter.getExportPath("."));
         const filePath = exporter.getExportPath(filename);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
-        const resolved = realpathSync(filePath);
+        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
+        const resolved = await realpath(filePath);
         if (!resolved.startsWith(exportRoot)) return new Response("Forbidden", { status: 403 });
 
-        const stat = statSync(filePath);
+        const fileSize = await Bun.file(filePath).size;
         const file = Bun.file(filePath);
         const contentType = filename.endsWith(".gif") ? "image/gif" : filename.endsWith(".zip") ? "application/zip" : "video/mp4";
         return new Response(file, {
           headers: {
             "Content-Type": contentType,
-            "Content-Length": String(stat.size),
+            "Content-Length": String(fileSize),
             "Content-Disposition": `attachment; filename="${filename}"`,
           },
         });
@@ -1228,10 +1277,10 @@ export function startServer(
         const camId = snapFileMatch[1]!;
         const filename = snapFileMatch[2]!;
         const filePath = snapshotStorage.getSnapshotPath(`${camId}/${filename}`);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
         /** 防止路径遍历 */
-        const snapRoot = realpathSync(snapshotStorage.getSnapshotPath("."));
-        const resolved = realpathSync(filePath);
+        const snapRoot = await realpath(snapshotStorage.getSnapshotPath("."));
+        const resolved = await realpath(filePath);
         if (!resolved.startsWith(snapRoot)) return new Response("Forbidden", { status: 403 });
         const file = Bun.file(filePath);
         return new Response(file, {
@@ -1263,9 +1312,9 @@ export function startServer(
         const camId = alertSnapMatch[1]!;
         const filename = alertSnapMatch[2]!;
         const filePath = alertSnapshotStorage.getSnapshotPath(`${camId}/${filename}`);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
-        const snapRoot = realpathSync(alertSnapshotStorage.getSnapshotPath("."));
-        const resolved = realpathSync(filePath);
+        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
+        const snapRoot = await realpath(alertSnapshotStorage.getSnapshotPath("."));
+        const resolved = await realpath(filePath);
         if (!resolved.startsWith(snapRoot)) return new Response("Forbidden", { status: 403 });
         return new Response(Bun.file(filePath), {
           headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
@@ -1929,7 +1978,7 @@ export function startServer(
         const track = trackStorage.getTrack(trackId);
         if (!track?.snapshotFile) return new Response("Not Found", { status: 404 });
         const filePath = trackStorage.getSnapshotPath(track.snapshotFile);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
         const file = Bun.file(filePath);
         return new Response(file);
       }
@@ -1938,7 +1987,7 @@ export function startServer(
       if (url.pathname.startsWith("/api/tracks/snapshot/") && req.method === "GET") {
         const filename = url.pathname.slice("/api/tracks/snapshot/".length);
         const filePath = trackStorage.getSnapshotPath(filename);
-        if (!existsSync(filePath)) return new Response("Not Found", { status: 404 });
+        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
         const file = Bun.file(filePath);
         return new Response(file);
       }
@@ -1949,7 +1998,7 @@ export function startServer(
       }
 
       /** 静态文件服务：服务前端构建产物 */
-      return serveStatic(url.pathname);
+      return await serveStatic(url.pathname);
     }
 
   Bun.serve<{ type?: string; cameraId?: string }>({
@@ -2205,7 +2254,7 @@ const MIME_TYPES: Record<string, string> = {
 const STATIC_DIR = resolve(import.meta.dir, "../../web/dist");
 
 /** 服务静态文件，SPA fallback 到 index.html */
-function serveStatic(pathname: string): Response {
+async function serveStatic(pathname: string): Promise<Response> {
   /** 去掉前导 / */
   let filePath = resolve(STATIC_DIR, pathname.slice(1) || "index.html");
 
@@ -2215,11 +2264,11 @@ function serveStatic(pathname: string): Response {
   }
 
   /** 如果文件不存在，SPA fallback 到 index.html */
-  if (!existsSync(filePath)) {
+  if ((await Bun.file(filePath).size) === undefined) {
     filePath = resolve(STATIC_DIR, "index.html");
   }
 
-  if (!existsSync(filePath)) {
+  if ((await Bun.file(filePath).size) === undefined) {
     return new Response("Not Found", { status: 404 });
   }
 
