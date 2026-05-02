@@ -104,6 +104,13 @@ export class AiDetector {
     private clipService?: ClipService,
   ) {}
 
+  /** 注入 MotionDetector 引用（用于查询最新帧差异比率，跳过静态帧推理） */
+  private motionDetector: { getLatestRatio(cameraId: string): number } | null = null;
+
+  setMotionDetector(md: { getLatestRatio(cameraId: string): number }): void {
+    this.motionDetector = md;
+  }
+
   /** 异步初始化：加载模型 */
   async init(): Promise<void> {
     const config = this.runtimeConfig.get().ai;
@@ -452,12 +459,35 @@ export class AiDetector {
     return { model: this.currentModel, loading: this.loading, initialized: this.initialized };
   }
 
+  /** 静态帧跳过：motion ratio 低于此阈值且上一帧也是空结果时跳过推理 */
+  private static readonly STATIC_RATIO_THRESHOLD = 0.005;
+
   /** 执行目标检测（委托 Worker 线程推理） */
   private async detect(cameraId: string, jpeg: Buffer, timestamp: number): Promise<void> {
     if (!this.initialized || !this.worker) return;
 
     const aiConfig = this.runtimeConfig.get().ai;
     if (!aiConfig.enabled) return;
+
+    /** 静态帧跳过：ratio 极低且上一帧也是空结果 → 跳过推理，直接发射无变化事件 */
+    if (this.motionDetector && aiConfig.mode === "continuous") {
+      const ratio = this.motionDetector.getLatestRatio(cameraId);
+      const streak = this.emptyDetectStreak.get(cameraId) ?? 0;
+      if (ratio < AiDetector.STATIC_RATIO_THRESHOLD && streak >= AiDetector.IDLE_SLOWDOWN_THRESHOLD) {
+        this.emptyDetectStreak.set(cameraId, streak + 1);
+        this.lastDetectTime.set(cameraId, Date.now());
+        this.annotator.setLatestFrame(cameraId, jpeg, []);
+        this.eventBus.emit("detect", {
+          cameraId,
+          timestamp,
+          detections: [],
+          frameImage: jpeg,
+          changed: false,
+          inferMs: 0,
+        });
+        return;
+      }
+    }
 
     /** 更新最后推理时间（防止帧驱动模式重复触发） */
     this.lastDetectTime.set(cameraId, Date.now());

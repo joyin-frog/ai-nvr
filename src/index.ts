@@ -121,6 +121,9 @@ const crossLineStorage = new CrossLineStorage(join(dataDir, "cross-lines.db"));
 /** 变动检测器（使用 RuntimeConfig + ROI 区域过滤） */
 const motionDetector = new MotionDetector(runtimeConfig, eventBus, roiStorage);
 
+/** 注入 MotionDetector 到 AiDetector（静态帧推理跳过） */
+aiDetector.setMotionDetector(motionDetector);
+
 /** 启动变动检测 */
 motionDetector.start();
 

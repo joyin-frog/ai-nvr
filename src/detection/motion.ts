@@ -17,6 +17,8 @@ interface CameraState {
   roiCacheKey: string;
   /** 预计算的 ROI mask（true = 在检测区域内） */
   roiMask: Uint8Array | null;
+  /** 最近一次帧差异比率（0~1），供 AiDetector 判断是否跳过推理 */
+  lastRatio: number;
 }
 
 /**
@@ -38,7 +40,7 @@ export class MotionDetector {
   private getOrCreateState(cameraId: string): CameraState {
     let state = this.states.get(cameraId);
     if (!state) {
-      state = { prevPixels: null, lastMotionTime: 0, processing: false, lastProcessTime: 0, roiCacheKey: "", roiMask: null };
+      state = { prevPixels: null, lastMotionTime: 0, processing: false, lastProcessTime: 0, roiCacheKey: "", roiMask: null, lastRatio: 0 };
       this.states.set(cameraId, state);
     }
     return state;
@@ -50,6 +52,11 @@ export class MotionDetector {
     this.eventBus.on("detect:frame", (payload) => {
       this.processFrame(payload.cameraId, payload.data, payload.timestamp);
     });
+  }
+
+  /** 获取指定摄像头最近一次帧差异比率（0~1），供 AiDetector 判断是否跳过推理 */
+  getLatestRatio(cameraId: string): number {
+    return this.states.get(cameraId)?.lastRatio ?? 0;
   }
 
   /** 处理一帧 */
@@ -139,6 +146,9 @@ export class MotionDetector {
     }
 
     const ratio = diffCount / roiPixelCount;
+
+    /** 保存最新 ratio 供 AiDetector 查询 */
+    state.lastRatio = ratio;
 
     /** 更新上一帧 */
     state.prevPixels = pixels;
