@@ -13,14 +13,14 @@ import { authWsUrl } from '../services/auth'
 const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
-/** 保留当前播放位置前多少秒缓冲区 */
-const BUFFER_RETAIN_SECONDS = 4
+/** 保留当前播放位置前多少秒缓冲区（实时监控无需大缓冲，2秒足以应对网络抖动） */
+const BUFFER_RETAIN_SECONDS = 2
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
 const LIVE_CATCHUP_THRESHOLD = 1.5
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 4.0
+const LIVE_SEEK_THRESHOLD = 3.0
 
 /** pending 队列最大段数，超过则丢弃最旧的段 */
 const MAX_PENDING_SEGMENTS = 8
