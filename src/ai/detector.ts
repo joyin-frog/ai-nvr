@@ -528,8 +528,9 @@ export class AiDetector {
                 if (!updated) return;
                 const rec = this.trackStorage!.getRecord(det.trackId!);
                 if (!rec || rec.customName || (!rec.dhash && !rec.clipEmbedding?.length)) return;
-                /** 快照更新时重新做 CLIP 分类 + embedding（一次推理同时得到两者） */
-                if (this.clipService && det.box) {
+                /** 快照更新时重新做 CLIP 分类 + embedding（已有完整数据时跳过，减少 ~80% 推理） */
+                const hasFullClipData = rec.clipEmbedding?.length && rec.semanticLabel;
+                if (!hasFullClipData && this.clipService && det.box) {
                   this.clipService.classifyTarget(jpeg, det.box, rec.label)
                     .then(result => {
                       /** 更新 semanticLabel（新快照可能提供更准确的分类） */
