@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch, authUrl } from '../services/auth'
@@ -422,8 +422,31 @@ async function loadMore() {
   }
 }
 
+/** 加载更多哨兵 ref */
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+
+/** IntersectionObserver 自动加载更多 */
+let loadMoreObserver: IntersectionObserver | null = null
+
 onMounted(() => {
   loadHistory()
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries[0]?.isIntersecting && hasMore.value && !loading.value) {
+      loadMore()
+    }
+  }, { rootMargin: '200px' })
+})
+
+onUnmounted(() => {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+})
+
+/** 哨兵元素挂载时开始观察 */
+watch(loadMoreSentinel, (el) => {
+  if (el && loadMoreObserver) {
+    loadMoreObserver.observe(el)
+  }
 })
 
 /** 切换事件展开 */
@@ -692,7 +715,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
           </div>
         </div>
       </div>
-      <div v-if="hasMore" class="load-more">
+      <div v-if="hasMore" ref="loadMoreSentinel" class="load-more">
         <button class="load-more-btn" @click="loadMore" :disabled="loading">
           {{ loading ? t('app.loading') : t('event.loadMore') }}
         </button>
