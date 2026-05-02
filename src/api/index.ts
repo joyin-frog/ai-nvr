@@ -1583,8 +1583,9 @@ export function startServer(
         }
         const { setCustomCandidates } = await import("@/ai/clip-service");
         setCustomCandidates(valid);
-        /** 持久化到运行时配置 */
-        runtimeConfig.update({ ai: { clip: { candidates: valid } } });
+        /** 持久化到运行时配置 + preferences storage */
+        runtimeConfig.patchFromJSON({ ai: { clip: { candidates: valid } } });
+        preferencesStorage.set("clip-candidates", valid);
         return Response.json({ ok: true });
       }
 

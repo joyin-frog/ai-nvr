@@ -184,6 +184,16 @@ if (runtimeConfig.get().ai.llm.enabled) {
 /** 用户偏好设置存储 */
 const preferencesStorage = new PreferencesStorage(join(dataDir, "preferences.db"));
 
+/** 从 preferences 恢复 CLIP 自定义候选标签（覆盖 YAML 配置） */
+{
+  const saved = preferencesStorage.get("clip-candidates");
+  if (saved) {
+    const candidates = JSON.parse(saved.value) as Record<string, string[]>;
+    setCustomCandidates(candidates);
+    console.log(`[App] 已恢复 ${Object.keys(candidates).length} 个 CLIP 自定义候选标签`);
+  }
+}
+
 /** 录像缩略图生成器 */
 const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), config.ffmpegPath);
 
