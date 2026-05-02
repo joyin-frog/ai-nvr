@@ -343,14 +343,14 @@ export class BehaviorAnalyzer {
         const isMoving = totalDist > diagLen * 2 && bboxArea > 0.001 && bboxArea < 0.3;
         if (!isMoving) continue;
 
-        /** 检查是否在 ROI 区域内 */
+        /** 检查是否在 ROI 区域内（复用上面的区域检测结果） */
         let zoneId = 0;
         let zoneName = "";
         if (zones.length > 0) {
-          const inZone = zones.find(z => this.pointInPolygon(cx, cy, z.points));
-          if (!inZone) continue;
-          zoneId = inZone.id;
-          zoneName = inZone.name;
+          const activeZone = zones.find(z => trackState.zones.has(z.id));
+          if (!activeZone) continue;
+          zoneId = activeZone.id;
+          zoneName = activeZone.name;
         }
 
         trackState.lastLoiterAlertAt = timestamp;
