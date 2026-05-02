@@ -1226,8 +1226,6 @@ function pointInPoly(x: number, y: number, poly: Array<{ x: number; y: number }>
   return inside
 }
 
-/** 注册 Canvas overlay */
-setOverlay(drawDetectionOverlay)
 const namingBox = ref<{ trackId: number; label: string; x: number; y: number } | null>(null)
 const namingName = ref('')
 const namingInput = ref<HTMLInputElement | null>(null)
