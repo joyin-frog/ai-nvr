@@ -182,6 +182,10 @@ export function startServer(
 
   /** fMP4 流连接管理 */
   const fmp4Unsubs = new WeakMap<WsClient, (() => void)[]>();
+  /** 跟踪哪些摄像头有活跃的 fMP4 客户端（有 fMP4 客户端时不推送 JPEG 帧） */
+  const fmp4ActiveCameras = new Set<string>();
+  /** 事件统计 API 缓存（10 秒 TTL） */
+  const statsCache = new Map<string, { data: Record<string, unknown>; ts: number }>();
 
   /**
    * fMP4 二进制协议：
@@ -272,6 +276,7 @@ export function startServer(
     unsubs.push(unsubSeg);
 
     fmp4Unsubs.set(ws, unsubs);
+    fmp4ActiveCameras.add(cameraId);
     console.log(`[fMP4] 客户端连接: ${cameraId}`);
   }
 
@@ -279,6 +284,18 @@ export function startServer(
     const unsubs = fmp4Unsubs.get(ws);
     if (unsubs) {
       for (const unsub of unsubs) unsub();
+    }
+    const camId = (ws as unknown as { cameraId?: string }).cameraId;
+    if (camId) {
+      /** 检查是否还有其他 fMP4 客户端连接同一摄像头 */
+      let hasOther = false;
+      for (const otherWs of wsClients) {
+        if (otherWs !== ws && (otherWs as unknown as { cameraId?: string }).cameraId === camId && fmp4Unsubs.has(otherWs)) {
+          hasOther = true;
+          break;
+        }
+      }
+      if (!hasOther) fmp4ActiveCameras.delete(camId);
     }
     console.log(`[fMP4] 客户端断开`);
   }
@@ -671,17 +688,22 @@ export function startServer(
         });
       }
 
-      /** 事件统计 */
+      /** 事件统计（带 10 秒缓存，避免频繁轮询重复计算） */
       if (url.pathname === "/api/events/stats") {
         const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
         const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        const cacheKey = `stats:${since ?? 0}:${until ?? 0}`;
+        const cached = statsCache.get(cacheKey);
+        if (cached && Date.now() - cached.ts < 10_000) return Response.json(cached.data);
         const opts = { since, until };
-        return Response.json({
+        const data = {
           byType: eventStorage.countByType(opts),
           byHour: eventStorage.countByHour(opts),
           byCamera: eventStorage.countByCamera(opts),
           byLabel: eventStorage.countByDetectionLabel(opts),
-        });
+        };
+        statsCache.set(cacheKey, { data, ts: Date.now() });
+        return Response.json(data);
       }
 
       /** 单个事件完整详情（按需加载，避免列表返回大 detail） */
@@ -2256,6 +2278,9 @@ export function startServer(
 
     for (const [cameraId, frame] of latestFrameByCamera) {
       latestFrameByCamera.delete(cameraId);
+
+      /** 该摄像头有 fMP4 客户端时跳过 JPEG 帧推送（fMP4 已提供 GPU 解码视频） */
+      if (fmp4ActiveCameras.has(cameraId)) continue;
 
       /** 先收集允许推送的客户端列表 */
       const targets: Array<{ ws: typeof wsClients extends Set<infer T> ? T : never; throttleMs: number }> = [];

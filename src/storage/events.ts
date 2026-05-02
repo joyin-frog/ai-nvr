@@ -235,7 +235,9 @@ export class EventStorage {
     }>();
 
     const targetTypes = new Set(["track:enter-zone", "track:leave-zone", "track:dwell", "track:loiter", "track:line-cross"]);
-    const { conditions, params } = this.buildConditions({ ...options, typeLike: "track:%" });
+    /** 默认只统计最近 24 小时，避免全表扫描 */
+    const since = options.since ?? (Date.now() - 86_400_000);
+    const { conditions, params } = this.buildConditions({ ...options, since, typeLike: "track:%" });
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = this.db.query(
       `SELECT type, detail FROM events ${where}`
