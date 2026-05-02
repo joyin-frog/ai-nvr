@@ -314,10 +314,20 @@ export class FrameExtractor {
     });
   }
 
-  /** 计划重连（指数退避） */
+  /** 计划重连（指数退避，超过阈值后降频） */
   private scheduleReconnect(): void {
     this.retryCount++;
-    const delay = Math.min(2000 * Math.pow(2, this.retryCount - 1), 60_000);
+    /** 超过 10 次后降频为每 5 分钟检查一次 */
+    const maxRetries = 10;
+    let delay: number;
+    if (this.retryCount > maxRetries) {
+      delay = 300_000;
+      if (this.retryCount === maxRetries + 1) {
+        console.warn(`${this.logTag} 连续 ${maxRetries} 次重连失败，降频为每 5 分钟检查一次`);
+      }
+    } else {
+      delay = Math.min(2000 * Math.pow(2, this.retryCount - 1), 60_000);
+    }
     console.log(`${this.logTag} ${delay}ms 后重连... (第 ${this.retryCount} 次)`);
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
