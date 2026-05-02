@@ -653,15 +653,19 @@ watch(() => props.online, (on) => {
   if (on) {
     /** 加载历史轨迹（后台静默） */
     loadHistoryTrails()
-    /** MSE 模式：直接连接 fMP4 流 */
-    fmp4.connect()
+    /** MSE 模式：仅在未连接时连接（避免 brief offline 时全管道重建） */
+    if (!fmp4.connected.value) {
+      fmp4.connect()
+    }
     nextTick(() => startOverlayLoop())
-    frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
+    if (!frozenTimer) { frozenTimer = setInterval(checkFrozen, 3000); checkFrozen() }
   }
   else {
-    fmp4.disconnect()
+    /** 离线时不拆除 MSE 管道，让 WS 自行处理断连重连 */
+    /** 仅在组件卸载时才真正 disconnect（由 onUnmounted 负责） */
     stopOverlayLoop()
     frozen.value = false
+    fmp4StallStart = 0
     if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null }
   }
 }, { immediate: true })

@@ -573,7 +573,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       failed.value = true
       return
     }
-    const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 30000)
+    /** 首次 200ms 快速重连，后续指数退避 */
+    const delay = Math.min(200 * Math.pow(2, retryCount - 1), 30000)
     console.warn(`[fMP4] ${delay / 1000}s 后重连 (第 ${retryCount} 次)`)
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null

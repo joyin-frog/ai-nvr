@@ -534,7 +534,8 @@ export class H264Fmp4Extractor {
         console.warn(`${this.logTag} 连续 ${maxRetries} 次重连失败，降频为每 5 分钟检查一次`);
       }
     } else {
-      delay = Math.min(1000 * Math.pow(2, this.retryCount - 1), 30_000);
+      /** 首次 200ms 快速重连，后续指数退避（200ms, 400ms, 800ms, 1.6s, ...） */
+      delay = Math.min(200 * Math.pow(2, this.retryCount - 1), 30_000);
     }
     console.log(`${this.logTag} ${delay / 1000}s 后重连 (第 ${this.retryCount} 次)`);
     this.retryTimer = setTimeout(() => {
