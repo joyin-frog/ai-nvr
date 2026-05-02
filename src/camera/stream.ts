@@ -107,6 +107,8 @@ export class FrameExtractor {
   private retryCount = 0;
   /** 重连定时器 */
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 看门狗定时器：检测 ffmpeg 卡死 */
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   /** 上一次接收到帧的时间 */
   private lastFrameTime = 0;
   /** 当前是否在线（用于检测状态变化） */
@@ -144,6 +146,7 @@ export class FrameExtractor {
   /** 停止帧提取 */
   stop(): void {
     this.running = false;
+    this.clearWatchdog();
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -237,6 +240,7 @@ export class FrameExtractor {
           const now = Date.now();
           this.lastFrameTime = now;
           this.retryCount = 0;
+          this.resetWatchdog();
           totalFrameBytes += frame.length;
           frameCount++;
           if (!this.online) {
@@ -295,6 +299,7 @@ export class FrameExtractor {
 
     this.proc!.on("exit", (code: number | null) => {
       console.log(`${this.logTag} ffmpeg 进程退出, code=${code}`);
+      this.clearWatchdog();
       this.proc?.unref();
       this.proc = null;
       if (this.online) {
@@ -312,6 +317,27 @@ export class FrameExtractor {
     this.proc!.on("error", (err: Error) => {
       console.error(`${this.logTag} ffmpeg 进程错误:`, err.message);
     });
+
+    /** 启动看门狗：15 秒无帧数据则认为卡死 */
+    this.resetWatchdog();
+  }
+
+  /** 重置看门狗定时器 */
+  private resetWatchdog(): void {
+    if (this.watchdogTimer) clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = setTimeout(() => {
+      if (!this.proc) return;
+      console.warn(`${this.logTag} ffmpeg 15 秒无帧输出，可能卡死，强制重启`);
+      this.killProcess();
+    }, 15_000);
+  }
+
+  /** 清除看门狗定时器 */
+  private clearWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
   }
 
   /** 计划重连（指数退避，超过阈值后降频） */
