@@ -232,6 +232,11 @@ const DEFAULT_CANDIDATES = [
 /** 用户自定义候选标签（运行时可通过 API 更新） */
 let customCandidates: Record<string, string[]> = {};
 
+/** 文本 embedding 缓存（key = 查询文本, value = embedding 向量） */
+const textEmbedCache = new Map<string, number[]>();
+/** 文本缓存最大条目 */
+const TEXT_CACHE_MAX = 100;
+
 /** 设置用户自定义候选标签 */
 export function setCustomCandidates(candidates: Record<string, string[]>): void {
   customCandidates = candidates;
@@ -449,16 +454,54 @@ export class ClipService {
       return Promise.resolve({ embeddings: [], inferMs: 0 });
     }
 
+    /** 检查缓存：所有文本都有缓存时直接返回 */
+    const cached: number[][] = [];
+    const uncached: string[] = [];
+    const uncachedIndices: number[] = [];
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i]!;
+      const hit = textEmbedCache.get(text);
+      if (hit) {
+        cached[i] = hit;
+      } else {
+        uncached.push(text);
+        uncachedIndices.push(i);
+      }
+    }
+    if (uncached.length === 0) {
+      return Promise.resolve({ embeddings: cached, inferMs: 0 });
+    }
+
     const id = ++requestId;
 
     const req: TextEmbedRequest = {
       type: "text",
       id,
-      texts,
+      texts: uncached,
     };
 
     return new Promise<TextEmbedResult>((resolve, reject) => {
-      pendingTextEmbed.set(id, { resolve, reject });
+      pendingTextEmbed.set(id, {
+        resolve: (result) => {
+          /** 合并缓存和新结果 */
+          const embeddings: number[][] = [...cached];
+          for (let j = 0; j < uncachedIndices.length; j++) {
+            const idx = uncachedIndices[j]!;
+            const embedding = result.embeddings[j] ?? [];
+            embeddings[idx] = embedding;
+            /** 写入缓存 */
+            if (embedding.length > 0) {
+              if (textEmbedCache.size >= TEXT_CACHE_MAX) {
+                const firstKey = textEmbedCache.keys().next().value;
+                if (firstKey != null) textEmbedCache.delete(firstKey);
+              }
+              textEmbedCache.set(uncached[j]!, embedding);
+            }
+          }
+          resolve({ embeddings, inferMs: result.inferMs });
+        },
+        reject,
+      });
       this.worker!.postMessage(req);
 
       setTimeout(() => {
