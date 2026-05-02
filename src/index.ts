@@ -42,6 +42,10 @@ import { ClipService, setCustomCandidates } from "@/ai/clip-service";
  */
 installLogBuffer();
 
+/** 全局未处理 Promise 拒绝日志（防止静默崩溃） */
+process.on("unhandledRejection", (reason) => {
+  console.error("[UnhandledRejection]", reason);
+});
 /**
  * 设置 Hugging Face 镜像（用于 CLIP 模型下载）
  */

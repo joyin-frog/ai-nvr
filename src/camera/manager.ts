@@ -51,12 +51,14 @@ export class CameraManager {
 
   /** 停止所有摄像头 */
   stop(): void {
-    for (const [id] of this.displayExtractors) {
+    for (const id of [...this.displayExtractors.keys()]) {
       this.stopCamera(id);
     }
     this.displayExtractors.clear();
     this.detectExtractors.clear();
+    this.fmp4Extractors.clear();
     this.dualStreamFlags.clear();
+    this.latestFrames.clear();
   }
 
   /** 获取最新一帧数据（显示流） */

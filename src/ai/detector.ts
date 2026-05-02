@@ -3,6 +3,26 @@ import { type Detection, type DetectMode } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
+
+/** 从 JPEG SOF0/SOF2 marker 解析实际图像宽高（避免硬编码比例假设） */
+function parseJpegDimensions(buf: Buffer): { width: number; height: number } {
+  /** SOF0 (0xFFC0) 或 SOF2 (0xFFC2)，偏移 5 字节后为 height(2B) + width(2B) */
+  for (let i = 0; i < buf.length - 9; i++) {
+    if (buf[i] !== 0xFF) continue
+    if (i + 1 >= buf.length) break
+    const marker = buf[i + 1]!
+    if (marker === 0xC0 || marker === 0xC2) {
+      return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) }
+    }
+    /** 跳过非 SOF marker 段（2 字节长度） */
+    if (marker >= 0xD0 && marker <= 0xD9) continue
+    if (marker === 0x00 || marker === 0x01) continue
+    if (i + 3 >= buf.length) break
+    const segLen = buf.readUInt16BE(i + 2)
+    i += segLen + 1
+  }
+  return { width: 640, height: 360 }
+}
 import { TrackStorage } from "@/storage/tracks";
 import { type TrackLabelStorage } from "@/storage/track-labels";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
@@ -404,11 +424,14 @@ export class AiDetector {
       ? llmConfig.apiUrl
       : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
@@ -422,12 +445,14 @@ export class AiDetector {
     const content = result.choices?.[0]?.message?.content?.trim() ?? "";
     const inferMs = performance.now() - t0;
 
+    /** 从 JPEG SOF marker 解析实际图像尺寸（避免硬编码 16:9 假设） */
+    const { width: imgW, height: imgH } = parseJpegDimensions(jpeg);
     /** 解析 VLM 输出为结构化结果 */
-    return this.parseVlmResponse(content, inferMs);
+    return this.parseVlmResponse(content, inferMs, imgW, imgH);
   }
 
   /** 解析 VLM 返回的 JSON（支持数组格式和对象格式） */
-  private parseVlmResponse(content: string, inferMs: number): VlmAnalysisResult {
+  private parseVlmResponse(content: string, inferMs: number, imgWidth?: number, imgHeight?: number): VlmAnalysisResult {
     /** 提取 JSON */
     let jsonStr = content;
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -476,8 +501,8 @@ export class AiDetector {
     }
 
     /** 获取图片尺寸（用于 bbox 像素→归一化转换） */
-    const imageWidth = this.runtimeConfig.get().ai.inputWidth || 640;
-    const imageHeight = Math.round(imageWidth * 9 / 16); /** 假设 16:9 */
+    const imageWidth = imgWidth ?? (this.runtimeConfig.get().ai.inputWidth || 640);
+    const imageHeight = imgHeight ?? Math.round(imageWidth * 9 / 16);
 
     const validLabels = this.runtimeConfig.get().ai.importantLabels;
     const objects: VlmDetection[] = [];
