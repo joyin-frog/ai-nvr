@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, watchFile } from "node:fs";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
 import { type AiConfig, type DetectMode } from "@/ai/types";
+import { type ClipConfig } from "@/ai/clip-service";
 
 /** RTSP 流地址来源（直接连摄像机） */
 export interface StreamSource {
@@ -175,6 +176,7 @@ export function loadConfig(configPath?: string): AppConfig {
       speedThreshold: (aiNode?.speed_threshold as number) ?? 0.02,
       loiterThreshold: (aiNode?.loiter_threshold as number) ?? 0,
       llm: parseLlmConfig(aiNode?.llm as Record<string, unknown> | undefined),
+      clip: parseClipConfig(aiNode?.clip as Record<string, unknown> | undefined),
     },
     auth: {
       token: (authNode?.token as string) ?? "",
@@ -212,6 +214,22 @@ function parseLlmConfig(llmNode: Record<string, unknown> | undefined): import("@
     imageWidth: (llmNode.image_width as number) ?? 640,
     systemPrompt: (llmNode.system_prompt as string) ?? "",
     triggers: Array.isArray(llmNode.triggers) ? llmNode.triggers.filter((t: unknown): t is string => typeof t === "string") : [],
+  };
+}
+
+/** 解析 CLIP 零样本分类配置 */
+function parseClipConfig(clipNode: Record<string, unknown> | undefined): ClipConfig {
+  if (!clipNode) {
+    return {
+      enabled: false,
+      model: "jinaai/jina-clip-v2",
+      embeddingDim: 512,
+    };
+  }
+  return {
+    enabled: (clipNode.enabled as boolean) ?? false,
+    model: (clipNode.model as string) ?? "jinaai/jina-clip-v2",
+    embeddingDim: (clipNode.embedding_dim as number) ?? 512,
   };
 }
 

@@ -31,6 +31,7 @@ import { CrossLineStorage } from "@/storage/cross-lines";
 import { TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { StorageFs } from "@/storage/storage-fs";
 import { MultimodalAnalyzer } from "@/ai/multimodal-analyzer";
+import { ClipService } from "@/ai/clip-service";
 
 /**
  * 安装内存日志缓冲区（拦截 console.log/warn/error）
@@ -98,7 +99,11 @@ const annotator = new Annotator();
 const trackStorage = new TrackStorage(join(dataDir, "tracks"));
 const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
 const trajectoryStorage = new TrackTrajectoryStorage(join(dataDir, "track-trajectory.db"));
-const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage, trajectoryStorage);
+
+/** CLIP 零样本分类服务（可选启用） */
+const clipService = new ClipService(config.ai.clip, join(dataDir, "models"));
+
+const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage, trajectoryStorage, clipService);
 
 /** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder);
@@ -124,6 +129,15 @@ aiDetector.init().then(() => {
 }).catch((err) => {
   console.error("[App] AI 检测器初始化失败:", err);
 });
+
+/** 异步初始化 CLIP 零样本分类（可选，默认禁用） */
+if (config.ai.clip.enabled) {
+  clipService.init().then(() => {
+    console.log("[App] CLIP 零样本分类初始化完成");
+  }).catch((err) => {
+    console.error("[App] CLIP 初始化失败:", err);
+  });
+}
 
 /** Webhook 通知（事件推送到外部 URL） */
 const webhookNotifier = new WebhookNotifier(runtimeConfig, eventBus);
@@ -271,6 +285,8 @@ process.on("SIGINT", () => {
   cameraManager.stop();
   behaviorAnalyzer.stop();
   multimodalAnalyzer.stop();
+  clipService.dispose();
+  aiDetector.dispose();
   cleaner.stop();
   eventStorage.close();
   roiStorage.close();

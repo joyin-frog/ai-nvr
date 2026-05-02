@@ -135,7 +135,7 @@ export class RuntimeConfig {
   constructor(config: AppConfig) {
     this.settings = {
       motion: { ...config.motion },
-      ai: { ...config.ai, llm: { ...config.ai.llm } },
+      ai: { ...config.ai, llm: { ...config.ai.llm }, clip: { ...config.ai.clip } },
       cameraOverrides: {},
       recording: {
         mode: "motion",
@@ -217,6 +217,12 @@ export class RuntimeConfig {
         if (typeof l.imageWidth === "number") this.settings.ai.llm.imageWidth = l.imageWidth;
         if (typeof l.systemPrompt === "string") this.settings.ai.llm.systemPrompt = l.systemPrompt;
         if (Array.isArray(l.triggers)) this.settings.ai.llm.triggers = l.triggers.filter((t: unknown): t is string => typeof t === "string");
+      }
+      if (a.clip && typeof a.clip === "object") {
+        const c = a.clip as Record<string, unknown>;
+        if (typeof c.enabled === "boolean") this.settings.ai.clip.enabled = c.enabled;
+        if (typeof c.model === "string") this.settings.ai.clip.model = c.model;
+        if (typeof c.embeddingDim === "number") this.settings.ai.clip.embeddingDim = c.embeddingDim;
       }
     }
 

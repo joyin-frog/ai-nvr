@@ -16,6 +16,7 @@ import { type RuntimeConfig } from "@/runtime-config";
 import { TrackStorage } from "@/storage/tracks";
 import { type TrackLabelStorage } from "@/storage/track-labels";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
+import { ClipService } from "./clip-service";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -83,6 +84,9 @@ export class AiDetector {
   /** 缓存刷新定时器 */
   private trackNameCacheTimer: ReturnType<typeof setInterval> | null = null;
 
+  /** CLIP 语义标签缓存：trackId → semanticLabel */
+  private semanticLabelCache = new Map<number, string>();
+
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
@@ -91,6 +95,7 @@ export class AiDetector {
     private trackStorage?: TrackStorage,
     private trackLabelStorage?: TrackLabelStorage,
     private trajectoryStorage?: TrackTrajectoryStorage,
+    private clipService?: ClipService,
   ) {}
 
   /** 异步初始化：加载模型 */
@@ -246,6 +251,7 @@ export class AiDetector {
       this.lastDetectFingerprint.delete(cameraId);
       this.trackers.delete(cameraId);
       this.trackNameCache.forEach((_v, k) => { if (k.startsWith(`${cameraId}:`)) this.trackNameCache.delete(k); });
+      this.semanticLabelCache.forEach((_v, k) => { /* trackId 是全局的，离线时不清理 */ });
     });
 
     if (config.mode === "continuous") {
@@ -447,6 +453,19 @@ export class AiDetector {
               }
             }
           }).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
+
+          /** CLIP 零样本分类：对新目标异步分类，结果缓存到 semanticLabelCache */
+          if (this.clipService && target.box) {
+            this.clipService.classifyTarget(jpeg, target.box, target.label)
+              .then(result => {
+                const top = ClipService.getTopLabels(result, 1);
+                if (top.length > 0 && top[0]!.score > 0.15) {
+                  this.semanticLabelCache.set(target.trackId, top[0]!.label);
+                  console.log(`[AiDetector] CLIP 分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
+                }
+              })
+              .catch(() => { /* CLIP 分类失败不影响主流程 */ });
+          }
         }
       }
       /** 更新已有活跃目标的 lastSeen/hitCount */
@@ -532,14 +551,13 @@ export class AiDetector {
         }
       }
 
-      /** 为检测结果附带用户自定义名称和主色调 */
-      const enricheddetections = this.trackLabelStorage
-        ? trackResult.detections.map(d => {
-          const trackName = d.trackId ? this.lookupTrackName(cameraId, d.trackId) : undefined;
-          const dominantColor = d.trackId ? this.lookupDominantColor(d.trackId) : undefined;
-          return { ...d, trackName: trackName || undefined, dominantColor };
-        })
-        : trackResult.detections;
+      /** 为检测结果附带用户自定义名称、主色调和语义标签 */
+      const enricheddetections = trackResult.detections.map(d => {
+        const trackName = d.trackId ? this.lookupTrackName(cameraId, d.trackId) : undefined;
+        const dominantColor = d.trackId ? this.lookupDominantColor(d.trackId) : undefined;
+        const semanticLabel = d.trackId ? this.semanticLabelCache.get(d.trackId) : undefined;
+        return { ...d, trackName: trackName || undefined, dominantColor, semanticLabel };
+      });
 
       /** 缓存最新帧和 enriched 检测结果（用于按需生成标注图） */
       this.annotator.setLatestFrame(cameraId, jpeg, enricheddetections);

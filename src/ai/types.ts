@@ -1,4 +1,5 @@
 import { type LlmConfig } from "./multimodal-analyzer";
+import { type ClipConfig } from "./clip-service";
 
 /** 单个检测结果 */
 export interface Detection {
@@ -21,6 +22,8 @@ export interface Detection {
   trackName?: string;
   /** 主色调（十六进制颜色，如 #FF6B6B） */
   dominantColor?: string;
+  /** CLIP 零样本分类的语义标签（如 "a black dog", "a person walking"） */
+  semanticLabel?: string;
 }
 
 /** AI 检测事件载荷 */
@@ -64,4 +67,6 @@ export interface AiConfig {
   loiterThreshold: number;
   /** 多模态 LLM 配置 */
   llm: LlmConfig;
+  /** CLIP 零样本分类配置 */
+  clip: ClipConfig;
 }
