@@ -349,7 +349,7 @@ export class ObjectTracker {
     return matrix;
   }
 
-  /** 贪心匹配：每轮选最小代价的配对 */
+  /** 贪心匹配：每轮线性扫描选最小代价配对（避免排序分配开销） */
   private greedyMatch(
     costMatrix: number[][],
     numTracks: number,
@@ -361,25 +361,29 @@ export class ObjectTracker {
     const matchedTracks: Array<[number, number]> = [];
     const usedTracks = new Set<number>();
     const usedDets = new Set<number>();
+    const threshold = 1 - this.iouThreshold;
+    const maxMatches = Math.min(numTracks, numDets);
 
-    /** 收集所有候选配对并按代价排序 */
-    const candidates: Array<{ cost: number; ti: number; di: number }> = [];
-    for (let i = 0; i < numTracks; i++) {
-      for (let j = 0; j < numDets; j++) {
-        const cost = costMatrix[i]?.[j] ?? 1;
-        if (cost < 1 - this.iouThreshold) {
-          candidates.push({ cost, ti: i, di: j });
+    for (let round = 0; round < maxMatches; round++) {
+      let bestCost = Infinity;
+      let bestTi = -1;
+      let bestDi = -1;
+      for (let i = 0; i < numTracks; i++) {
+        if (usedTracks.has(i)) continue;
+        for (let j = 0; j < numDets; j++) {
+          if (usedDets.has(j)) continue;
+          const cost = costMatrix[i]?.[j] ?? 1;
+          if (cost < threshold && cost < bestCost) {
+            bestCost = cost;
+            bestTi = i;
+            bestDi = j;
+          }
         }
       }
-    }
-    candidates.sort((a, b) => a.cost - b.cost);
-
-    /** 贪心选取 */
-    for (const { ti, di } of candidates) {
-      if (usedTracks.has(ti) || usedDets.has(di)) continue;
-      matchedTracks.push([ti, di]);
-      usedTracks.add(ti);
-      usedDets.add(di);
+      if (bestTi < 0) break;
+      matchedTracks.push([bestTi, bestDi]);
+      usedTracks.add(bestTi);
+      usedDets.add(bestDi);
     }
 
     const unmatchedDets = Array.from({ length: numDets }, (_, i) => i)
