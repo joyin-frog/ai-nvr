@@ -316,6 +316,33 @@ function onSegMove(e: MouseEvent) {
 function onSegLeave() {
   thumbTooltip.value = null
 }
+
+/** 鼠标滚轮缩放时间范围 */
+function onTracksWheel(e: WheelEvent) {
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+
+  /** 获取 tracks 容器的边界，计算鼠标在时间轴上的位置百分比 */
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+
+  if (e.deltaY < 0) {
+    /** 放大：day → hour（根据鼠标位置定位到对应小时） */
+    if (viewMode.value === 'day') {
+      const { start, end } = timeRange.value
+      const mouseTime = start + pct * (end - start)
+      const hour = new Date(mouseTime).getHours()
+      selectedHour.value = hour
+      viewMode.value = 'hour'
+    }
+  } else {
+    /** 缩小：hour → day */
+    if (viewMode.value === 'hour') {
+      viewMode.value = 'day'
+    }
+  }
+}
 </script>
 
 <template>
@@ -343,7 +370,7 @@ function onSegLeave() {
     </div>
 
     <!-- 多轨道区域 -->
-    <div class="mtl-tracks">
+    <div class="mtl-tracks" @wheel="onTracksWheel">
       <div v-for="cam in cameraRows" :key="cam.id" class="mtl-row">
         <div class="mtl-label-col">
           <span class="cam-name">{{ cam.name }}</span>
