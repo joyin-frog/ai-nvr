@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
@@ -72,6 +72,65 @@ interface RecordingState {
   writing: boolean;
   /** 上次写入帧的时间戳（用于帧率节流） */
   lastWriteTime: number;
+}
+
+/**
+ * 从 MP4 文件的 moov.mvhd atom 中解析视频时长（毫秒）
+ * faststart 文件 moov 在文件头部，只需读前 64KB
+ * 解析失败返回 null（调用方回退到 mtime）
+ */
+function parseMp4DurationMs(filePath: string): number | null {
+  try {
+    const stat = statSync(filePath);
+    /** 只读前 64KB，faststart 文件的 moov 在这个范围内 */
+    const readLen = Math.min(65536, stat.size);
+    const buf = Buffer.alloc(readLen);
+    const fd = openSync(filePath, "r");
+    readSync(fd, buf, 0, readLen, 0);
+    closeSync(fd);
+
+    /** 遍历顶层 atom 查找 moov */
+    let offset = 0;
+    while (offset + 8 <= buf.length) {
+      const atomSize = buf.readUInt32BE(offset);
+      const atomType = buf.toString("ascii", offset + 4, offset + 8);
+
+      if (atomType === "moov") {
+        /** 在 moov 内搜索 mvhd */
+        const moovEnd = Math.min(offset + atomSize, buf.length);
+        let inner = offset + 8;
+        while (inner + 8 <= moovEnd) {
+          const innerSize = buf.readUInt32BE(inner);
+          const innerType = buf.toString("ascii", inner + 4, inner + 8);
+
+          if (innerType === "mvhd" && inner + innerSize <= buf.length) {
+            const version = buf[inner + 8]!;
+            if (version === 0) {
+              /** version 0: timescale(u32) + duration(u32) */
+              const timescale = buf.readUInt32BE(inner + 20);
+              const duration = buf.readUInt32BE(inner + 24);
+              if (timescale > 0) return Math.round((duration / timescale) * 1000);
+            } else if (version === 1) {
+              /** version 1: timescale(u32) + duration(u64) */
+              const timescale = buf.readUInt32BE(inner + 28);
+              const duration = Number(buf.readBigUInt64BE(inner + 32));
+              if (timescale > 0) return Math.round((duration / timescale) * 1000);
+            }
+            return null;
+          }
+          if (innerSize < 8) break;
+          inner += innerSize;
+        }
+        return null;
+      }
+
+      if (atomSize < 8) break;
+      offset += atomSize;
+    }
+  } catch {
+    // 文件可能正在写入或损坏
+  }
+  return null;
 }
 
 /** drawtext 水印默认字体路径 */
@@ -322,7 +381,10 @@ export class MotionRecorder {
           filename: `${camId}/${file}`,
           cameraId: camId,
           startTime: parsed.startTime,
-          endTime: parsed.endTime ?? stat.mtimeMs,
+          endTime: parsed.endTime ?? ((): number => {
+            const dur = parseMp4DurationMs(filePath);
+            return dur ? parsed.startTime + dur : stat.mtimeMs;
+          })(),
           size: stat.size,
         };
         if (since && rec.endTime < since) continue;
