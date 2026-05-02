@@ -55,7 +55,10 @@ let detector: Awaited<ReturnType<typeof pipeline>> | null = null;
 const init = workerData as WorkerInit;
 
 let currentRequestId = 0;
-let pendingReq: DetectRequest | null = null;
+/** 按摄像头 ID 保留最新请求（同一摄像头只保留最新一帧，旧帧自动丢弃） */
+const pendingByCamera = new Map<string, DetectRequest>();
+/** 待处理队列的 cameraId 顺序（FIFO，避免 Map 遍历顺序依赖） */
+let pendingOrder: string[] = [];
 let busy = false;
 
 /** NMS（非极大值抑制） */
@@ -178,9 +181,11 @@ async function detect(req: DetectRequest): Promise<void> {
 }
 
 async function drainPending(): Promise<void> {
-  while (pendingReq) {
-    const req = pendingReq;
-    pendingReq = null;
+  while (pendingOrder.length > 0) {
+    const cameraId = pendingOrder.shift()!;
+    const req = pendingByCamera.get(cameraId);
+    if (!req) continue;
+    pendingByCamera.delete(cameraId);
     await detect(req);
   }
   busy = false;
@@ -188,11 +193,16 @@ async function drainPending(): Promise<void> {
 
 parentPort?.on("message", (msg: { type: string; data?: DetectRequest }) => {
   if (msg.type === "detect" && msg.data) {
+    const req = msg.data;
     if (busy) {
-      pendingReq = msg.data;
+      /** 同一摄像头已有待处理请求时，替换为更新的（跳过旧帧） */
+      if (!pendingByCamera.has(req.cameraId)) {
+        pendingOrder.push(req.cameraId);
+      }
+      pendingByCamera.set(req.cameraId, req);
     } else {
       busy = true;
-      detect(msg.data).then(() => drainPending());
+      detect(req).then(() => drainPending());
     }
   }
 });
