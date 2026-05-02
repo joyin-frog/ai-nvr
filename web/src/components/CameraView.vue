@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { useClock } from '../composables/useClock'
 import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
@@ -364,9 +363,6 @@ function stopOverlayLoop() {
     overlayRafId = null
   }
 }
-
-/** 实时时钟（全局共享定时器，所有 CameraView 共用一个 setInterval） */
-const { clockText, cleanup: cleanupClock } = useClock()
 
 /**
  * 追踪目标轨迹缓存
@@ -933,22 +929,9 @@ function drawStaticOSD(ctx: CanvasRenderingContext2D, width: number, _height: nu
   ctx.restore()
 }
 
-/** 绘制动态 OSD（时钟 + FPS/延迟/AI指标 + 检测摘要，频繁变化） */
+/** 绘制动态 OSD（FPS/延迟/AI指标 + 检测摘要，频繁变化） */
 function drawDynamicOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
   ctx.save()
-
-  /** 左下角：时钟 */
-  if (clockText.value) {
-    ctx.font = 'bold 12px monospace'
-    ctx.textBaseline = 'bottom'
-    const tm = ctx.measureText(clockText.value)
-    const pad = 4
-    const y = height - 4
-    ctx.fillStyle = 'rgba(0,0,0,0.5)'
-    ctx.fillRect(4, y - 18, tm.width + pad * 2, 18)
-    ctx.fillStyle = '#fff'
-    ctx.fillText(clockText.value, 4 + pad, y - 4)
-  }
 
   /** 右下角：渲染FPS + 源FPS + 延迟 + AI耗时 + 分辨率 指标栏 */
   const stats: Array<{ text: string; color: string }> = []
@@ -2203,7 +2186,6 @@ onUnmounted(() => {
   if (detectCountZeroTimer) clearTimeout(detectCountZeroTimer)
   if (longPressTimer) clearTimeout(longPressTimer)
   if (frozenTimer) clearInterval(frozenTimer)
-  cleanupClock()
   if (recDurationTimer) clearInterval(recDurationTimer)
   if (heatmapTimer) clearInterval(heatmapTimer)
   trackTrails.clear()

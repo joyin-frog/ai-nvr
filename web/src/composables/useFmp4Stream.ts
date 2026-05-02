@@ -78,7 +78,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   const videoHeight = ref(0)
   /** MSE 连接是否彻底失败（连续重连失败），用于回退到 Canvas */
   const failed = ref(false)
-  /** MSE 模式 FPS（从 media segment 到达频率计算） */
+  /** 用户真实看到的渲染帧率 */
   const fps = ref(0)
 
   let mediaSource: MediaSource | null = null
@@ -94,10 +94,15 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let retryCount = 0
   /** 当前使用的 codec */
   let currentCodec = ''
-  /** FPS 统计（使用 requestVideoFrameCallback 精确测量实际视频帧率） */
-  let fpsFrameCount = 0
-  let fpsStartTime = 0
+  /** FPS 统计：requestVideoFrameCallback 计数 */
+  let vfcFrameCount = 0
+  let vfcStartTime = 0
   let videoFrameCallbackId: number | null = null
+  /** rVFC 最近一次更新时间（用于判断 rVFC 是否在工作） */
+  let lastVfcUpdateTime = 0
+  /** FPS 统计：media segment 到达计数（不依赖 rVFC，作为备选） */
+  let segmentCount = 0
+  let segmentFpsStart = 0
   /** video 元素事件处理器引用（用于清理） */
   let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
   /** 待重初始化的 init segment（ffmpeg 重启后等待第一个 media segment 一起处理） */
@@ -140,15 +145,16 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       }
       /** 使用 requestVideoFrameCallback 精确测量实际视频帧率 */
       if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
-        fpsStartTime = performance.now()
-        fpsFrameCount = 0
-        const measureFps = (_now: number, _metadata: unknown) => {
-          fpsFrameCount++
-          const elapsed = performance.now() - fpsStartTime
+        vfcStartTime = performance.now()
+        vfcFrameCount = 0
+        const measureFps = () => {
+          vfcFrameCount++
+          const elapsed = performance.now() - vfcStartTime
           if (elapsed >= 2000) {
-            fps.value = Math.round(fpsFrameCount * 1000 / elapsed)
-            fpsFrameCount = 0
-            fpsStartTime = performance.now()
+            fps.value = Math.round(vfcFrameCount * 1000 / elapsed)
+            lastVfcUpdateTime = performance.now()
+            vfcFrameCount = 0
+            vfcStartTime = performance.now()
           }
           videoFrameCallbackId = el.requestVideoFrameCallback(measureFps)
         }
@@ -249,8 +255,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     appending = false
     pruning = false
     currentCodec = ''
-    fpsFrameCount = 0
-    fpsStartTime = performance.now()
+    vfcFrameCount = 0
+    vfcStartTime = performance.now()
+    segmentCount = 0
+    segmentFpsStart = performance.now()
 
     mediaSource = new MediaSource()
     if (videoRef.value) {
@@ -330,6 +338,19 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       } else if (type === FMP4_TYPE_MEDIA) {
         /** subarray 零拷贝视图（共享底层 ArrayBuffer），直接传给 MSE 的 appendBuffer */
         const fmp4Data = raw.subarray(1)
+
+        /** 基于 media segment 到达频率计算 FPS（rVFC 不工作时作为备选） */
+        segmentCount++
+        const segElapsed = performance.now() - segmentFpsStart
+        if (segElapsed >= 2000) {
+          const segFps = Math.round(segmentCount * 1000 / segElapsed)
+          /** rVFC 超过 4 秒没产出 FPS（浏览器不支持或 HEVC 不触发 rVFC），用 segment 频率 */
+          if (segFps > 0 && performance.now() - lastVfcUpdateTime > 4000) {
+            fps.value = segFps
+          }
+          segmentCount = 0
+          segmentFpsStart = performance.now()
+        }
 
         /** 有待处理的 init segment：先 append 新数据，再异步清理旧缓冲区 */
         if (pendingInit) {
@@ -649,6 +670,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     appending = false
     pruning = false
     appendCount = 0
+    vfcFrameCount = 0
+    lastVfcUpdateTime = 0
+    segmentCount = 0
     connected.value = false
     playing.value = false
     fps.value = 0
