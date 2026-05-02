@@ -375,9 +375,10 @@ export class H264Fmp4Extractor {
       /** copy 持续失败时回退到转码 */
       args.push(
         "-c:v", "libx264",
-        "-preset", "ultrafast",
+        "-preset", "superfast",
         "-tune", "zerolatency",
-        "-x264-params", "keyint=30:min-keyint=15",
+        "-crf", "23",
+        "-x264-params", "keyint=30:min-keyint=15:bframes=0",
       );
     } else {
       /** 零转码 copy — CPU 开销极低 */
