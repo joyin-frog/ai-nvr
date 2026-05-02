@@ -131,6 +131,7 @@ export function startServer(
   alertSnapshotStorage?: SnapshotStorage,
   trajectoryStorage?: import("@/storage/track-trajectory").TrackTrajectoryStorage,
   multimodalAnalyzer?: import("@/ai/multimodal-analyzer").MultimodalAnalyzer,
+  clipService?: import("@/ai/clip-service").ClipService,
 ): void {
   /** 登录速率限制：IP → { count, resetAt } */
   const loginRateLimits = new Map<string, { count: number; resetAt: number }>();
@@ -1526,6 +1527,43 @@ export function startServer(
       /** 未命名目标的 dHash 匹配建议 */
       if (url.pathname === "/api/tracks/suggestions" && req.method === "GET") {
         return Response.json(trackStorage.getSuggestions());
+      }
+
+      /** 语义搜索追踪目标（CLIP text→image embedding 匹配） */
+      if (url.pathname === "/api/tracks/semantic-search" && req.method === "GET") {
+        const query = url.searchParams.get("q");
+        if (!query || !clipService) {
+          return Response.json([]);
+        }
+        const textResult = await clipService.textEmbed([query]);
+        if (!textResult.embeddings[0]?.length) {
+          return Response.json([]);
+        }
+        const queryEmbed = textResult.embeddings[0]!;
+        const allTracks = trackStorage.listTracks();
+        const eventCounts = eventStorage.countByTrackId();
+        /** 计算每个目标的 CLIP embedding 与查询文本的余弦相似度 */
+        const scored: Array<{ track: typeof allTracks[0]; score: number; eventCount: number }> = [];
+        for (const t of allTracks) {
+          const record = trackStorage.getRecord(t.trackId);
+          if (!record?.clipEmbedding?.length) continue;
+          /** 余弦相似度 = 点积（因为向量已 L2 归一化） */
+          let dot = 0;
+          for (let i = 0; i < queryEmbed.length; i++) {
+            dot += queryEmbed[i]! * record.clipEmbedding[i]!;
+          }
+          if (dot > 0.2) {
+            scored.push({ track: t, score: dot, eventCount: eventCounts.get(t.trackId) ?? 0 });
+          }
+        }
+        /** 按相似度降序，返回前 50 个 */
+        scored.sort((a, b) => b.score - a.score);
+        const results = scored.slice(0, 50).map(s => ({
+          ...s.track,
+          eventCount: s.eventCount,
+          searchScore: Math.round(s.score * 100) / 100,
+        }));
+        return Response.json(results);
       }
 
       /** 更新追踪目标自定义名称 */

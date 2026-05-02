@@ -60,6 +60,21 @@ interface EmbedRequest {
   crop?: { xmin: number; ymin: number; xmax: number; ymax: number };
 }
 
+/** 文本嵌入请求 */
+interface TextEmbedRequest {
+  type: "text";
+  id: number;
+  texts: string[];
+}
+
+/** 文本嵌入结果 */
+export interface TextEmbedResult {
+  /** 文本嵌入向量列表（与输入文本一一对应，已 L2 归一化） */
+  embeddings: number[][];
+  /** 推理耗时 ms */
+  inferMs: number;
+}
+
 /** Worker 响应 */
 interface ClipWorkerResponse {
   type: "result" | "ready" | "error";
@@ -84,6 +99,12 @@ const pendingClassify = new Map<number, {
 /** 图像嵌入待处理请求 */
 const pendingEmbed = new Map<number, {
   resolve: (result: ImageEmbedResult) => void;
+  reject: (err: Error) => void;
+}>();
+
+/** 文本嵌入待处理请求 */
+const pendingTextEmbed = new Map<number, {
+  resolve: (result: TextEmbedResult) => void;
   reject: (err: Error) => void;
 }>();
 
@@ -279,6 +300,19 @@ export class ClipService {
                 });
               }
             }
+          } else if (msg.resultType === "text") {
+            const pending = pendingTextEmbed.get(msg.id);
+            if (pending) {
+              pendingTextEmbed.delete(msg.id);
+              if (msg.error) {
+                pending.reject(new Error(msg.error));
+              } else {
+                pending.resolve({
+                  embeddings: msg.embeddings ?? [],
+                  inferMs: msg.inferMs ?? 0,
+                });
+              }
+            }
           } else {
             const pending = pendingClassify.get(msg.id);
             if (pending) {
@@ -387,6 +421,36 @@ export class ClipService {
     });
   }
 
+  /**
+   * 提取文本的 CLIP 嵌入向量
+   * 用于语义搜索（文字描述匹配追踪目标）
+   */
+  textEmbed(texts: string[]): Promise<TextEmbedResult> {
+    if (!this.initialized || !this.worker) {
+      return Promise.resolve({ embeddings: [], inferMs: 0 });
+    }
+
+    const id = ++requestId;
+
+    const req: TextEmbedRequest = {
+      type: "text",
+      id,
+      texts,
+    };
+
+    return new Promise<TextEmbedResult>((resolve, reject) => {
+      pendingTextEmbed.set(id, { resolve, reject });
+      this.worker!.postMessage(req);
+
+      setTimeout(() => {
+        if (pendingTextEmbed.has(id)) {
+          pendingTextEmbed.delete(id);
+          resolve({ embeddings: [], inferMs: 0 });
+        }
+      }, 10_000);
+    });
+  }
+
   /** 更新配置并重载模型 */
   async updateConfig(config: ClipConfig): Promise<void> {
     if (config.model !== this.config.model || config.embeddingDim !== this.config.embeddingDim) {
@@ -416,5 +480,6 @@ export class ClipService {
     this.initialized = false;
     pendingClassify.clear();
     pendingEmbed.clear();
+    pendingTextEmbed.clear();
   }
 }

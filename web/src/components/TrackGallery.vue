@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 
@@ -59,6 +59,12 @@ const filterActive = ref(false)
 const filterColor = ref('')
 /** 名称/标签搜索 */
 const searchText = ref('')
+/** 语义搜索结果（CLIP text→image 匹配） */
+const semanticResults = ref<TrackInfo[]>([])
+/** 语义搜索加载中 */
+const semanticSearching = ref(false)
+/** 语义搜索防抖定时器 */
+let semanticDebounce: ReturnType<typeof setTimeout> | null = null
 /** 展开事件历史的 trackId */
 const expandedTrackId = ref<number | null>(null)
 /** trackId → 事件历史列表 */
@@ -354,15 +360,41 @@ const filteredTracks = computed(() => {
   if (filterActive.value) list = list.filter(t => isTrackActive(t))
   if (searchText.value) {
     const q = searchText.value.toLowerCase()
-    list = list.filter(t =>
+    const localMatches = list.filter(t =>
       (t.customName && t.customName.toLowerCase().includes(q))
       || t.label.toLowerCase().includes(q)
       || (t.semanticLabel && t.semanticLabel.toLowerCase().includes(q))
       || String(t.trackId).includes(q)
     )
+    /** 本地匹配有结果就用本地结果；否则展示语义搜索结果 */
+    if (localMatches.length > 0) return localMatches
+    if (semanticResults.value.length > 0) {
+      /** 用语义搜索结果覆盖，但仍应用筛选条件 */
+      return semanticResults.value
+    }
+    return []
   }
   return list
 })
+
+/** 触发语义搜索（防抖 500ms） */
+function triggerSemanticSearch(query: string) {
+  if (semanticDebounce) clearTimeout(semanticDebounce)
+  if (!query || query.length < 2) {
+    semanticResults.value = []
+    semanticSearching.value = false
+    return
+  }
+  semanticDebounce = setTimeout(async () => {
+    semanticSearching.value = true
+    const url = authUrl(`/api/tracks/semantic-search?q=${encodeURIComponent(query)}`)
+    const res = await authFetch(url)
+    if (res.ok) {
+      semanticResults.value = await res.json()
+    }
+    semanticSearching.value = false
+  }, 500)
+}
 
 /** 未命名的目标数量 */
 const unnamedCount = computed(() => tracks.value.filter(t => !t.customName).length)
@@ -420,9 +452,15 @@ onMounted(() => {
   activeTickTimer = setInterval(() => { viewTick.value++ }, 10000)
 })
 
+/** 搜索文本变化时触发语义搜索 */
+watch(searchText, (q) => {
+  triggerSemanticSearch(q)
+})
+
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (activeTickTimer) clearInterval(activeTickTimer)
+  if (semanticDebounce) clearTimeout(semanticDebounce)
 })
 
 defineExpose({ loadTracks })
@@ -437,6 +475,7 @@ defineExpose({ loadTracks })
         class="search-input"
         :placeholder="t('tracks.search', '搜索名称/标签...')"
       />
+      <span v-if="semanticSearching" class="semantic-hint" title="CLIP 语义搜索中...">...</span>
       <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
         <option value="">{{ t('tracks.all') }}</option>
         <option v-for="label in allLabels" :key="label" :value="label">{{ label }}</option>
@@ -711,6 +750,16 @@ defineExpose({ loadTracks })
 
 .search-input:focus { border-color: #4ECDC4; }
 .search-input::placeholder { color: #555; }
+
+.semantic-hint {
+  color: #9b59b6;
+  font-size: 12px;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 
 .label-filter {
   background: #2a2a4a;
