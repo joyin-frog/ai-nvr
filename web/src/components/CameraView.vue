@@ -689,6 +689,43 @@ function nameHash(name: string): number {
   return Math.abs(h)
 }
 
+/** 解析 HSL/Hex/RGB 颜色字符串为 {r, g, b} */
+function parseCssColor(color: string): { r: number; g: number; b: number } {
+  /** 尝试 HSL 格式 */
+  const hslMatch = color.match(/hsl[a]?\(\s*(\d+)\s*,\s*(\d+)%?\s*,\s*(\d+)%?/)
+  if (hslMatch) {
+    const [, h, s, l] = hslMatch
+    return hslToRgb(Number(h), Number(s), Number(l))
+  }
+  /** 尝试 Hex 格式 */
+  const hexMatch = color.match(/^#([0-9a-f]{6})$/i)
+  if (hexMatch) {
+    const hex = hexMatch[1]!
+    return { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) }
+  }
+  return { r: 128, g: 128, b: 128 }
+}
+
+/** HSL → RGB 转换 */
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  s /= 100
+  l /= 100
+  const k = (n: number) => (n + h / 30) % 12
+  const a = s * Math.min(l, 1 - l)
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))
+  return { r: Math.round(f(0) * 255), g: Math.round(f(8) * 255), b: Math.round(f(4) * 255) }
+}
+
+/** 在两个 CSS 颜色之间线性插值，t=0 返回 a，t=1 返回 b */
+function lerpColor(a: string, b: string, t: number): string {
+  const ca = parseCssColor(a)
+  const cb = parseCssColor(b)
+  const r = Math.round(ca.r + (cb.r - ca.r) * t)
+  const g = Math.round(ca.g + (cb.g - ca.g) * t)
+  const bl = Math.round(ca.b + (cb.b - ca.b) * t)
+  return `rgb(${r},${g},${bl})`
+}
+
 /** 根据 trackId + label + customName 获取颜色（同名目标同色） */
 function getColor(label: string, trackId?: number, customName?: string): { stroke: string; fill: string } {
   if (customName) {
@@ -1148,6 +1185,36 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     const customName = tid ? props.trackLabels?.[tid] : undefined
     const isNamed = !!customName
     const { stroke, fill } = getColor(d.label, d.trackId, customName)
+
+    /** 停留时间警告渐变：30s 后颜色从原始向橙色过渡，120s 后向红色过渡 */
+    let dwellSec = 0
+    let dwellColorShift = 0
+    if (tid) {
+      const firstSeen = getTrackFirstSeen(tid)
+      if (firstSeen) {
+        dwellSec = (Date.now() - firstSeen) / 1000
+        if (dwellSec > 30) {
+          dwellColorShift = dwellSec > 120 ? 1 : (dwellSec - 30) / 90
+        }
+      }
+    }
+
+    /** 根据停留时间混合边框颜色：正常 → 橙色(#e67e22) → 红色(#e74c3c) */
+    let effectiveStroke = stroke
+    let effectiveFill = fill
+    let effectiveLineWidth = isHovered ? 3.5 : isNamed ? 2.5 : 1.5
+    if (dwellColorShift > 0) {
+      const warnColor = dwellColorShift >= 1 ? '#e74c3c' : '#e67e22'
+      const warnFill = dwellColorShift >= 1 ? 'rgba(231,76,60,0.12)' : 'rgba(230,126,34,0.12)'
+      effectiveStroke = lerpColor(stroke, warnColor, Math.min(dwellColorShift, 1))
+      effectiveFill = warnFill
+      effectiveLineWidth = Math.max(effectiveLineWidth, 2 + dwellColorShift)
+      /** 长时间停留时脉冲透明度更明显 */
+      if (dwellColorShift >= 1) {
+        ctx.globalAlpha = 0.7 + 0.3 * pulse
+      }
+    }
+
     const box = getSmoothedBox(d)
     const x = box.xmin * width
     const y = box.ymin * height
@@ -1157,17 +1224,19 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     /** 已命名目标：粗边框 + 实线；未命名目标：细边框 + 虚线 + 脉冲透明度 */
     const isHovered = tid != null && hoveredTrackId.value === tid
     ctx.setLineDash(isNamed ? [] : [8, 4])
-    ctx.lineWidth = isHovered ? 3.5 : isNamed ? 2.5 : 1.5
-    ctx.globalAlpha = isNamed || isHovered ? 1 : (0.5 + 0.5 * pulse)
+    ctx.lineWidth = effectiveLineWidth
+    if (dwellColorShift === 0) {
+      ctx.globalAlpha = isNamed || isHovered ? 1 : (0.5 + 0.5 * pulse)
+    }
 
     /** 绘制圆角矩形框 + 半透明填充 */
     const r = Math.min(4, w / 4, h / 4)
     ctx.beginPath()
     ctx.roundRect(x, y, w, h, r)
 
-    ctx.fillStyle = fill
+    ctx.fillStyle = effectiveFill
     ctx.fill()
-    ctx.strokeStyle = stroke
+    ctx.strokeStyle = effectiveStroke
     ctx.stroke()
 
     ctx.setLineDash([])
@@ -1201,7 +1270,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     /** 标签背景：圆角 + 不透明填充 */
     ctx.beginPath()
     ctx.roundRect(x, labelY - labelH, labelW, labelH, 2)
-    ctx.fillStyle = stroke
+    ctx.fillStyle = effectiveStroke
     ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.fillText(text, x + 5, labelY - 4)
