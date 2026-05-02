@@ -1213,7 +1213,7 @@ onUnmounted(() => {
         >⚙ {{ t('tab.settings') }}</button>
       </div>
       <div class="mobile-content">
-        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" />
+        <EventPanel v-show="activeTab === 'events'" ref="eventPanel" :cameras="cameras" :track-labels="trackLabelsMap" @play-recording="onPlayRecording" @jump-to-track="onJumpToTrack" />
         <RecordingsPanel
           v-show="activeTab === 'recordings'"
           ref="recordingsPanel"
@@ -1227,7 +1227,7 @@ onUnmounted(() => {
         />
         <CameraManagePanel v-if="activeTab === 'cameras'" ref="cameraManagePanel" />
         <AlertPanel v-if="activeTab === 'alerts'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
-        <TrackGallery v-if="activeTab === 'tracks'" ref="trackGallery" :cameras="cameras" @jump-to-recording="onPlayRecording" />
+        <TrackGallery v-if="activeTab === 'tracks'" ref="trackGallery" :cameras="cameras" @jump-to-recording="onPlayRecording" @view-live="onViewLive" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>
