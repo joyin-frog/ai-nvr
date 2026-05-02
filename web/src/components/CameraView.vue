@@ -2072,7 +2072,8 @@ onUnmounted(() => {
       </span>
       <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
-      <span v-if="frozen" class="frozen-badge">{{ t('camera.frozen') }}</span>
+      <span v-else-if="fmp4.connected.value && !fmp4.playing.value && hasFrame" class="reconnect-badge">{{ t('camera.buffering', '缓冲中...') }}</span>
+      <span v-else-if="frozen" class="frozen-badge">{{ t('camera.frozen') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
       <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
@@ -2306,6 +2307,24 @@ onUnmounted(() => {
   color: #fff;
   border-radius: 3px;
   padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reconnect-badge {
+  background: #2196F3;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  animation: pulse-badge 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
   font-size: 11px;
   font-weight: 600;
   animation: frozen-blink 1.5s ease-in-out infinite;
