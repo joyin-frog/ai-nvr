@@ -94,6 +94,10 @@ export class MotionRecorder {
   private runtimeConfig: RuntimeConfig;
   /** 帧事件取消订阅函数 */
   private unsubFrame: (() => void) | null = null;
+  /** motion 事件取消订阅 */
+  private unsubMotion: (() => void) | null = null;
+  /** 过期录像清理定时器 */
+  private purgeTimer: ReturnType<typeof setInterval> | null = null;
   /** 存储文件系统（增量统计） */
   private storageFs: StorageFs | null;
   /** 每路摄像头的帧预缓冲区（motion 触发前保留 ~2 秒帧） */
@@ -135,7 +139,7 @@ export class MotionRecorder {
       }, 3000);
     } else {
       /** 变动触发模式 */
-      this.eventBus.on("motion", ({ cameraId, timestamp }) => {
+      this.unsubMotion = this.eventBus.on("motion", ({ cameraId, timestamp }) => {
         const state = this.getOrCreateState(cameraId);
         state.lastMotionTime = timestamp;
 
@@ -148,7 +152,7 @@ export class MotionRecorder {
     }
 
     /** 定期清理过期录像 */
-    setInterval(() => this.purgeOldRecordings(), 3600_000);
+    this.purgeTimer = setInterval(() => this.purgeOldRecordings(), 3600_000);
   }
 
   /** 停止所有录像 */
@@ -156,6 +160,14 @@ export class MotionRecorder {
     if (this.unsubFrame) {
       this.unsubFrame();
       this.unsubFrame = null;
+    }
+    if (this.unsubMotion) {
+      this.unsubMotion();
+      this.unsubMotion = null;
+    }
+    if (this.purgeTimer) {
+      clearInterval(this.purgeTimer);
+      this.purgeTimer = null;
     }
     for (const [cameraId] of this.states) {
       this.forceStop(cameraId);
@@ -168,6 +180,11 @@ export class MotionRecorder {
     console.log(`[Recorder] 模式切换: ${mode}`);
 
     if (mode === "continuous") {
+      /** 切到持续录制 → 取消 motion 监听 */
+      if (this.unsubMotion) {
+        this.unsubMotion();
+        this.unsubMotion = null;
+      }
       for (const [cameraId] of this.states) {
         const state = this.states.get(cameraId);
         if (state?.stopTimer) {
@@ -179,12 +196,24 @@ export class MotionRecorder {
         this.startContinuous(cameraId);
       }
     } else {
+      /** 切到变动触发 → 取消持续录制，注册 motion 监听 */
       for (const [cameraId] of this.states) {
         const state = this.states.get(cameraId);
         if (state?.continuousTimer) {
           clearTimeout(state.continuousTimer);
           state.continuousTimer = null;
         }
+      }
+      if (!this.unsubMotion) {
+        this.unsubMotion = this.eventBus.on("motion", ({ cameraId, timestamp }) => {
+          const state = this.getOrCreateState(cameraId);
+          state.lastMotionTime = timestamp;
+          if (!state.recording) {
+            this.startRecording(cameraId, timestamp);
+          } else {
+            this.scheduleStop(cameraId);
+          }
+        });
       }
     }
   }
