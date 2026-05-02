@@ -353,17 +353,21 @@ export class H264Fmp4Extractor {
      * copy 模式：摄像头输出 H.264 → 直接封装 fMP4，CPU 接近 0
      * transcode 模式：HEVC 等不兼容编码 → libx264 转码
      */
-    const isTranscode = this.retryCount >= 2 && this.lastCopyFailed;
+    const isTranscode = this.lastCopyFailed;
     const args = [
       "-rtsp_transport", "tcp",
-      "-fflags", "nobuffer",
-      "-flags", "low_delay",
-      "-max_delay", "0",
-      "-reorder_queue_size", "0",
+    ];
+
+    /** copy 模式：最低延迟；转码模式：保留缓冲避免 HEVC 解码 POC 错误 */
+    if (!isTranscode) {
+      args.push("-fflags", "nobuffer", "-flags", "low_delay", "-max_delay", "0", "-reorder_queue_size", "0");
+    }
+
+    args.push(
       "-analyzeduration", "1000000",
       "-probesize", "500000",
       "-i", this.rtspUrl,
-    ];
+    );
 
     if (isTranscode) {
       /** copy 持续失败时回退到转码 */
@@ -371,7 +375,7 @@ export class H264Fmp4Extractor {
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-tune", "zerolatency",
-        "-x264-params", "keyint=15:min-keyint=15",
+        "-x264-params", "keyint=30:min-keyint=15",
       );
     } else {
       /** 零转码 copy — CPU 开销极低 */
@@ -411,10 +415,11 @@ export class H264Fmp4Extractor {
       if (msg.includes("error") || msg.includes("Error")) {
         console.error(`${this.logTag} ffmpeg error:`, msg);
       }
-      /** 检测 HEVC 码流 — copy 模式下 fMP4 会报错 */
-      if (msg.includes("hevc") || msg.includes("HEVC") || msg.includes("hvc1")) {
+      /** 检测 HEVC 码流 — copy 模式下立即 kill 进程并回退到转码 */
+      if (!this.lastCopyFailed && (msg.includes("hevc") || msg.includes("HEVC") || msg.includes("hvc1"))) {
         this.lastCopyFailed = true;
-        console.log(`${this.logTag} 检测到 HEVC 码流，下次重连将使用转码模式`);
+        console.log(`${this.logTag} 检测到 HEVC 码流，立即切换到转码模式`);
+        this.killProcess();
       }
     });
 
