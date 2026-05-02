@@ -16,6 +16,8 @@ export interface ClipConfig {
   model: string;
   /** 嵌入维度（Matryoshka 截断，默认 512） */
   embeddingDim: number;
+  /** 用户自定义候选标签（覆盖默认的 CANDIDATE_LABELS） */
+  candidates?: Record<string, string[]>;
 }
 
 /** 零样本分类结果 */
@@ -227,8 +229,22 @@ const DEFAULT_CANDIDATES = [
   "a white object",
 ];
 
-/** 获取某个基础标签的候选列表 */
+/** 用户自定义候选标签（运行时可通过 API 更新） */
+let customCandidates: Record<string, string[]> = {};
+
+/** 设置用户自定义候选标签 */
+export function setCustomCandidates(candidates: Record<string, string[]>): void {
+  customCandidates = candidates;
+}
+
+/** 获取所有候选标签配置（默认 + 自定义合并） */
+export function getAllCandidates(): Record<string, string[]> {
+  return { ...CANDIDATE_LABELS, ...customCandidates };
+}
+
+/** 获取某个基础标签的候选列表（自定义优先，回退到默认） */
 function getCandidatesForLabel(label: string): string[] {
+  if (customCandidates[label]?.length) return customCandidates[label]!;
   return CANDIDATE_LABELS[label] ?? DEFAULT_CANDIDATES;
 }
 

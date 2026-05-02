@@ -223,6 +223,16 @@ export class RuntimeConfig {
         if (typeof c.enabled === "boolean") this.settings.ai.clip.enabled = c.enabled;
         if (typeof c.model === "string") this.settings.ai.clip.model = c.model;
         if (typeof c.embeddingDim === "number") this.settings.ai.clip.embeddingDim = c.embeddingDim;
+        if (c.candidates && typeof c.candidates === "object") {
+          const raw = c.candidates as Record<string, unknown>;
+          const parsed: Record<string, string[]> = {};
+          for (const [key, val] of Object.entries(raw)) {
+            if (Array.isArray(val) && val.every(v => typeof v === "string")) {
+              parsed[key] = val;
+            }
+          }
+          this.settings.ai.clip.candidates = parsed;
+        }
       }
     }
 

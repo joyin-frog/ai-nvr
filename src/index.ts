@@ -31,7 +31,7 @@ import { CrossLineStorage } from "@/storage/cross-lines";
 import { TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { StorageFs } from "@/storage/storage-fs";
 import { MultimodalAnalyzer } from "@/ai/multimodal-analyzer";
-import { ClipService } from "@/ai/clip-service";
+import { ClipService, setCustomCandidates } from "@/ai/clip-service";
 
 /**
  * 安装内存日志缓冲区（拦截 console.log/warn/error）
@@ -102,6 +102,10 @@ const trajectoryStorage = new TrackTrajectoryStorage(join(dataDir, "track-trajec
 
 /** CLIP 零样本分类服务（可选启用） */
 const clipService = new ClipService(config.ai.clip, join(dataDir, "models"));
+/** 启动时应用配置中的自定义候选标签 */
+if (config.ai.clip.candidates) {
+  setCustomCandidates(config.ai.clip.candidates);
+}
 
 const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage, trajectoryStorage, clipService);
 

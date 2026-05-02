@@ -226,10 +226,23 @@ function parseClipConfig(clipNode: Record<string, unknown> | undefined): ClipCon
       embeddingDim: 512,
     };
   }
+  /** 解析用户自定义候选标签 { "person": ["a person in uniform", ...], ... } */
+  let candidates: Record<string, string[]> | undefined;
+  if (clipNode.candidates && typeof clipNode.candidates === "object") {
+    const raw = clipNode.candidates as Record<string, unknown>;
+    candidates = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (Array.isArray(val) && val.every(v => typeof v === "string")) {
+        candidates[key] = val;
+      }
+    }
+    if (Object.keys(candidates).length === 0) candidates = undefined;
+  }
   return {
     enabled: (clipNode.enabled as boolean) ?? false,
     model: (clipNode.model as string) ?? "jinaai/jina-clip-v2",
     embeddingDim: (clipNode.embedding_dim as number) ?? 512,
+    candidates,
   };
 }
 

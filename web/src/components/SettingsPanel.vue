@@ -265,6 +265,77 @@ function removeWebhook(index: number) {
   settings.value.webhook.urls.splice(index, 1)
 }
 
+/** CLIP 候选标签管理 */
+const clipCandidates = ref<Record<string, string[]>>({})
+const clipCandidatesLoaded = ref(false)
+const clipCandidatesSaving = ref(false)
+/** 新标签输入状态 */
+const newCandidateLabel = ref('')
+const newCandidateText = ref('')
+
+async function loadClipCandidates() {
+  try {
+    const res = await authFetch('/api/clip-candidates')
+    if (res.ok) {
+      clipCandidates.value = await res.json()
+      clipCandidatesLoaded.value = true
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function saveClipCandidates() {
+  clipCandidatesSaving.value = true
+  try {
+    await authFetch('/api/clip-candidates', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(clipCandidates.value),
+    })
+    toast.success(t('settings.clipCandidatesSaved', '候选标签已保存'))
+  } catch {
+    toast.error(t('settings.clipCandidatesSaveFailed', '保存失败'))
+  } finally {
+    clipCandidatesSaving.value = false
+  }
+}
+
+/** 添加新的候选类别 */
+function addCandidateCategory() {
+  const label = newCandidateLabel.value.trim()
+  if (!label || clipCandidates.value[label]) return
+  clipCandidates.value[label] = ['a ' + label]
+  newCandidateLabel.value = ''
+}
+
+/** 删除候选类别 */
+function removeCandidateCategory(label: string) {
+  delete clipCandidates.value[label]
+  /** 触发响应式更新 */
+  clipCandidates.value = { ...clipCandidates.value }
+}
+
+/** 在某类别中添加候选标签 */
+function addCandidateText(label: string) {
+  const text = newCandidateText.value.trim()
+  if (!text) return
+  const list = clipCandidates.value[label]
+  if (!list) return
+  list.push(text)
+  newCandidateText.value = ''
+}
+
+/** 在某类别中删除候选标签 */
+function removeCandidateText(label: string, index: number) {
+  const list = clipCandidates.value[label]
+  if (!list) return
+  list.splice(index, 1)
+  if (list.length === 0) {
+    removeCandidateCategory(label)
+  }
+}
+
 /** 加载摄像头列表（用于 per-camera 灵敏度配置） */
 async function loadCameras() {
   try {
@@ -329,6 +400,7 @@ onMounted(() => {
   loadModelInfo()
   loadCameras()
   loadCleanupStats()
+  loadClipCandidates()
 })
 </script>
 
@@ -551,6 +623,36 @@ onMounted(() => {
             <input type="number" v-model.number="settings.ai.clip.embeddingDim" step="64" min="64" max="1024" class="input" />
             <span class="field-hint">Matryoshka 截断维度，越小越快但精度降低（默认 512）</span>
           </label>
+          <!-- 候选标签管理 -->
+          <div class="clip-candidates" v-if="clipCandidatesLoaded">
+            <span class="field-label">{{ t('settings.clipCandidates', '候选标签') }}</span>
+            <span class="field-hint">{{ t('settings.clipCandidatesHint', '每个检测类别对应一组候选描述，CLIP 会为检测到的目标选择最匹配的描述。修改后需保存。') }}</span>
+            <div class="candidate-categories">
+              <div v-for="(texts, label) in clipCandidates" :key="label" class="candidate-category">
+                <div class="category-header">
+                  <span class="category-label">{{ label }}</span>
+                  <button class="btn-icon btn-danger" @click="removeCandidateCategory(label)" :title="t('settings.removeCategory', '删除类别')">×</button>
+                </div>
+                <div class="candidate-tags">
+                  <span v-for="(text, idx) in texts" :key="idx" class="candidate-tag">
+                    {{ text }}
+                    <button class="tag-remove" @click="removeCandidateText(label, idx)">×</button>
+                  </span>
+                </div>
+                <div class="add-candidate-row">
+                  <input type="text" v-model="newCandidateText" :placeholder="t('settings.newCandidatePlaceholder', '输入候选描述...')" class="input" @keydown.enter="addCandidateText(label)" />
+                  <button class="btn-sm" @click="addCandidateText(label)">{{ t('settings.addCandidate', '添加') }}</button>
+                </div>
+              </div>
+            </div>
+            <div class="add-category-row">
+              <input type="text" v-model="newCandidateLabel" :placeholder="t('settings.newCategoryPlaceholder', '新类别名（如 person、dog）')" class="input" @keydown.enter="addCandidateCategory" />
+              <button class="btn-sm" @click="addCandidateCategory">{{ t('settings.addCategory', '添加类别') }}</button>
+            </div>
+            <button class="btn-save-candidates" :disabled="clipCandidatesSaving" @click="saveClipCandidates">
+              {{ clipCandidatesSaving ? t('settings.saving', '保存中...') : t('settings.saveCandidates', '保存候选标签') }}
+            </button>
+          </div>
         </template>
       </section>
 
@@ -1231,5 +1333,136 @@ onMounted(() => {
   color: #1a1a2e;
   border-color: #4ECDC4;
   font-weight: 600;
+}
+
+.clip-candidates {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.candidate-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.candidate-category {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.category-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.category-label {
+  font-weight: 600;
+  color: #4ECDC4;
+  font-size: 13px;
+}
+
+.candidate-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.candidate-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(78, 205, 196, 0.1);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #e0e0e0;
+}
+
+.tag-remove {
+  background: none;
+  border: none;
+  color: #ff6b6b;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.tag-remove:hover {
+  color: #ff4444;
+}
+
+.add-candidate-row,
+.add-category-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.add-candidate-row .input,
+.add-category-row .input {
+  flex: 1;
+}
+
+.btn-sm {
+  background: #2a2a4a;
+  color: #e0e0e0;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-sm:hover {
+  background: #3a3a5a;
+}
+
+.btn-icon.btn-danger {
+  background: none;
+  border: none;
+  color: #ff6b6b;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.btn-icon.btn-danger:hover {
+  color: #ff4444;
+}
+
+.btn-save-candidates {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.btn-save-candidates:hover {
+  background: #3dbdb5;
+}
+
+.btn-save-candidates:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

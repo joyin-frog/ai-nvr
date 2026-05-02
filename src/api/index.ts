@@ -1566,6 +1566,28 @@ export function startServer(
         return Response.json(results);
       }
 
+      /** CLIP 候选标签管理 */
+      if (url.pathname === "/api/clip-candidates" && req.method === "GET") {
+        const { getAllCandidates } = await import("@/ai/clip-service");
+        return Response.json(getAllCandidates());
+      }
+      if (url.pathname === "/api/clip-candidates" && req.method === "PUT") {
+        const body = await req.json() as Record<string, string[]>;
+        /** 校验格式：key 是非空字符串，value 是非空字符串数组 */
+        const valid: Record<string, string[]> = {};
+        for (const [key, val] of Object.entries(body)) {
+          if (!key || !Array.isArray(val) || val.length === 0) continue;
+          if (val.every(v => typeof v === "string" && v.length > 0)) {
+            valid[key] = val;
+          }
+        }
+        const { setCustomCandidates } = await import("@/ai/clip-service");
+        setCustomCandidates(valid);
+        /** 持久化到运行时配置 */
+        runtimeConfig.update({ ai: { clip: { candidates: valid } } });
+        return Response.json({ ok: true });
+      }
+
       /** 更新追踪目标自定义名称 */
       if (url.pathname.startsWith("/api/tracks/") && req.method === "PATCH") {
         const trackId = parseInt(url.pathname.split("/").pop() ?? "");
