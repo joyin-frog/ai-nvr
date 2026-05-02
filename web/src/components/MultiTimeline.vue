@@ -288,6 +288,34 @@ function onEventMarkerClick(cameraId: string, timestamp: number) {
     emit('play', match, offsetSec)
   }
 }
+
+/** 缩略图 tooltip 状态 */
+const thumbTooltip = ref<{
+  x: number
+  y: number
+  url: string
+  time: string
+} | null>(null)
+
+/** 片段悬停：显示缩略图 */
+function onSegEnter(e: MouseEvent, rec: Recording) {
+  const dur = Math.max(0, (rec.endTime - rec.startTime) / 1000 / 2)
+  thumbTooltip.value = {
+    x: e.clientX,
+    y: e.clientY,
+    url: `/api/recordings/thumb?file=${encodeURIComponent(rec.filename)}&time=${dur.toFixed(1)}`,
+    time: new Date(rec.startTime).toLocaleTimeString(locale.value),
+  }
+}
+
+function onSegMove(e: MouseEvent) {
+  if (!thumbTooltip.value) return
+  thumbTooltip.value = { ...thumbTooltip.value, x: e.clientX, y: e.clientY }
+}
+
+function onSegLeave() {
+  thumbTooltip.value = null
+}
 </script>
 
 <template>
@@ -326,8 +354,10 @@ function onEventMarkerClick(cameraId: string, timestamp: number) {
             :key="rec.filename"
             class="mtl-segment"
             :style="segmentStyle(rec)"
-            :title="new Date(rec.startTime).toLocaleTimeString(locale)"
             @click="onSegClick($event, rec)"
+            @mouseenter="onSegEnter($event, rec)"
+            @mousemove="onSegMove"
+            @mouseleave="onSegLeave"
           />
           <!-- 事件标记 -->
           <template v-for="(m, mi) in eventMarkersByCamera.get(cam.id) ?? []" :key="'e'+mi">
@@ -356,6 +386,12 @@ function onEventMarkerClick(cameraId: string, timestamp: number) {
       >
         {{ new Date(date + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', weekday: 'short' }) }}
       </button>
+    </div>
+
+    <!-- 缩略图 tooltip -->
+    <div v-if="thumbTooltip" class="mtl-thumb-tooltip" :style="{ left: thumbTooltip.x + 'px', top: (thumbTooltip.y - 120) + 'px' }">
+      <img :src="thumbTooltip.url" alt="" class="mtl-thumb-img" />
+      <span class="mtl-thumb-time">{{ thumbTooltip.time }}</span>
     </div>
   </div>
 </template>
@@ -581,5 +617,34 @@ function onEventMarkerClick(cameraId: string, timestamp: number) {
   background: #4ECDC4;
   color: #1a1a2e;
   font-weight: 600;
+}
+
+/* 缩略图 tooltip */
+.mtl-thumb-tooltip {
+  position: fixed;
+  z-index: 100;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 4px;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.mtl-thumb-img {
+  display: block;
+  width: 192px;
+  height: 108px;
+  object-fit: cover;
+  border-radius: 2px;
+  background: #0a0a1a;
+}
+
+.mtl-thumb-time {
+  display: block;
+  text-align: center;
+  font-size: 10px;
+  color: #aaa;
+  margin-top: 2px;
 }
 </style>
