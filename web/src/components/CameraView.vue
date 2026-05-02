@@ -1830,6 +1830,9 @@ onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)
   if (heatmapTimer) clearInterval(heatmapTimer)
+  trackTrails.clear()
+  smoothedBoxes.clear()
+  trackVelocities.clear()
 })
 </script>
 
