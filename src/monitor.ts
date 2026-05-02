@@ -91,7 +91,7 @@ export class SystemMonitor {
   private lowFpsTimer: ReturnType<typeof setInterval> | null = null;
   /** ffmpeg 进程统计缓存（5 秒刷新） */
   private ffmpegCache = { count: 0, rssMb: 0, updatedAt: 0 };
-  private static readonly FFMPEG_CACHE_TTL = 5000;
+  private static readonly FFMPEG_CACHE_TTL = 15_000;
 
   constructor(
     private eventBus: EventBus,

@@ -72,6 +72,10 @@ export class TrackStorage {
   private tracks = new Map<number, TrackRecord>();
   private dirty = false;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** listTracks 缓存 */
+  private listCache: TrackInfo[] | null = null;
+  private listCacheExpiry = 0;
+  private static readonly LIST_CACHE_TTL = 5000;
 
   constructor(storagePath: string) {
     this.storagePath = storagePath;
@@ -152,6 +156,7 @@ export class TrackStorage {
       lbpHist,
     };
     this.tracks.set(trackId, newRecord);
+    this.invalidateListCache();
     this.scheduleSave();
   }
 
@@ -223,6 +228,7 @@ export class TrackStorage {
     const record = this.tracks.get(trackId);
     if (!record) return;
     record.customName = name || undefined;
+    this.invalidateListCache();
     this.scheduleSave();
   }
 
@@ -242,9 +248,12 @@ export class TrackStorage {
     this.scheduleSave();
   }
 
-  /** 获取所有追踪目标 */
+  /** 获取所有追踪目标（5 秒缓存，避免每次请求重建列表） */
   listTracks(): TrackInfo[] {
-    return [...this.tracks.values()].map(r => ({
+    const now = Date.now();
+    if (this.listCache && now < this.listCacheExpiry) return this.listCache;
+
+    const result = [...this.tracks.values()].map(r => ({
       trackId: r.trackId,
       label: r.label,
       customName: r.customName,
@@ -256,6 +265,16 @@ export class TrackStorage {
       dominantColor: r.colorHist ? TrackStorage.extractDominantColor(r.colorHist) : undefined,
       semanticLabel: r.semanticLabel,
     })).sort((a, b) => b.lastSeen - a.lastSeen);
+
+    this.listCache = result;
+    this.listCacheExpiry = now + TrackStorage.LIST_CACHE_TTL;
+    return result;
+  }
+
+  /** 使 listTracks 缓存失效 */
+  invalidateListCache(): void {
+    this.listCache = null;
+    this.listCacheExpiry = 0;
   }
 
   /** 获取快照文件路径 */

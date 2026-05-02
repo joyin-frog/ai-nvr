@@ -467,17 +467,7 @@ export function startServer(
           starred: url.searchParams.get("starred") === "true" ? true : undefined,
           trackId: url.searchParams.has("trackId") ? Number(url.searchParams.get("trackId")) : undefined,
         };
-        const rawEvents = eventStorage.query(queryOpts);
-        const total = eventStorage.count({
-          type: queryOpts.type,
-          typeLike: queryOpts.typeLike,
-          cameraId: queryOpts.cameraId,
-          since: queryOpts.since,
-          until: queryOpts.until,
-          search: queryOpts.search,
-          starred: queryOpts.starred,
-          trackId: queryOpts.trackId,
-        });
+        const { rows: rawEvents, total } = eventStorage.queryWithTotal(queryOpts);
 
         /**
          * 轻量化响应：从 detail JSON 中提取摘要字段，不返回原始大 detail

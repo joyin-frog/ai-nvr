@@ -61,8 +61,8 @@ export class EventStorage {
     })();
   }
 
-  /** 查询事件列表 */
-  query(options: {
+  /** 查询事件列表（带总数，单次 SQL） */
+  queryWithTotal(options: {
     type?: string;
     typeLike?: string;
     cameraId?: string;
@@ -72,9 +72,26 @@ export class EventStorage {
     offset?: number;
     search?: string;
     starred?: boolean;
-    /** 按目标 trackId 筛选（从 detail JSON 的 trackId 字段匹配） */
     trackId?: number;
-  } = {}): EventRecord[] {
+  } = {}): { rows: EventRecord[]; total: number } {
+    const { conditions, params } = this.buildConditions(options);
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limit = options.limit ?? 100;
+    const offset = options.offset ?? 0;
+
+    /** 使用 CTE + window function 合并 query + count 为单次查询 */
+    const rows = this.db.query(
+      `SELECT *, COUNT(*) OVER() as _total FROM events ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as Array<EventRecord & { _total: number }>;
+
+    const total = rows.length > 0 ? rows[0]!._total : 0;
+    /** 移除 _total 字段 */
+    const cleanRows = rows.map(({ _total, ...rest }) => rest) as EventRecord[];
+    return { rows: cleanRows, total };
+  }
+
+  /** 查询事件列表（不带总数，用于内部查询） */
+  query(options: Parameters<EventStorage["queryWithTotal"]>[0] = {}): EventRecord[] {
     const { conditions, params } = this.buildConditions(options);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = options.limit ?? 100;
