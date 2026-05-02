@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onUnmounted, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch, authUrl } from '../services/auth'
@@ -82,6 +82,28 @@ watch(() => fmp4.failed.value, (failed) => {
       }
     })
   }
+})
+
+/** 根元素引用（用于 IntersectionObserver） */
+const rootEl = ref<HTMLElement | null>(null)
+
+/** 视口可见性管理：不可见时断开 fMP4 流节省带宽 */
+let viewportObserver: IntersectionObserver | null = null
+onMounted(() => {
+  viewportObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        fmp4.setVisible(entry.isIntersecting)
+      }
+    },
+    { rootMargin: '100px' },
+  )
+  if (rootEl.value) viewportObserver.observe(rootEl.value)
+})
+
+watch(rootEl, (el, oldEl) => {
+  if (oldEl && viewportObserver) viewportObserver.unobserve(oldEl)
+  if (el && viewportObserver) viewportObserver.observe(el)
 })
 
 /** MSE 模式的检测框 overlay canvas */
@@ -1716,6 +1738,10 @@ function resetZoom() {
 }
 
 onUnmounted(() => {
+  if (viewportObserver) {
+    viewportObserver.disconnect()
+    viewportObserver = null
+  }
   fmp4.disconnect()
   stopOverlayLoop()
   mjpegStream.stopFetch()
@@ -1729,7 +1755,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="camera-view" :class="{ offline: !online }">
+  <div ref="rootEl" class="camera-view" :class="{ offline: !online }">
     <div class="camera-header">
       <span class="status-dot" :class="{ online, offline: !online }" />
       <span class="camera-name">{{ name }}</span>

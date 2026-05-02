@@ -511,6 +511,27 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
 
+  /** 元素视口可见性 — 不可见时断开流节省带宽 */
+  let isInViewport = true
+  let wasConnectedBeforeHiddenViewport = false
+
+  /** 外部调用：设置当前视口可见状态 */
+  function setVisible(visible: boolean) {
+    if (visible === isInViewport) return
+    isInViewport = visible
+    if (!visible) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        wasConnectedBeforeHiddenViewport = true
+        disconnect()
+        console.debug(`[fMP4] ${cameraId.value} 离开视口，暂停流`)
+      }
+    } else if (wasConnectedBeforeHiddenViewport) {
+      wasConnectedBeforeHiddenViewport = false
+      connect()
+      console.debug(`[fMP4] ${cameraId.value} 进入视口，恢复流`)
+    }
+  }
+
   onUnmounted(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange)
     disconnect()
@@ -527,5 +548,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     videoHeight,
     fps,
     failed,
+    setVisible,
   }
 }
