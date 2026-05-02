@@ -2,11 +2,8 @@
 import { ref, computed, onUnmounted, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
-import { authFetch, authUrl } from '../services/auth'
-import { useCanvasRenderer } from '../composables/useCanvasRenderer'
+import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { useMjpegStream } from '../composables/useMjpegStream'
-import { takeFrame } from '../services/ws-frame-cache'
 import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
@@ -53,36 +50,9 @@ const emit = defineEmits<{
   trackLabelUpdated: []
 }>()
 
-/** Canvas 渲染器（Canvas fallback 模式） */
-const { canvasRef: _canvasRef, setCanvas, setOverlay, setFramePollFn, feedFrame, startLoop, stopLoop, captureJpeg, getFrameSize, getRenderFps } = useCanvasRenderer()
-
 /** fMP4/MSE 渲染器（高性能模式，GPU 硬件解码） */
 const fmp4CameraId = computed(() => props.cameraId)
 const fmp4 = useFmp4Stream(fmp4CameraId)
-
-/**
- * 渲染模式：默认 MSE/fMP4（零转码 GPU 硬件解码，高帧率高分辨率）
- * MSE 失败后自动降级到 Canvas/MJPEG
- */
-const useMse = ref(true)
-const mjpegStream = useMjpegStream()
-
-/** MSE 连续失败时自动回退到 Canvas 模式 */
-watch(() => fmp4.failed.value, (failed) => {
-  if (failed && useMse.value) {
-    console.warn('[CameraView] MSE 连接失败，回退到 Canvas 模式')
-    useMse.value = false
-    stopOverlayLoop()
-    fmp4.disconnect()
-    nextTick(() => {
-      if (props.online) {
-        startLoop()
-        const url = authUrl(`/api/stream/${props.cameraId}`)
-        mjpegStream.startFetch(url, onFrameDecoded)
-      }
-    })
-  }
-})
 
 /** 根元素引用（用于 IntersectionObserver） */
 const rootEl = ref<HTMLElement | null>(null)
@@ -484,7 +454,7 @@ let frozenTimer: ReturnType<typeof setInterval> | null = null
 const isPip = ref(false)
 async function togglePip() {
   const video = fmp4.videoRef.value
-  if (!video || !useMse.value) return
+  if (!video) return
   if (document.pictureInPictureElement) {
     await document.exitPictureInPicture()
     return
@@ -499,100 +469,32 @@ function checkFrozen() {
   if (!props.online) { frozen.value = false; return }
   frozen.value = props.lastFrameAt > 0 && (Date.now() - props.lastFrameAt) > 10000
 }
-/** WS 帧消费：上次已消费的版本号 */
-let consumedWsVersion = 0
-
-/** 喂入帧数据并更新帧尺寸 */
-function onFrameDecoded(jpeg: ArrayBuffer) {
-  feedFrame(jpeg)
-  const size = getFrameSize()
-  if (size.width > 0 && size.height > 0) {
-    frameSize.value = size
-  }
-}
-
 watch(() => props.online, (on) => {
   if (on) {
     /** 加载历史轨迹（后台静默） */
     loadHistoryTrails()
-    if (useMse.value) {
-      /** MSE 模式：直接连接 fMP4 流 */
-      fmp4.connect()
-      nextTick(() => startOverlayLoop())
-    } else {
-      /** Canvas 模式：启动渲染循环 + MJPEG fallback */
-      startLoop()
-      authFetch(`/api/snapshot/${props.cameraId}`)
-        .then(res => res.ok ? res.arrayBuffer() : null)
-        .then(buf => {
-          if (buf && buf.byteLength > 100) onFrameDecoded(buf)
-        })
-        .catch(() => { /* 快照获取失败不影响实时流 */ })
-      const url = authUrl(`/api/stream/${props.cameraId}`)
-      mjpegStream.startFetch(url, onFrameDecoded)
-    }
+    /** MSE 模式：直接连接 fMP4 流 */
+    fmp4.connect()
+    nextTick(() => startOverlayLoop())
     frozenTimer = setInterval(checkFrozen, 3000); checkFrozen()
   }
   else {
     fmp4.disconnect()
     stopOverlayLoop()
-    mjpegStream.stopFetch()
-    stopLoop()
     frozen.value = false
     if (frozenTimer) { clearInterval(frozenTimer); frozenTimer = null }
   }
 }, { immediate: true })
 
-/** WS 帧消费：通过 rAF poll 替代 Vue watcher，减少响应式开销 */
-let mjpegSuppressed = false
-let mjpegRestoreTimer: ReturnType<typeof setTimeout> | null = null
-
 /** 本地检测结果缓存（从 ws-detect-cache poll） */
 let localDetections: Detection[] = []
 let consumedDetectVersion = 0
-
-setFramePollFn(() => {
-  if (!props.online) return
-
-  /** poll 检测结果 */
-  const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
-  if (detectResult) {
-    consumedDetectVersion = detectResult.version
-    localDetections = detectResult.detections
-    updateSmoothedBoxes(localDetections)
-    invalidateSortedDetections()
-    updateDetectionSummary()
-  }
-
-  const result = takeFrame(props.cameraId, consumedWsVersion)
-  if (result) {
-    consumedWsVersion = result.version
-    onFrameDecoded(result.jpeg)
-    /** 收到 WS 帧时暂停 MJPEG fetch（节省带宽） */
-    if (!mjpegSuppressed) {
-      mjpegStream.stopFetch()
-      mjpegSuppressed = true
-    }
-    /** 重置恢复定时器：3 秒无 WS 帧则恢复 MJPEG */
-    if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
-    mjpegRestoreTimer = setTimeout(() => {
-      if (mjpegSuppressed && props.online) {
-        const url = authUrl(`/api/stream/${props.cameraId}`)
-        mjpegStream.startFetch(url, onFrameDecoded)
-        mjpegSuppressed = false
-      }
-    }, 3000)
-  }
-})
 watch(() => props.lastFrameAt, () => { if (frozen.value) frozen.value = false })
 
-/** 画面比例：优先用帧实际尺寸/MSE video 尺寸，回退到 props */
-const frameSize = ref({ width: 0, height: 0 })
+/** 画面比例：优先用 MSE video 尺寸，回退到 props */
 const cameraBodyStyle = computed(() => {
-  const mseW = fmp4.videoWidth.value
-  const mseH = fmp4.videoHeight.value
-  const fw = mseW || frameSize.value.width || props.videoWidth || 0
-  const fh = mseH || frameSize.value.height || props.videoHeight || 0
+  const fw = fmp4.videoWidth.value || props.videoWidth || 0
+  const fh = fmp4.videoHeight.value || props.videoHeight || 0
   if (fw > 0 && fh > 0) {
     return { 'aspect-ratio': `${fw} / ${fh}` }
   }
@@ -672,8 +574,8 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
 
   /** 右下角：渲染FPS + 源FPS + 延迟 + AI耗时 + 分辨率 指标栏 */
   const stats: Array<{ text: string; color: string }> = []
-  /** MSE 模式使用 fMP4 segment FPS，Canvas 模式使用渲染帧率 */
-  const renderFps = useMse.value ? fmp4.fps.value : getRenderFps()
+  /** fMP4 segment FPS */
+  const renderFps = fmp4.fps.value
   const srcFps = props.fps ?? 0
   if (renderFps > 0 || srcFps > 0) {
     /** 显示渲染帧率（实际到达屏幕的帧率），如果和源帧率不同则同时显示 */
@@ -693,9 +595,9 @@ function drawOSD(ctx: CanvasRenderingContext2D, width: number, height: number) {
   if (localInferMs.value > 0) {
     stats.push({ text: `AI ${localInferMs.value.toFixed(0)}ms`, color: '#9C27B0' })
   }
-  /** MSE 模式用 fmp4 分辨率，Canvas 模式用帧尺寸 */
-  const w = useMse.value ? (fmp4.videoWidth.value || 0) : frameSize.value.width
-  const h = useMse.value ? (fmp4.videoHeight.value || 0) : frameSize.value.height
+  /** fMP4 视频分辨率 */
+  const w = fmp4.videoWidth.value || 0
+  const h = fmp4.videoHeight.value || 0
   if (w > 0 && h > 0) {
     stats.push({ text: `${w}x${h}`, color: '#888' })
   }
@@ -1501,15 +1403,14 @@ watch(() => props.recording, (on) => {
   else { recordingDuration.value = '' }
 }, { immediate: true })
 
-/** 截图下载当前画面（直接从 Canvas 导出，包含检测框+轨迹+ROI+OSD） */
+/** 截图下载当前画面（从 video + overlay canvas 合成，包含检测框+轨迹+ROI+OSD） */
 async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
 
   let blob: Blob | null = null
 
-  if (useMse.value && fmp4.videoRef.value) {
-    /** MSE 模式：从 video + overlay canvas 合成截图 */
+  if (fmp4.videoRef.value) {
     const video = fmp4.videoRef.value
     const canvas = document.createElement('canvas')
     canvas.width = video.videoWidth || 1920
@@ -1517,12 +1418,9 @@ async function takeScreenshot() {
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(video, 0, 0)
     if (overlayCanvas.value) {
-      /** overlay canvas 使用 CSS 像素 × dpr 分辨率，需要缩放到视频分辨率 */
       ctx.drawImage(overlayCanvas.value, 0, 0, canvas.width, canvas.height)
     }
     blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-  } else {
-    blob = await captureJpeg()
   }
 
   if (!blob) return
@@ -1771,9 +1669,6 @@ onUnmounted(() => {
   }
   fmp4.disconnect()
   stopOverlayLoop()
-  mjpegStream.stopFetch()
-  stopLoop()
-  if (mjpegRestoreTimer) clearTimeout(mjpegRestoreTimer)
   if (frozenTimer) clearInterval(frozenTimer)
   if (clockTimer) clearInterval(clockTimer)
   if (recDurationTimer) clearInterval(recDurationTimer)
@@ -1798,7 +1693,7 @@ onUnmounted(() => {
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
       <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
-      <button v-if="online && useMse" :class="['pip-btn', { active: isPip }]" @click="togglePip" :title="t('camera.pip')">&#x1F4BB;</button>
+      <button v-if="online" :class="['pip-btn', { active: isPip }]" @click="togglePip" :title="t('camera.pip')">&#x1F4BB;</button>
       <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
       <PtzControl v-if="ptz && online" :camera-id="cameraId" />
       <button v-if="online" :class="['adjust-btn', { active: showAdjust }]" @click="showAdjust = !showAdjust" :title="t('camera.adjust')">&#x2606;</button>
@@ -1818,8 +1713,8 @@ onUnmounted(() => {
       @mouseleave="onPanEnd"
     >
       <div class="camera-content" :style="{ transform: zoomTransform }">
-        <!-- MSE 模式：video 硬件解码 -->
-        <template v-if="useMse && online">
+        <!-- fMP4/MSE 模式：video 硬件解码 -->
+        <template v-if="online">
           <div class="mse-wrapper">
             <video
               :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
@@ -1840,19 +1735,6 @@ onUnmounted(() => {
             />
           </div>
         </template>
-        <!-- Canvas fallback 模式 -->
-        <canvas
-          v-else-if="online"
-          :ref="(el: any) => setCanvas(el as HTMLCanvasElement | null)"
-          class="camera-image"
-          :style="{ filter: imageFilter }"
-          @contextmenu.prevent="onCanvasContext"
-          @mousemove="onOverlayMouseMove"
-          @mouseleave="onOverlayMouseLeave"
-          @touchstart="onTouchStart"
-          @touchmove="onTouchMove"
-          @touchend="onTouchEnd"
-        />
         <div v-else class="camera-placeholder">
           <div v-if="online" class="placeholder-icon">&#9679;</div>
           <div v-else class="placeholder-icon offline-icon">&#10005;</div>
