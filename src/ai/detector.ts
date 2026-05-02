@@ -435,23 +435,13 @@ export class AiDetector {
             target.box,
             target.score,
           ).then(() => {
-            /** 快照保存后，提取 CLIP embedding 并查找相似目标 */
+            /** 快照保存后，执行 CLIP 零样本分类（同时产出 image embedding） */
             const record = this.trackStorage!.getRecord(target.trackId);
 
-            /** 异步提取 CLIP image embedding（用于高精度 ReID） */
-            const embedPromise = (this.clipService && target.box && record)
-              ? this.clipService.imageEmbed(jpeg, target.box).then(res => {
-                  if (res.embedding.length > 0 && this.trackStorage) {
-                    this.trackStorage.setClipEmbedding(target.trackId, res.embedding);
-                  }
-                  return res.embedding;
-                }).catch(() => <number[]>[])
-              : Promise.resolve(<number[]>[]);
-
-            /** 同时执行零样本分类 */
             if (this.clipService && target.box) {
               this.clipService.classifyTarget(jpeg, target.box, target.label)
                 .then(result => {
+                  /** 零样本分类结果 */
                   const top = ClipService.getTopLabels(result, 1);
                   if (top.length > 0 && top[0]!.score > 0.15) {
                     this.semanticLabelCache.set(target.trackId, top[0]!.label);
@@ -460,42 +450,46 @@ export class AiDetector {
                     }
                     console.log(`[AiDetector] CLIP 分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
                   }
-                })
-                .catch(() => { /* CLIP 分类失败不影响主流程 */ });
-            }
 
-            /** 等 embedding 提取完成后再做匹配（确保高精度） */
-            embedPromise.then(clipEmbedding => {
-              if (!record?.dhash && !clipEmbedding.length) return;
-              const matches = this.trackStorage!.findSimilar(
-                target.trackId, cameraId, target.label,
-                record?.dhash ?? "", 0.4,
-                record?.colorHist, record?.lbpHist,
-                clipEmbedding.length ? clipEmbedding : record?.clipEmbedding,
-              );
-              if (matches.length > 0) {
-                this.eventBus.emit("track:match-suggest", {
-                  cameraId,
-                  timestamp,
-                  trackId: target.trackId,
-                  label: target.label,
-                  matches,
-                });
-                const best = matches[0]!;
-                const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
-                if (autoThreshold > 0 && best.distance < autoThreshold && this.trackLabelStorage) {
-                  this.trackLabelStorage.upsert(cameraId, target.trackId, target.label, best.customName);
-                  this.trackStorage!.setCustomName(target.trackId, best.customName);
-                  this.trackNameCache.delete(`${cameraId}:${target.trackId}`);
-                  this.eventBus.emit("track:label-updated", {
-                    cameraId,
-                    trackId: target.trackId,
-                    name: best.customName,
-                  });
-                  console.log(`[AiDetector] 自动关联: track#${target.trackId} → ${best.customName} (${(best.distance * 100).toFixed(0)}%)`);
-                }
-              }
-            }).catch(() => { /* embedding 匹配失败不影响主流程 */ });
+                  /** 复用同一推理产出的 image embedding（无需二次推理） */
+                  const clipEmbedding = result.imageEmbedding;
+                  if (clipEmbedding?.length && this.trackStorage) {
+                    this.trackStorage.setClipEmbedding(target.trackId, clipEmbedding);
+                  }
+
+                  /** 用 embedding 做高精度 ReID 匹配 */
+                  if (!record?.dhash && !clipEmbedding?.length) return;
+                  const matches = this.trackStorage!.findSimilar(
+                    target.trackId, cameraId, target.label,
+                    record?.dhash ?? "", 0.4,
+                    record?.colorHist, record?.lbpHist,
+                    clipEmbedding?.length ? clipEmbedding : record?.clipEmbedding,
+                  );
+                  if (matches.length > 0) {
+                    this.eventBus.emit("track:match-suggest", {
+                      cameraId,
+                      timestamp,
+                      trackId: target.trackId,
+                      label: target.label,
+                      matches,
+                    });
+                    const best = matches[0]!;
+                    const autoThreshold = this.runtimeConfig.get().ai.autoMatchThreshold;
+                    if (autoThreshold > 0 && best.distance < autoThreshold && this.trackLabelStorage) {
+                      this.trackLabelStorage.upsert(cameraId, target.trackId, target.label, best.customName);
+                      this.trackStorage!.setCustomName(target.trackId, best.customName);
+                      this.trackNameCache.delete(`${cameraId}:${target.trackId}`);
+                      this.eventBus.emit("track:label-updated", {
+                        cameraId,
+                        trackId: target.trackId,
+                        name: best.customName,
+                      });
+                      console.log(`[AiDetector] 自动关联: track#${target.trackId} → ${best.customName} (${(best.distance * 100).toFixed(0)}%)`);
+                    }
+                  }
+                })
+                .catch(() => { /* CLIP 推理失败不影响主流程 */ });
+            }
           }).catch(err => console.error(`[AiDetector] 追踪快照保存失败:`, err));
         }
       }

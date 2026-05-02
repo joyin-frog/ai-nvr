@@ -13,7 +13,8 @@
 - **目标追踪**: ByteTrack（IoU 匹配 + min_hits 机制，跨帧稳定 ID）
 - **语义标签**: CLIP jina-clip-v2 零样本分类，自动生成丰富语义描述（如 "a black dog"）
 - **多模态 LLM**: OpenAI 兼容 API（LM Studio / Ollama），场景语义分析
-- **外观匹配**: dHash + 颜色直方图 + LBP 纹理，自动关联同名目标
+- **外观匹配**: CLIP image embedding（512维余弦相似度）+ dHash + 颜色直方图 + LBP 纹理，自动关联同名目标
+- **语义搜索**: CLIP text→image embedding 匹配，自然语言搜索追踪目标
 - **行为分析**: ROI 区域进出/停留/越线/徘徊/速度告警
 - **配置**: YAML（nvr_config.yml）+ 运行时热更新（RuntimeConfig）
 - **存储**: bun:sqlite（事件/告警/ROI/偏好 持久化）、文件系统（录像/快照/轨迹）
@@ -67,8 +68,9 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 - ByteTrack 追踪器：min_hits=3 机制防止短暂误检产生幽灵 ID
 - CLIP 零样本分类：jina-clip-v2 为检测目标生成语义标签，全链路贯通
 - 丰富候选标签：10 类目标各 8-20 个描述变体，颜色/动作/状态全覆盖
-- 外观匹配：dHash + 颜色直方图 + LBP 纹理特征
-- 自动关联：高置信度匹配自动命名同名目标
+- 外观匹配：CLIP image embedding（512维余弦相似度优先）+ dHash + 颜色 + LBP 回退
+- 自动关联：高置信度匹配自动命名同名目标（CLIP embedding 匹配阈值 0.35）
+- 语义搜索：CLIP text embedding → image embedding 余弦相似度，自然语言搜目标
 - 语义标签全链路：CLIP → Detector → BehaviorAnalyzer → EventBus → 持久化 → WS → 前端 → 通知
 
 ## 多模态 LLM 场景分析
@@ -92,7 +94,8 @@ RTSP → ffmpeg ─┬─ fMP4 流 (H264 copy / HEVC→H264 转码) → WebSocke
 - **LLM 描述**: 视频区域紫色半透明条，自动换行，15s 消失
 - **事件面板**: 实时事件流 + 历史查询 + 摄像头/类型筛选，优先显示 semanticLabel
 - **设置面板**: AI 参数 + LLM 配置 + 录像设置 + 告警规则 + 摄像头管理
-- **TrackGallery**: 追踪目标图库 + 命名编辑 + 轨迹回放 + 热力图
+- **TrackGallery**: 追踪目标图库 + 命名编辑 + 轨迹回放 + 热力图 + CLIP 语义搜索
+- **事件联动**: 事件详情点击 trackId 跳转到 TrackGallery 高亮目标
 - **录像缩略图**: 异步生成 + 磁盘缓存，不阻塞事件循环
 - **录像导出**: 异步非阻塞（裁剪/合并/GIF/ZIP），不冻结服务器
 - **录像回放**: 检测框二分查找 + 智能倍速 + A-B 循环 + 缩略图预览

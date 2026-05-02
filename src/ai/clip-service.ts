@@ -26,6 +26,8 @@ export interface ZeroShotResult {
   scores: number[];
   /** 推理耗时 ms */
   inferMs: number;
+  /** 零样本分类同时产出的 image embedding（可复用于 ReID，避免二次推理） */
+  imageEmbedding?: number[];
 }
 
 /** 图像嵌入结果 */
@@ -324,6 +326,7 @@ export class ClipService {
                   labels: msg.labels ?? [],
                   scores: msg.scores ?? [],
                   inferMs: msg.inferMs ?? 0,
+                  imageEmbedding: msg.embeddings?.[0]?.length ? msg.embeddings[0] : undefined,
                 });
               }
             }
