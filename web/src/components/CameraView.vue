@@ -971,6 +971,7 @@ function drawDetectionOverlay(ctx: CanvasRenderingContext2D, width: number, heig
       ctx.font = FONT_SMALL
       const lines: string[] = []
       lines.push(`${d.label} #${tid}`)
+      if (d.semanticLabel) lines.push(`语义: ${d.semanticLabel}`)
       if (customName) lines.push(`名称: ${customName}`)
       lines.push(`置信度: ${(d.score * 100).toFixed(0)}%`)
       if (d.dominantColor) lines.push(`\0color:${d.dominantColor}`)
