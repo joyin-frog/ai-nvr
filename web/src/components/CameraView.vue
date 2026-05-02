@@ -8,6 +8,7 @@ import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 import { registerShortcut } from '../composables/useKeyboard'
+import { LABEL_COLORS } from '../services/constants'
 
 const { t } = useI18n()
 const { setPref, getPref } = usePreferences()
@@ -713,16 +714,6 @@ const cameraBodyStyle = computed(() => {
  * 使用黄金角（~137.5°）分布色相，确保相邻 ID 差异最大化
  * 无 trackId 时按 label 类别 fallback 到固定色
  */
-const LABEL_COLORS: Record<string, string> = {
-  person: '#FF6B6B',
-  car: '#4ECDC4',
-  truck: '#45B7D1',
-  bus: '#96CEB4',
-  motorcycle: '#FFEAA7',
-  bicycle: '#DDA0DD',
-  dog: '#F4A460',
-  cat: '#FFB6C1',
-}
 
 /** 字符串 hash（用于已命名目标的稳定着色） */
 function nameHash(name: string): number {

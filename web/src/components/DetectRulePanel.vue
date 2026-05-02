@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import { useToast } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 
 /** ROI 区域 */
 interface RoiItem {
@@ -330,6 +331,7 @@ async function toggleRule(rule: DetectRule) {
 
 /** 删除规则 */
 async function deleteRule(id: number) {
+  if (!await confirmDialog(t('alert.confirmDelete'))) return
   try {
     await authFetch(`/api/detect-rules/${id}`, { method: 'DELETE' })
     loadRules()

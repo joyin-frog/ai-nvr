@@ -70,6 +70,14 @@ const filterCamera = ref('')
 const filterDate = ref('')
 /** 搜索关键词 */
 const filterSearch = ref('')
+/** 搜索防抖定时器 */
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 搜索输入防抖（300ms） */
+function onSearchInput() {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(loadHistory, 300)
+}
 /** 快速时间范围（空=全部, '1h'=最近1小时, '24h'=最近24小时） */
 const filterRange = ref('')
 /** 当前展开的事件 ID */
@@ -646,7 +654,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
       <input
         type="text"
         v-model="filterSearch"
-        @change="loadHistory"
+        @input="onSearchInput"
         class="filter-search"
         :placeholder="t('event.searchPlaceholder')"
         :title="t('event.search')"

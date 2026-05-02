@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import { useToast } from '../composables/useToast'
+import { confirmDialog } from '../composables/useConfirm'
 
 /** 告警规则 */
 /** ROI 区域 */
@@ -286,6 +287,7 @@ async function toggleRule(rule: AlertRule) {
 
 /** 删除规则 */
 async function deleteRule(id: number) {
+  if (!await confirmDialog(t('alert.confirmDelete'))) return
   try {
     await authFetch(`/api/alerts/rules/${id}`, { method: 'DELETE' })
     loadRules()
@@ -412,7 +414,10 @@ defineExpose({ loadAlerts, addAlert })
       </div>
       <div class="form-field">
         <label>{{ t('alert.cameraFilter') }}</label>
-        <input v-model="form.cameraId" :placeholder="t('alert.cameraPlaceholder')" class="input" />
+        <select v-model="form.cameraId" class="input">
+          <option value="">{{ t('alert.cameraPlaceholder') }}</option>
+          <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name || cam.id }}</option>
+        </select>
       </div>
       <div class="form-field" v-if="showLabelFields">
         <label>{{ t('alert.labelFilter') }}</label>

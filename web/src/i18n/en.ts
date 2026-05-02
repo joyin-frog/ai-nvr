@@ -330,6 +330,7 @@ export default {
     exportCsv: 'Export CSV',
     saveFailed: 'Operation failed, please retry',
     deleteFailed: 'Delete failed, please retry',
+    confirmDelete: 'Confirm delete? This cannot be undone.',
   },
   detectRule: {
     title: 'Detect Rules',

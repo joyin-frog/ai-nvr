@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+import { confirmDialog } from '../composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -184,6 +185,7 @@ async function toggleBoolValue(state: StateDef) {
 }
 
 async function deleteState(id: number) {
+  if (!await confirmDialog(t('alert.confirmDelete'))) return
   await authFetch(`/api/states/${id}`, { method: 'DELETE' })
   await loadStates()
 }

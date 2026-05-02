@@ -332,6 +332,7 @@ export default {
     exportCsv: '导出 CSV',
     saveFailed: '操作失败，请重试',
     deleteFailed: '删除失败，请重试',
+    confirmDelete: '确认删除？此操作不可恢复。',
   },
   detectRule: {
     title: '检测规则',
