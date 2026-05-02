@@ -101,6 +101,7 @@ export default {
     viewRecording: 'View Recording',
     noEvents: 'No events',
     loadMore: 'Load More',
+    truncatedHint: '{total} events total, showing latest {shown}',
     refresh: 'Refresh',
     timelineTitle: "Today's Events",
     hourEvents: '{hour}:00 - {count} events',

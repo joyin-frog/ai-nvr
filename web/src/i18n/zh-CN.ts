@@ -101,6 +101,7 @@ export default {
     viewRecording: '查看录像',
     noEvents: '暂无事件',
     loadMore: '加载更多',
+    truncatedHint: '共 {total} 条事件，当前显示最新 {shown} 条',
     refresh: '刷新',
     timelineTitle: '今日事件分布',
     hourEvents: '{hour}:00 - {count} 个事件',

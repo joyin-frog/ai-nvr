@@ -59,6 +59,8 @@ interface EventItem {
 
 const events = ref<EventItem[]>([])
 const PAGE_SIZE = 50
+/** DOM 渲染上限：超过此数量时只渲染最新的事件，防止 DOM 膨胀 */
+const MAX_RENDER_EVENTS = 200
 const loading = ref(false)
 const hasMore = ref(false)
 const filterType = ref('')
@@ -216,10 +218,11 @@ function switchToGallery() {
   loadSnapshots()
 }
 
-/** 排序后的事件列表 */
+/** 排序后的事件列表（限制 DOM 渲染上限） */
 const sortedEvents = computed(() => {
-  if (sortDesc.value) return events.value
-  return [...events.value].reverse()
+  const list = sortDesc.value ? events.value : [...events.value].reverse()
+  if (list.length <= MAX_RENDER_EVENTS) return list
+  return list.slice(0, MAX_RENDER_EVENTS)
 })
 
 const props = defineProps<{
@@ -785,6 +788,9 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
           </div>
         </div>
       </div>
+      <div v-if="events.length > MAX_RENDER_EVENTS" class="truncated-hint">
+        {{ t('event.truncatedHint', { total: events.length, shown: MAX_RENDER_EVENTS }) }}
+      </div>
       <div v-if="hasMore" ref="loadMoreSentinel" class="load-more">
         <button class="load-more-btn" @click="loadMore" :disabled="loading">
           {{ loading ? t('app.loading') : t('event.loadMore') }}
@@ -1255,6 +1261,13 @@ defineExpose({ addEvent, addDetectEvent, loadHistory })
 
 .play-btn:hover {
   opacity: 0.85;
+}
+
+.truncated-hint {
+  padding: 8px;
+  text-align: center;
+  color: #888;
+  font-size: 12px;
 }
 
 .load-more {
