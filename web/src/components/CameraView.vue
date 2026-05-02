@@ -1103,8 +1103,9 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
     /** 绘制标签背景和文字 */
     /** 有自定义名称时简化显示（名称 + 置信度），无名称时显示完整信息 + 右键提示 */
-    /** semanticLabel（CLIP 分类）优先于原始 label */
-    const displayLabel = d.semanticLabel || d.label
+    /** semanticLabel（CLIP 分类）优先于原始 label，去掉 "a " 前缀使标签更紧凑 */
+    const rawSemantic = d.semanticLabel || d.label
+    const displayLabel = rawSemantic.startsWith('a ') ? rawSemantic.slice(2) : rawSemantic
     /** 停留时间后缀（超过 5 秒才显示） */
     let dwellSuffix = ''
     if (tid) {
@@ -1396,6 +1397,18 @@ const namingError = ref('')
 const namingSuggestion = computed(() => {
   if (!namingBox.value) return null
   return getMatchSuggestionForTrack(props.cameraId, namingBox.value.trackId)
+})
+
+/** 当前命名目标的 CLIP 语义标签（作为快速命名建议） */
+const namingSemanticLabel = computed(() => {
+  if (!namingBox.value) return null
+  const dets = takeDetections(props.cameraId)
+  if (!dets) return null
+  const det = dets.find(d => d.trackId === namingBox.value!.trackId)
+  if (!det?.semanticLabel) return null
+  /** 去掉 "a " 前缀，首字母大写 */
+  const raw = det.semanticLabel.startsWith('a ') ? det.semanticLabel.slice(2) : det.semanticLabel
+  return raw.charAt(0).toUpperCase() + raw.slice(1)
 })
 
 const namingPopupStyle = computed(() => {
@@ -1954,6 +1967,10 @@ onUnmounted(() => {
           <button v-if="namingSuggestion && namingName !== namingSuggestion" class="naming-suggest-btn" @click="namingName = namingSuggestion!">
             ≈ {{ namingSuggestion }}
           </button>
+          <!-- CLIP 语义标签建议：一键使用 AI 描述作为名称 -->
+          <button v-if="namingSemanticLabel && namingName !== namingSemanticLabel" class="naming-suggest-btn semantic" @click="namingName = namingSemanticLabel!">
+            AI: {{ namingSemanticLabel }}
+          </button>
           <input
             ref="namingInput"
             v-model="namingName"
@@ -2371,6 +2388,14 @@ onUnmounted(() => {
 }
 .naming-suggest-btn:hover {
   background: rgba(156, 39, 176, 0.4);
+}
+.naming-suggest-btn.semantic {
+  background: rgba(33, 150, 243, 0.2);
+  border-color: rgba(33, 150, 243, 0.5);
+  color: #90CAF9;
+}
+.naming-suggest-btn.semantic:hover {
+  background: rgba(33, 150, 243, 0.35);
 }
 
 .naming-input {
