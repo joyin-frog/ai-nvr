@@ -27,6 +27,8 @@ interface TrackInfo {
   eventCount?: number
   /** 当前是否活跃（前端计算） */
   _active?: boolean
+  /** 语义搜索匹配分数（0-1） */
+  searchScore?: number
 }
 
 /** 主色调名称 → 显示颜色 */
@@ -604,6 +606,7 @@ defineExpose({ loadTracks, selectTrack })
               </span>
               <span v-if="track.customName" class="track-original-label">{{ track.label }}</span>
               <span v-if="track.semanticLabel" class="track-semantic-label">{{ track.semanticLabel }}</span>
+              <span v-if="track.searchScore" class="track-search-score">{{ (track.searchScore * 100).toFixed(0) }}%</span>
               <!-- dHash 匹配建议：一键应用 -->
               <button
                 v-if="!track.customName && suggestions.get(track.trackId)"
@@ -960,6 +963,13 @@ defineExpose({ loadTracks, selectTrack })
   color: #9c27b0;
   font-size: 10px;
   font-style: italic;
+  margin-left: 4px;
+}
+
+.track-search-score {
+  color: #4ECDC4;
+  font-size: 10px;
+  font-weight: 600;
   margin-left: 4px;
 }
 
