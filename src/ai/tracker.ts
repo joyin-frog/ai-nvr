@@ -22,6 +22,10 @@ export interface TrackedObject {
   lastMatched: number;
   /** 标签投票计数 */
   labelVotes: Map<string, number>;
+  /** 是否为候选追踪（未达到 minHits 确认帧数） */
+  tentative: boolean;
+  /** 连续匹配计数（用于 tentative → confirmed 判定） */
+  hitCount: number;
 }
 
 /** 追踪结果（带 trackId 的检测结果） */
@@ -77,6 +81,8 @@ export class ObjectTracker {
   private iouThreshold: number;
   /** 新建追踪的置信度阈值 */
   private newTrackThreshold: number;
+  /** 候选追踪需要连续匹配的帧数才能确认 */
+  private minHits: number;
   /** 当前帧序号 */
   private frameIndex = 0;
   /** 最近消失的 track 元数据（用于外观恢复） */
@@ -90,11 +96,14 @@ export class ObjectTracker {
     newTrackThreshold?: number;
     /** ghost tracks 保留帧数（默认 120，约 16 秒） */
     ghostTtl?: number;
+    /** 候选追踪确认所需连续匹配帧数（默认 3） */
+    minHits?: number;
   }) {
     this.maxLost = options?.maxLost ?? 15;
     this.iouThreshold = options?.iouThreshold ?? 0.2;
     this.newTrackThreshold = options?.newTrackThreshold ?? 0.5;
     this.ghostTtl = options?.ghostTtl ?? 120;
+    this.minHits = options?.minHits ?? 3;
   }
 
   /**
@@ -116,7 +125,7 @@ export class ObjectTracker {
       this.tracks.filter(t => this.frameIndex - t.lastMatched <= 2).map(t => t.trackId),
     );
 
-    /** 第一帧：全部创建新追踪 */
+    /** 第一帧：全部创建新追踪（均为 tentative） */
     if (this.tracks.length === 0) {
       for (const det of highDets) {
         const votes = new Map<string, number>();
@@ -132,9 +141,10 @@ export class ObjectTracker {
           age: 1,
           lastMatched: this.frameIndex,
           labelVotes: votes,
+          tentative: true,
+          hitCount: 1,
         };
         this.tracks.push(track);
-        results.push({ ...det, trackId: track.trackId });
       }
       return { detections: results, appeared, disappeared };
     }
@@ -209,13 +219,22 @@ export class ObjectTracker {
       track.label = bestLabel;
       track.age++;
       track.lastMatched = this.frameIndex;
-      results.push({
-        label: track.label,
-        score: track.score,
-        box: { ...track.box },
-        trackId: track.trackId,
-        velocity: { dx: track.velocity.dx, dy: track.velocity.dy },
-      });
+      track.hitCount++;
+      /** tentative → confirmed：连续匹配达到 minHits 后确认 */
+      if (track.tentative && track.hitCount >= this.minHits) {
+        track.tentative = false;
+        appeared.push({ trackId: track.trackId, label: track.label, score: track.score, box: track.box });
+      }
+      /** 只有确认的追踪才输出到结果 */
+      if (!track.tentative) {
+        results.push({
+          label: track.label,
+          score: track.score,
+          box: { ...track.box },
+          trackId: track.trackId,
+          velocity: { dx: track.velocity.dx, dy: track.velocity.dy },
+        });
+      }
     }
 
     /** 未匹配的检测 → 新建追踪（尝试从 ghost tracks 恢复） */
@@ -262,18 +281,29 @@ export class ObjectTracker {
         age: 1,
         lastMatched: this.frameIndex,
         labelVotes: votes,
+        tentative: true,
+        hitCount: 1,
       };
       this.tracks.push(track);
-      results.push({ ...det, trackId: track.trackId });
-      appeared.push({ trackId: track.trackId, label: track.label, score: track.score, box: track.box });
+      /** ghost 恢复的追踪立即确认 */
+      if (recoveredId > 0) {
+        track.tentative = false;
+        track.hitCount = this.minHits;
+        results.push({ ...det, trackId: track.trackId });
+        appeared.push({ trackId: track.trackId, label: track.label, score: track.score, box: track.box });
+      }
     }
 
     /** 清理丢失太久的追踪，记录消失的目标 */
     this.tracks = this.tracks.filter(t => {
       const lost = this.frameIndex - t.lastMatched;
+      /** tentative 追踪丢失 1 帧即删除（不触发事件、不进 ghost） */
+      if (t.tentative && lost > 1) {
+        return false;
+      }
       if (lost > this.maxLost) {
-        /** 只记录之前活跃的追踪消失 */
-        if (prevActiveIds.has(t.trackId)) {
+        /** 只记录之前活跃的确认追踪消失 */
+        if (!t.tentative && prevActiveIds.has(t.trackId)) {
           disappeared.push({ trackId: t.trackId, label: t.label });
           /** 移入 ghost tracks 用于位置恢复 */
           this.ghostTracks.push({
