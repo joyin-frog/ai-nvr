@@ -422,6 +422,11 @@ function cleanupTrails() {
 let sortedDetectionsCache: Detection[] = []
 let sortedDetectionsDirty = true
 
+/** 消失目标的淡出状态（trackId → 最后位置 + 消失时间） */
+const fadeOutBoxes = new Map<number, { box: { xmin: number; ymin: number; xmax: number; ymax: number }; color: string; startTime: number }>()
+/** 淡出持续时间 ms */
+const FADE_OUT_DURATION = 500
+
 /**
  * 检测框 EMA 平滑 + 速度插值
  * 维护每个 trackId 的当前显示位置，新检测到达时按 EMA 系数平滑过渡
@@ -452,6 +457,8 @@ function updateSmoothedBoxes(detections: Detection[]) {
   for (const d of detections) {
     if (d.trackId == null) continue
     activeIds.add(d.trackId)
+    /** 目标重新出现，清除淡出状态 */
+    fadeOutBoxes.delete(d.trackId)
     /** 记录速度向量 */
     if (d.velocity) {
       trackVelocities.set(d.trackId, d.velocity)
@@ -468,12 +475,20 @@ function updateSmoothedBoxes(detections: Detection[]) {
       smoothedBoxes.set(d.trackId, { ...d.box })
     }
   }
-  /** 清除已消失的目标 */
+  /** 已消失的目标移入淡出队列 */
+  const now = Date.now()
   for (const id of smoothedBoxes.keys()) {
     if (!activeIds.has(id)) {
+      const box = smoothedBoxes.get(id)!
+      const color = getColor('', id)
+      fadeOutBoxes.set(id, { box, color: color.stroke, startTime: now })
       smoothedBoxes.delete(id)
       trackVelocities.delete(id)
     }
+  }
+  /** 清理过期的淡出目标 */
+  for (const [id, state] of fadeOutBoxes) {
+    if (now - state.startTime > FADE_OUT_DURATION) fadeOutBoxes.delete(id)
   }
 }
 
@@ -1041,6 +1056,31 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     }
     ctx.textAlign = 'start'
     ctx.textBaseline = 'bottom'
+  }
+
+  /** 绘制消失目标的淡出框（即使无活跃目标也需要绘制） */
+  if (fadeOutBoxes.size > 0) {
+    const now = Date.now()
+    for (const [id, state] of fadeOutBoxes) {
+      const elapsed = now - state.startTime
+      const alpha = Math.max(0, 1 - elapsed / FADE_OUT_DURATION)
+      if (alpha <= 0) continue
+      const { box, color } = state
+      const x = box.xmin * width
+      const y = box.ymin * height
+      const w = (box.xmax - box.xmin) * width
+      const h = (box.ymax - box.ymin) * height
+      ctx.globalAlpha = alpha * 0.6
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      const r = Math.min(4, w / 4, h / 4)
+      ctx.roundRect(x, y, w, h, r)
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
+    ctx.setLineDash([])
   }
 
   if (sorted.length === 0) return
