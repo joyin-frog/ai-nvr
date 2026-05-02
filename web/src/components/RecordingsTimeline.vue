@@ -35,6 +35,7 @@ const EVENT_MARKER_COLORS: Record<string, string> = {
   'track:loiter': '#8d6e63',
   'track:speed': '#e91e63',
   'track:line-cross': '#00bcd4',
+  'track:approach': '#e91e63',
   'track:appeared': '#66bb6a',
   'track:disappeared': '#ef5350',
 }
@@ -78,10 +79,14 @@ const now = ref(Date.now())
 
 onMounted(() => {
   refreshTimer = setInterval(() => { now.value = Date.now() }, 60_000)
+  document.addEventListener('mousemove', onTimelineDragMove)
+  document.addEventListener('mouseup', onTimelineDragEnd)
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  document.removeEventListener('mousemove', onTimelineDragMove)
+  document.removeEventListener('mouseup', onTimelineDragEnd)
 })
 
 /** 可用日期列表（从录像中提取） */
@@ -347,6 +352,44 @@ function onTimelineWheel(e: WheelEvent) {
   }
 }
 
+/** 拖拽平移时间轴 */
+let dragging = false
+let dragStartX = 0
+let dragMoved = false
+function onTimelineDragStart(e: MouseEvent) {
+  if (e.button !== 0) return
+  dragging = true
+  dragStartX = e.clientX
+  dragMoved = false
+}
+function onTimelineDragMove(e: MouseEvent) {
+  if (!dragging || !timelineEl.value) return
+  const bar = timelineEl.value
+  const rect = bar.getBoundingClientRect()
+  const dx = e.clientX - dragStartX
+  const threshold = rect.width * 0.3
+  if (Math.abs(dx) > 5) dragMoved = true
+  if (dx > threshold) {
+    dragStartX = e.clientX
+    prevPeriod()
+  } else if (dx < -threshold) {
+    dragStartX = e.clientX
+    nextPeriod()
+  }
+}
+function onTimelineDragEnd() {
+  if (!dragging) return
+  dragging = false
+}
+
+/** 点击定位（拖拽时不触发） */
+function onTimelineClickCapture(e: MouseEvent) {
+  if (dragMoved) {
+    e.stopPropagation()
+    dragMoved = false
+  }
+}
+
 /** 格式化日期标签 */
 const dateLabel = computed(() => {
   if (viewMode.value === 'day') {
@@ -387,7 +430,7 @@ function onEventMarkerClick(timestamp: number) {
     </div>
 
     <!-- 时间轴 -->
-    <div class="timeline-bar" ref="timelineEl" @click="onTimelineClick">
+    <div class="timeline-bar" ref="timelineEl" @click.capture="onTimelineClickCapture" @click="onTimelineClick" @mousedown.prevent="onTimelineDragStart" style="cursor: grab">
       <!-- 刻度标签 -->
       <div class="ticks">
         <div v-for="tick in tickLabels" :key="tick.label" class="tick" :style="{ left: tick.position + '%' }">
