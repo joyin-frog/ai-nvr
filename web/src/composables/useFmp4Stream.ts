@@ -342,12 +342,17 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       sourceBuffer.appendBuffer(data)
     } catch (e) {
       appending = false
-      /** QuotaExceeded: 清理缓冲区后重试 */
+      /** QuotaExceeded: 清理全部缓冲区后重试当前段 */
       if (sourceBuffer && e instanceof DOMException && e.name === 'QuotaExceededError') {
-        console.warn('[fMP4] QuotaExceeded，清理缓冲区')
-        pruneBuffer(sourceBuffer.buffered, 0)
-        /** 丢弃待处理队列，等待新段 */
-        pendingQueue = []
+        console.warn('[fMP4] QuotaExceeded，清理缓冲区并重试')
+        /** 清理全部已缓冲数据 */
+        if (!sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
+          try {
+            sourceBuffer.remove(sourceBuffer.buffered.start(0), sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1))
+          } catch { /* ignore */ }
+        }
+        /** 丢弃待处理队列，等待清理完成后重试当前段 */
+        pendingQueue = [data]
       }
     }
   }
