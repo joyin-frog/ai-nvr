@@ -95,6 +95,16 @@ interface RuntimeSettings {
     speedThreshold: number
     loiterThreshold: number
     importantLabels: string[]
+    llm: {
+      enabled: boolean
+      apiUrl: string
+      model: string
+      maxTokens: number
+      interval: number
+      imageWidth: number
+      systemPrompt: string
+      triggers: string[]
+    }
   }
   recording: {
     mode: string
@@ -465,6 +475,50 @@ onMounted(() => {
           <span class="field-label">{{ t('settings.aiInterval') }}</span>
           <input type="number" v-model.number="settings.ai.interval" step="100" min="200" max="60000" class="input" />
         </label>
+      </section>
+
+      <!-- 多模态 LLM -->
+      <section class="section">
+        <h3>{{ t('settings.llmTitle', '多模态 LLM') }}</h3>
+        <p class="section-desc">{{ t('settings.llmDesc', '启用后，AI 检测到重要事件时会将关键帧发送给多模态 LLM 生成场景描述。') }}</p>
+        <label class="field">
+          <span class="field-label">{{ t('settings.llmEnabled', '启用') }}</span>
+          <input type="checkbox" v-model="settings.ai.llm.enabled" class="checkbox" />
+        </label>
+        <template v-if="settings.ai.llm.enabled">
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmApiUrl', 'API 端点') }}</span>
+            <input type="url" v-model="settings.ai.llm.apiUrl" placeholder="http://localhost:1234/v1/chat/completions" class="input" />
+            <span class="field-hint">OpenAI 兼容格式（LM Studio / Ollama / vLLM）</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmModel', '模型名称') }}</span>
+            <input type="text" v-model="settings.ai.llm.model" placeholder="qwen3.5-0.8b" class="input" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmInterval', '分析间隔 (ms)') }}</span>
+            <input type="number" v-model.number="settings.ai.llm.interval" step="1000" min="3000" max="120000" class="input" />
+            <span class="field-hint">每个摄像头独立节流</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmImageWidth', '图片缩放宽度') }}</span>
+            <input type="number" v-model.number="settings.ai.llm.imageWidth" step="64" min="0" max="1920" class="input" />
+            <span class="field-hint">0=使用检测帧原始分辨率，建议 640</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmMaxTokens', '最大 Token') }}</span>
+            <input type="number" v-model.number="settings.ai.llm.maxTokens" step="10" min="30" max="1000" class="input" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmSystemPrompt', '系统提示词') }}</span>
+            <textarea v-model="settings.ai.llm.systemPrompt" class="input textarea" rows="3" :placeholder="'留空使用默认提示词'"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('settings.llmTriggers', '触发事件') }}</span>
+            <input type="text" :value="settings.ai.llm.triggers?.join(', ') ?? ''" @change="settings.ai.llm.triggers = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
+            <span class="field-hint">track:appeared, track:enter-zone, track:loiter</span>
+          </label>
+        </template>
       </section>
 
       <!-- 录像 -->
@@ -1102,6 +1156,18 @@ onMounted(() => {
 .field-hint {
   font-size: 11px;
   color: #666;
+}
+
+.section-desc {
+  font-size: 12px;
+  color: #888;
+  margin: 0 0 8px 0;
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
 }
 
 .sound-event-chips {
