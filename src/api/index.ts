@@ -143,15 +143,16 @@ export function startServer(
     return msg;
   }
 
-  /** 缓存最近编码的 media segment（避免 N 客户端重复编码） */
-  let cachedMediaMsg: { dataPtr: Buffer; encoded: Buffer } | null = null;
+  /** 缓存最近编码的 media segment（按摄像头分区，避免多摄像头互相覆盖） */
+  const cachedMediaByCamera = new Map<string, { dataPtr: Buffer; encoded: Buffer }>();
 
-  function getOrEncodeMedia(data: Buffer): Buffer {
-    if (cachedMediaMsg && cachedMediaMsg.dataPtr === data) {
-      return cachedMediaMsg.encoded;
+  function getOrEncodeMedia(cameraId: string, data: Buffer): Buffer {
+    const cached = cachedMediaByCamera.get(cameraId);
+    if (cached && cached.dataPtr === data) {
+      return cached.encoded;
     }
     const encoded = encodeFmp4Media(data);
-    cachedMediaMsg = { dataPtr: data, encoded };
+    cachedMediaByCamera.set(cameraId, { dataPtr: data, encoded });
     return encoded;
   }
 
@@ -173,7 +174,7 @@ export function startServer(
 
     /** 发送缓存的最近 media segment（立即显示画面，消除黑屏等待） */
     if (extractor.lastMediaSegment) {
-      ws.send(getOrEncodeMedia(extractor.lastMediaSegment));
+      ws.send(getOrEncodeMedia(cameraId, extractor.lastMediaSegment));
     }
 
     /** 监听新的 init segment */
@@ -187,7 +188,7 @@ export function startServer(
     /** 监听 media segment */
     const unsubSeg = bus.on("fmp4:segment", (payload) => {
       if (payload.cameraId === cameraId) {
-        ws.send(getOrEncodeMedia(payload.data));
+        ws.send(getOrEncodeMedia(cameraId, payload.data));
       }
     });
     unsubs.push(unsubSeg);
