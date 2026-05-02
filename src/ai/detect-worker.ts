@@ -155,9 +155,14 @@ async function detect(req: DetectRequest): Promise<void> {
 
     result.detections = filtered;
 
-    /** 指纹 */
+    /** 指纹（包含位置量化，避免目标移动但标签不变时误判为无变化） */
     result.fingerprint = filtered.length === 0 ? ""
-      : filtered.map(d => `${d.label}:${d.score.toFixed(2)}`).sort().join("|");
+      : filtered.map(d => {
+        /** 检测框中心量化到 5% 网格，位置变化超过 5% 才算变化 */
+        const cx = ((d.box.xmin + d.box.xmax) / 2 * 20) | 0;
+        const cy = ((d.box.ymin + d.box.ymax) / 2 * 20) | 0;
+        return `${d.label}:${cx},${cy}`;
+      }).sort().join("|");
   } catch (err) {
     result.error = err instanceof Error ? err.message : String(err);
   }
