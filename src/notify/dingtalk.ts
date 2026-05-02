@@ -92,38 +92,43 @@ export class DingTalkNotifier {
     } else if (event === "track:appeared") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
+      const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const score = payload.score as number | undefined;
-      const displayName = trackName ?? trackLabel ?? "目标";
+      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"}${score ? ` (${(score * 100).toFixed(0)}%)` : ""}`;
     } else if (event === "track:disappeared") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
+      const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
-      const displayName = trackName ?? trackLabel ?? "目标";
+      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"}`;
     } else if (event === "track:enter-zone" || event === "track:leave-zone") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
+      const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const zoneName = payload.zoneName as string | undefined;
-      const displayName = trackName ?? trackLabel ?? "目标";
+      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       const arrow = event === "track:enter-zone" ? "→" : "←";
       body = `${displayName} #${trackId ?? "?"} ${arrow} ${zoneName ?? "?"}`;
     } else if (event === "track:dwell") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
+      const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const zoneName = payload.zoneName as string | undefined;
       const dwellMs = payload.dwellMs as number | undefined;
-      const displayName = trackName ?? trackLabel ?? "目标";
+      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"} 在 ${zoneName ?? "?"} 停留 ${dwellMs ? `${(dwellMs / 1000).toFixed(0)}s` : "?"}`;
     } else if (event === "track:speed") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
+      const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const speed = payload.speed as number | undefined;
-      const displayName = trackName ?? trackLabel ?? "目标";
+      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)`;
     }
 

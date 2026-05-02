@@ -73,14 +73,17 @@ export class WebhookNotifier {
       detail.trackId = payload.trackId;
       detail.score = payload.score;
       detail.trackName = payload.trackName;
+      if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
     } else if (event === "track:disappeared") {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
       detail.trackName = payload.trackName;
+      if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
     } else if (event === "track:enter-zone" || event === "track:leave-zone") {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
       detail.trackName = payload.trackName;
+      if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
       detail.zoneId = payload.zoneId;
       detail.zoneName = payload.zoneName;
       if (payload.dwellMs !== undefined) detail.dwellMs = payload.dwellMs;
@@ -88,6 +91,7 @@ export class WebhookNotifier {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
       detail.trackName = payload.trackName;
+      if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
       detail.zoneId = payload.zoneId;
       detail.zoneName = payload.zoneName;
       detail.dwellMs = payload.dwellMs;
@@ -95,6 +99,7 @@ export class WebhookNotifier {
       detail.label = payload.label;
       detail.trackId = payload.trackId;
       detail.trackName = payload.trackName;
+      if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
       detail.speed = payload.speed;
     }
 
