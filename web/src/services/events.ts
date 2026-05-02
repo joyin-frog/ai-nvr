@@ -25,15 +25,15 @@ export interface EventMap {
   'camera:offline': { cameraId: string }
   'camera:lowfps': { cameraId: string; fps: number }
   alert: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }
-  'track:appeared': { cameraId: string; timestamp: number; trackId: number; label: string; score: number; trackName?: string }
-  'track:disappeared': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string }
+  'track:appeared': { cameraId: string; timestamp: number; trackId: number; label: string; score: number; trackName?: string; semanticLabel?: string }
+  'track:disappeared': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string }
   'track:label-updated': { cameraId: string; trackId: number; name: string }
-  'track:enter-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string }
-  'track:leave-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; dwellMs: number }
-  'track:dwell': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; dwellMs: number }
-  'track:speed': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; speed: number }
-  'track:line-cross': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; lineId: number; lineName: string; direction: string }
-  'track:loiter': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; zoneId: number; zoneName: string; durationMs: number }
+  'track:enter-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string }
+  'track:leave-zone': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string; dwellMs: number }
+  'track:dwell': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string; dwellMs: number }
+  'track:speed': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; speed: number }
+  'track:line-cross': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; lineId: number; lineName: string; direction: string }
+  'track:loiter': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string; durationMs: number }
   'track:match-suggest': { cameraId: string; timestamp: number; trackId: number; label: string; matches: Array<{ trackId: number; customName: string; distance: number }> }
   'llm:scene': { cameraId: string; timestamp: number; description: string; trigger: string; inferMs: number }
 }
