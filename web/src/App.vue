@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
@@ -22,13 +22,13 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const { t, locale } = useI18n()
 const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, warning: toastWarning } = useToast()
-const { getPref } = usePreferences()
+const { getPref, setPref } = usePreferences()
 
 /** 切换语言 */
 function toggleLocale() {
   const next = locale.value === 'zh-CN' ? 'en' : 'zh-CN'
   locale.value = next
-  localStorage.setItem('nvr-locale', next)
+  setPref('nvr-locale', next)
 }
 
 /** 摄像头状态 */
@@ -417,6 +417,10 @@ async function loadRoiData() {
     toastWarning('ROI ' + t('app.loadFailed'))
   }
 }
+
+/** 提供 ROI 和越线数据刷新函数给子组件 */
+provide('reloadRoi', loadRoiData)
+provide('reloadCrossLines', loadCrossLineData)
 
 /** 加载越线检测线段数据 */
 async function loadCrossLineData() {
