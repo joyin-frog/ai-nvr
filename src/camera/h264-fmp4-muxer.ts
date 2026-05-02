@@ -395,7 +395,7 @@ export class H264Fmp4Extractor {
           "-crf", "23",
           "-g", "2",
           "-keyint_min", "1",
-          "-x264-params", "bframes=0:nal-hrd=cbr",
+          "-x264-params", "bframes=0",
         ];
     }
   }

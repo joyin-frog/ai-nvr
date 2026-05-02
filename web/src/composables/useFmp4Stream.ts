@@ -47,7 +47,7 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
 const BUFFER_RETAIN_SECONDS = 0.2
 
 /** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 0.08
+const LIVE_CATCHUP_THRESHOLD = 0.04
 
 /** 延迟超过此值（秒）直接 seek 到最新（给渐进追赶留更多空间，减少跳帧） */
 const LIVE_SEEK_THRESHOLD = 0.5
@@ -144,12 +144,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
   /** 绑定 video 元素的关键事件 */
   function bindVideoEvents(el: HTMLVideoElement) {
-    /** 播放卡住时 seek 到最新位置（追赶直播） */
+    /** 播放卡住时立即 seek 到最新位置（不等待 rAF，减少 16ms 延迟） */
     const onWaiting = () => {
-      requestAnimationFrame(() => {
-        if (!videoRef.value || !sourceBuffer) return
-        catchUpToLive()
-      })
+      if (!videoRef.value || !sourceBuffer) return
+      catchUpToLive()
     }
 
     /** 解码错误时重连（通过 scheduleReconnect 带退避和上限） */
@@ -466,16 +464,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     if (wasAppending && videoRef.value && sourceBuffer && sourceBuffer.buffered.length > 0) {
       const video = videoRef.value
       const bufEnd = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
-      /** 取最新的 buffered range（最后一个 range 是最新 append 的数据） */
-      const lastRangeIdx = sourceBuffer.buffered.length - 1
-      const latestStart = sourceBuffer.buffered.start(lastRangeIdx)
-      const latestEnd = sourceBuffer.buffered.end(lastRangeIdx)
-      /** currentTime 落在最新 range 之外 → seek 到最新数据末尾附近 */
-      if (video.currentTime < latestStart || video.currentTime > latestEnd) {
-        const target = Math.max(latestStart, bufEnd - 0.1)
-        if (Math.abs(video.currentTime - target) > 0.1) {
-          video.currentTime = target
-        }
+      /** currentTime 落在缓冲区外 → seek 到最新数据末尾附近 */
+      if (video.currentTime < bufEnd - 2 || video.currentTime > bufEnd) {
+        video.currentTime = bufEnd - 0.05
       }
     }
 
@@ -486,10 +477,14 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       }).catch(() => { /* autoplay blocked */ })
     }
 
-    /** 更新视频分辨率 */
+    /** 分辨率变化时才更新（避免每帧触发 reactive set） */
     if (videoRef.value) {
-      videoWidth.value = videoRef.value.videoWidth
-      videoHeight.value = videoRef.value.videoHeight
+      const w = videoRef.value.videoWidth
+      const h = videoRef.value.videoHeight
+      if (w && h && (videoWidth.value !== w || videoHeight.value !== h)) {
+        videoWidth.value = w
+        videoHeight.value = h
+      }
     }
   }
 
