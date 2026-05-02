@@ -23,6 +23,8 @@ class JpegFrameSplitter {
   private frameSize = 0;
   /** 是否在帧内（已遇到 SOI） */
   private inFrame = false;
+  /** 单帧最大字节数（超过则丢弃当前帧，防止损坏流导致 OOM） */
+  private static readonly MAX_FRAME_SIZE = 20 * 1024 * 1024; // 20MB
 
   /** 处理一块数据，返回完整帧列表 */
   feed(data: Buffer): Buffer[] {
@@ -48,6 +50,15 @@ class JpegFrameSplitter {
 
   /** 在数据中搜索 EOI，提取完整帧 */
   private scanForEoi(data: Buffer, frames: Buffer[]): Buffer[] {
+    /** 帧大小保护：超过上限说明流已损坏，丢弃当前帧重新同步 */
+    if (this.frameSize + data.length > JpegFrameSplitter.MAX_FRAME_SIZE) {
+      this.frameChunks = [];
+      this.frameSize = 0;
+      this.inFrame = false;
+      /** 在当前数据块中重新搜索 SOI */
+      return this.feed(data);
+    }
+
     const eoiPos = data.indexOf(EOI);
     if (eoiPos === -1) {
       /** 没有 EOI，整块数据属于当前帧 */
