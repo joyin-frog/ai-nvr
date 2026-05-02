@@ -8,9 +8,11 @@ const emit = defineEmits<{
 }>()
 import { authFetch } from '../services/auth'
 import { usePreferences } from '../composables/usePreferences'
+import { useToast } from '../composables/useToast'
 
 const { t } = useI18n()
 const { setPref, getPref } = usePreferences()
+const toast = useToast()
 
 /** 后端地址 */
 const backendUrlInput = ref(getBackendUrl())
@@ -199,10 +201,10 @@ async function reloadModel() {
       success.value = true
       setTimeout(() => { success.value = false }, 2000)
     } else {
-      alert(t('settings.modelLoadFailed', { error: result.error ?? 'Unknown' }))
+      toast.error(t('settings.modelLoadFailed', { error: result.error ?? 'Unknown' }))
     }
   } catch {
-    alert(t('settings.modelLoadError'))
+    toast.error(t('settings.modelLoadError'))
   } finally {
     modelReloading.value = false
   }
@@ -283,7 +285,7 @@ async function runCleanup() {
     if (res.ok) {
       const report = await res.json()
       const total = (report.events ?? 0) + (report.alerts ?? 0) + (report.snapshots ?? 0)
-      alert(t('settings.cleanupDone', { count: total }))
+      toast.success(t('settings.cleanupDone', { count: total }))
     }
     loadCleanupStats()
   } catch {
