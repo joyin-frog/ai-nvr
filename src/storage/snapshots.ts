@@ -64,7 +64,10 @@ export class SnapshotStorage {
       }));
     }
 
-    console.log(`[Snapshot] 已保存: ${cameraId}/${filename} (${frameImage.length} bytes)`);
+    /** 仅 DEBUG 模式打印快照保存日志 */
+    if (process.env.DEBUG) {
+      console.log(`[Snapshot] 已保存: ${cameraId}/${filename} (${frameImage.length} bytes)`);
+    }
     return `${cameraId}/${filename}`;
   }
 

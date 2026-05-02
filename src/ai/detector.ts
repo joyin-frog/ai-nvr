@@ -726,8 +726,11 @@ export class AiDetector {
         changed,
         inferMs: result.inferMs,
       });
-      const trackIds = trackResult.detections.map(d => `${d.label}#${d.trackId}`).join(", ");
-      console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
+      /** 只在有目标或推理耗时异常（>500ms）时打印性能日志，减少空检测噪声 */
+      if (trackResult.detections.length > 0 || result.inferMs > 500) {
+        const trackIds = trackResult.detections.map(d => `${d.label}#${d.trackId}`).join(", ");
+        console.log(`[Perf][AI][${cameraId}] ${trackResult.detections.length} 目标 (${trackIds || "-"}), infer=${result.inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms`);
+      }
     } catch (err) {
       console.error(`[AiDetector] 检测失败:`, err);
     }
