@@ -19,6 +19,11 @@ const LABEL_COLORS: Record<string, string> = {
 /** 默认颜色 */
 const DEFAULT_COLOR = "#FF4444";
 
+/** XML 转义（防止 SVG 注入） */
+function xmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 /**
  * 图片标注器
  * 在 JPEG 图片上画检测框 + 标签文字
@@ -81,7 +86,7 @@ export class Annotator {
       const strokeDash = det.trackName ? "" : ' stroke-dasharray="6 3"';
       const strokeWidth = det.trackName ? 4 : 2;
       svgElements.push(
-        `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="none" stroke="${color}" stroke-width="${strokeWidth}"${strokeDash}/>`,
+        `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="none" stroke="${xmlEscape(color)}" stroke-width="${strokeWidth}"${strokeDash}/>`,
       );
 
       /** 标签：优先显示自定义名称，否则显示 #trackId label */
@@ -101,10 +106,10 @@ export class Annotator {
       const labelY = py > textHeight + 2 ? py - textHeight : py + ph;
 
       svgElements.push(
-        `<rect x="${px}" y="${labelY}" width="${textWidth}" height="${textHeight}" fill="${color}" opacity="0.85"/>`,
+        `<rect x="${px}" y="${labelY}" width="${textWidth}" height="${textHeight}" fill="${xmlEscape(color)}" opacity="0.85"/>`,
       );
       svgElements.push(
-        `<text x="${px + 4}" y="${labelY + fontSize + 1}" fill="white" font-size="${fontSize}" font-family="sans-serif" font-weight="bold">${labelText}</text>`,
+        `<text x="${px + 4}" y="${labelY + fontSize + 1}" fill="white" font-size="${fontSize}" font-family="sans-serif" font-weight="bold">${xmlEscape(labelText)}</text>`,
       );
     }
 
