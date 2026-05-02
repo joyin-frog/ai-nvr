@@ -867,17 +867,20 @@ class VideoToFmp4Muxer {
     /** 直接写入 traf/moof，减少中间 concat */
     const tfhdLen = tfhd.length;
     const tfdtLen = tfdt.length;
-    const trunLen = trun.length;
-    const trafPayloadLen = tfhdLen + tfdtLen + trunLen;
     const traf = this.box("traf", tfhd, tfdt, trun);
 
     const mfhdLen = mfhd.length;
     const moof = this.box("moof", mfhd, traf);
 
     const moofSize = moof.length;
-    /** data_offset 在 trun 中的位置 */
-    const dataOffsetPos = 8 + 8 + mfhdLen + 8 + 8 + trafPayloadLen - trunLen + 12 + 4;
-    moof.writeUInt32BE(moofSize + 8, dataOffsetPos);
+    /**
+     * trun 中 data_offset 字段的位置（从 moof 开头算）
+     * moof[8字节头][mfhd][traf[8字节头][tfhd][tfdt][trun[8字节头][4字节vf][4字节sampleCount][4字节data_offset]]]]
+     */
+    const dataOffsetPos = 8 + mfhdLen + 8 + tfhdLen + tfdtLen + 8 + 4 + 4;
+    if (dataOffsetPos + 4 <= moofSize) {
+      moof.writeUInt32BE(moofSize + 8, dataOffsetPos);
+    }
 
     return Buffer.concat([moof, mdat]);
   }
