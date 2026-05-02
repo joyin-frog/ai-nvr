@@ -111,6 +111,11 @@ const overlayCanvas = ref<HTMLCanvasElement | null>(null)
 let overlayVfcId: number | null = null
 /** rAF fallback（浏览器不支持 requestVideoFrameCallback 时使用） */
 let overlayRafId: number | null = null
+/** overlay 是否需要重绘（检测结果或尺寸变化时标记为 dirty） */
+let overlayDirty = true
+/** 上次 overlay 绘制时的 canvas 尺寸（用于检测 resize） */
+let overlayLastW = 0
+let overlayLastH = 0
 
 /** MSE overlay 渲染：优先使用 requestVideoFrameCallback 与视频帧同步 */
 function startOverlayLoop() {
@@ -159,7 +164,14 @@ function drawOverlayOnce() {
   if (canvas.width !== canvasW || canvas.height !== canvasH) {
     canvas.width = canvasW
     canvas.height = canvasH
+    overlayDirty = true
   }
+
+  /** 尺寸未变且无新检测数据 → 跳过重绘 */
+  if (!overlayDirty && cssW === overlayLastW && cssH === overlayLastH) return
+  overlayLastW = cssW
+  overlayLastH = cssH
+  overlayDirty = false
 
   const ctx = canvas.getContext('2d')
   if (!ctx) return
@@ -169,6 +181,7 @@ function drawOverlayOnce() {
   /** poll 检测结果 */
   const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
   if (detectResult) {
+    overlayDirty = true
     consumedDetectVersion = detectResult.version
     localDetections = detectResult.detections
     updateSmoothedBoxes(localDetections)
@@ -1378,7 +1391,7 @@ function onCanvasContext(e: MouseEvent) {
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
 let longPressTarget: { trackId: number; label: string; x: number; y: number } | null = null
 
-function onTouchStart(e: TouchEvent) {
+function onTouchStartNaming(e: TouchEvent) {
   if (e.touches.length !== 1) return
   const touch = e.touches[0]!
   const sorted = getSortedDetections()
@@ -1409,11 +1422,11 @@ function onTouchStart(e: TouchEvent) {
   }, 600)
 }
 
-function onTouchMove() {
+function handleTouchMoveNaming() {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressTarget = null }
 }
 
-function onTouchEnd() {
+function handleTouchEndNaming() {
   if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; longPressTarget = null }
 }
 
@@ -1644,7 +1657,7 @@ let touchStartPanY = 0
 let touchStartClientX = 0
 let touchStartClientY = 0
 
-function onTouchStart(e: TouchEvent) {
+function handleTouchZoom(e: TouchEvent) {
   if (e.touches.length === 2) {
     /** 双指缩放开始 */
     e.preventDefault()
@@ -1662,7 +1675,13 @@ function onTouchStart(e: TouchEvent) {
   }
 }
 
-function onTouchMove(e: TouchEvent) {
+/** 统一触摸开始：同时处理缩放/平移和长按命名 */
+function onTouchStart(e: TouchEvent) {
+  handleTouchZoom(e)
+  onTouchStartNaming(e)
+}
+
+function handleTouchZoomMove(e: TouchEvent) {
   if (e.touches.length === 2) {
     /** 双指缩放 */
     e.preventDefault()
@@ -1684,9 +1703,17 @@ function onTouchMove(e: TouchEvent) {
   }
 }
 
+/** 统一触摸移动：同时处理缩放/平移和命名取消 */
+function onTouchMove(e: TouchEvent) {
+  handleTouchZoomMove(e)
+  handleTouchMoveNaming()
+}
+
+/** 统一触摸结束 */
 function onTouchEnd() {
   touchPanning = false
   touchStartDist = 0
+  handleTouchEndNaming()
 }
 
 /** 鼠标悬停检测框追踪 */

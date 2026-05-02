@@ -1183,7 +1183,6 @@ async function loadTimelineEvents() {
     }
 
     timelineEvents.value = allEvents
-    }
   } catch {
     timelineEvents.value = []
   }
