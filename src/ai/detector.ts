@@ -316,6 +316,16 @@ export class AiDetector {
     const baseInterval = this.runtimeConfig.getAiInterval(cameraId);
     const streak = this.emptyDetectStreak.get(cameraId) ?? 0;
     if (streak < AiDetector.IDLE_SLOWDOWN_THRESHOLD) return baseInterval;
+
+    /** 运动恢复：降频期间检测到运动变化，立即重置为基础频率 */
+    if (this.motionDetector) {
+      const ratio = this.motionDetector.getLatestRatio(cameraId);
+      if (ratio >= AiDetector.STATIC_RATIO_THRESHOLD) {
+        this.emptyDetectStreak.set(cameraId, 0);
+        return baseInterval;
+      }
+    }
+
     const multiplier = Math.min(
       1 + Math.floor((streak - AiDetector.IDLE_SLOWDOWN_THRESHOLD) / AiDetector.IDLE_SLOWDOWN_THRESHOLD),
       AiDetector.MAX_IDLE_MULTIPLIER,
