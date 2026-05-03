@@ -103,14 +103,12 @@ class Fmp4StreamParser {
   private height = 0;
   /** 从 moov 中提取的 codec */
   private codec = "avc1.42C01E";
-  /** 从 moov 的 mdhd 中提取的 timescale（用于 PTS 重写） */
+  /** timescale（从 moov 的 mdhd 提取） */
   private timescale = 0;
-  /** 第一个 media segment 到达时的 performance.now() 基准 */
-  private streamStartPerf = 0;
-  /** 是否已记录 stream 起始时间 */
-  private streamStarted = false;
-  /** 上一帧的 wall clock PTS（单调递增保护） */
-  private lastWallClockPts = 0n;
+  /** 每帧 PTS 间隔 = timescale / 源流帧率 */
+  private ptsStep = 0n;
+  /** 下一帧 PTS（均匀递增，不受网络抖动影响） */
+  private nextPts = 0n;
   /** 已物化的连续 buffer */
   private buffer: Buffer = Buffer.allocUnsafe(0);
   /** 待合并的 chunks（延迟 flatten 减少 GC） */
@@ -155,9 +153,8 @@ class Fmp4StreamParser {
     this.lastMdat = null;
     this.lastMergedMedia = null;
     this.timescale = 0;
-    this.streamStartPerf = 0;
-    this.streamStarted = false;
-    this.lastWallClockPts = 0n;
+    this.ptsStep = 0n;
+    this.nextPts = 0n;
   }
 
   /** 将 pending chunks 合并到 buffer（使用 concat2 避免数组展开） */
@@ -415,26 +412,87 @@ class Fmp4StreamParser {
     return null;
   }
 
-  /** 将 moof 的 tfdt 重写为基于 wall clock 的 PTS */
+  /** 将 moof 的 tfdt 重写为均匀递增的 PTS（不受网络抖动影响） */
   private rewriteTfdtToWallClock(moof: Buffer): Buffer {
     if (this.timescale === 0) return moof;
 
-    if (!this.streamStarted) {
-      this.streamStartPerf = performance.now();
-      this.streamStarted = true;
+    const originalPts = this.readTfdtFromMoof(moof);
+
+    if (this.ptsStep === 0n) {
+      /** 首帧：ptsStep 尚未初始化，用 tfhd 的 default_sample_duration 作为帧间隔 */
+      this.ptsStep = this.readSampleDurationFromMoof(moof);
+      if (this.ptsStep === 0n) this.ptsStep = 1n;
+      this.nextPts = originalPts;
     }
 
-    /** 用 performance.now 计算亚毫秒精度的 elapsed 时间 */
-    const elapsedUs = (performance.now() - this.streamStartPerf) * 1000;
-    const wallClockPts = BigInt(Math.round(elapsedUs * this.timescale / 1_000_000));
+    const pts = this.nextPts;
+    this.nextPts += this.ptsStep;
 
-    /** 单调递增保护 */
-    const finalPts = wallClockPts > this.lastWallClockPts
-      ? wallClockPts
-      : this.lastWallClockPts + 1n;
-    this.lastWallClockPts = finalPts;
+    return this.patchTfdtInMoof(moof, pts);
+  }
 
-    return this.patchTfdtInMoof(moof, finalPts);
+  /** 从 moof 的 tfdt 读取原始 baseMediaDecodeTime */
+  private readTfdtFromMoof(moof: Buffer): bigint {
+    let moofOff = 8;
+    while (moofOff + 8 <= moof.length) {
+      const boxSize = moof.readUInt32BE(moofOff);
+      const boxType = moof.subarray(moofOff + 4, moofOff + 8).toString("ascii");
+      if (boxSize < 8 || moofOff + boxSize > moof.length) break;
+      if (boxType === "traf") {
+        const trafEnd = moofOff + boxSize;
+        let trafOff = moofOff + 8;
+        while (trafOff + 8 <= trafEnd) {
+          const subSize = moof.readUInt32BE(trafOff);
+          const subType = moof.subarray(trafOff + 4, trafOff + 8).toString("ascii");
+          if (subSize < 8 || trafOff + subSize > trafEnd) break;
+          if (subType === "tfdt") {
+            const version = moof[trafOff + 8];
+            if (version === 1 && trafOff + 20 <= trafEnd) {
+              return moof.readBigUInt64BE(trafOff + 12);
+            } else if (trafOff + 16 <= trafEnd) {
+              return BigInt(moof.readUInt32BE(trafOff + 12));
+            }
+          }
+          trafOff += subSize;
+        }
+      }
+      moofOff += boxSize;
+    }
+    return 0n;
+  }
+
+  /** 从 moof 的 tfhd 读取 default_sample_duration（帧间隔 ticks） */
+  private readSampleDurationFromMoof(moof: Buffer): bigint {
+    let moofOff = 8;
+    while (moofOff + 8 <= moof.length) {
+      const boxSize = moof.readUInt32BE(moofOff);
+      const boxType = moof.subarray(moofOff + 4, moofOff + 8).toString("ascii");
+      if (boxSize < 8 || moofOff + boxSize > moof.length) break;
+      if (boxType === "traf") {
+        const trafEnd = moofOff + boxSize;
+        let trafOff = moofOff + 8;
+        while (trafOff + 8 <= trafEnd) {
+          const subSize = moof.readUInt32BE(trafOff);
+          const subType = moof.subarray(trafOff + 4, trafOff + 8).toString("ascii");
+          if (subSize < 8 || trafOff + subSize > trafEnd) break;
+          if (subType === "tfhd") {
+            /** tfhd: version(1)+flags(3)+track_id(4) + [可选字段由 flags 控制] */
+            const flags = moof.readUInt32BE(trafOff + 8);
+            /** flag 0x08 = default-sample-duration-present */
+            if (flags & 0x08) {
+              /** track_id 后面紧跟着 default_sample_duration（如果 flag 0x10 sample-size 不存在则再后面） */
+              let off = trafOff + 16; // 跳过 size+type+version+flags+track_id
+              if (flags & 0x02) off += 8; // base-data-offset
+              if (flags & 0x01) off += 4; // sample-description-index
+              if (off + 4 <= trafEnd) return BigInt(moof.readUInt32BE(off));
+            }
+          }
+          trafOff += subSize;
+        }
+      }
+      moofOff += boxSize;
+    }
+    return 0n;
   }
 
   /** 遍历 moof>traf>tfdt 修改 baseMediaDecodeTime */

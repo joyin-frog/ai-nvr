@@ -211,7 +211,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ]
   }
 
-  /** 追赶直播：PTS 已对齐 wall clock，延迟过大直接 seek */
+  /** 追赶直播：PTS 均匀递增，只需处理异常延迟 */
   function catchUpToLive() {
     const video = videoRef.value
     if (!video || !sourceBuffer) return
@@ -221,14 +221,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     const end = buffered.end(buffered.length - 1)
     const delay = end - video.currentTime
 
-    if (delay > LIVE_SEEK_THRESHOLD) {
-      /** 延迟过大直接 seek 到最新 */
+    if (delay > LIVE_SEEK_THRESHOLD || delay < -0.5) {
+      /** 异常延迟或播放位置跑偏，seek 到最新 */
       video.currentTime = end - 0.01
-    } else if (delay < -0.5) {
-      /** 播放位置跑到缓冲区前面（异常），也 seek 回来 */
-      video.currentTime = end - 0.01
-    } else if (video.playbackRate !== 1) {
-      video.playbackRate = 1
     }
   }
 
