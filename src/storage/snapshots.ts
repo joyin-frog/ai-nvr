@@ -2,6 +2,7 @@ import { type EventBus } from "@/event-bus";
 import { type Detection } from "@/ai/types";
 import { type StorageFs } from "@/storage/storage-fs";
 import { join } from "node:path";
+import sharp from "sharp";
 
 /** 快照元信息 */
 export interface SnapshotInfo {
@@ -80,10 +81,16 @@ export class SnapshotStorage {
       ? [...new Set(detections.map(d => d.label))].join(", ")
       : undefined;
 
+    /** 缩放+压缩：最大宽度 960px，JPEG quality 75，减少磁盘占用 */
+    const resized = await sharp(frameImage, { failOn: "none" })
+      .resize(960, 960, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 75 })
+      .toBuffer();
+
     /** 写入 JPEG */
     await this.storageFs.writeFile(
       `${this.dirName}/${relativePath}.jpg`,
-      frameImage,
+      resized,
       {
         category: this.category,
         cameraId,

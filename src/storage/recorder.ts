@@ -629,7 +629,7 @@ export class MotionRecorder {
    * 从上下文帧缓冲中按时间间隔取帧
    * 用于 VLM 多帧检测
    */
-  getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames: number = 3): Array<{ data: Buffer; timestamp: number }> {
+  getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames: number = 2): Array<{ data: Buffer; timestamp: number }> {
     const buf = this.contextFrameBuffers.get(cameraId);
     if (!buf || buf.length === 0 || intervalMs <= 0) return [];
 

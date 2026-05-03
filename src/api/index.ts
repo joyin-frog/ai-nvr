@@ -1278,9 +1278,9 @@ export function startServer(
           const durationSec = endSec - startSec;
           if (durationSec <= 0) return new Response("Invalid duration", { status: 400 });
 
-          /** 均匀提取 4 帧关键帧 */
-          const frameCount = Math.min(4, Math.max(1, Math.ceil(durationSec / 10)));
-          const frameBuffers: Buffer[] = [];
+          /** 动态提取关键帧：短片段（<=30s）4帧，长片段最多 8 帧，每 10 秒一帧 */
+          const frameCount = Math.min(8, Math.max(4, Math.ceil(durationSec / 10)));
+          const frameBuffers: Array<{ offset: number; data: Buffer }> = [];
           for (let i = 0; i < frameCount; i++) {
             const seekTime = startSec + (durationSec * (i + 0.5)) / frameCount;
             const captureResult = await new Promise<Buffer | null>((resolve) => {
@@ -1292,7 +1292,7 @@ export function startServer(
               proc.on("exit", () => { clearTimeout(timer); proc.unref(); resolve(chunks.length > 0 ? Buffer.concat(chunks) : null); });
               proc.on("error", () => { clearTimeout(timer); proc.unref(); resolve(null); });
             });
-            if (captureResult) frameBuffers.push(captureResult);
+            if (captureResult) frameBuffers.push({ offset: Math.round(seekTime - startSec), data: captureResult });
           }
 
           /** 从文件名解析录像起始时间戳 */
@@ -1324,17 +1324,23 @@ export function startServer(
           const typeSummary = Object.entries(typeCounts).map(([t, c]) => `${t}(${c})`).join(", ");
 
           /** 构建 LLM 请求 */
-          const systemPrompt = `Analyze this surveillance clip. Describe what happened in 2-3 sentences. Be specific about people, vehicles, activities. ${langInstruction}`;
+          const systemPrompt = `You are analyzing keyframes extracted from a surveillance video clip in chronological order.
+Frames are labeled with their timestamp offset (e.g. "0s", "15s"). Describe the full sequence of events:
+1. What happened over time (who entered/left, what moved, interactions)
+2. Timeline of key moments (reference frame timestamps)
+3. Any safety concerns or anomalies
+Be specific and factual. ${langInstruction}`;
 
           const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
-          contentParts.push({ type: "text", text: `Video clip: ${Math.round(durationSec)}s, camera ${cameraId}\nEvents: ${typeSummary}\nDetails:\n${detailLines.join("\n")}` });
+          contentParts.push({ type: "text", text: `Video clip: ${Math.round(durationSec)}s, camera ${cameraId}\nEvents: ${typeSummary}\nDetails:\n${detailLines.join("\n")}\n\nKeyframes in chronological order:` });
 
-          for (const buf of frameBuffers) {
-            contentParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${buf.toString("base64")}` } });
+          for (const frame of frameBuffers) {
+            contentParts.push({ type: "text", text: `[${frame.offset}s]` });
+            contentParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${frame.data.toString("base64")}` } });
           }
 
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 15_000);
+          const timeout = setTimeout(() => controller.abort(), 30_000);
           const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
             ? llmConfig.apiUrl
             : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
@@ -1348,7 +1354,7 @@ export function startServer(
                 { role: "system", content: systemPrompt },
                 { role: "user", content: contentParts },
               ],
-              max_tokens: 200,
+              max_tokens: 400,
               temperature: 0.3,
             }),
             signal: controller.signal,
@@ -1977,6 +1983,79 @@ export function startServer(
         const answer = result.choices?.[0]?.message?.content?.trim() ?? "";
 
         return Response.json({ answer, inferMs: performance.now() - t0 });
+      }
+
+      /** AI 规则建议：根据当前场景自动生成检测规则建议 */
+      if (url.pathname === "/api/ai/suggest-rules" && req.method === "POST") {
+        const body = await req.json() as { cameraId?: string };
+        if (!body.cameraId) return Response.json({ error: "cameraId required" }, { status: 400 });
+
+        const llmConfig = runtimeConfig.get().ai.llm;
+        if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) {
+          return Response.json({ error: "AI not configured" }, { status: 503 });
+        }
+
+        const latestFrame = cameraManager.getLatestFrameWithTimestamp(body.cameraId);
+        if (!latestFrame) return Response.json({ error: "No frame available" }, { status: 404 });
+
+        /** 获取该摄像头已有的规则名称，避免重复建议 */
+        const existingRules = detectRuleStorage?.listRules().filter(r => r.cameraId === body.cameraId) ?? [];
+        const existingNames = existingRules.map(r => r.name).join(", ");
+
+        const lang = runtimeConfig.get().language;
+        const langInstruction = lang.startsWith("zh") ? "用中文。规则名称和 prompt 都用中文。" : "Use English.";
+
+        const systemPrompt = `You are a surveillance expert. Analyze this camera view and suggest practical detection rules.
+Output JSON array of rules:
+[{"name":"rule name","prompt":"what to detect","interval":10000,"reason":"why this rule is useful"}]
+interval: check interval in ms (5000-60000).
+Suggest 2-4 rules that would be most useful for THIS specific scene.
+Consider: security zones, entry/exit monitoring, object detection, behavior analysis, safety hazards.
+Do NOT suggest rules similar to existing ones.
+${langInstruction}`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20_000);
+        const t0 = performance.now();
+        const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
+          ? llmConfig.apiUrl
+          : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: llmConfig.model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: [
+                  { type: "image_url", image_url: { url: `data:image/jpeg;base64,${latestFrame.data.toString("base64")}` } },
+                  { type: "text", text: existingNames ? `Existing rules (don't duplicate): ${existingNames}` : "No existing rules." },
+                ],
+              },
+            ],
+            max_tokens: 300,
+            temperature: 0.5,
+          }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+
+        if (!response.ok) return Response.json({ error: "LLM request failed" }, { status: 502 });
+
+        const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const content = result.choices?.[0]?.message?.content?.trim() ?? "";
+
+        /** 解析 JSON 建议 */
+        let suggestions: Array<{ name: string; prompt: string; interval: number; reason: string }> = [];
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) suggestions = parsed.slice(0, 4);
+        }
+
+        return Response.json({ suggestions, inferMs: performance.now() - t0 });
       }
 
       /** 手动触发一轮 AI 巡逻 */

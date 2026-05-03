@@ -59,7 +59,7 @@ export class Fmp4Writer {
       "-vf", watermarkFilter,
       ...encoderArgs,
       "-movflags", "+faststart",
-      "-an",
+      "-c:a", "aac", "-b:a", "64k", "-ac", "1",
       "-y",
       outputPath,
     ];
