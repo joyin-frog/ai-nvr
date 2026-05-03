@@ -2,40 +2,30 @@ import { type AppConfig, type CameraConfig } from "@/config";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type MotionRecorder } from "@/storage/recorder";
-import { FrameExtractor } from "./stream";
 import { H264Fmp4Extractor } from "./h264-fmp4-muxer";
+import { Fmp4RingBuffer } from "@/storage/fmp4-ring-buffer";
 
 /**
  * 摄像头管理器
  * 为每个启用的摄像头创建并管理帧提取器实例
  * 是 camera:online / camera:offline 事件的唯一权威源
  *
- * 架构（优化 RTSP 连接数）：
- *   HD 流：H264Fmp4Extractor（零转码 copy → fMP4）→ 前端 MSE GPU 解码显示
- *   SD 流：FrameExtractor（decode → MJPEG）→ AI 检测 + 录像 + Canvas 备用显示
- *
- * 单流模式：只有一个码流时，FrameExtractor 同时用于显示和检测
+ * 架构（单连接）：
+ *   HD 流 → H264Fmp4Extractor → fMP4 (前端 MSE 播放 + 录像环形缓冲)
+ *                             → 内置 JPEG 解码 → 检测 + MJPEG 回退
  */
 export class CameraManager {
-  /** 摄像头 ID → 显示流提取器（MJPEG，用于 Canvas 备用显示 + 录像） */
-  private displayExtractors = new Map<string, FrameExtractor>();
-  /** 摄像头 ID → 检测流提取器（双流模式专用，SD 码流） */
-  private detectExtractors = new Map<string, FrameExtractor>();
-  /** 摄像头 ID → fMP4 流提取器（高分辨率零转码） */
+  /** 摄像头 ID → fMP4 流提取器（高分辨率 H.264，用于实时播放和录像 + 内置 JPEG 抽帧） */
   private fmp4Extractors = new Map<string, H264Fmp4Extractor>();
-  /** 摄像头 ID → 是否使用双流模式 */
-  private dualStreamFlags = new Map<string, boolean>();
-  /** 摄像头 ID → 最新一帧（显示流，带时间戳） */
+  /** 摄像头 ID → fMP4 环形缓冲区（用于录像预缓冲） */
+  private ringBuffers = new Map<string, Fmp4RingBuffer>();
+  /** 摄像头 ID → 最新一帧（JPEG，带时间戳） */
   private latestFrames = new Map<string, { data: Buffer; timestamp: number }>();
   /** 当前摄像头配置列表 */
   private cameraConfigs: CameraConfig[] = [];
-  /** 摄像头 ID → 配置 Map（O(1) 查找，与 cameraConfigs 同步维护） */
+  /** 摄像头 ID → 配置 Map（O(1) 查找） */
   private cameraConfigMap = new Map<string, CameraConfig>();
-  /**
-   * 摄像头在线状态（去重用）
-   * 两个 extractor 可能各自发射 extractor:online/offline，
-   * 这里跟踪聚合后的状态，只在真正变化时才发射 camera:online/offline
-   */
+  /** 摄像头在线状态（去重用） */
   private cameraOnlineState = new Map<string, boolean>();
   /** 取消订阅 extractor 内部事件的函数 */
   private unsubExtractors: (() => void)[] = [];
@@ -69,7 +59,7 @@ export class CameraManager {
   start(): void {
     this.cameraConfigs = this.config.cameras;
     this.rebuildConfigMap();
-    /** 显示流的帧用于前端显示和录像 */
+    /** JPEG 帧用于前端 MJPEG 回退和 latestFrames 缓存 */
     this.unsubExtractors.push(
       this.eventBus.on("frame", ({ cameraId, data, timestamp }) => {
         let entry = this.latestFrames.get(cameraId);
@@ -89,30 +79,22 @@ export class CameraManager {
         if (!prev) {
           this.cameraOnlineState.set(cameraId, true);
           this.eventBus.emit("camera:online", { cameraId });
-          console.log(`[CameraManager] ${cameraId} 上线（聚合）`);
+          console.log(`[CameraManager] ${cameraId} 上线`);
         }
       }),
     );
     this.unsubExtractors.push(
-      this.eventBus.on("extractor:offline", ({ cameraId, source }) => {
+      this.eventBus.on("extractor:offline", ({ cameraId }) => {
         const prev = this.cameraOnlineState.get(cameraId) ?? false;
         if (!prev) return;
-        /** 检查该摄像头的其他 extractor 是否还在线 */
-        const display = this.displayExtractors.get(cameraId);
-        const fmp4 = this.fmp4Extractors.get(cameraId);
-        /** 发出 offline 的 extractor 已将自己标记为 offline，检查另一个 */
-        const otherOnline = source === "frame"
-          ? (fmp4?.isOnline ?? false)
-          : (display?.isOnline ?? false);
-        if (!otherOnline) {
-          this.cameraOnlineState.set(cameraId, false);
-          this.eventBus.emit("camera:offline", { cameraId });
-          console.log(`[CameraManager] ${cameraId} 离线（聚合，所有 extractor 均已下线）`);
-        }
+        /** fMP4 extractor 是唯一的 extractor，offline 即离线 */
+        this.cameraOnlineState.set(cameraId, false);
+        this.eventBus.emit("camera:offline", { cameraId });
+        console.log(`[CameraManager] ${cameraId} 离线`);
       }),
     );
 
-    /** 错开启动：8+ 摄像头用 500ms 间隔，避免同时初始化争抢硬件编码器 */
+    /** 错开启动 */
     const staggerMs = this.cameraConfigs.length > 8 ? 500 : 200;
     for (let i = 0; i < this.cameraConfigs.length; i++) {
       const cam = this.cameraConfigs[i]!;
@@ -126,13 +108,11 @@ export class CameraManager {
 
   /** 停止所有摄像头 */
   stop(): void {
-    for (const id of [...this.displayExtractors.keys()]) {
+    for (const id of [...this.fmp4Extractors.keys()]) {
       this.stopCamera(id);
     }
-    this.displayExtractors.clear();
-    this.detectExtractors.clear();
     this.fmp4Extractors.clear();
-    this.dualStreamFlags.clear();
+    this.ringBuffers.clear();
     this.latestFrames.clear();
     this.cameraOnlineState.clear();
     for (const unsub of this.unsubExtractors) {
@@ -141,12 +121,12 @@ export class CameraManager {
     this.unsubExtractors = [];
   }
 
-  /** 获取最新一帧数据（显示流） */
+  /** 获取最新一帧数据（JPEG） */
   getLatestFrame(cameraId: string): Buffer | undefined {
     return this.latestFrames.get(cameraId)?.data;
   }
 
-  /** 获取最新一帧带时间戳（显示流） */
+  /** 获取最新一帧带时间戳（JPEG） */
   getLatestFrameWithTimestamp(cameraId: string): { data: Buffer; timestamp: number } | undefined {
     return this.latestFrames.get(cameraId);
   }
@@ -160,22 +140,19 @@ export class CameraManager {
   getStatus(): Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number; streamFps: number; streamCodec: string | null; streamWidth: number; streamHeight: number }> {
     const result: Array<{ id: string; name: string; online: boolean; lastFrameAt: number; group: string; ptz: boolean; width: number; height: number; dualStream: boolean; displayFps: number; detectFps: number; streamFps: number; streamCodec: string | null; streamWidth: number; streamHeight: number }> = [];
     for (const cam of this.cameraConfigs) {
-      const display = this.displayExtractors.get(cam.id);
-      const detect = this.detectExtractors.get(cam.id);
       const fmp4 = this.fmp4Extractors.get(cam.id);
-      const dual = this.dualStreamFlags.get(cam.id) ?? false;
       result.push({
         id: cam.id,
         name: cam.friendlyName,
-        online: display?.isOnline || fmp4?.isOnline || false,
-        lastFrameAt: display?.lastFrameAt ?? 0,
+        online: fmp4?.isOnline ?? false,
+        lastFrameAt: fmp4?.lastFrameAt ?? 0,
         group: cam.group,
         ptz: cam.ptz?.enabled === true,
         width: cam.detectWidth,
         height: cam.detectHeight,
-        dualStream: dual,
-        displayFps: Math.round(display?.fps ?? 0),
-        detectFps: Math.round(detect?.fps ?? 0),
+        dualStream: false,
+        displayFps: Math.round(fmp4?.fps ?? 0),
+        detectFps: Math.round(fmp4?.fps ?? 0),
         streamFps: Math.round(fmp4?.fps ?? 0),
         streamCodec: fmp4?.detectedCodec ?? null,
         streamWidth: fmp4?.videoWidth ?? 0,
@@ -185,12 +162,11 @@ export class CameraManager {
     return result;
   }
 
-  /** 热重载配置：对比新旧摄像头列表，增删改 */
+  /** 热重载配置 */
   reloadConfig(newConfig: AppConfig): void {
     const oldMap = new Map(this.cameraConfigs.map(c => [c.id, c]));
     const newMap = new Map(newConfig.cameras.map(c => [c.id, c]));
 
-    /** 停止已移除的摄像头 */
     for (const id of oldMap.keys()) {
       if (!newMap.has(id)) {
         this.stopCamera(id);
@@ -198,7 +174,6 @@ export class CameraManager {
       }
     }
 
-    /** 检测配置变更的摄像头 */
     for (const [id, newCam] of newMap) {
       const oldCam = oldMap.get(id);
       if (!oldCam) continue;
@@ -211,7 +186,6 @@ export class CameraManager {
       }
     }
 
-    /** 启动新增的摄像头 */
     for (const cam of newConfig.cameras) {
       if (!oldMap.has(cam.id)) {
         this.startCamera(cam);
@@ -224,10 +198,10 @@ export class CameraManager {
     this.config = newConfig;
   }
 
-  /** 判断摄像头配置是否需要重启 ffmpeg */
+  /** 判断摄像头配置是否需要重启 */
   private configChanged(old: CameraConfig, cur: CameraConfig): boolean {
-    return old.stream.sd !== cur.stream.sd
-      || old.stream.hd !== cur.stream.hd
+    return old.stream.hd !== cur.stream.hd
+      || old.stream.sd !== cur.stream.sd
       || old.detectFps !== cur.detectFps
       || old.detectWidth !== cur.detectWidth
       || old.detectHeight !== cur.detectHeight
@@ -236,83 +210,39 @@ export class CameraManager {
 
   /** 启动单个摄像头 */
   private startCamera(cam: CameraConfig): void {
-    const hasDual = !!(cam.stream.hd && cam.stream.sd);
+    const rtspUrl = cam.stream.hd || cam.stream.sd;
 
-    if (hasDual) {
-      /**
-       * 双流模式（优化版，仅 2 个 RTSP 连接）：
-       * HD 流：H264Fmp4Extractor（零转码 copy → fMP4）→ 前端 MSE GPU 解码
-       * SD 流：FrameExtractor（decode → MJPEG）→ AI 检测 + 录像 + Canvas 备用显示
-       *   （display 模式同时发 frame 和 detect:frame 事件）
-       */
-      this.dualStreamFlags.set(cam.id, true);
+    /** fMP4 提取器 + 内置 JPEG 解码，一条 RTSP 连接解决所有需求 */
+    const fmp4Extractor = new H264Fmp4Extractor(
+      cam, this.config.ffmpegPath, this.eventBus,
+      rtspUrl, this.runtimeConfig,
+    );
+    this.fmp4Extractors.set(cam.id, fmp4Extractor);
+    fmp4Extractor.start();
 
-      /** SD 流：同时用于检测 + 录像 + Canvas 备用显示 */
-      const displayExtractor = new FrameExtractor(
-        cam, this.config.ffmpegPath, this.eventBus,
-        "display",
-        cam.stream.sd,
-        0,
-        0,
-      );
-      this.displayExtractors.set(cam.id, displayExtractor);
-      displayExtractor.start();
-
-      /** HD 流：零转码 H.264 → fMP4（前端 MSE 解码，CPU 开销极低） */
-      const fmp4Extractor = new H264Fmp4Extractor(
-        cam, this.config.ffmpegPath, this.eventBus,
-        cam.stream.hd!, this.runtimeConfig,
-      );
-      this.fmp4Extractors.set(cam.id, fmp4Extractor);
-      fmp4Extractor.start();
-
-      console.log(`[CameraManager] 双流模式(2连接): ${cam.friendlyName} (HD=H264→fMP4, SD=检测+录像)`);
-    } else {
-      /** 单流模式：显示和检测共用，行为与之前完全一致 */
-      this.dualStreamFlags.set(cam.id, false);
-
-      const extractor = new FrameExtractor(cam, this.config.ffmpegPath, this.eventBus);
-      this.displayExtractors.set(cam.id, extractor);
-      extractor.start();
-
-      /** 单流时也启动 fMP4 流（如果只有一个码流） */
-      const url = cam.stream.hd || cam.stream.sd;
-      if (url) {
-        const fmp4Extractor = new H264Fmp4Extractor(
-          cam, this.config.ffmpegPath, this.eventBus,
-          url, this.runtimeConfig,
-        );
-        this.fmp4Extractors.set(cam.id, fmp4Extractor);
-        fmp4Extractor.start();
-      }
-
-      console.log(`[CameraManager] 单流模式: ${cam.friendlyName} (${cam.id})`);
-    }
+    /** 为录像器创建 fMP4 环形缓冲区 */
+    const config = this.runtimeConfig.get().recording;
+    const maxBytes = config.bufferDurationMs * 256 * 1024;
+    const ringBuf = new Fmp4RingBuffer(maxBytes);
+    this.ringBuffers.set(cam.id, ringBuf);
+    this.recorder.setRingBuffer(cam.id, ringBuf);
 
     this.recorder.registerCameraName(cam.id, cam.friendlyName);
+
+    console.log(`[CameraManager] 启动: ${cam.friendlyName} (${cam.id}) 单连接 fMP4 + JPEG`);
   }
 
-  /** 停止单个摄像头的所有流 */
+  /** 停止单个摄像头 */
   private stopCamera(id: string): void {
-    const display = this.displayExtractors.get(id);
-    if (display) {
-      display.stop();
-      this.displayExtractors.delete(id);
-    }
-    const detect = this.detectExtractors.get(id);
-    if (detect) {
-      detect.stop();
-      this.detectExtractors.delete(id);
-    }
     const fmp4 = this.fmp4Extractors.get(id);
     if (fmp4) {
       fmp4.stop();
       this.fmp4Extractors.delete(id);
     }
+    this.ringBuffers.delete(id);
     this.latestFrames.delete(id);
-    this.dualStreamFlags.delete(id);
+    this.recorder.removeRingBuffer(id);
     this.recorder.unregisterStream(id);
-    /** 清理聚合状态，若之前在线则发射 offline */
     const wasOnline = this.cameraOnlineState.get(id) ?? false;
     this.cameraOnlineState.delete(id);
     if (wasOnline) {

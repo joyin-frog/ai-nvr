@@ -1,9 +1,9 @@
 import { type EventBus } from "@/event-bus";
 import { type CameraConfig } from "@/config";
 import { type RuntimeConfig } from "@/runtime-config";
-import { execFile } from "node:child_process";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { Readable } from "node:stream";
+import { JpegFrameSplitter } from "./jpeg-extractor";
 
 /** 硬件编码器探测结果缓存（进程级，只探测一次） */
 let cachedEncoder: string | null = null;
@@ -389,6 +389,11 @@ export class H264Fmp4Extractor {
   private logTag: string;
   /** 缓存 init segment（新客户端连接时发送） */
   private cachedInit: Fmp4InitSegment | null = null;
+  /** JPEG 解码子进程 */
+  private jpegProc: ReturnType<typeof spawn> | null = null;
+  private jpegSplitter = new JpegFrameSplitter();
+  /** 复用的帧 payload */
+  private reusablePayload: { cameraId: string; data: Buffer; timestamp: number };
 
   constructor(
     private config: CameraConfig,
@@ -398,12 +403,14 @@ export class H264Fmp4Extractor {
     private runtimeConfig?: RuntimeConfig,
   ) {
     this.logTag = `[Video-fMP4][${config.id}]`;
+    this.reusablePayload = { cameraId: config.id, data: Buffer.alloc(0), timestamp: 0 };
   }
 
   start(): void {
     if (this.running) return;
     this.running = true;
     this.spawnFfmpeg();
+    this.spawnJpegDecoder();
   }
 
   stop(): void {
@@ -417,6 +424,7 @@ export class H264Fmp4Extractor {
       this.online = false;
       this.eventBus.emit("extractor:offline", { cameraId: this.config.id, source: "fmp4" });
     }
+    this.killJpegProc();
     this.killProcess();
   }
 
@@ -546,6 +554,9 @@ export class H264Fmp4Extractor {
     stdout.on("data", (chunk: Buffer) => {
       this.parser.feed(chunk, this.eventBus, this.config.id);
 
+      /** 同时将 fMP4 数据喂给 JPEG 解码子进程 */
+      this.feedJpegDecoder(chunk);
+
       /** 只在首次缓存 init segment，之后跳过热路径上的冗余赋值 */
       if (!initCached) {
         const init = this.parser.lastInitSegment;
@@ -648,5 +659,76 @@ export class H264Fmp4Extractor {
       this.retryTimer = null;
       this.spawnFfmpeg();
     }, delay);
+  }
+
+  /** 启动 JPEG 解码子进程：从 fMP4 解码为 JPEG 帧 */
+  private spawnJpegDecoder(): void {
+    const width = this.config.detectWidth;
+
+    const vfParts: string[] = [];
+    vfParts.push("fps=15:round=zero");
+    if (width > 0) vfParts.push(`scale=${width}:-4`);
+
+    const args = [
+      "-f", "mp4",
+      "-flags", "low_delay",
+      "-fflags", "nobuffer",
+      "-i", "pipe:0",
+      "-vf", vfParts.join(","),
+      "-f", "image2pipe",
+      "-vcodec", "mjpeg",
+      "-q:v", String(Math.min(this.config.jpegQuality, 10)),
+      "-an",
+      "-threads", "2",
+      "pipe:1",
+    ];
+
+    this.jpegProc = spawn(this.ffmpegPath, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.jpegProc.stdin?.on("error", () => {});
+    this.jpegProc.stderr?.on("data", () => {});
+    this.jpegProc.on("exit", () => {
+      this.jpegProc?.unref();
+      this.jpegProc = null;
+      this.jpegSplitter = new JpegFrameSplitter();
+    });
+
+    const stdout = this.jpegProc.stdout;
+    if (stdout) {
+      stdout.on("data", (chunk: Buffer) => {
+        const frames = this.jpegSplitter.feed(chunk);
+        for (const frame of frames) {
+          const now = Date.now();
+          const payload = this.reusablePayload;
+          payload.data = frame;
+          payload.timestamp = now;
+          this.eventBus.emit("detect:frame", payload);
+          this.eventBus.emit("frame", payload);
+        }
+      });
+    }
+  }
+
+  /** 将 fMP4 数据喂给 JPEG 解码子进程 */
+  private feedJpegDecoder(data: Buffer): void {
+    const stdin = this.jpegProc?.stdin;
+    if (!stdin?.writable) return;
+    stdin.write(data);
+  }
+
+  /** 关闭 JPEG 解码子进程 */
+  private killJpegProc(): void {
+    if (this.jpegProc) {
+      const proc = this.jpegProc;
+      this.jpegProc = null;
+      proc.stdin?.destroy();
+      proc.stdout?.destroy();
+      proc.stderr?.destroy();
+      proc.kill("SIGKILL");
+      proc.unref();
+    }
+    this.jpegSplitter = new JpegFrameSplitter();
   }
 }
