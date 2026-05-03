@@ -551,6 +551,7 @@ export class MotionRecorder {
   private async handleRecordingExit(cameraId: string, filename: string, startTime: number): Promise<void> {
     const relativePath = `${cameraId}/${filename}`;
     const fileInfo = await this.storageFs.stat(`recordings/${relativePath}`);
+    const state = this.states.get(cameraId);
 
     if (!fileInfo || fileInfo.size < 1024) {
       if (fileInfo) {
@@ -566,12 +567,12 @@ export class MotionRecorder {
         size: fileInfo.size,
         mtimeMs: fileInfo.mtimeMs,
         createdAt: startTime,
+        extra: state?.recordedDurationMs ? JSON.stringify({ durationMs: state.recordedDurationMs }) : undefined,
       });
       this.listCache.clear();
     }
 
     /** 连续录制模式下，检查是否需要重启 */
-    const state = this.states.get(cameraId);
     if (state?.continuousTimer) {
       /** continuous 模式的定时器仍在，无需额外处理 */
     }

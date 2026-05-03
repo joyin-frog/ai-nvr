@@ -152,7 +152,7 @@ export class CameraManager {
         height: cam.detectHeight,
         dualStream: false,
         displayFps: Math.round(fmp4?.fps ?? 0),
-        detectFps: Math.round(fmp4?.fps ?? 0),
+        detectFps: Math.round(fmp4?.detectFps ?? 0),
         streamFps: Math.round(fmp4?.fps ?? 0),
         streamCodec: fmp4?.detectedCodec ?? null,
         streamWidth: fmp4?.videoWidth ?? 0,

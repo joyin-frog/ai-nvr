@@ -394,6 +394,10 @@ export class H264Fmp4Extractor {
   private jpegSplitter = new JpegFrameSplitter();
   /** 复用的帧 payload */
   private reusablePayload: { cameraId: string; data: Buffer; timestamp: number };
+  /** JPEG 帧率统计 */
+  private jpegFrameCount = 0;
+  private jpegFpsStart = Date.now();
+  private jpegFps = 0;
 
   constructor(
     private config: CameraConfig,
@@ -431,6 +435,9 @@ export class H264Fmp4Extractor {
   get isOnline(): boolean { return this.online; }
 
   get fps(): number { return this.parser.fps; }
+
+  /** JPEG 检测帧率 */
+  get detectFps(): number { return this.jpegFps; }
 
   get initSegment(): Fmp4InitSegment | null { return this.cachedInit; }
 
@@ -526,6 +533,12 @@ export class H264Fmp4Extractor {
       "-probesize", "32768",
       "-i", this.rtspUrl,
     );
+
+    /**
+     * 固定帧率输出：源流丢帧时复制上一帧补齐，保证 PTS 时间线均匀
+     * 避免 VFR 导致播放忽快忽慢 + 录像时长与 wall clock 不对齐
+     */
+    args.push("-vsync", "cfr");
 
     /** 始终重编码：保证 GOP 可控，PTZ 后即可看到画面变化 */
     const encoderArgs = await this.getEncoderArgs();
@@ -706,6 +719,13 @@ export class H264Fmp4Extractor {
           payload.timestamp = now;
           this.eventBus.emit("detect:frame", payload);
           this.eventBus.emit("frame", payload);
+
+          this.jpegFrameCount++;
+          if (now - this.jpegFpsStart >= 5000) {
+            this.jpegFps = this.jpegFrameCount * 1000 / (now - this.jpegFpsStart);
+            this.jpegFrameCount = 0;
+            this.jpegFpsStart = now;
+          }
         }
       });
     }
