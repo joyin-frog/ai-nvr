@@ -1975,14 +1975,39 @@ export function startServer(
       if (url.pathname === "/api/ai/status" && req.method === "GET") {
         const aiConfig = runtimeConfig.get().ai;
         const llm = aiConfig.llm;
-        const recentEvents = eventStorage.query({ since: Date.now() - 300_000, limit: 1000 });
+        const now = Date.now();
+        const recentEvents = eventStorage.query({ since: now - 300_000, limit: 1000 });
         const detectCount = recentEvents.filter(e => e.type === "detect").length;
         const alertCount = recentEvents.filter(e => e.type === "alert" || e.type === "detect:rule").length;
         const llmCount = recentEvents.filter(e => e.type.startsWith("llm:")).length;
+        const trackEvents = recentEvents.filter(e => e.type.startsWith("track:"));
+
+        /** 追踪统计 */
+        const allTracks = trackStorage.listTracks();
+        const activeTracks = allTracks.filter(t => now - t.lastSeen < 60_000).length;
+        const namedTracks = allTracks.filter(t => t.customName).length;
+
+        /** 检测标签分布（最近 5 分钟） */
+        const labelCounts: Record<string, number> = {};
+        for (const e of recentEvents.filter(e => e.type === "detect" && e.detail)) {
+          const detail = JSON.parse(e.detail || "{}") as Record<string, unknown>;
+          const detections = Array.isArray(detail.detections) ? detail.detections as Array<Record<string, unknown>> : [];
+          for (const d of detections) {
+            const label = String(d.label ?? "unknown");
+            labelCounts[label] = (labelCounts[label] ?? 0) + 1;
+          }
+        }
+
+        /** 轨迹点统计 */
+        const trajPoints = trajectoryStorage?.getPointCount() ?? 0;
+
         return Response.json({
           vlm: { enabled: llm.enabled, model: llm.model, apiUrl: llm.apiUrl ? "***" : "", imageWidth: llm.imageWidth, contextIntervalMs: llm.contextIntervalMs },
           clip: { enabled: aiConfig.clip.enabled },
-          stats5m: { detectCount, alertCount, llmCount, total: recentEvents.length },
+          stats5m: { detectCount, alertCount, llmCount, total: recentEvents.length, trackEventCount: trackEvents.length },
+          tracks: { total: allTracks.length, active: activeTracks, named: namedTracks },
+          trajectories: { pointCount: trajPoints },
+          labelDistribution: labelCounts,
         });
       }
 

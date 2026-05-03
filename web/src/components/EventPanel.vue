@@ -25,7 +25,7 @@ const { setPref, getPref } = usePreferences()
 const aiActionLoading = ref<'patrol' | ''>('')
 
 /** AI 引擎状态 */
-const aiStats = ref<{ vlm: { enabled: boolean; model: string }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number } } | null>(null)
+const aiStats = ref<{ vlm: { enabled: boolean; model: string }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number } } | null>(null)
 
 /** 加载 AI 状态 */
 async function loadAiStats() {
@@ -790,6 +790,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
     <div v-if="subView === 'events' && aiStats" class="ai-stats-bar">
       <span class="ai-stat" :title="'VLM: ' + aiStats.vlm.model">{{ aiStats.vlm.enabled ? '🟢' : '🔴' }} VLM</span>
       <span v-if="aiStats.stats5m" class="ai-stat">检测 {{ aiStats.stats5m.detectCount }} | 告警 {{ aiStats.stats5m.alertCount }} | AI {{ aiStats.stats5m.llmCount }}</span>
+      <span v-if="aiStats.tracks" class="ai-stat" :title="`活跃 ${aiStats.tracks.active} / 已命名 ${aiStats.tracks.named}`">追踪 {{ aiStats.tracks.total }} ({{ aiStats.tracks.active }} 活跃)</span>
+      <span v-if="aiStats.trajectories" class="ai-stat">轨迹 {{ aiStats.trajectories.pointCount }} 点</span>
       <span v-if="aiStats.clip?.enabled" class="ai-stat">🟢 CLIP</span>
     </div>
     <!-- 筛选工具栏（事件视图） -->
