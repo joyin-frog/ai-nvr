@@ -29,10 +29,12 @@ const EVENT_LABELS: Record<string, string> = {
   "track:dwell": "区域停留",
   "track:speed": "高速移动",
   "state:changed": "状态变更",
+  "llm:scene": "AI 场景分析",
+  "llm:patrol": "AI 巡逻报告",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
 
 /**
  * 钉钉机器人通知推送
@@ -144,6 +146,13 @@ export class DingTalkNotifier {
       const oldValue = payload.oldValue as string | undefined;
       const newValue = payload.newValue as string | undefined;
       body = `状态: ${stateName ?? ""}\n${oldValue ?? ""} → ${newValue ?? ""}`;
+    } else if (event === "llm:patrol") {
+      const analysis = payload.analysis as string | undefined;
+      const hasAnomaly = payload.hasAnomaly as boolean | undefined;
+      const anomalyDetail = payload.anomalyDetail as string | undefined;
+      const count = payload.count as Record<string, number> | undefined;
+      const countStr = count ? Object.entries(count).map(([k, v]) => `${k}: ${v}`).join(", ") : "";
+      body = `${hasAnomaly ? "⚠️ 异常" : "✅ 正常"}\n${analysis ?? ""}${anomalyDetail ? `\n异常: ${anomalyDetail}` : ""}${countStr ? `\n计数: ${countStr}` : ""}`;
     }
 
     const title = `JK NVR - ${label}`;

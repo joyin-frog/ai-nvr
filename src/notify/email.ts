@@ -17,6 +17,7 @@ const EVENT_LABELS: Record<string, string> = {
   "track:dwell": "区域停留",
   "track:speed": "高速移动",
   "state:changed": "状态变更",
+  "llm:patrol": "AI 巡逻报告",
 };
 
 /** 事件类型对应 CSS 颜色 */
@@ -33,10 +34,11 @@ const EVENT_COLORS: Record<string, string> = {
   "track:dwell": "#FF7043",
   "track:speed": "#E91E63",
   "state:changed": "#9C27B0",
+  "llm:patrol": "#7E57C2",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
 
 /**
  * 邮件告警通知
