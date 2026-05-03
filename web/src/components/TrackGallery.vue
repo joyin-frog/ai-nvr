@@ -661,6 +661,7 @@ defineExpose({ loadTracks, selectTrack })
             <span v-if="isTrackActive(track)" class="track-active" :title="t('tracks.active', '活跃中')">●</span>
             <span class="track-count">{{ track.hitCount }}次</span>
             <span v-if="track.eventCount" class="track-event-count" :title="t('tracks.eventCount', '行为事件')">{{ track.eventCount }}evt</span>
+            <span class="track-first-seen" :title="`首次出现: ${formatTime(track.firstSeen)}`">⏚ {{ relativeTime(track.firstSeen) }}</span>
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
           </div>
           <div class="track-cameras">
@@ -1134,6 +1135,7 @@ defineExpose({ loadTracks, selectTrack })
 .track-count { color: #aaa; }
 .track-event-count { color: #FF9800; font-size: 9px; }
 .track-time { color: #666; }
+.track-first-seen { color: #555; font-size: 10px; }
 .track-active {
   color: #4CAF50;
   animation: active-pulse 1.5s infinite;
