@@ -57,6 +57,8 @@ export class MultimodalAnalyzer {
   private lastAnalysisTime = new Map<string, number>();
   /** 是否正在分析中（每个摄像头独立） */
   private analyzing = new Set<string>();
+  /** 场景描述去重：最近一次描述文本（cameraId → description） */
+  private lastDescription = new Map<string, string>();
   /** 取消订阅函数列表 */
   private unsubs: (() => void)[] = [];
   /** 每个摄像头最新帧缓存 */
@@ -297,6 +299,20 @@ export class MultimodalAnalyzer {
       trigger,
       inferMs,
     };
+
+    /** 场景描述去重：与上次描述相似度 > 80% 时跳过推送（减少重复信息） */
+    const last = this.lastDescription.get(cameraId);
+    if (last && description.length > 10 && last.length > 10) {
+      const shorter = last.length < description.length ? last : description;
+      const longer = last.length < description.length ? description : last;
+      let matchChars = 0;
+      for (let i = 0; i < shorter.length; i++) {
+        if (shorter[i] === longer[i]) matchChars++;
+      }
+      const similarity = matchChars / shorter.length;
+      if (similarity > 0.8) return;
+    }
+    this.lastDescription.set(cameraId, description);
 
     this.eventBus.emit("llm:scene" as keyof import("@/event-bus").EventPayloads, sceneResult as never);
     console.debug(`[MultimodalAnalyzer] ${cameraId}: "${description.slice(0, 80)}" (${Math.round(inferMs)}ms)`);
