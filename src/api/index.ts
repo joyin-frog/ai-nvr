@@ -1796,6 +1796,21 @@ export function startServer(
         return Response.json(result);
       }
 
+      /** AI 引擎状态：VLM 配置、检测统计 */
+      if (url.pathname === "/api/ai/status" && req.method === "GET") {
+        const aiConfig = runtimeConfig.get().ai;
+        const llm = aiConfig.llm;
+        const recentEvents = eventStorage.query({ since: Date.now() - 300_000, limit: 1000 });
+        const detectCount = recentEvents.filter(e => e.type === "detect").length;
+        const alertCount = recentEvents.filter(e => e.type === "alert" || e.type === "detect:rule").length;
+        const llmCount = recentEvents.filter(e => e.type.startsWith("llm:")).length;
+        return Response.json({
+          vlm: { enabled: llm.enabled, model: llm.model, apiUrl: llm.apiUrl ? "***" : "", imageWidth: llm.imageWidth, contextIntervalMs: llm.contextIntervalMs },
+          clip: { enabled: aiConfig.clip.enabled },
+          stats5m: { detectCount, alertCount, llmCount, total: recentEvents.length },
+        });
+      }
+
       // ===== PTZ 云台控制（统一 regex 匹配，单次提取 cameraId + action） =====
       const ptzMatch = url.pathname.match(/^\/api\/ptz\/([^/]+)\/([a-z-]+)$/);
       if (ptzMatch) {

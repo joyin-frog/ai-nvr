@@ -236,6 +236,7 @@ if (runtimeConfig.get().ai.llm.enabled) {
 /** AI 主动巡逻扫描器（定期扫描所有摄像头，生成全局态势感知） */
 import { AiPatrolScanner } from "@/ai/patrol";
 const patrolScanner = new AiPatrolScanner(eventBus, runtimeConfig, cameraManager, eventStorage);
+patrolScanner.setRecorder(recorder);
 if (runtimeConfig.get().ai.llm.enabled) {
   patrolScanner.start();
 }

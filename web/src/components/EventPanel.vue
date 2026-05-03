@@ -21,6 +21,31 @@ const { t, locale } = useI18n()
 
 const { setPref, getPref } = usePreferences()
 
+/** AI 快捷操作状态 */
+const aiActionLoading = ref<'patrol' | ''>('')
+
+/** AI 引擎状态 */
+const aiStats = ref<{ vlm: { enabled: boolean; model: string }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number } } | null>(null)
+
+/** 加载 AI 状态 */
+async function loadAiStats() {
+  try {
+    const resp = await authFetch('/api/ai/status')
+    if (resp.ok) aiStats.value = await resp.json()
+  } catch { /* ignore */ }
+}
+
+/** 手动触发一轮 AI 巡逻 */
+async function triggerPatrol() {
+  aiActionLoading.value = 'patrol'
+  try {
+    const resp = await authFetch('/api/ai/patrol/trigger', { method: 'POST' })
+    if (!resp.ok) console.warn('[EventPanel] 巡逻触发失败:', resp.status)
+  } finally {
+    setTimeout(() => { aiActionLoading.value = '' }, 3000)
+  }
+}
+
 /** 从后端偏好缓存恢复筛选条件 */
 getPref<string>('nvr-event-filter-type', '').then(v => { filterType.value = v })
 getPref<string>('nvr-event-filter-camera', '').then(v => { filterCamera.value = v })
@@ -531,6 +556,7 @@ let loadMoreObserver: IntersectionObserver | null = null
 
 onMounted(() => {
   loadHistory()
+  loadAiStats()
   loadMoreObserver = new IntersectionObserver((entries) => {
     if (entries[0]?.isIntersecting && hasMore.value && !loading.value) {
       loadMore()
@@ -720,6 +746,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
         </button>
         <button class="refresh-btn" @click="loadHistory" :disabled="loading">{{ t('event.refresh') }}</button>
         <button class="export-btn" @click="exportCsv" :disabled="loading" :title="t('event.exportCsv')">CSV</button>
+        <button :class="['ai-action-btn', { loading: aiActionLoading === 'patrol' }]" @click="triggerPatrol" :disabled="!!aiActionLoading" :title="t('event.aiPatrol', 'AI 巡逻')">{{ aiActionLoading === 'patrol' ? '⏳' : '🔍' }}</button>
       </template>
       <template v-if="subView === 'gallery'">
         <select v-model="snapFilterCamera" @change="loadSnapshots" class="filter-select">
@@ -732,6 +759,12 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
         </select>
         <button class="refresh-btn" @click="loadSnapshots" :disabled="snapshotLoading">{{ t('event.refresh') }}</button>
       </template>
+    </div>
+    <!-- AI 状态条（仅事件视图，有 AI 数据时显示） -->
+    <div v-if="subView === 'events' && aiStats" class="ai-stats-bar">
+      <span class="ai-stat" :title="'VLM: ' + aiStats.vlm.model">{{ aiStats.vlm.enabled ? '🟢' : '🔴' }} VLM</span>
+      <span v-if="aiStats.stats5m" class="ai-stat">检测 {{ aiStats.stats5m.detectCount }} | 告警 {{ aiStats.stats5m.alertCount }} | AI {{ aiStats.stats5m.llmCount }}</span>
+      <span v-if="aiStats.clip?.enabled" class="ai-stat">🟢 CLIP</span>
     </div>
     <!-- 筛选工具栏（事件视图） -->
     <div v-if="subView === 'events'" class="filter-bar">
@@ -926,6 +959,22 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
   margin-right: auto;
 }
 
+.ai-stats-bar {
+  padding: 4px 10px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a4a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.ai-stat {
+  white-space: nowrap;
+}
+
 .filter-bar {
   padding: 6px 10px;
   background: #16213e;
@@ -1065,6 +1114,30 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
 
 .export-btn:hover:not(:disabled) {
   opacity: 0.85;
+}
+
+.ai-action-btn {
+  background: #5C6BC0;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.ai-action-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.ai-action-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.ai-action-btn.loading {
+  background: #7E57C2;
 }
 
 .sort-btn {

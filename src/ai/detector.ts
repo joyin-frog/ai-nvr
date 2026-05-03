@@ -51,26 +51,18 @@ interface VlmAnalysisResult {
   inferMs: number;
 }
 
-/** VLM 检测 prompt（针对小模型优化：简洁明确、减少 token、结构化输出） */
-const VLM_SYSTEM_PROMPT = `Detect all objects in this surveillance image. Output JSON array:
-[{"bbox_2d":[x1,y1,x2,y2],"label":"type","description":"brief detail"}]
-bbox: pixel coordinates. label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other.
-Rules: tightest bbox, separate entries per object, include edge objects, never empty if anything visible.`;
+/** VLM 检测 prompt（针对 0.8B 小模型极致优化：归一化坐标、最小化 token、清晰格式） */
+const VLM_SYSTEM_PROMPT = `Detect objects. JSON array:
+[{"box":[x1,y1,x2,y2],"label":"type","desc":"brief"}]
+box: normalized 0.0-1.0. label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other.
+One object per entry. Tight box. Never empty if visible.`;
 
-/** 多帧时序分析 prompt（用于 contextIntervalMs > 0 时，指导模型利用时间信息） */
-const VLM_MULTI_FRAME_SYSTEM_PROMPT = `You are a surveillance camera analyzer. You receive multiple frames from the same camera at different times.
-
-First image is the LATEST frame. Other images are earlier context frames (older).
-
-Detect all objects in the LATEST frame. Use context frames to:
-1. Determine if objects are moving (compare positions across frames)
-2. Identify activities (walking, running, standing, entering, leaving)
-3. Track object consistency (same person appearing across frames)
-
-Output JSON array for the LATEST frame:
-[{"bbox_2d":[x1,y1,x2,y2],"label":"type","description":"brief detail with activity"}]
-label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other
-Rules: tightest bbox, separate entries per object, include edge objects, never empty if anything visible.`;
+/** 多帧时序分析 prompt（精简版：只要求简单运动判断，不要求复杂的活动识别） */
+const VLM_MULTI_FRAME_SYSTEM_PROMPT = `Multiple frames from same camera. First=LATEST, rest=older context.
+Detect objects in LATEST frame. Compare with context to note movement.
+JSON array: [{"box":[x1,y1,x2,y2],"label":"type","desc":"brief with movement"}]
+box: normalized 0.0-1.0. label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other.
+One object per entry. Tight box. Never empty if visible.`;
 
 /**
  * AI 目标检测器
@@ -566,17 +558,29 @@ export class AiDetector {
       /** 标签过滤 */
       if (validLabels.length > 0 && !validLabels.includes(label.toLowerCase()) && !validLabels.includes(label)) continue;
 
-      /** 解析 bbox_2d 像素坐标 → 归一化 0-1 */
+      /** 解析 bbox：支持归一化坐标(0-1)的 box 和像素坐标的 bbox_2d */
       let box: VlmDetection["box"];
-      if (Array.isArray(raw.bbox_2d) && raw.bbox_2d.length >= 4) {
-        const coords = raw.bbox_2d.map(Number);
+      const rawBox = raw.box ?? raw.bbox_2d;
+      if (Array.isArray(rawBox) && rawBox.length >= 4) {
+        const coords = rawBox.map(Number);
         if (coords.every(c => !isNaN(c))) {
-          box = {
-            xmin: Math.max(0, Math.min(1, coords[0]! / imageWidth)),
-            ymin: Math.max(0, Math.min(1, coords[1]! / imageHeight)),
-            xmax: Math.max(0, Math.min(1, coords[2]! / imageWidth)),
-            ymax: Math.max(0, Math.min(1, coords[3]! / imageHeight)),
-          };
+          /** 判断是否为归一化坐标（所有值 <= 1.0） */
+          const isNormalized = coords.every(c => c >= 0 && c <= 1.05);
+          if (isNormalized) {
+            box = {
+              xmin: Math.max(0, Math.min(1, coords[0]!)),
+              ymin: Math.max(0, Math.min(1, coords[1]!)),
+              xmax: Math.max(0, Math.min(1, coords[2]!)),
+              ymax: Math.max(0, Math.min(1, coords[3]!)),
+            };
+          } else {
+            box = {
+              xmin: Math.max(0, Math.min(1, coords[0]! / imageWidth)),
+              ymin: Math.max(0, Math.min(1, coords[1]! / imageHeight)),
+              xmax: Math.max(0, Math.min(1, coords[2]! / imageWidth)),
+              ymax: Math.max(0, Math.min(1, coords[3]! / imageHeight)),
+            };
+          }
         }
       }
 
@@ -588,7 +592,7 @@ export class AiDetector {
         label: label.toLowerCase(),
         score,
         box,
-        description: typeof raw.description === "string" ? raw.description : undefined,
+        description: typeof (raw.desc ?? raw.description) === "string" ? (raw.desc ?? raw.description) as string : undefined,
       });
     }
 

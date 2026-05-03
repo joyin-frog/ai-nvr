@@ -24,17 +24,16 @@ interface VlmRuleResult {
   regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }>;
 }
 
-/** 检测规则系统 prompt */
-const RULE_SYSTEM_PROMPT = `Detect if the described situation is occurring in this surveillance image. Output JSON only:
-{"matched":false,"confidence":0.8,"description":"what you observe"{stateSlot}{regionSlot}}
-matched: true only if clearly occurring. confidence: 0.0-1.0. description: factual observation in user's language. When in doubt, set matched to false.{stateInstructions}{regionInstructions}`;
+/** 检测规则系统 prompt（精简版，适配 0.8B 小模型） */
+const RULE_SYSTEM_PROMPT = `Is the described situation occurring? JSON only:
+{"matched":false,"confidence":0.8,"description":"what you see"{stateSlot}{regionSlot}}
+matched: true only if clearly occurring. confidence: 0.0-1.0. description: factual observation. When in doubt, matched=false.{stateInstructions}{regionInstructions}`;
 
-/** 多帧规则检测 prompt（当有上下文帧时使用） */
-const RULE_MULTI_FRAME_SYSTEM_PROMPT = `Analyze multiple frames from the same camera. First image=latest, others=older context.
-Use context frames to track movement, determine duration, identify activities over time.
-Detect if the described situation is occurring. Output JSON only:
-{"matched":false,"confidence":0.8,"description":"what you observe including temporal changes"{stateSlot}{regionSlot}}
-matched: true only if clearly occurring. confidence: 0.0-1.0. When in doubt, set matched to false.{stateInstructions}{regionInstructions}`;
+/** 多帧规则检测 prompt（精简版） */
+const RULE_MULTI_FRAME_SYSTEM_PROMPT = `Multiple frames. First=latest, rest=older context. Track movement over time.
+Is the described situation occurring? JSON only:
+{"matched":false,"confidence":0.8,"description":"what you see including changes"{stateSlot}{regionSlot}}
+matched: true only if clearly occurring. confidence: 0.0-1.0. When in doubt, matched=false.{stateInstructions}{regionInstructions}`;
 
 /** 状态评估指令片段（仅当关联了状态时注入） */
 const STATE_SLOT = `, "states": [{"id": <state_id>, "value": "<new_value>"}, ...]`;

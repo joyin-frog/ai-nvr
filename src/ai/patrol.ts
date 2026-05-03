@@ -43,6 +43,12 @@ const PATROL_SYSTEM_PROMPT = `Analyze this surveillance image. Output JSON only:
 {"status":"normal","observations":"what you see","anomaly":""}
 status: "normal", "unusual", or "alert". anomaly: describe the concern, or "" if normal.`;
 
+/** 多帧巡逻 prompt */
+const PATROL_MULTI_FRAME_PROMPT = `Multiple frames from same camera. First=latest, rest=older context. Detect changes and movement.
+Output JSON only:
+{"status":"normal","observations":"what you see including changes","anomaly":""}
+status: "normal", "unusual", or "alert". anomaly: describe the concern, or "" if normal.`;
+
 /**
  * AI 主动巡逻扫描器
  * 定期扫描所有在线摄像头，生成全局态势感知报告
@@ -53,6 +59,8 @@ export class AiPatrolScanner {
   private runtimeConfig: RuntimeConfig;
   private frameProvider: PatrolFrameProvider;
   private eventStorage?: EventStorage;
+  /** Recorder 引用（用于获取上下文帧） */
+  private recorder: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> } | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
   /** 是否正在巡逻中 */
@@ -63,6 +71,10 @@ export class AiPatrolScanner {
 
   /** 巡逻间隔（毫秒） */
   private static readonly PATROL_INTERVAL = 120_000;
+
+  setRecorder(rec: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> }): void {
+    this.recorder = rec;
+  }
 
   constructor(
     eventBus: EventBus,
@@ -121,9 +133,6 @@ export class AiPatrolScanner {
     }
 
     const llmConfig = this.runtimeConfig.get().ai.llm;
-    const lang = this.runtimeConfig.get().language;
-    const langInstruction = lang.startsWith("zh") ? "\nIMPORTANT: Write ALL text in Chinese (中文)." : "";
-    const systemPrompt = PATROL_SYSTEM_PROMPT + langInstruction;
 
     /** 依次扫描每个摄像头（受并发限制） */
     for (const cam of cameras) {
@@ -136,7 +145,7 @@ export class AiPatrolScanner {
       if (Date.now() - frameInfo.timestamp > 30_000) continue;
 
       await this.acquireSlot();
-      this.analyzeCamera(cam, frameInfo.data, frameInfo.timestamp, systemPrompt, llmConfig)
+      this.analyzeCamera(cam, frameInfo.data, frameInfo.timestamp, llmConfig)
         .catch(err => {
           console.warn(`[AiPatrol] ${cam.name} 分析失败:`, err instanceof Error ? err.message : String(err));
         })
@@ -173,34 +182,56 @@ export class AiPatrolScanner {
     cam: CameraInfo,
     jpeg: Buffer,
     timestamp: number,
-    systemPrompt: string,
-    llmConfig: { apiUrl: string; model: string; imageWidth: number; maxTokens: number },
+    llmConfig: { apiUrl: string; model: string; imageWidth: number; maxTokens: number; contextIntervalMs?: number },
   ): Promise<void> {
     const t0 = performance.now();
 
-    /** 缩放图片 */
-    let imageDataUrl: string;
-    if (llmConfig.imageWidth > 0) {
-      const resized = await sharp(jpeg, { failOn: "none" })
-        .resize(llmConfig.imageWidth)
-        .jpeg({ quality: 75 })
-        .toBuffer();
-      imageDataUrl = `data:image/jpeg;base64,${resized.toString("base64")}`;
-    } else {
-      imageDataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    /** 缩放图片辅助函数 */
+    const resizeImage = async (img: Buffer): Promise<string> => {
+      if (llmConfig.imageWidth > 0) {
+        const resized = await sharp(img, { failOn: "none" })
+          .resize(llmConfig.imageWidth)
+          .jpeg({ quality: 75 })
+          .toBuffer();
+        return `data:image/jpeg;base64,${resized.toString("base64")}`;
+      }
+      return `data:image/jpeg;base64,${img.toString("base64")}`;
+    };
+
+    /** 获取上下文帧 */
+    const contextIntervalMs = llmConfig.contextIntervalMs ?? 0;
+    let contextFrames: Array<{ data: Buffer; timestamp: number }> = [];
+    if (this.recorder && contextIntervalMs > 0) {
+      contextFrames = this.recorder.getContextFrames(cam.id, timestamp, contextIntervalMs);
+    }
+    const hasContext = contextFrames.length > 0;
+    const prompt = hasContext ? PATROL_MULTI_FRAME_PROMPT : PATROL_SYSTEM_PROMPT;
+    const lang = this.runtimeConfig.get().language;
+    const langInstruction = lang.startsWith("zh") ? "\nIMPORTANT: Write ALL text in Chinese (中文)." : "";
+    const finalPrompt = prompt + langInstruction;
+
+    const imageDataUrl = await resizeImage(jpeg);
+
+    /** 构建 user content */
+    const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+      { type: "text", text: `Camera: ${cam.name}.${hasContext ? " Latest frame:" : " Analyze the scene."}` },
+      { type: "image_url", image_url: { url: imageDataUrl } },
+    ];
+
+    if (hasContext) {
+      const ctxUrls = await Promise.all(contextFrames.map(f => resizeImage(f.data)));
+      for (let i = 0; i < contextFrames.length; i++) {
+        const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
+        userContent.push({ type: "text", text: `${agoSec}s ago:` });
+        userContent.push({ type: "image_url", image_url: { url: ctxUrls[i]! } });
+      }
     }
 
     const body = {
       model: llmConfig.model,
       messages: [
-        { role: "system" as const, content: systemPrompt },
-        {
-          role: "user" as const,
-          content: [
-            { type: "text" as const, text: `Camera: ${cam.name}. Analyze the current scene.` },
-            { type: "image_url" as const, image_url: { url: imageDataUrl } },
-          ],
-        },
+        { role: "system" as const, content: finalPrompt },
+        { role: "user" as const, content: userContent },
       ],
       max_tokens: 150,
       temperature: 0.2,

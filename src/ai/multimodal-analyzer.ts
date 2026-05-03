@@ -38,15 +38,10 @@ export interface LlmSceneResult {
   [key: string]: unknown;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are a security camera analyst. Describe the scene concisely in the user's language.
-Focus on: objects/people/activities, unusual events, safety concerns. Max 3 sentences.`;
+const DEFAULT_SYSTEM_PROMPT = `Describe this surveillance scene. Objects, people, activities, anything unusual. Max 2 sentences. User's language.`;
 
-/** 多帧场景分析 prompt（当有上下文帧时使用） */
-const MULTI_FRAME_SYSTEM_PROMPT = `You are a security camera analyst. You receive multiple frames from the same camera.
-The first image is the latest, others are earlier context frames.
-Describe the scene focusing on: what is happening, movement patterns, activities, unusual events.
-Use context frames to detect changes, movement direction, and activity progression.
-Keep description under 3 sentences. Be factual and specific.`;
+/** 多帧场景分析 prompt（精简版） */
+const MULTI_FRAME_SYSTEM_PROMPT = `Multiple frames from same camera. First=latest, rest=older. Describe current scene. Note any movement or changes. Max 2 sentences.`;
 
 const DEFAULT_TRIGGERS = ["track:appeared", "track:enter-zone", "track:loiter"];
 
