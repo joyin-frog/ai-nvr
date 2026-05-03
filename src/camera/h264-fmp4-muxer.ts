@@ -103,6 +103,14 @@ class Fmp4StreamParser {
   private height = 0;
   /** 从 moov 中提取的 codec */
   private codec = "avc1.42C01E";
+  /** 从 moov 的 mdhd 中提取的 timescale（用于 PTS 重写） */
+  private timescale = 0;
+  /** 第一个 media segment 到达时的 performance.now() 基准 */
+  private streamStartPerf = 0;
+  /** 是否已记录 stream 起始时间 */
+  private streamStarted = false;
+  /** 上一帧的 wall clock PTS（单调递增保护） */
+  private lastWallClockPts = 0n;
   /** 已物化的连续 buffer */
   private buffer: Buffer = Buffer.allocUnsafe(0);
   /** 待合并的 chunks（延迟 flatten 减少 GC） */
@@ -146,6 +154,10 @@ class Fmp4StreamParser {
     this.lastMoof = null;
     this.lastMdat = null;
     this.lastMergedMedia = null;
+    this.timescale = 0;
+    this.streamStartPerf = 0;
+    this.streamStarted = false;
+    this.lastWallClockPts = 0n;
   }
 
   /** 将 pending chunks 合并到 buffer（使用 concat2 避免数组展开） */
@@ -208,9 +220,10 @@ class Fmp4StreamParser {
       this.completedBoxes.push({ type, data });
 
       if (type === "moov") {
-        /** 从 moov 中提取 codec 和分辨率 */
+        /** 从 moov 中提取 codec、分辨率和 timescale */
         this.extractCodecFromMoov(data);
         this.extractDimensionsFromMoov(data);
+        this.extractTimescaleFromMoov(data);
 
         /** 组装 init segment: ftyp + moov（恰好 2 个 box，避免 Buffer.concat 开销） */
         const initData = concat2(this.completedBoxes[0]!.data, this.completedBoxes[1]!.data);
@@ -231,8 +244,11 @@ class Fmp4StreamParser {
 
       /** moof 后面跟的 mdat 组成一个完整的 media segment */
       if (type === "mdat" && this.hasMoof) {
-        const moofData = this.completedBoxes[0]!.data;
+        let moofData = this.completedBoxes[0]!.data;
         const mdatData = this.completedBoxes[1]!.data;
+
+        /** 重写 tfdt 为 wall clock PTS，对齐真实时间 */
+        moofData = this.rewriteTfdtToWallClock(moofData);
 
         /** 缓存零拷贝引用，lastMediaSegment getter 按需合并（消除每帧 alloc+copy） */
         this.lastMoof = moofData;
@@ -367,6 +383,93 @@ class Fmp4StreamParser {
       offset += size;
     }
     return null;
+  }
+
+  /** 从 moov 的 mdhd box 中提取 timescale */
+  private extractTimescaleFromMoov(moov: Buffer): void {
+    const ts = this.findTimescaleInBox(moov, 8);
+    if (ts) this.timescale = ts;
+  }
+
+  private findTimescaleInBox(data: Buffer, start: number): number | null {
+    let offset = start;
+    while (offset + 8 <= data.length) {
+      const size = data.readUInt32BE(offset);
+      const type = data.subarray(offset + 4, offset + 8).toString("ascii");
+      if (size < 8 || offset + size > data.length) break;
+
+      if (type === "mdhd") {
+        const version = data[offset + 8];
+        /** version 0: timescale at +8+12, version 1: at +8+20 */
+        const tsOffset = version === 0 ? offset + 20 : offset + 28;
+        if (tsOffset + 4 <= data.length) return data.readUInt32BE(tsOffset);
+      }
+
+      if (type === "moov" || type === "trak" || type === "mdia") {
+        const result = this.findTimescaleInBox(data, offset + 8);
+        if (result !== null) return result;
+      }
+
+      offset += size;
+    }
+    return null;
+  }
+
+  /** 将 moof 的 tfdt 重写为基于 wall clock 的 PTS */
+  private rewriteTfdtToWallClock(moof: Buffer): Buffer {
+    if (this.timescale === 0) return moof;
+
+    if (!this.streamStarted) {
+      this.streamStartPerf = performance.now();
+      this.streamStarted = true;
+    }
+
+    /** 用 performance.now 计算亚毫秒精度的 elapsed 时间 */
+    const elapsedUs = (performance.now() - this.streamStartPerf) * 1000;
+    const wallClockPts = BigInt(Math.round(elapsedUs * this.timescale / 1_000_000));
+
+    /** 单调递增保护 */
+    const finalPts = wallClockPts > this.lastWallClockPts
+      ? wallClockPts
+      : this.lastWallClockPts + 1n;
+    this.lastWallClockPts = finalPts;
+
+    return this.patchTfdtInMoof(moof, finalPts);
+  }
+
+  /** 遍历 moof>traf>tfdt 修改 baseMediaDecodeTime */
+  private patchTfdtInMoof(moof: Buffer, newPts: bigint): Buffer {
+    const cloned = Buffer.from(moof);
+
+    let moofOff = 8;
+    while (moofOff + 8 <= cloned.length) {
+      const boxSize = cloned.readUInt32BE(moofOff);
+      const boxType = cloned.subarray(moofOff + 4, moofOff + 8).toString("ascii");
+      if (boxSize < 8 || moofOff + boxSize > cloned.length) break;
+
+      if (boxType === "traf") {
+        const trafEnd = moofOff + boxSize;
+        let trafOff = moofOff + 8;
+        while (trafOff + 8 <= trafEnd) {
+          const subSize = cloned.readUInt32BE(trafOff);
+          const subType = cloned.subarray(trafOff + 4, trafOff + 8).toString("ascii");
+          if (subSize < 8 || trafOff + subSize > trafEnd) break;
+
+          if (subType === "tfdt") {
+            const version = cloned[trafOff + 8];
+            if (version === 1 && trafOff + 20 <= trafEnd) {
+              cloned.writeBigUInt64BE(newPts, trafOff + 12);
+            } else if (trafOff + 16 <= trafEnd) {
+              cloned.writeUInt32BE(Number(newPts), trafOff + 12);
+            }
+            return cloned;
+          }
+          trafOff += subSize;
+        }
+      }
+      moofOff += boxSize;
+    }
+    return cloned;
   }
 }
 
@@ -533,12 +636,6 @@ export class H264Fmp4Extractor {
       "-probesize", "32768",
       "-i", this.rtspUrl,
     );
-
-    /**
-     * 固定帧率输出：源流丢帧时复制上一帧补齐，保证 PTS 时间线均匀
-     * 避免 VFR 导致播放忽快忽慢 + 录像时长与 wall clock 不对齐
-     */
-    args.push("-vsync", "cfr");
 
     /** 始终重编码：保证 GOP 可控，PTZ 后即可看到画面变化 */
     const encoderArgs = await this.getEncoderArgs();

@@ -201,7 +201,6 @@ export class CameraManager {
   /** 判断摄像头配置是否需要重启 */
   private configChanged(old: CameraConfig, cur: CameraConfig): boolean {
     return old.stream.hd !== cur.stream.hd
-      || old.stream.sd !== cur.stream.sd
       || old.detectFps !== cur.detectFps
       || old.detectWidth !== cur.detectWidth
       || old.detectHeight !== cur.detectHeight
