@@ -54,14 +54,11 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
   }
 }
 
-/** 保留当前播放位置前多少秒缓冲区（0.2s：平衡低延迟与播放稳定性） */
-const BUFFER_RETAIN_SECONDS = 0.2
+/** 保留当前播放位置前多少秒缓冲区 */
+const BUFFER_RETAIN_SECONDS = 0.5
 
-/** 播放延迟超过此值（秒）时开始渐进追赶 */
-const LIVE_CATCHUP_THRESHOLD = 0.03
-
-/** 延迟超过此值（秒）直接 seek 到最新（0.3s：平衡低延迟与流畅播放） */
-const LIVE_SEEK_THRESHOLD = 0.3
+/** 延迟超过此值（秒）直接 seek 到最新 */
+const LIVE_SEEK_THRESHOLD = 1.0
 
 /** pending 队列最大段数，超过则丢弃最旧的段（实时流保持低延迟） */
 const MAX_PENDING_SEGMENTS = 1
@@ -214,8 +211,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ]
   }
 
-  /** 追赶直播：更激进的加速策略，延迟过大直接 seek
-   *  注意：video.currentTime/playbackRate 赋值不依赖 sourceBuffer 状态，可始终执行 */
+  /** 追赶直播：PTS 已对齐 wall clock，延迟过大直接 seek */
   function catchUpToLive() {
     const video = videoRef.value
     if (!video || !sourceBuffer) return
@@ -226,19 +222,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     const delay = end - video.currentTime
 
     if (delay > LIVE_SEEK_THRESHOLD) {
-      /** 延迟过大直接 seek 到最新（10ms 安全余量） */
+      /** 延迟过大直接 seek 到最新 */
       video.currentTime = end - 0.01
-    } else if (delay > LIVE_CATCHUP_THRESHOLD) {
-      /** 平滑追赶：在 30ms~300ms 窗口内从 1.0x 渐进到 3.0x（更快速追回延迟） */
-      const t = (delay - LIVE_CATCHUP_THRESHOLD) / (LIVE_SEEK_THRESHOLD - LIVE_CATCHUP_THRESHOLD)
-      const raw = 1.0 + t * 2.0
-      /** 步进量化（0.1 步长）减少 playbackRate 频繁赋值 */
-      const rate = Math.round(raw * 10) / 10
-      if (video.playbackRate !== rate) {
-        video.playbackRate = rate
-      }
+    } else if (delay < -0.5) {
+      /** 播放位置跑到缓冲区前面（异常），也 seek 回来 */
+      video.currentTime = end - 0.01
     } else if (video.playbackRate !== 1) {
-      /** 追上后恢复正常速度 */
       video.playbackRate = 1
     }
   }
