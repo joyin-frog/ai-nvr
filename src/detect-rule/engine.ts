@@ -529,7 +529,7 @@ export class DetectRuleEngine {
         }
       }
 
-      if (vlmResult.matched || rule.outputRegions) {
+      if (vlmResult.matched) {
         /** 保存快照（原图优先） */
         if (this.saveSnapshot) {
           if (rule.saveOriginal) {

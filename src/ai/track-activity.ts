@@ -250,7 +250,7 @@ export class TrackActivityCollector {
     const label = profile.semanticLabel || profile.label;
 
     const zoneSummary = profile.zones.length > 0
-      ? profile.zones.map(z => `${z.zoneName}(${(z.totalDwellMs / 1000).toFixed(0)}s)`).join(", ")
+      ? profile.zones.map(z => `${z.zoneName}(${(z.totalDwellMs / 1000).toFixed(0)}s, ${z.enterCount}次进出)`).join(", ")
       : "无";
 
     const eventLines = profile.events.slice(-15).map(e => {
@@ -258,10 +258,16 @@ export class TrackActivityCollector {
       return `[${time}] ${e.summary}`;
     }).join("\n");
 
+    /** 行为事件类型统计 */
+    const eventTypes = profile.events.map(e => e.type);
+    const typeCounts: Record<string, number> = {};
+    for (const t of eventTypes) typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+    const typeSummary = Object.entries(typeCounts).map(([t, c]) => `${t}×${c}`).join(", ");
+
     const lang = this.runtimeConfig.get().language;
     const langInstruction = lang.startsWith("zh") ? "Write in Chinese." : "Write in English.";
 
-    const systemPrompt = `Summarize this tracked object's activity. Max 2 sentences. Be factual. ${langInstruction}`;
+    const systemPrompt = `Summarize this tracked object's activity in 2-3 sentences. Be factual and specific. Include: movement pattern, zone preferences, and notable behaviors. ${langInstruction}`;
 
     const body = {
       model: llmConfig.model,
@@ -269,10 +275,10 @@ export class TrackActivityCollector {
         { role: "system" as const, content: systemPrompt },
         {
           role: "user" as const,
-          content: `Object: ${name} (${label})\nDuration: ${lifespanSec}s\nZones: ${zoneSummary}\nEvents:\n${eventLines}`,
+          content: `Object: ${name} (${label})\nDuration: ${lifespanSec}s\nZones: ${zoneSummary}\nEvent breakdown: ${typeSummary}\nTotal events: ${profile.events.length}\nEvents timeline:\n${eventLines}`,
         },
       ],
-      max_tokens: 100,
+      max_tokens: 150,
       temperature: 0.2,
     };
 

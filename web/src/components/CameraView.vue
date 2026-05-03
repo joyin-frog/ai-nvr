@@ -2380,6 +2380,12 @@ onUnmounted(() => {
           <div class="ai-chat-history" v-if="aiChatHistory.length > 0" ref="aiChatScrollRef">
             <div v-for="(msg, idx) in aiChatHistory" :key="idx" :class="['ai-chat-msg', msg.role]">{{ msg.content }}</div>
           </div>
+          <div v-if="aiChatHistory.length === 0" class="ai-ask-suggestions">
+            <button class="ai-suggest-chip" @click="aiQuestion = '描述当前画面'; askAi()">{{ t('camera.aiSuggestDescribe', '描述当前画面') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '有多少人？他们在做什么？'; askAi()">{{ t('camera.aiSuggestCount', '有多少人？') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '有什么异常或值得注意的情况？'; askAi()">{{ t('camera.aiSuggestAnomaly', '有异常吗？') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '最近发生了什么事件？'; askAi()">{{ t('camera.aiSuggestRecent', '最近的事件') }}</button>
+          </div>
           <div style="display:flex;gap:6px">
             <input v-model="aiQuestion" class="ai-ask-input" :placeholder="t('camera.aiAskPlaceholder', '输入关于画面的问题...')" @keydown.enter="askAi" />
             <button class="ai-ask-submit" @click="askAi" :disabled="aiAsking">{{ aiAsking ? '...' : '&#x27A4;' }}</button>
@@ -2746,6 +2752,29 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.ai-ask-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.ai-suggest-chip {
+  background: rgba(124, 77, 255, 0.15);
+  border: 1px solid rgba(124, 77, 255, 0.3);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.ai-suggest-chip:hover {
+  background: rgba(124, 77, 255, 0.3);
+  border-color: rgba(124, 77, 255, 0.6);
+}
+
 .ai-ask-input {
   flex: 1;
   min-width: 0;
@@ -2809,6 +2838,8 @@ onUnmounted(() => {
   color: #ddd;
   border-bottom-left-radius: 2px;
 }
+
+.heatmap-btn {
   background: none;
   border: none;
   color: #888;

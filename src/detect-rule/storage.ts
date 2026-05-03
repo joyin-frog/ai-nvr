@@ -270,7 +270,13 @@ export class DetectRuleStorage {
     try {
       stateIds = JSON.parse(stateIdsJson);
     } catch { /* 使用默认空数组 */ }
-    return { ...rest, stateIds };
+    /** SQLite INTEGER → boolean 转换 */
+    return {
+      ...rest,
+      stateIds,
+      saveOriginal: !!rest.saveOriginal,
+      outputRegions: !!rest.outputRegions,
+    };
   }
 
   close(): void {
