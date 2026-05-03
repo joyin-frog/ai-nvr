@@ -466,6 +466,20 @@ const progressEventMarkers = computed(() => {
   })).filter(m => m.position >= 0 && m.position <= 100)
 })
 
+/** 行为事件进度条标记 */
+const behaviorEventMarkers = computed(() => {
+  if (!selectedRecording.value || playbackBehaviorEvents.value.length === 0) return []
+  const rec = selectedRecording.value
+  const duration = rec.endTime - rec.startTime
+  if (duration <= 0) return []
+  return playbackBehaviorEvents.value.map((e, i) => ({
+    key: `beh-${i}`,
+    position: ((e.timestamp - rec.startTime) / duration) * 100,
+    type: e.type,
+    summary: e.summary,
+  })).filter(m => m.position >= 0 && m.position <= 100)
+})
+
 /** 当前播放位置对应的事件索引（用于事件列表高亮） */
 const activePlaybackEventIdx = computed(() => {
   if (!selectedRecording.value || playbackEvents.value.length === 0) return -1
@@ -1816,6 +1830,10 @@ defineExpose({ loadRecordings, playAtTime })
             <template v-for="m in progressEventMarkers" :key="m.key">
               <div class="progress-event-marker" :style="{ left: m.position + '%', background: eventMarkerColor(m.labels) }" :title="m.labels.join(', ') + ' (' + m.count + ')'" @click.stop="seekToMarker(m.position)" />
             </template>
+            <!-- 行为事件标记（菱形，与检测标记区分） -->
+            <template v-for="m in behaviorEventMarkers" :key="m.key">
+              <div class="progress-behavior-marker" :style="{ left: m.position + '%', borderColor: BEHAVIOR_EVENT_STYLE[m.type]?.bg ?? '#666' }" :title="`${BEHAVIOR_EVENT_STYLE[m.type]?.label ?? m.type}: ${m.summary}`" @click.stop="seekToMarker(m.position)" />
+            </template>
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
             <div v-if="hoverPct >= 0 && selectedRecording" class="progress-tooltip" :style="{ left: (hoverPct * 100) + '%' }">
@@ -2997,6 +3015,25 @@ defineExpose({ loadRecordings, playAtTime })
 .progress-event-marker:hover {
   opacity: 1;
   transform: translateX(-50%) scaleY(1.3);
+}
+
+.progress-behavior-marker {
+  position: absolute;
+  top: -1px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #666;
+  background: transparent;
+  transform: translateX(-50%) rotate(45deg);
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0.85;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.progress-behavior-marker:hover {
+  opacity: 1;
+  transform: translateX(-50%) rotate(45deg) scale(1.4);
 }
 
 .progress-fill {

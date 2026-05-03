@@ -72,6 +72,8 @@ export class BehaviorAnalyzer {
   private roiCacheExpiry = 0;
   /** 取消订阅函数 */
   private unsub: (() => void) | null = null;
+  /** 人群聚集冷却：cameraId:zoneId → 上次触发时间 */
+  private crowdCooldown = new Map<string, number>();
   /** 定期清理过期状态 */
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -366,6 +368,68 @@ export class BehaviorAnalyzer {
           durationMs: timestamp - recentPts[0]!.ts,
           bboxArea,
         });
+      }
+    }
+
+    /** 人群聚集检测：同区域内 N 个以上 person 且互相接近 */
+    const persons = detections.filter(d => d.label === "person" && d.trackId != null);
+    if (persons.length >= 3) {
+      /** 按区域分组 */
+      const zonePersons = new Map<number, typeof persons>();
+      for (const p of persons) {
+        const cx = (p.box.xmin + p.box.xmax) / 2;
+        const cy = (p.box.ymin + p.box.ymax) / 2;
+        let foundZone = false;
+        for (const zone of zones) {
+          if (this.pointInPolygon(cx, cy, zone.points)) {
+            let list = zonePersons.get(zone.id);
+            if (!list) { list = []; zonePersons.set(zone.id, list); }
+            list.push(p);
+            foundZone = true;
+            break;
+          }
+        }
+        if (!foundZone) {
+          /** 区域外也检测 */
+          let list = zonePersons.get(0);
+          if (!list) { list = []; zonePersons.set(0, list); }
+          list.push(p);
+        }
+      }
+      for (const [zoneId, group] of zonePersons) {
+        if (group.length < 3) continue;
+        /** 检查组内互相接近（平均两两距离 < 0.2） */
+        let totalDist = 0;
+        let pairCount = 0;
+        for (let i = 0; i < group.length; i++) {
+          for (let j = i + 1; j < group.length; j++) {
+            const a = group[i]!;
+            const b = group[j]!;
+            const dx = (a.box.xmin + a.box.xmax) / 2 - (b.box.xmin + b.box.xmax) / 2;
+            const dy = (a.box.ymin + a.box.ymax) / 2 - (b.box.ymin + b.box.ymax) / 2;
+            totalDist += Math.sqrt(dx * dx + dy * dy);
+            pairCount++;
+          }
+        }
+        const avgDist = pairCount > 0 ? totalDist / pairCount : 1;
+        if (avgDist > 0.2) continue;
+
+        const zoneName = zones.find(z => z.id === zoneId)?.name ?? "";
+        const trackIds = group.map(p => p.trackId!);
+        const stateKey = `${cameraId}:${zoneId}`;
+        const lastCrowdAt = this.crowdCooldown.get(stateKey) ?? 0;
+        if (timestamp - lastCrowdAt < 30_000) continue;
+        this.crowdCooldown.set(stateKey, timestamp);
+
+        this.eventBus.emit("track:crowd" as keyof import("@/event-bus").EventPayloads, {
+          cameraId,
+          timestamp,
+          count: group.length,
+          trackIds,
+          zoneId,
+          zoneName,
+          avgDistance: avgDist,
+        } as never);
       }
     }
   }

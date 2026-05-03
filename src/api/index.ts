@@ -119,7 +119,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "state:changed"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "state:changed"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -2070,6 +2070,38 @@ export function startServer(
           searchScore: Math.round(s.score * 100) / 100,
         }));
         return Response.json(results);
+      }
+
+      /** 以图搜图：上传图片搜索相似追踪目标（CLIP image-to-image） */
+      if (url.pathname === "/api/tracks/image-search" && req.method === "POST") {
+        if (!clipService) return Response.json({ error: "CLIP not available" }, { status: 503 });
+        const body = await req.json() as { image?: string };
+        if (!body.image) return Response.json({ error: "image required (base64)" }, { status: 400 });
+        /** 解码 base64 图片 */
+        const jpeg = Buffer.from(body.image, "base64");
+        const imageResult = await clipService.imageEmbed(jpeg, { xmin: 0, ymin: 0, xmax: 1, ymax: 1 });
+        const queryEmbed = imageResult.embedding;
+        if (!queryEmbed?.length) return Response.json([]);
+        const allTracks = trackStorage.listTracks();
+        const eventCounts = eventStorage.countByTrackId();
+        const scored: Array<{ track: typeof allTracks[0]; score: number; eventCount: number }> = [];
+        for (const t of allTracks) {
+          const record = trackStorage.getRecord(t.trackId);
+          if (!record?.clipEmbedding?.length) continue;
+          let dot = 0;
+          for (let i = 0; i < queryEmbed.length; i++) {
+            dot += queryEmbed[i]! * record.clipEmbedding[i]!;
+          }
+          if (dot > 0.4) {
+            scored.push({ track: t, score: dot, eventCount: eventCounts.get(t.trackId) ?? 0 });
+          }
+        }
+        scored.sort((a, b) => b.score - a.score);
+        return Response.json(scored.slice(0, 50).map(s => ({
+          ...s.track,
+          eventCount: s.eventCount,
+          searchScore: Math.round(s.score * 100) / 100,
+        })));
       }
 
       /** CLIP 候选标签管理 */

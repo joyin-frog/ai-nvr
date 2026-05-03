@@ -900,6 +900,13 @@ function setupEventListeners() {
     }
   })
 
+  /** 人群聚集事件 */
+  client.on('track:crowd', (payload) => {
+    const zoneText = payload.zoneName ? ` ${t('event.inZone', '在')}${payload.zoneName}` : ''
+    eventPanel.value?.addEvent('track:crowd', payload.cameraId, `${payload.count}${t('event.persons', '人聚集')}${zoneText}`)
+    pushZoneNotification(payload.cameraId, { type: 'approach', name: `${payload.count}人聚集`, zoneName: payload.zoneName, timestamp: payload.timestamp, distance: payload.avgDistance })
+  })
+
   client.on('track:match-suggest', (payload) => {
     const best = payload.matches[0]
     if (!best) return

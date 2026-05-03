@@ -399,6 +399,35 @@ function triggerSemanticSearch(query: string) {
   }, 500)
 }
 
+/** 以图搜图 */
+const imageSearchInput = ref<HTMLInputElement | null>(null)
+
+function triggerImageSearch() {
+  imageSearchInput.value?.click()
+}
+
+async function onImageSearchFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  semanticSearching.value = true
+  try {
+    const buf = await file.arrayBuffer()
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+    const res = await authFetch('/api/tracks/image-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64 }),
+    })
+    if (res.ok) {
+      semanticResults.value = await res.json()
+      searchText.value = `[${file.name}]`
+    }
+  } finally {
+    semanticSearching.value = false
+    if (imageSearchInput.value) imageSearchInput.value.value = ''
+  }
+}
+
 /** 未命名的目标数量 */
 const unnamedCount = computed(() => tracks.value.filter(t => !t.customName).length)
 
@@ -490,6 +519,8 @@ defineExpose({ loadTracks, selectTrack })
         :placeholder="t('tracks.search', '搜索名称/标签...')"
       />
       <span v-if="semanticSearching" class="semantic-hint" title="CLIP 语义搜索中...">...</span>
+      <button class="image-search-btn" @click="triggerImageSearch" :disabled="semanticSearching" :title="t('tracks.imageSearch', '以图搜图')">{{ semanticSearching ? '⏳' : '📷' }}</button>
+      <input ref="imageSearchInput" type="file" accept="image/*" style="display:none" @change="onImageSearchFile" />
       <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
         <option value="">{{ t('tracks.all') }}</option>
         <option v-for="label in allLabels" :key="label" :value="label">{{ label }}</option>
@@ -775,6 +806,27 @@ defineExpose({ loadTracks, selectTrack })
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+.image-search-btn {
+  background: none;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #aaa;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.image-search-btn:hover:not(:disabled) {
+  color: #e0e0e0;
+  border-color: #666;
+}
+
+.image-search-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .label-filter {

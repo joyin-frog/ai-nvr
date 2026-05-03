@@ -41,6 +41,7 @@ export interface EventMap {
   'track:activity-summary': { cameraId: string; trackId: number; label: string; trackName?: string; summary: string; lifespanMs: number; zoneCount: number; eventCount: number }
   'detect:rule': { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> }
   'track:approach': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; targetTrackId: number; targetLabel: string; targetTrackName?: string; targetSemanticLabel?: string; distance: number }
+  'track:crowd': { cameraId: string; timestamp: number; count: number; trackIds: number[]; zoneId: number; zoneName: string; avgDistance: number }
   'state:changed': { stateId: number; stateName: string; cameraId: string; oldValue: string; newValue: string; source: string; sourceRuleId: number; timestamp: number; notify: boolean }
 }
 

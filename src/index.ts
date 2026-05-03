@@ -292,7 +292,7 @@ function flushPendingEvents() {
 }
 
 /** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
-const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "llm:scene", "track:activity-summary", "state:changed"] as const;
+const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "state:changed"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -344,6 +344,9 @@ for (const eventType of RECORDED_EVENTS) {
       if (p.lifespanMs !== undefined) obj.lifespanMs = p.lifespanMs;
       if (p.zoneCount !== undefined) obj.zoneCount = p.zoneCount;
       if (p.eventCount !== undefined) obj.eventCount = p.eventCount;
+      if (p.count !== undefined) obj.count = p.count;
+      if (p.avgDistance !== undefined) obj.avgDistance = p.avgDistance;
+      if (Array.isArray(p.trackIds)) obj.trackIds = p.trackIds;
       detail = JSON.stringify(obj);
     }
     pendingEvents.push({ type: eventType, cameraId: (payload as { cameraId: string }).cameraId, timestamp: (payload as { timestamp: number }).timestamp ?? Date.now(), detail });

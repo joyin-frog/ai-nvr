@@ -312,6 +312,24 @@ export interface EventPayloads {
     distance: number;
   };
 
+  /** 人群聚集事件（同区域内 N 人以上且互相接近） */
+  "track:crowd": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 时间戳 */
+    timestamp: number;
+    /** 人数 */
+    count: number;
+    /** 涉及的 trackId 列表 */
+    trackIds: number[];
+    /** 所在区域 ID（0 = 不在任何 ROI 区域内） */
+    zoneId: number;
+    /** 区域名称 */
+    zoneName: string;
+    /** 平均两两距离（归一化） */
+    avgDistance: number;
+  };
+
   /** fMP4 初始化段（ftyp + moov） */
   "fmp4:init": {
     cameraId: string;
