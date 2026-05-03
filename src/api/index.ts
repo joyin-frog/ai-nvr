@@ -1879,7 +1879,7 @@ export function startServer(
             const parts = relPath.split("/");
             return { cameraId: parts.length >= 2 ? parts[0] : undefined };
           }),
-          storageFs.fileIndex.calibrate("snapshots", join(dataDir, "detection-snapshots"), (relPath: string) => {
+          storageFs.fileIndex.calibrate("detection-snapshots", join(dataDir, "detection-snapshots"), (relPath: string) => {
             const parts = relPath.split("/");
             return { cameraId: parts.length >= 2 ? parts[0] : undefined };
           }),

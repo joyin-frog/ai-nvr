@@ -43,7 +43,7 @@ export class SnapshotStorage {
    * @param category SQLite 索引的 category 名称
    * @param dirName 磁盘上的子目录名（默认与 category 相同）
    */
-  constructor(storageFs: StorageFs, private eventBus: EventBus, category: string = "snapshots", dirName?: string) {
+  constructor(storageFs: StorageFs, private eventBus: EventBus, category: string = "detection-snapshots", dirName?: string) {
     this.storageFs = storageFs;
     this.category = category;
     this.dirName = dirName ?? category;

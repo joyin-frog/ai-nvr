@@ -167,7 +167,7 @@ const emailNotifier = new EmailNotifier(runtimeConfig, eventBus);
 emailNotifier.start();
 
 /** 检测快照存储（保存标注图到磁盘） */
-const snapshotStorage = new SnapshotStorage(storageFs, eventBus, "snapshots", "detection-snapshots");
+const snapshotStorage = new SnapshotStorage(storageFs, eventBus, "detection-snapshots");
 snapshotStorage.start().catch(err => console.error("[Snapshot] 启动失败:", err));
 
 /** 告警快照存储（独立的目录，不监听 detect 事件） */
