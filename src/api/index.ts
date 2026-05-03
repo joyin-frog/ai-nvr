@@ -1677,6 +1677,7 @@ Be specific and factual. ${langInstruction}`;
             schedule: (obj.schedule as string) ?? "",
             saveOriginal: (obj.saveOriginal as boolean) ?? true,
             outputRegions: (obj.outputRegions as boolean) ?? false,
+            extraCameras: (obj.extraCameras as Array<{ cameraId: string; offsetSec: number }>) ?? [],
           });
           detectRuleEngine?.reloadRules();
           return Response.json({ id });
@@ -1690,7 +1691,7 @@ Be specific and factual. ${langInstruction}`;
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "cameraId", "roiId", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal", "outputRegions"] as const) {
+          for (const key of ["name", "cameraId", "roiId", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal", "outputRegions", "extraCameras"] as const) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
           detectRuleStorage.updateRule(ruleId, updates as never);

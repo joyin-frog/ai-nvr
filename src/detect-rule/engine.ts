@@ -307,55 +307,6 @@ export class DetectRuleEngine {
     }
   }
 
-  /** 构建目标运动+语义上下文文本（注入 VLM prompt 帮助小模型理解场景） */
-  private buildTrackContext(cameraId: string, timestamp: number): string {
-    if (!this.trajectoryStorage) return "";
-
-    const trajectories = this.trajectoryStorage.getCameraTrajectories(cameraId, timestamp - 120_000);
-    if (trajectories.length === 0) return "";
-
-    const parts: string[] = [];
-    for (const traj of trajectories.slice(0, 6)) {
-      const pts = traj.points;
-      if (pts.length < 2) continue;
-
-      /** 计算运动摘要：起点→终点方向和距离 */
-      const first = pts[0]!;
-      const last = pts[pts.length - 1]!;
-      const dx = last.x - first.x;
-      const dy = last.y - first.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const durationSec = Math.round((last.ts - first.ts) / 1000);
-
-      /** 获取目标名称和语义标签 */
-      let label = `#${traj.trackId}`;
-      if (this.trackStorage) {
-        const record = this.trackStorage.getRecord(traj.trackId);
-        if (record?.customName) {
-          label = record.customName;
-        } else {
-          label = `${record?.label ?? "object"}#${traj.trackId}`;
-          if (record?.semanticLabel) label += ` (${record.semanticLabel})`;
-        }
-      }
-
-      /** 简单方向描述 */
-      let movement = "";
-      if (dist > 0.05) {
-        const dirX = dx > 0.02 ? "right" : dx < -0.02 ? "left" : "";
-        const dirY = dy > 0.02 ? "down" : dy < -0.02 ? "up" : "";
-        const dir = [dirY, dirX].filter(Boolean).join("-") || "moved";
-        movement = ` moved ${dir}`;
-      } else {
-        movement = " stationary";
-      }
-
-      parts.push(`${label}:${movement} ${durationSec}s, now at (${last.x.toFixed(2)},${last.y.toFixed(2)})`);
-    }
-
-    return parts.length > 0 ? `Active objects: ${parts.join("; ")}` : "";
-  }
-
   /** 执行单次规则检测 */
   private async executeRule(rule: DetectRule, frame: Buffer, timestamp: number): Promise<void> {
     this.concurrent++;
@@ -425,12 +376,6 @@ export class DetectRuleEngine {
       const imageDataUrl = await resizeImage(jpeg);
       const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
-      /** 注入轨迹+语义上下文（帮助 0.8B 模型理解运动和目标信息） */
-      const contextLines = this.buildTrackContext(rule.cameraId, timestamp);
-      if (contextLines) {
-        userContent.push({ type: "text", text: `[Context] ${contextLines}` });
-      }
-
       userContent.push({ type: "text", text: rule.prompt });
       userContent.push({ type: "image_url", image_url: { url: imageDataUrl } });
 
@@ -444,6 +389,28 @@ export class DetectRuleEngine {
         }
       }
 
+      /** 附加其他摄像头帧 */
+      if (rule.extraCameras.length > 0) {
+        for (const src of rule.extraCameras) {
+          let camFrame: Buffer | undefined;
+          if (src.offsetSec > 0 && this.recorder) {
+            /** 取偏移帧：从 recorder 缓冲区获取指定时间之前的帧 */
+            const targetTime = timestamp - src.offsetSec * 1000;
+            const ctxFrames = this.recorder.getContextFrames(src.cameraId, targetTime, 0, 1);
+            if (ctxFrames.length > 0) camFrame = ctxFrames[0]!.data;
+          }
+          if (!camFrame) {
+            camFrame = this.frameProvider.getLatestFrame(src.cameraId);
+          }
+          if (camFrame) {
+            const camUrl = await resizeImage(camFrame);
+            const offsetLabel = src.offsetSec > 0 ? ` (${src.offsetSec}s ago)` : "";
+            userContent.push({ type: "text", text: `[Camera: ${src.cameraId}${offsetLabel}]` });
+            userContent.push({ type: "image_url", image_url: { url: camUrl } });
+          }
+        }
+      }
+
       /** 调用 VLM（有关联状态时增加 max_tokens） */
       const body = {
         model: llmConfig.model,
@@ -454,7 +421,7 @@ export class DetectRuleEngine {
             content: userContent,
           },
         ],
-        max_tokens: (rule.stateIds.length > 0 || rule.outputRegions) ? 500 : 200,
+        max_tokens: (rule.stateIds.length > 0 || rule.outputRegions || rule.extraCameras.length > 0) ? 500 : 200,
         temperature: 0.1,
       };
 

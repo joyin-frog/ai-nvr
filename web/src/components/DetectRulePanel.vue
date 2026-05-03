@@ -15,6 +15,14 @@ interface RoiItem {
 }
 
 /** 检测规则 */
+/** 附加摄像头图片配置 */
+interface ExtraCameraSource {
+  /** 摄像头 ID */
+  cameraId: string
+  /** 取多少秒前的帧（0=当前帧） */
+  offsetSec: number
+}
+
 interface DetectRule {
   id: number
   name: string
@@ -34,6 +42,8 @@ interface DetectRule {
   saveOriginal: boolean
   /** 是否输出目标区域坐标 */
   outputRegions: boolean
+  /** 附加摄像头图片源 */
+  extraCameras: ExtraCameraSource[]
 }
 
 /** 检测记录 */
@@ -108,6 +118,7 @@ const form = ref({
   scheduleDays: [1, 2, 3, 4, 5] as number[],
   saveOriginal: true,
   outputRegions: false,
+  extraCameras: [] as ExtraCameraSource[],
 })
 
 const emptyForm = {
@@ -115,6 +126,7 @@ const emptyForm = {
   imageWidth: 0, stateIds: [] as number[], scheduleEnabled: false,
   scheduleStart: '08:00', scheduleEnd: '18:00', scheduleDays: [1, 2, 3, 4, 5] as number[],
   saveOriginal: true, outputRegions: false,
+  extraCameras: [] as ExtraCameraSource[],
 }
 
 /** 星期选项 */
@@ -321,10 +333,11 @@ function startEdit(rule: DetectRule) {
     scheduleDays: [1, 2, 3, 4, 5],
     saveOriginal: rule.saveOriginal ?? true,
     outputRegions: rule.outputRegions ?? false,
+    extraCameras: rule.extraCameras ?? [],
   }
   parseScheduleJson(rule.schedule ?? '')
   /** 有高级配置时自动展开 */
-  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions
+  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions || (rule.extraCameras?.length ?? 0) > 0
 }
 
 async function saveEdit() {
@@ -663,6 +676,20 @@ function switchToHistory() {
             </label>
           </div>
         </div>
+        <!-- 附加摄像头图片 -->
+        <div class="extra-cameras-section">
+          <label>{{ t('detectRule.extraCameras', '附加摄像头') }}</label>
+          <span class="hint-inline">{{ t('detectRule.extraCamerasHint', '额外发送其他摄像头的帧给 AI 分析') }}</span>
+          <div v-for="(src, idx) in form.extraCameras" :key="idx" class="extra-cam-row">
+            <select v-model="src.cameraId" class="input extra-cam-select">
+              <option value="" disabled>{{ t('detectRule.selectCamera', '选择摄像头') }}</option>
+              <option v-for="cam in (cameras ?? []).filter(c => c.id !== form.cameraId)" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+            </select>
+            <input v-model.number="src.offsetSec" type="number" min="0" step="1" class="input extra-cam-offset" :placeholder="t('detectRule.offsetSec', '秒前 (0=当前)')" />
+            <button class="remove-btn" @click="form.extraCameras.splice(idx, 1)" :title="t('detectRule.remove', '移除')">&#x2715;</button>
+          </div>
+          <button class="add-extra-cam-btn" @click="form.extraCameras.push({ cameraId: '', offsetSec: 0 })" :disabled="!(cameras ?? []).some(c => c.id !== form.cameraId)">{{ t('detectRule.addExtraCamera', '+ 添加摄像头') }}</button>
+        </div>
         <!-- 启用时段 -->
         <div class="schedule-section">
           <label class="checkbox-label">
@@ -779,6 +806,20 @@ function switchToHistory() {
                     {{ t('detectRule.outputRegions') }}
                   </label>
                 </div>
+              </div>
+              <!-- 附加摄像头图片（编辑） -->
+              <div class="extra-cameras-section">
+                <label>{{ t('detectRule.extraCameras', '附加摄像头') }}</label>
+                <span class="hint-inline">{{ t('detectRule.extraCamerasHint', '额外发送其他摄像头的帧给 AI 分析') }}</span>
+                <div v-for="(src, idx) in form.extraCameras" :key="idx" class="extra-cam-row">
+                  <select v-model="src.cameraId" class="input extra-cam-select">
+                    <option value="" disabled>{{ t('detectRule.selectCamera', '选择摄像头') }}</option>
+                    <option v-for="cam in (cameras ?? []).filter(c => c.id !== form.cameraId)" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+                  </select>
+                  <input v-model.number="src.offsetSec" type="number" min="0" step="1" class="input extra-cam-offset" :placeholder="t('detectRule.offsetSec', '秒前 (0=当前)')" />
+                  <button class="remove-btn" @click="form.extraCameras.splice(idx, 1)" :title="t('detectRule.remove', '移除')">&#x2715;</button>
+                </div>
+                <button class="add-extra-cam-btn" @click="form.extraCameras.push({ cameraId: '', offsetSec: 0 })" :disabled="!(cameras ?? []).some(c => c.id !== form.cameraId)">{{ t('detectRule.addExtraCamera', '+ 添加摄像头') }}</button>
               </div>
               <div class="schedule-section">
                 <label class="checkbox-label">
@@ -1631,6 +1672,60 @@ select.input {
   font-size: 10px;
   color: #555;
   margin-top: 2px;
+}
+
+/** 附加摄像头 */
+.extra-cameras-section {
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.extra-cameras-section > label {
+  font-size: 11px;
+  color: #aaa;
+  font-weight: 600;
+}
+.extra-cam-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.extra-cam-select {
+  flex: 1;
+  min-width: 0;
+}
+.extra-cam-offset {
+  width: 80px;
+}
+.remove-btn {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+.remove-btn:hover {
+  color: #ff6b6b;
+}
+.add-extra-cam-btn {
+  background: rgba(52, 152, 219, 0.15);
+  border: 1px dashed rgba(52, 152, 219, 0.4);
+  border-radius: 4px;
+  color: #3498db;
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.add-extra-cam-btn:hover {
+  background: rgba(52, 152, 219, 0.25);
+}
+.add-extra-cam-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /** 启用时段 */

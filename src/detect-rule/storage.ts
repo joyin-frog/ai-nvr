@@ -2,12 +2,20 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+/** 附加摄像头图片配置 */
+export interface ExtraCameraSource {
+  /** 摄像头 ID */
+  cameraId: string;
+  /** 取多少秒前的帧（0=当前帧） */
+  offsetSec: number;
+}
+
 /** 检测规则 */
 export interface DetectRule {
   id: number;
   /** 规则名称 */
   name: string;
-  /** 摄像头 ID（必选） */
+  /** 主摄像头 ID（必选） */
   cameraId: string;
   /** ROI 区域 ID（0=不限制） */
   roiId: number;
@@ -29,6 +37,8 @@ export interface DetectRule {
   saveOriginal: boolean;
   /** 是否输出目标区域坐标 */
   outputRegions: boolean;
+  /** 附加摄像头图片源（额外发送给 VLM 的其他摄像头帧） */
+  extraCameras: ExtraCameraSource[];
 }
 
 /** 检测规则匹配记录 */
@@ -109,7 +119,8 @@ export class DetectRuleStorage {
       `SELECT id, name, camera_id as cameraId, roi_id as roiId, prompt,
         interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
         image_width as imageWidth, state_ids as stateIdsJson,
-        schedule, save_original as saveOriginal, output_regions as outputRegions
+        schedule, save_original as saveOriginal, output_regions as outputRegions,
+        extra_cameras as extraCamerasJson
       FROM detect_rules WHERE enabled = 1`
     );
   }
@@ -135,6 +146,9 @@ export class DetectRuleStorage {
     if (!columns.has("output_regions")) {
       this.db.run("ALTER TABLE detect_rules ADD COLUMN output_regions INTEGER NOT NULL DEFAULT 0");
     }
+    if (!columns.has("extra_cameras")) {
+      this.db.run("ALTER TABLE detect_rules ADD COLUMN extra_cameras TEXT NOT NULL DEFAULT '[]'");
+    }
   }
 
   /** 列出所有规则 */
@@ -143,34 +157,37 @@ export class DetectRuleStorage {
       `SELECT id, name, camera_id as cameraId, roi_id as roiId, prompt,
         interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
         image_width as imageWidth, state_ids as stateIdsJson,
-        schedule, save_original as saveOriginal, output_regions as outputRegions
+        schedule, save_original as saveOriginal, output_regions as outputRegions,
+        extra_cameras as extraCamerasJson
       FROM detect_rules ORDER BY id`
-    ).all() as Array<DetectRule & { stateIdsJson: string }>).map(this.mapRule);
+    ).all() as Array<DetectRule & { stateIdsJson: string; extraCamerasJson: string }>).map(this.mapRule);
   }
 
   /** 获取启用的规则（预编译查询） */
   getEnabledRules(): DetectRule[] {
-    return (this.stmtGetEnabledRules.all() as Array<DetectRule & { stateIdsJson: string }>).map(this.mapRule);
+    return (this.stmtGetEnabledRules.all() as Array<DetectRule & { stateIdsJson: string; extraCamerasJson: string }>).map(this.mapRule);
   }
 
   /** 添加规则 */
   addRule(rule: Omit<DetectRule, "id" | "enabled">): number {
     const stateIdsJson = JSON.stringify(rule.stateIds ?? []);
+    const extraCamerasJson = JSON.stringify(rule.extraCameras ?? []);
     const row = this.db.query(
-      `INSERT INTO detect_rules (name, camera_id, roi_id, prompt, interval_ms, cooldown_ms, enabled, image_width, state_ids, schedule, save_original, output_regions)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO detect_rules (name, camera_id, roi_id, prompt, interval_ms, cooldown_ms, enabled, image_width, state_ids, schedule, save_original, output_regions, extra_cameras)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) RETURNING id`
     ).get(
       rule.name, rule.cameraId, rule.roiId ?? 0, rule.prompt,
       rule.intervalMs, rule.cooldownMs,
       rule.imageWidth ?? 0, stateIdsJson, rule.schedule ?? "",
       rule.saveOriginal !== false ? 1 : 0,
       rule.outputRegions ? 1 : 0,
+      extraCamerasJson,
     );
     return (row as { id: number }).id;
   }
 
   /** 更新规则 */
-  updateRule(id: number, updates: Partial<Pick<DetectRule, "name" | "cameraId" | "roiId" | "prompt" | "intervalMs" | "cooldownMs" | "enabled" | "imageWidth" | "stateIds" | "schedule" | "saveOriginal" | "outputRegions">>): boolean {
+  updateRule(id: number, updates: Partial<Pick<DetectRule, "name" | "cameraId" | "roiId" | "prompt" | "intervalMs" | "cooldownMs" | "enabled" | "imageWidth" | "stateIds" | "schedule" | "saveOriginal" | "outputRegions" | "extraCameras">>): boolean {
     const sets: string[] = [];
     const params: (string | number)[] = [];
 
@@ -186,6 +203,7 @@ export class DetectRuleStorage {
     if (updates.schedule !== undefined) { sets.push("schedule = ?"); params.push(updates.schedule); }
     if (updates.saveOriginal !== undefined) { sets.push("save_original = ?"); params.push(updates.saveOriginal ? 1 : 0); }
     if (updates.outputRegions !== undefined) { sets.push("output_regions = ?"); params.push(updates.outputRegions ? 1 : 0); }
+    if (updates.extraCameras !== undefined) { sets.push("extra_cameras = ?"); params.push(JSON.stringify(updates.extraCameras)); }
 
     if (sets.length === 0) return false;
     params.push(id);
@@ -263,19 +281,23 @@ export class DetectRuleStorage {
     return count;
   }
 
-  /** 将数据库行映射为 DetectRule（解析 stateIds JSON） */
-  private mapRule(row: DetectRule & { stateIdsJson: string }): DetectRule {
-    const { stateIdsJson, ...rest } = row;
+  /** 将数据库行映射为 DetectRule（解析 JSON 字段） */
+  private mapRule(row: DetectRule & { stateIdsJson: string; extraCamerasJson?: string }): DetectRule {
+    const { stateIdsJson, extraCamerasJson, ...rest } = row;
     let stateIds: number[] = [];
     try {
       stateIds = JSON.parse(stateIdsJson);
     } catch { /* 使用默认空数组 */ }
-    /** SQLite INTEGER → boolean 转换 */
+    let extraCameras: ExtraCameraSource[] = [];
+    if (extraCamerasJson) {
+      try { extraCameras = JSON.parse(extraCamerasJson); } catch { /* 空数组 */ }
+    }
     return {
       ...rest,
       stateIds,
       saveOriginal: !!rest.saveOriginal,
       outputRegions: !!rest.outputRegions,
+      extraCameras,
     };
   }
 
