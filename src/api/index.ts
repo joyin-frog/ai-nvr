@@ -18,6 +18,7 @@ import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
 import { type AiDetector } from "@/ai/detector";
+import { aiMetrics } from "@/ai/metrics";
 import { type PtzController } from "@/ptz";
 import { type PreferencesStorage } from "@/storage/preferences";
 import { type CrossLineStorage } from "@/storage/cross-lines";
@@ -2083,6 +2084,100 @@ ${langInstruction}`;
         return Response.json(result);
       }
 
+      /** 语义事件搜索：用 LLM 从自然语言查询中匹配事件 */
+      if (url.pathname === "/api/ai/search-events" && req.method === "POST") {
+        const body = await req.json() as { query?: string; limit?: number };
+        const query = body.query?.trim();
+        if (!query) return Response.json({ error: "query required" }, { status: 400 });
+
+        const llm = runtimeConfig.get().ai.llm;
+        if (!llm.enabled || !llm.apiUrl || !llm.model) {
+          return Response.json({ error: "LLM not configured" }, { status: 400 });
+        }
+
+        /** 取最近 1 小时的事件（最多 200 条），排除高频低价值类型 */
+        const now = Date.now();
+        const events = eventStorage.query({ since: now - 3600_000, limit: 200 })
+          .filter(e => e.type !== "motion" && e.type !== "detect" && e.type !== "llm:summary")
+          .slice(0, 100);
+
+        if (events.length === 0) return Response.json({ results: [] });
+
+        /** 构建事件摘要列表 */
+        const eventLines = events.map((e, i) => {
+          const time = new Date(e.timestamp).toLocaleTimeString("zh-CN");
+          let desc = "";
+          if (e.type.startsWith("track:")) {
+            const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
+            const name = (d.trackName || d.semanticLabel || d.label || "目标") as string;
+            desc = `${name} ${e.type.replace("track:", "")}`;
+            if (d.zoneName) desc += ` → ${d.zoneName}`;
+          } else if (e.type === "alert") {
+            desc = `告警: ${(e.detail ?? "").slice(0, 80)}`;
+          } else if (e.type === "llm:scene") {
+            const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
+            desc = `AI场景: ${(d.description as string)?.slice(0, 80) ?? ""}`;
+          } else if (e.type === "llm:patrol") {
+            const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
+            desc = `巡逻: ${(d.analysis as string)?.slice(0, 80) ?? ""}`;
+          } else if (e.type === "detect:rule") {
+            const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
+            desc = `规则: ${(d.ruleName ?? "")} ${(d.result as string ?? "").slice(0, 60)}`;
+          } else {
+            desc = `${e.type}: ${(e.detail ?? "").slice(0, 60)}`;
+          }
+          return `[${i}] ${time} ${e.camera_id} ${e.type} | ${desc}`;
+        });
+
+        const apiUrl = llm.apiUrl.endsWith("/chat/completions")
+          ? llm.apiUrl
+          : `${llm.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+        const searchPrompt = `Given these security events, find indices matching the user's natural language query.
+Return ONLY a JSON array of matching event indices (numbers). If none match, return [].
+Do not explain. Only the JSON array.
+
+Events:
+${eventLines.join("\n")}
+
+User query: "${query}"`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+
+        const resp = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: llm.model,
+            messages: [{ role: "user", content: searchPrompt }],
+            max_tokens: 200,
+            temperature: 0,
+          }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+
+        if (!resp.ok) return Response.json({ error: "LLM request failed" }, { status: 502 });
+
+        const result = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const content = result.choices?.[0]?.message?.content?.trim() ?? "[]";
+
+        /** 解析 LLM 返回的索引数组 */
+        let indices: number[] = [];
+        const jsonMatch = content.match(/\[[\s\S]*?\]/);
+        if (jsonMatch) {
+          indices = JSON.parse(jsonMatch[0]) as number[];
+        }
+
+        const limit = body.limit ?? 20;
+        const matchedEvents = indices
+          .filter(i => i >= 0 && i < events.length)
+          .slice(0, limit)
+          .map(i => events[i]!);
+
+        return Response.json({ results: matchedEvents, total: matchedEvents.length });
+      }
+
       /** AI 引擎状态：VLM 配置、检测统计 */
       if (url.pathname === "/api/ai/status" && req.method === "GET") {
         const aiConfig = runtimeConfig.get().ai;
@@ -2118,6 +2213,10 @@ ${langInstruction}`;
         const trackAnomaly = eventStorage.getAnomalyScore({ type: "track:appeared" });
         const anomalyScore = Math.max(detectAnomaly.score, trackAnomaly.score);
 
+        /** AI 性能指标 */
+        const vlmStatus = aiDetector.getVlmStatus();
+        const metrics = aiMetrics.snapshot(vlmStatus.current, vlmStatus.max);
+
         return Response.json({
           vlm: { enabled: llm.enabled, model: llm.model, apiUrl: llm.apiUrl ? "***" : "", imageWidth: llm.imageWidth, contextIntervalMs: llm.contextIntervalMs },
           clip: { enabled: aiConfig.clip.enabled },
@@ -2126,6 +2225,7 @@ ${langInstruction}`;
           trajectories: { pointCount: trajPoints },
           labelDistribution: labelCounts,
           anomaly: { score: Math.round(anomalyScore * 100) / 100, detect: detectAnomaly, track: trackAnomaly },
+          metrics,
         });
       }
 

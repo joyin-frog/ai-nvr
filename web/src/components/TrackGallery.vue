@@ -668,10 +668,11 @@ defineExpose({ loadTracks, selectTrack })
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
           </div>
           <div class="track-cameras">
+            <span v-if="track.cameraIds.length > 1" class="cross-cam-badge" :title="t('tracks.crossCamera', '跨摄像头关联')">🔗</span>
             <span
               v-for="(camId, idx) in track.cameraIds" :key="camId"
               class="cam-tag clickable"
-              :class="{ 'cam-online': props.cameras?.find(c => c.id === camId)?.online, active: filterCamera === camId }"
+              :class="{ 'cam-online': props.cameras?.find(c => c.id === camId)?.online, active: filterCamera === camId, 'cross-cam': track.cameraIds.length > 1 }"
               @click="filterCamera = filterCamera === camId ? '' : camId"
             >{{ camId }}{{ idx < track.cameraIds.length - 1 ? ',' : '' }}</span>
           </div>
@@ -1544,5 +1545,24 @@ defineExpose({ loadTracks, selectTrack })
   max-height: 85vh;
   border-radius: 8px;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.cross-cam-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  background: rgba(33, 150, 243, 0.2);
+  border: 1px solid rgba(33, 150, 243, 0.5);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 4px;
+  cursor: help;
+  line-height: 1.4;
+}
+
+.cam-tag.cross-cam {
+  border-color: rgba(33, 150, 243, 0.5);
+  background: rgba(33, 150, 243, 0.15);
 }
 </style>

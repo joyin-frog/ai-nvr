@@ -5,6 +5,7 @@ import { type RoiStorage } from "@/storage/roi";
 import { type StateStorage } from "@/state/storage";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { type TrackStorage } from "@/storage/tracks";
+import { aiMetrics } from "@/ai/metrics";
 import sharp from "sharp";
 
 /** 帧获取接口（由 CameraManager 实现） */
@@ -358,6 +359,7 @@ export class DetectRuleEngine {
   /** 执行单次规则检测 */
   private async executeRule(rule: DetectRule, frame: Buffer, timestamp: number): Promise<void> {
     this.concurrent++;
+    const t0 = performance.now();
     try {
       const llmConfig = this.runtimeConfig.get().ai.llm;
       if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) return;
@@ -460,7 +462,11 @@ export class DetectRuleEngine {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15_000);
 
-      const response = await fetch(llmConfig.apiUrl, {
+      const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
+        ? llmConfig.apiUrl
+        : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+      const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -482,6 +488,8 @@ export class DetectRuleEngine {
 
       /** 解析 VLM 返回 */
       const vlmResult = this.parseVlmResponse(content);
+
+      aiMetrics.record({ source: "rule", inferMs: performance.now() - t0, ok: true, avgConfidence: vlmResult.confidence });
 
       /** 冷却更新 */
       this.lastTriggerTime.set(rule.id, timestamp);
@@ -549,6 +557,7 @@ export class DetectRuleEngine {
         console.log(`[DetectRuleEngine] 规则 "${rule.name}" 匹配 (${(vlmResult.confidence * 100).toFixed(0)}%): ${vlmResult.description.slice(0, 80)}`);
       }
     } catch (err) {
+      aiMetrics.record({ source: "rule", inferMs: performance.now() - t0, ok: false });
       console.warn(`[DetectRuleEngine] 规则 "${rule.name}" 执行失败:`, err instanceof Error ? err.message : String(err));
     } finally {
       this.concurrent--;

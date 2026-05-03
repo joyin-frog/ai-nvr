@@ -25,7 +25,7 @@ const { setPref, getPref } = usePreferences()
 const aiActionLoading = ref<'patrol' | ''>('')
 
 /** AI 引擎状态 */
-const aiStats = ref<{ vlm: { enabled: boolean; model: string; contextIntervalMs?: number }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number }; labelDistribution?: Record<string, number>; anomaly?: { score: number } } | null>(null)
+const aiStats = ref<{ vlm: { enabled: boolean; model: string; contextIntervalMs?: number }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number }; labelDistribution?: Record<string, number>; anomaly?: { score: number }; metrics?: { modules: Array<{ source: string; calls5m: number; ok5m: number; avgMs5m: number; p95Ms5m: number; errorRate5m: number }>; totalCalls5m: number; totalOk5m: number; avgMs5m: number; confidenceBuckets: number[]; totalObjects5m: number; vlmConcurrency: number; vlmMaxConcurrency: number } } | null>(null)
 
 /** 加载 AI 状态 */
 async function loadAiStats() {
@@ -95,6 +95,8 @@ const filterCamera = ref('')
 const filterDate = ref('')
 /** 搜索关键词 */
 const filterSearch = ref('')
+/** AI 语义搜索状态 */
+const semanticSearching = ref(false)
 /** 搜索防抖定时器 */
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -103,6 +105,42 @@ function onSearchInput() {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   searchDebounceTimer = setTimeout(loadHistory, 300)
 }
+
+/** AI 语义搜索：用自然语言搜索事件 */
+async function semanticSearch() {
+  const query = filterSearch.value.trim()
+  if (!query) return
+  semanticSearching.value = true
+  try {
+    const resp = await authFetch('/api/ai/search-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    })
+    if (!resp.ok) return
+    const data = await resp.json() as { results: Array<{ id: number; type: string; camera_id: string; timestamp: number; detail?: string }> }
+    if (data.results.length > 0) {
+      events.value = data.results.map(e => ({
+        id: e.id,
+        time: new Date(e.timestamp).toLocaleTimeString(locale.value === 'zh' ? 'zh-CN' : undefined),
+        timestamp: e.timestamp,
+        type: e.type,
+        cameraId: e.camera_id,
+        detail: e.detail ?? '',
+        summary: null,
+        rawDetail: null,
+        starred: false,
+      }))
+      totalCount.value = data.results.length
+      filterType.value = ''
+      filterCamera.value = ''
+      filterRange.value = ''
+    }
+  } catch { /* ignore */ } finally {
+    semanticSearching.value = false
+  }
+}
+
 /** 快速时间范围（空=全部, '1h'=最近1小时, '24h'=最近24小时） */
 const filterRange = ref('')
 /** 当前展开的事件 ID */
@@ -793,6 +831,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
       <span v-if="aiStats.tracks" class="ai-stat" :title="`活跃 ${aiStats.tracks.active} / 已命名 ${aiStats.tracks.named}`">追踪 {{ aiStats.tracks.total }} ({{ aiStats.tracks.active }} 活跃)</span>
       <span v-if="aiStats.trajectories" class="ai-stat">轨迹 {{ aiStats.trajectories.pointCount }} 点</span>
       <span v-if="aiStats.clip?.enabled" class="ai-stat">🟢 CLIP</span>
+      <span v-if="aiStats.metrics && aiStats.metrics.totalCalls5m > 0" class="ai-stat" :title="`推理: ${aiStats.metrics.totalOk5m}/${aiStats.metrics.totalCalls5m} 成功, 平均 ${aiStats.metrics.avgMs5m}ms, P95 ${Math.max(...aiStats.metrics.modules.map(m => m.p95Ms5m))}ms`">⚡ {{ aiStats.metrics.avgMs5m }}ms ({{ aiStats.metrics.totalCalls5m }}次)</span>
+      <span v-if="aiStats.metrics && aiStats.metrics.vlmMaxConcurrency > 0" class="ai-stat" :title="`VLM 并发: ${aiStats.metrics.vlmConcurrency}/${aiStats.metrics.vlmMaxConcurrency}`">🔀 {{ aiStats.metrics.vlmConcurrency }}/{{ aiStats.metrics.vlmMaxConcurrency }}</span>
       <span v-if="(aiStats.anomaly?.score ?? 0) > 0" :class="['ai-stat', 'anomaly-badge', aiStats.anomaly!.score > 0.3 ? 'high' : 'low']" :title="`异常评分: ${Math.round(aiStats.anomaly!.score * 100)}%`">{{ Math.round(aiStats.anomaly!.score * 100) }}% 异常</span>
       <span v-if="aiStats.vlm.contextIntervalMs" class="ai-stat" title="多帧分析间隔">📐 {{ (aiStats.vlm.contextIntervalMs / 1000).toFixed(0) }}s</span>
       <div v-if="aiStats.labelDistribution && Object.keys(aiStats.labelDistribution).length > 0" class="ai-label-dist">
@@ -810,7 +850,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
           <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
         </select>
       </div>
-      <input type="text" v-model="filterSearch" @input="onSearchInput" class="filter-search" :placeholder="t('event.searchPlaceholder')" />
+      <input type="text" v-model="filterSearch" @input="onSearchInput" class="filter-search" :placeholder="t('event.searchPlaceholder')" @keydown.enter="semanticSearch" />
+      <button v-if="aiStats?.vlm?.enabled && filterSearch.trim()" :class="['ai-action-btn', { loading: semanticSearching }]" @click="semanticSearch" :disabled="semanticSearching" title="AI 语义搜索">{{ semanticSearching ? '⏳' : '✨' }}</button>
       <div class="type-chips">
         <button :class="['type-chip', { active: !filterType }]" @click="filterType = ''; onFilterChange('type')">{{ t('event.allTypes') }}</button>
         <button :class="['type-chip', 'motion', { active: filterType === 'motion' }]" @click="filterType = 'motion'; onFilterChange('type')">{{ t('event.motion') }}</button>

@@ -3,6 +3,7 @@ import { type Detection, type DetectMode } from "./types";
 import { type Annotator } from "./annotator";
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
+import { aiMetrics } from "./metrics";
 
 /** 从 JPEG SOF0/SOF2 marker 解析实际图像宽高（避免硬编码比例假设） */
 function parseJpegDimensions(buf: Buffer): { width: number; height: number } {
@@ -153,6 +154,11 @@ export class AiDetector {
     } else {
       this.vlmConcurrency--;
     }
+  }
+
+  /** 获取当前 VLM 并发使用情况 */
+  getVlmStatus(): { current: number; max: number } {
+    return { current: this.vlmConcurrency, max: AiDetector.MAX_VLM_CONCURRENCY };
   }
 
   constructor(
@@ -509,7 +515,16 @@ export class AiDetector {
       this.jpegDimCache.set(cameraId, { width: imgW, height: imgH, hash: jpegHash });
     }
     /** 解析 VLM 输出为结构化结果 */
-    return this.parseVlmResponse(content, inferMs, imgW, imgH);
+    const parsed = this.parseVlmResponse(content, inferMs, imgW, imgH);
+    const confidences = parsed.objects.map(o => o.score);
+    aiMetrics.record({
+      source: "detector",
+      inferMs,
+      ok: true,
+      objectCount: parsed.objects.length,
+      avgConfidence: confidences.length > 0 ? confidences.reduce((s, v) => s + v, 0) / confidences.length : 0,
+    });
+    return parsed;
   }
 
   /** 解析 VLM 返回的 JSON（支持数组格式和对象格式） */
@@ -657,9 +672,9 @@ export class AiDetector {
     /** 更新最后推理时间 */
     this.lastDetectTime.set(cameraId, Date.now());
 
-    try {
-      const t0 = performance.now();
+    const t0 = performance.now();
 
+    try {
       /** 获取 VLM 并发许可（超出上限时排队等待） */
       await this.acquireVlm();
       let vlmResult: Awaited<ReturnType<typeof this.analyzeWithVlm>>;
@@ -901,6 +916,7 @@ export class AiDetector {
       }
     } catch (err) {
       console.error(`[AiDetector] VLM 检测失败:`, err);
+      aiMetrics.record({ source: "detector", inferMs: performance.now() - t0, ok: false });
     } finally {
       this.analyzing.delete(cameraId);
     }

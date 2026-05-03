@@ -1,5 +1,6 @@
 import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
+import { aiMetrics } from "./metrics";
 import { type EventStorage } from "@/storage/events";
 import sharp from "sharp";
 
@@ -245,7 +246,11 @@ export class AiPatrolScanner {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12_000);
-    const response = await fetch(llmConfig.apiUrl, {
+    const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
+      ? llmConfig.apiUrl
+      : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -262,6 +267,8 @@ export class AiPatrolScanner {
     if (!content) return;
 
     const inferMs = performance.now() - t0;
+
+    aiMetrics.record({ source: "patrol", inferMs, ok: true });
 
     /** 解析结果 */
     const parsed = this.parsePatrolResult(content);

@@ -1,4 +1,5 @@
 import { type EventBus } from "@/event-bus";
+import { aiMetrics } from "./metrics";
 import sharp from "sharp";
 
 /** 多模态 LLM 配置 */
@@ -271,7 +272,11 @@ export class MultimodalAnalyzer {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
-    const response = await fetch(this.config.apiUrl, {
+    const apiUrl = this.config.apiUrl.endsWith("/chat/completions")
+      ? this.config.apiUrl
+      : `${this.config.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -291,6 +296,8 @@ export class MultimodalAnalyzer {
     if (!description) return;
 
     const inferMs = performance.now() - t0;
+
+    aiMetrics.record({ source: "scene", inferMs, ok: true });
 
     const sceneResult: LlmSceneResult = {
       cameraId,

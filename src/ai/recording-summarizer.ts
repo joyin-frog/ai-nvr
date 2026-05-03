@@ -1,6 +1,7 @@
 import { type EventBus } from "@/event-bus";
 import { type EventStorage } from "@/storage/events";
 import { type RuntimeConfig } from "@/runtime-config";
+import { aiMetrics } from "./metrics";
 
 /** 录像 AI 摘要结果 */
 export interface RecordingSummary {
@@ -122,6 +123,9 @@ export class RecordingSummarizer {
       if (!summaryText) return;
 
       const inferMs = performance.now() - t0;
+
+      aiMetrics.record({ source: "recording", inferMs, ok: true });
+
       const summary: RecordingSummary = {
         cameraId,
         filename,
