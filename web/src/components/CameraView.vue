@@ -722,10 +722,14 @@ function updateDetectionSummary() {
   detectionSummary.value = parts.join(' · ')
   /** 同步更新 AI 推理耗时（响应式，用于模板徽标） */
   localInferMs.value = getInferMs(props.cameraId)
+  lastDetectTsMap.set(props.cameraId, Date.now())
 }
 
 /** AI 推理耗时（响应式，用于模板） */
 const localInferMs = ref(0)
+
+/** 每个摄像头最后一次检测时间戳（非响应式，用于 OSD 显示检测间隔） */
+const lastDetectTsMap = new Map<string, number>()
 
 /** 是否有帧数据 */
 const hasFrame = computed(() => props.online)
@@ -991,6 +995,12 @@ function drawDynamicOSD(ctx: CanvasRenderingContext2D, width: number, height: nu
   }
   if (localInferMs.value > 0) {
     stats.push({ text: `AI ${localInferMs.value.toFixed(0)}ms`, color: '#9C27B0' })
+    /** 显示上次检测距今的时间间隔 */
+    const since = detectCount.value > 0 ? Date.now() - (lastDetectTsMap.get(props.cameraId) ?? 0) : 0
+    if (since > 0) {
+      const intervalColor = since < 3000 ? '#4ECDC4' : since < 8000 ? '#FFC107' : '#F44336'
+      stats.push({ text: since < 1000 ? '<1s' : `${(since / 1000).toFixed(0)}s`, color: intervalColor })
+    }
   }
   /** fMP4 视频分辨率 */
   const w = fmp4.videoWidth.value || 0
