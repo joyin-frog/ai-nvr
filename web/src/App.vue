@@ -1087,8 +1087,9 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
-      <span v-if="headerAiStatus" class="ai-header-badge" :title="`VLM: ${headerAiStatus.vlm.model}\n检测: ${headerAiStatus.stats5m?.detectCount ?? 0}/5m\n追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃`">
+      <span v-if="headerAiStatus" class="ai-header-badge" :title="`VLM: ${headerAiStatus.vlm.model}\n多帧: ${headerAiStatus.vlm.contextIntervalMs ? headerAiStatus.vlm.contextIntervalMs + 'ms' : '关闭'}\n检测: ${headerAiStatus.stats5m?.detectCount ?? 0}/5m\n告警: ${headerAiStatus.stats5m?.alertCount ?? 0}/5m\n追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃 / ${headerAiStatus.tracks?.named ?? 0} 已命名`">
         <span :class="['ai-dot', headerAiStatus.vlm.enabled ? 'on' : 'off']">AI</span>
+        <span v-if="headerAiStatus.tracks?.active" class="ai-active-count">{{ headerAiStatus.tracks.active }}</span>
       </span>
       <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? t('header.wsConnected') : wsState === 'connecting' ? t('header.wsConnecting') : t('header.wsDisconnected')">
         {{ wsState === 'connected' ? '●' : wsState === 'connecting' ? '◐' : '○' }}
@@ -1425,6 +1426,13 @@ onUnmounted(() => {
 .ai-dot.off {
   color: #888;
   border: 1px solid rgba(136, 136, 136, 0.3);
+}
+
+.ai-active-count {
+  font-size: 8px;
+  color: #4ECDC4;
+  margin-left: 2px;
+  font-weight: 600;
 }
 
 .ws-indicator.connected {
