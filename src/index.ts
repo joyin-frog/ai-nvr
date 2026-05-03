@@ -246,6 +246,13 @@ if (runtimeConfig.get().ai.llm.enabled) {
   patrolScanner.start();
 }
 
+/** 录像 AI 摘要生成器（录像完成时用 LLM 生成摘要） */
+import { RecordingSummarizer } from "@/ai/recording-summarizer";
+const recordingSummarizer = new RecordingSummarizer(eventBus, eventStorage, runtimeConfig);
+if (runtimeConfig.get().ai.llm.enabled) {
+  recordingSummarizer.start();
+}
+
 /** 磁盘用量统计已在上方创建 */
 
 /** PTZ 云台控制器 */
@@ -363,6 +370,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   multimodalAnalyzer.stop();
   eventSummarizer.stop();
   patrolScanner.stop();
+  recordingSummarizer.stop();
   clipService.dispose();
   aiDetector.dispose();
   cleaner.stop();

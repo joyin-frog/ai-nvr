@@ -325,6 +325,20 @@ export interface EventPayloads {
     mdatData: Buffer;
   };
 
+  /** 录像完成（文件已写入磁盘并注册索引） */
+  "recording:completed": {
+    /** 摄像头 ID */
+    cameraId: string;
+    /** 录像文件名 */
+    filename: string;
+    /** 录像开始时间 */
+    startTime: number;
+    /** 录像结束时间 */
+    endTime: number;
+    /** 文件大小（bytes） */
+    size: number;
+  };
+
   /** LLM 场景分析结果 */
   "llm:scene": LlmSceneResult;
 

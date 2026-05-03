@@ -570,6 +570,17 @@ export class MotionRecorder {
         extra: state?.recordedDurationMs ? JSON.stringify({ durationMs: state.recordedDurationMs }) : undefined,
       });
       this.listCache.clear();
+
+      /** 通知录像完成（供 AI 摘要等下游使用） */
+      if (this.eventBus) {
+        this.eventBus.emit("recording:completed" as keyof import("@/event-bus").EventPayloads, {
+          cameraId,
+          filename,
+          startTime,
+          endTime: Date.now(),
+          size: fileInfo.size,
+        } as never);
+      }
     }
 
     /** 连续录制模式下，检查是否需要重启 */
