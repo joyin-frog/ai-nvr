@@ -25,7 +25,7 @@ const { setPref, getPref } = usePreferences()
 const aiActionLoading = ref<'patrol' | ''>('')
 
 /** AI 引擎状态 */
-const aiStats = ref<{ vlm: { enabled: boolean; model: string }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number } } | null>(null)
+const aiStats = ref<{ vlm: { enabled: boolean; model: string }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number }; labelDistribution?: Record<string, number> } | null>(null)
 
 /** 加载 AI 状态 */
 async function loadAiStats() {
@@ -793,6 +793,9 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
       <span v-if="aiStats.tracks" class="ai-stat" :title="`活跃 ${aiStats.tracks.active} / 已命名 ${aiStats.tracks.named}`">追踪 {{ aiStats.tracks.total }} ({{ aiStats.tracks.active }} 活跃)</span>
       <span v-if="aiStats.trajectories" class="ai-stat">轨迹 {{ aiStats.trajectories.pointCount }} 点</span>
       <span v-if="aiStats.clip?.enabled" class="ai-stat">🟢 CLIP</span>
+      <div v-if="aiStats.labelDistribution && Object.keys(aiStats.labelDistribution).length > 0" class="ai-label-dist">
+        <span v-for="(count, label) in aiStats.labelDistribution" :key="label" class="label-chip" :style="{ opacity: 0.4 + 0.6 * (count / Math.max(...Object.values(aiStats.labelDistribution as Record<string, number>))) }">{{ label }} {{ count }}</span>
+      </div>
     </div>
     <!-- 筛选工具栏（事件视图） -->
     <div v-if="subView === 'events'" class="filter-bar">
@@ -1000,6 +1003,22 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
 }
 
 .ai-stat {
+  white-space: nowrap;
+}
+
+.ai-label-dist {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.label-chip {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(78, 205, 196, 0.2);
+  color: #4ECDC4;
   white-space: nowrap;
 }
 
