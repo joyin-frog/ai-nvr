@@ -166,11 +166,6 @@ watch(overlayCanvas, (canvas) => {
 }, { immediate: true })
 /** rAF fallback（浏览器不支持 requestVideoFrameCallback 时使用） */
 let overlayRafId: number | null = null
-/** overlay 是否需要重绘（检测结果或尺寸变化时标记为 dirty） */
-let overlayDirty = true
-/** 上次 overlay 绘制时的 canvas 尺寸（用于检测 resize） */
-let overlayLastW = 0
-let overlayLastH = 0
 /** 静态层是否需要重绘 */
 let staticLayerDirty = true
 /** 静态层上次绘制的 canvas 尺寸 */
@@ -304,14 +299,12 @@ function drawOverlayOnce() {
   if (canvas.width !== canvasW || canvas.height !== canvasH) {
     canvas.width = canvasW
     canvas.height = canvasH
-    overlayDirty = true
     staticLayerDirty = true
   }
 
   /** poll 检测结果 */
   const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
   if (detectResult) {
-    overlayDirty = true
     /** 仅在有 ROI 区域时才需要更新静态层（区域计数徽标依赖检测结果） */
     if (props.roiRegions && props.roiRegions.length > 0) staticLayerDirty = true
     consumedDetectVersion = detectResult.version
@@ -323,13 +316,6 @@ function drawOverlayOnce() {
 
   /** 绘制静态层（OSD + ROI + 越线 + 热力图 + 区域计数） */
   drawStaticLayer(cssW, cssH)
-
-  /** 尺寸未变且无新检测数据 → 跳过动态层重绘（除非有速度插值需要更新） */
-  const hasVelocity = trackVelocities.size > 0 && lastInferTime > 0
-  if (!overlayDirty && cssW === overlayLastW && cssH === overlayLastH && !hasVelocity) return
-  overlayLastW = cssW
-  overlayLastH = cssH
-  overlayDirty = false
 
   /** 绘制动态层（时钟 + FPS/延迟/AI指标 + 检测框 + 轨迹 + 通知） */
   if (!overlayCtx) overlayCtx = canvas.getContext('2d')
@@ -520,7 +506,6 @@ function loadTrackSnapshot(trackId: number) {
       const firstKey = trackSnapshotCache.keys().next().value
       if (firstKey != null) trackSnapshotCache.delete(firstKey)
     }
-    overlayDirty = true
   }
   img.onerror = () => {
     trackSnapshotCache.set(trackId, null)

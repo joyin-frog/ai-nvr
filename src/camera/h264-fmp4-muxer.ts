@@ -105,10 +105,10 @@ class Fmp4StreamParser {
   private codec = "avc1.42C01E";
   /** timescale（从 moov 的 mdhd 提取） */
   private timescale = 0;
-  /** 每帧 PTS 间隔 = timescale / 源流帧率 */
-  private ptsStep = 0n;
-  /** 下一帧 PTS（均匀递增，不受网络抖动影响） */
+  /** 下一帧 PTS（增量式递增） */
   private nextPts = 0n;
+  /** 首帧原始 PTS */
+  private firstOriginalPts: bigint | null = null;
   /** 已物化的连续 buffer */
   private buffer: Buffer = Buffer.allocUnsafe(0);
   /** 待合并的 chunks（延迟 flatten 减少 GC） */
@@ -153,8 +153,8 @@ class Fmp4StreamParser {
     this.lastMdat = null;
     this.lastMergedMedia = null;
     this.timescale = 0;
-    this.ptsStep = 0n;
     this.nextPts = 0n;
+    this.firstOriginalPts = null;
   }
 
   /** 将 pending chunks 合并到 buffer（使用 concat2 避免数组展开） */
@@ -245,7 +245,7 @@ class Fmp4StreamParser {
         const mdatData = this.completedBoxes[1]!.data;
 
         /** 重写 tfdt 为 wall clock PTS，对齐真实时间 */
-        moofData = this.rewriteTfdtToWallClock(moofData);
+        moofData = this.fixMoof(moofData);
 
         /** 缓存零拷贝引用，lastMediaSegment getter 按需合并（消除每帧 alloc+copy） */
         this.lastMoof = moofData;
@@ -412,122 +412,92 @@ class Fmp4StreamParser {
     return null;
   }
 
-  /** 将 moof 的 tfdt 重写为均匀递增的 PTS（不受网络抖动影响） */
-  private rewriteTfdtToWallClock(moof: Buffer): Buffer {
+  /**
+   * 修复 moof：重写 tfdt PTS 为均匀递增
+   *
+   * ffmpeg 在 -g 1 + frag_keyframe + split 模式下 tfdt 差值可能不等于实际帧间隔
+   * 且 trun 中不含 sample_duration，导致 MSE 按错误的 PTS 速率播放
+   *
+   * 修复：用段计数器 + parser 实测帧率生成均匀 PTS
+   */
+  private fixMoof(moof: Buffer): Buffer {
     if (this.timescale === 0) return moof;
 
-    const originalPts = this.readTfdtFromMoof(moof);
-
-    if (this.ptsStep === 0n) {
-      /** 首帧：ptsStep 尚未初始化，用 tfhd 的 default_sample_duration 作为帧间隔 */
-      this.ptsStep = this.readSampleDurationFromMoof(moof);
-      if (this.ptsStep === 0n) this.ptsStep = 1n;
-      this.nextPts = originalPts;
+    /** 首帧：读取原始 PTS 作为基准 */
+    if (this.firstOriginalPts === null) {
+      const pts = this.extractTfdt(moof);
+      if (pts === null) return moof;
+      this.firstOriginalPts = pts;
+      this.nextPts = pts;
+      return moof;
     }
 
-    const pts = this.nextPts;
-    this.nextPts += this.ptsStep;
+    /** 增量式 PTS：每帧 PTS = 上一帧 PTS + ptsStep
+     *  ptsStep 动态跟随 parser 实测帧率，避免 fps 变化时 PTS 跳变 */
+    const fps = this.currentFps > 0 ? this.currentFps : 15;
+    const step = BigInt(Math.round(this.timescale / fps));
+    this.nextPts += step;
 
-    return this.patchTfdtInMoof(moof, pts);
+    /** 原地写入 tfdt */
+    this.writeTfdt(moof, this.nextPts);
+    return moof;
   }
 
-  /** 从 moof 的 tfdt 读取原始 baseMediaDecodeTime */
-  private readTfdtFromMoof(moof: Buffer): bigint {
-    let moofOff = 8;
-    while (moofOff + 8 <= moof.length) {
-      const boxSize = moof.readUInt32BE(moofOff);
-      const boxType = moof.subarray(moofOff + 4, moofOff + 8).toString("ascii");
-      if (boxSize < 8 || moofOff + boxSize > moof.length) break;
-      if (boxType === "traf") {
-        const trafEnd = moofOff + boxSize;
-        let trafOff = moofOff + 8;
-        while (trafOff + 8 <= trafEnd) {
-          const subSize = moof.readUInt32BE(trafOff);
-          const subType = moof.subarray(trafOff + 4, trafOff + 8).toString("ascii");
-          if (subSize < 8 || trafOff + subSize > trafEnd) break;
-          if (subType === "tfdt") {
-            const version = moof[trafOff + 8];
-            if (version === 1 && trafOff + 20 <= trafEnd) {
-              return moof.readBigUInt64BE(trafOff + 12);
-            } else if (trafOff + 16 <= trafEnd) {
-              return BigInt(moof.readUInt32BE(trafOff + 12));
-            }
+  /** 从 moof 提取 tfdt 原始 PTS */
+  private extractTfdt(moof: Buffer): bigint | null {
+    let off = 8;
+    while (off + 8 <= moof.length) {
+      const size = moof.readUInt32BE(off);
+      const type = moof.subarray(off + 4, off + 8).toString("ascii");
+      if (size < 8 || off + size > moof.length) break;
+      if (type === "traf") {
+        const end = off + size;
+        let tOff = off + 8;
+        while (tOff + 8 <= end) {
+          const sSize = moof.readUInt32BE(tOff);
+          const sType = moof.subarray(tOff + 4, tOff + 8).toString("ascii");
+          if (sSize < 8 || tOff + sSize > end) break;
+          if (sType === "tfdt") {
+            const v = moof[tOff + 8]!;
+            if (v === 1 && tOff + 20 <= end) return moof.readBigUInt64BE(tOff + 12);
+            if (tOff + 16 <= end) return BigInt(moof.readUInt32BE(tOff + 12));
           }
-          trafOff += subSize;
+          tOff += sSize;
         }
       }
-      moofOff += boxSize;
+      off += size;
     }
-    return 0n;
+    return null;
   }
 
-  /** 从 moof 的 tfhd 读取 default_sample_duration（帧间隔 ticks） */
-  private readSampleDurationFromMoof(moof: Buffer): bigint {
-    let moofOff = 8;
-    while (moofOff + 8 <= moof.length) {
-      const boxSize = moof.readUInt32BE(moofOff);
-      const boxType = moof.subarray(moofOff + 4, moofOff + 8).toString("ascii");
-      if (boxSize < 8 || moofOff + boxSize > moof.length) break;
-      if (boxType === "traf") {
-        const trafEnd = moofOff + boxSize;
-        let trafOff = moofOff + 8;
-        while (trafOff + 8 <= trafEnd) {
-          const subSize = moof.readUInt32BE(trafOff);
-          const subType = moof.subarray(trafOff + 4, trafOff + 8).toString("ascii");
-          if (subSize < 8 || trafOff + subSize > trafEnd) break;
-          if (subType === "tfhd") {
-            /** tfhd: version(1)+flags(3)+track_id(4) + [可选字段由 flags 控制] */
-            const flags = moof.readUInt32BE(trafOff + 8);
-            /** flag 0x08 = default-sample-duration-present */
-            if (flags & 0x08) {
-              /** track_id 后面紧跟着 default_sample_duration（如果 flag 0x10 sample-size 不存在则再后面） */
-              let off = trafOff + 16; // 跳过 size+type+version+flags+track_id
-              if (flags & 0x02) off += 8; // base-data-offset
-              if (flags & 0x01) off += 4; // sample-description-index
-              if (off + 4 <= trafEnd) return BigInt(moof.readUInt32BE(off));
+  /** 原地写入 tfdt PTS */
+  private writeTfdt(moof: Buffer, pts: bigint): void {
+    let off = 8;
+    while (off + 8 <= moof.length) {
+      const size = moof.readUInt32BE(off);
+      const type = moof.subarray(off + 4, off + 8).toString("ascii");
+      if (size < 8 || off + size > moof.length) break;
+      if (type === "traf") {
+        const end = off + size;
+        let tOff = off + 8;
+        while (tOff + 8 <= end) {
+          const sSize = moof.readUInt32BE(tOff);
+          const sType = moof.subarray(tOff + 4, tOff + 8).toString("ascii");
+          if (sSize < 8 || tOff + sSize > end) break;
+          if (sType === "tfdt") {
+            const v = moof[tOff + 8]!;
+            if (v === 1) {
+              moof.writeBigUInt64BE(pts, tOff + 12);
+            } else {
+              moof.writeUInt32BE(Number(pts), tOff + 12);
             }
+            return;
           }
-          trafOff += subSize;
+          tOff += sSize;
         }
       }
-      moofOff += boxSize;
+      off += size;
     }
-    return 0n;
-  }
-
-  /** 遍历 moof>traf>tfdt 修改 baseMediaDecodeTime */
-  private patchTfdtInMoof(moof: Buffer, newPts: bigint): Buffer {
-    const cloned = Buffer.from(moof);
-
-    let moofOff = 8;
-    while (moofOff + 8 <= cloned.length) {
-      const boxSize = cloned.readUInt32BE(moofOff);
-      const boxType = cloned.subarray(moofOff + 4, moofOff + 8).toString("ascii");
-      if (boxSize < 8 || moofOff + boxSize > cloned.length) break;
-
-      if (boxType === "traf") {
-        const trafEnd = moofOff + boxSize;
-        let trafOff = moofOff + 8;
-        while (trafOff + 8 <= trafEnd) {
-          const subSize = cloned.readUInt32BE(trafOff);
-          const subType = cloned.subarray(trafOff + 4, trafOff + 8).toString("ascii");
-          if (subSize < 8 || trafOff + subSize > trafEnd) break;
-
-          if (subType === "tfdt") {
-            const version = cloned[trafOff + 8];
-            if (version === 1 && trafOff + 20 <= trafEnd) {
-              cloned.writeBigUInt64BE(newPts, trafOff + 12);
-            } else if (trafOff + 16 <= trafEnd) {
-              cloned.writeUInt32BE(Number(newPts), trafOff + 12);
-            }
-            return cloned;
-          }
-          trafOff += subSize;
-        }
-      }
-      moofOff += boxSize;
-    }
-    return cloned;
   }
 }
 
@@ -550,8 +520,7 @@ export class H264Fmp4Extractor {
   private logTag: string;
   /** 缓存 init segment（新客户端连接时发送） */
   private cachedInit: Fmp4InitSegment | null = null;
-  /** JPEG 解码子进程 */
-  private jpegProc: ReturnType<typeof spawn> | null = null;
+  /** JPEG 帧拆分器（从 fd3 读取） */
   private jpegSplitter = new JpegFrameSplitter();
   /** 复用的帧 payload */
   private reusablePayload: { cameraId: string; data: Buffer; timestamp: number };
@@ -575,7 +544,6 @@ export class H264Fmp4Extractor {
     if (this.running) return;
     this.running = true;
     this.spawnFfmpeg();
-    this.spawnJpegDecoder();
   }
 
   stop(): void {
@@ -589,7 +557,6 @@ export class H264Fmp4Extractor {
       this.online = false;
       this.eventBus.emit("extractor:offline", { cameraId: this.config.id, source: "fmp4" });
     }
-    this.killJpegProc();
     this.killProcess();
   }
 
@@ -615,71 +582,24 @@ export class H264Fmp4Extractor {
   get detectedCodec(): "avc" | null { return "avc"; }
 
   /**
-   * 始终重编码为 H.264 ultrafast — 保证极低延迟
-   * copy 模式虽然 CPU 零开销，但摄像头 GOP 通常 1-2 秒，
-   * 导致 PTZ 操作后要等关键帧才能看到画面变化（延迟 1-2s）
-   * ultrafast 重编码 CPU 开销很低（~2% 单核/路），但 GOP 完全可控
+   * 构建完整 ffmpeg 参数（单进程 fMP4 + JPEG 双输出）
+   * filter_complex split 解码一次，同时输出 fMP4（pipe:1）和 JPEG（pipe:3）
    */
-  private async getEncoderArgs(): Promise<string[]> {
+  private async buildFfmpegArgs(): Promise<string[]> {
     let encoder = this.runtimeConfig?.get().recording.encoder ?? "libx264";
     if (encoder === "auto") {
       encoder = await probeHardwareEncoder(this.ffmpegPath, this.runtimeConfig?.get().recording.vaapiDevice ?? "/dev/dri/renderD128");
     }
-    switch (encoder) {
-      case "h264_v4l2m2m":
-        return ["-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
-          "-g", "1", "-keyint_min", "1",
-          "-bf", "0"];
-      case "h264_vaapi":
-        return [
-          "-vaapi_device", this.runtimeConfig?.get().recording.vaapiDevice ?? "/dev/dri/renderD128",
-          "-c:v", "h264_vaapi",
-          "-vf", "format=nv12,hwupload",
-          "-qp", "23",
-          "-g", "1", "-keyint_min", "1",
-          /** 低延迟：禁用 B 帧 + 立即输出 + 异步深度 1 */
-          "-bf", "0", "-flags", "+low_delay", "-async_depth", "1",
-        ];
-      case "h264_nvenc":
-        return ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
-          "-cq", "23", "-g", "1", "-keyint_min", "1",
-          /** 低延迟：禁用 B 帧 + 零 lookahead + 零延迟输出 */
-          "-bf", "0", "-rc-lookahead", "0", "-zerolatency", "1"];
-      case "h264_qsv":
-        return ["-c:v", "h264_qsv", "-preset", "veryfast",
-          "-global_quality", "23", "-g", "1", "-keyint_min", "1",
-          /** 低延迟：禁用 B 帧 + 异步深度 1 */
-          "-bf", "0", "-async_depth", "1"];
-      case "h264_videotoolbox":
-        return ["-c:v", "h264_videotoolbox",
-          "-q:v", "23",
-          "-g", "1", "-keyint_min", "1",
-          /** 低延迟：允许实时编码 */
-          "-realtime", "1"];
-      case "h264_amf":
-        return ["-c:v", "h264_amf", "-usage", "ultralowlatency",
-          "-quality", "speed", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23",
-          "-g", "1", "-keyint_min", "1"];
-      default:
-        return [
-          "-c:v", "libx264",
-          "-preset", "ultrafast",
-          "-tune", "zerolatency",
-          "-crf", "23",
-          "-g", "1",
-          "-keyint_min", "1",
-          "-x264-params", "bframes=0:sync-lookahead=0:rc-lookahead=0",
-        ];
-    }
-  }
 
-  private async spawnFfmpeg(): Promise<void> {
-    /**
-     * 使用 ffmpeg 直接输出 fMP4 格式
-     * 始终重编码为 H.264 ultrafast — 保证极低延迟（GOP 2帧 ~80ms@25fps）
-     * 兼容 H.264/HEVC 等任意摄像头编码
-     */
-    const args = [
+    const detectFps = this.config.detectFps || 5;
+    const detectWidth = this.config.detectWidth > 0 ? this.config.detectWidth : 640;
+    const jpegQuality = Math.min(this.config.jpegQuality, 10);
+    const scaleFilter = `scale=${detectWidth}:-4`;
+
+    /** JPEG 分支 filter：fps 抽帧 + 缩放 */
+    const jpegFilter = `fps=${detectFps}:round=zero,${scaleFilter}`;
+
+    const inputArgs = [
       "-rtsp_transport", "tcp",
       "-avioflags", "direct",
       "-fflags", "nobuffer+fastseek+genpts+discardcorrupt",
@@ -687,45 +607,126 @@ export class H264Fmp4Extractor {
       "-max_delay", "0",
       "-reorder_queue_size", "0",
       "-thread_queue_size", "1",
-    ];
-
-    args.push(
       "-analyzeduration", "100000",
       "-probesize", "32768",
       "-i", this.rtspUrl,
-    );
+    ];
 
-    /** 始终重编码：保证 GOP 可控，PTZ 后即可看到画面变化 */
-    const encoderArgs = await this.getEncoderArgs();
-    args.push(...encoderArgs);
-    /** 单线程：zerolatency 模式下帧级并行无效，减少多路并发时 CPU 争用 */
-    args.push("-threads", "1");
+    /** GOP 1 + frag_keyframe = 每帧 I 帧，每帧独立 fragment，MSE 即时解码 */
+    const gopSize = 1;
+    /** movflags: frag_keyframe 在每个关键帧处切 fragment，配合 -g 1 即每帧一个 fragment */
+    const movflags = "frag_keyframe+empty_moov+default_base_moof";
 
-    args.push(
-      "-an",
-      "-f", "mp4",
-      "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-      /** 立即刷新到管道，避免 mp4 muxer 内部缓冲延迟 */
-      "-flush_packets", "1",
-      "pipe:1",
-    );
+    switch (encoder) {
+      case "h264_vaapi": {
+        const vaapiDev = this.runtimeConfig?.get().recording.vaapiDevice ?? "/dev/dri/renderD128";
+        return [
+          ...inputArgs,
+          "-vaapi_device", vaapiDev,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v1]format=nv12,hwupload[v1hw];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1hw]", "-c:v", "h264_vaapi",
+          "-qp", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
+          "-bf", "0", "-flags", "+low_delay", "-async_depth", "1",
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+      }
+      case "h264_nvenc":
+        return [
+          ...inputArgs,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
+          "-cq", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
+          "-bf", "0", "-rc-lookahead", "0", "-zerolatency", "1",
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+      case "h264_qsv":
+        return [
+          ...inputArgs,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1]", "-c:v", "h264_qsv", "-preset", "veryfast",
+          "-global_quality", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
+          "-bf", "0", "-async_depth", "1",
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+      case "h264_videotoolbox":
+        return [
+          ...inputArgs,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1]", "-c:v", "h264_videotoolbox", "-q:v", "28",
+          "-g", String(gopSize), "-keyint_min", String(gopSize), "-realtime", "1",
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+      case "h264_amf":
+        return [
+          ...inputArgs,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1]", "-c:v", "h264_amf", "-usage", "ultralowlatency",
+          "-quality", "speed", "-rc", "cqp", "-qp_i", "28", "-qp_p", "28",
+          "-g", String(gopSize), "-keyint_min", String(gopSize),
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+      case "h264_v4l2m2m":
+        return [
+          ...inputArgs,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1]", "-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
+          "-g", String(gopSize), "-keyint_min", String(gopSize), "-bf", "0",
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+      default:
+        return [
+          ...inputArgs,
+          "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
+          "-map", "[v1]", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+          "-crf", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
+          "-x264-params", "bframes=0:sync-lookahead=0:rc-lookahead=0",
+          "-threads", "2",
+          "-an", "-f", "mp4", "-movflags", movflags,
+          "-flush_packets", "1", "pipe:1",
+          "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
+          "-f", "image2pipe", "pipe:3",
+        ];
+    }
+  }
 
-    console.log(`${this.logTag} 启动 ffmpeg (fMP4 native): ${this.ffmpegPath} ${args.join(" ")}`);
+  private async spawnFfmpeg(): Promise<void> {
+    /**
+     * 单进程双输出：filter_complex split 解码一次
+     * pipe:1 = fMP4（前端 MSE 播放 + 录像）
+     * pipe:3 = JPEG（AI 检测 + MJPEG 回退 + 快照）
+     */
+    const args = await this.buildFfmpegArgs();
+
+    console.log(`${this.logTag} 启动 ffmpeg (fMP4+JPEG 单进程): ${this.ffmpegPath} ${args.join(" ")}`);
 
     this.proc = spawn(this.ffmpegPath, args, {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
     });
 
-    /** 用低水位线包装 stdout，减少 ffmpeg → Node 管道的批量缓冲延迟 */
-    const stdout = new Readable({ highWaterMark: 4096 }).wrap(this.proc.stdout!);
+    /** 高水位线 128KB：让单个 fMP4 segment 更可能一次读取完毕，减少 feed/flatten 调用 */
+    const stdout = new Readable({ highWaterMark: 131072 }).wrap(this.proc.stdout!);
     let initCached = false;
     stdout.on("data", (chunk: Buffer) => {
       this.parser.feed(chunk, this.eventBus, this.config.id);
 
-      /** 同时将 fMP4 数据喂给 JPEG 解码子进程 */
-      this.feedJpegDecoder(chunk);
-
-      /** 只在首次缓存 init segment，之后跳过热路径上的冗余赋值 */
       if (!initCached) {
         const init = this.parser.lastInitSegment;
         if (init) {
@@ -740,9 +741,32 @@ export class H264Fmp4Extractor {
         console.log(`${this.logTag} 流上线 (codec=${this.parser.lastInitSegment?.codec ?? "unknown"}, ${this.parser.videoWidth}x${this.parser.videoHeight})`);
       }
       this.retryCount = 0;
-      /** 收到数据，重置看门狗 */
       this.resetWatchdog();
     });
+
+    /** fd3 = JPEG 帧（filter_complex split 的第二个输出分支） */
+    const jpegFd = this.proc.stdio[3];
+    if (jpegFd) {
+      const jpegReadable = new Readable({ highWaterMark: 65536 }).wrap(jpegFd as any);
+      jpegReadable.on("data", (chunk: Buffer) => {
+        const frames = this.jpegSplitter.feed(chunk);
+        for (const frame of frames) {
+          const now = Date.now();
+          const payload = this.reusablePayload;
+          payload.data = frame;
+          payload.timestamp = now;
+          this.eventBus.emit("detect:frame", payload);
+          this.eventBus.emit("frame", payload);
+
+          this.jpegFrameCount++;
+          if (now - this.jpegFpsStart >= 5000) {
+            this.jpegFps = this.jpegFrameCount * 1000 / (now - this.jpegFpsStart);
+            this.jpegFrameCount = 0;
+            this.jpegFpsStart = now;
+          }
+        }
+      });
+    }
 
     this.proc.stderr?.on("data", (chunk: Buffer) => {
       const msg = chunk.toString().trim();
@@ -755,8 +779,8 @@ export class H264Fmp4Extractor {
       console.log(`${this.logTag} ffmpeg 退出, code=${code}`);
       this.clearWatchdog();
       this.parser.reset();
-      /** 清除缓存的 init segment（ffmpeg 重启后旧 init 不再兼容） */
       this.cachedInit = null;
+      this.jpegSplitter = new JpegFrameSplitter();
       if (this.proc) {
         this.proc.unref();
         this.proc = null;
@@ -768,7 +792,6 @@ export class H264Fmp4Extractor {
       this.scheduleReconnect();
     });
 
-    /** 启动看门狗：15 秒无数据则认为卡死 */
     this.resetWatchdog();
   }
 
@@ -778,7 +801,11 @@ export class H264Fmp4Extractor {
       this.proc = null;
       proc.stdout?.destroy();
       proc.stderr?.destroy();
+      /** 关闭 fd3（JPEG 输出管道） */
+      const fd3 = proc.stdio[3];
+      if (fd3 && "destroy" in fd3) (fd3 as any).destroy();
       proc.kill("SIGKILL");
+      /** 立即 unref 防止僵尸：exit 回调可能不会执行（bun --watch 重启时） */
       proc.unref();
     }
   }
@@ -827,83 +854,5 @@ export class H264Fmp4Extractor {
       this.retryTimer = null;
       this.spawnFfmpeg();
     }, delay);
-  }
-
-  /** 启动 JPEG 解码子进程：从 fMP4 解码为 JPEG 帧 */
-  private spawnJpegDecoder(): void {
-    const width = this.config.detectWidth;
-
-    const vfParts: string[] = [];
-    vfParts.push("fps=15:round=zero");
-    if (width > 0) vfParts.push(`scale=${width}:-4`);
-
-    const args = [
-      "-f", "mp4",
-      "-flags", "low_delay",
-      "-fflags", "nobuffer",
-      "-i", "pipe:0",
-      "-vf", vfParts.join(","),
-      "-f", "image2pipe",
-      "-vcodec", "mjpeg",
-      "-q:v", String(Math.min(this.config.jpegQuality, 10)),
-      "-an",
-      "-threads", "2",
-      "pipe:1",
-    ];
-
-    this.jpegProc = spawn(this.ffmpegPath, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    this.jpegProc.stdin?.on("error", () => {});
-    this.jpegProc.stderr?.on("data", () => {});
-    this.jpegProc.on("exit", () => {
-      this.jpegProc?.unref();
-      this.jpegProc = null;
-      this.jpegSplitter = new JpegFrameSplitter();
-    });
-
-    const stdout = this.jpegProc.stdout;
-    if (stdout) {
-      stdout.on("data", (chunk: Buffer) => {
-        const frames = this.jpegSplitter.feed(chunk);
-        for (const frame of frames) {
-          const now = Date.now();
-          const payload = this.reusablePayload;
-          payload.data = frame;
-          payload.timestamp = now;
-          this.eventBus.emit("detect:frame", payload);
-          this.eventBus.emit("frame", payload);
-
-          this.jpegFrameCount++;
-          if (now - this.jpegFpsStart >= 5000) {
-            this.jpegFps = this.jpegFrameCount * 1000 / (now - this.jpegFpsStart);
-            this.jpegFrameCount = 0;
-            this.jpegFpsStart = now;
-          }
-        }
-      });
-    }
-  }
-
-  /** 将 fMP4 数据喂给 JPEG 解码子进程 */
-  private feedJpegDecoder(data: Buffer): void {
-    const stdin = this.jpegProc?.stdin;
-    if (!stdin?.writable) return;
-    stdin.write(data);
-  }
-
-  /** 关闭 JPEG 解码子进程 */
-  private killJpegProc(): void {
-    if (this.jpegProc) {
-      const proc = this.jpegProc;
-      this.jpegProc = null;
-      proc.stdin?.destroy();
-      proc.stdout?.destroy();
-      proc.stderr?.destroy();
-      proc.kill("SIGKILL");
-      proc.unref();
-    }
-    this.jpegSplitter = new JpegFrameSplitter();
   }
 }

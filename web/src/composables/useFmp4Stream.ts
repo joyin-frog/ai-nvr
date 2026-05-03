@@ -16,19 +16,23 @@ const FMP4_TYPE_MEDIA = 0x02
 /** 全局 TextDecoder 单例（避免每次 init segment 创建新实例） */
 const textDecoder = new TextDecoder()
 
-/** 全局共享 prune 循环：使用 rAF 驱动，每帧检查延迟并追赶 */
+/** 全局共享 prune 循环：使用 rAF 驱动，catchUpToLive 节流 100ms */
 const activeStreams = new Set<{ pruneBuffer: () => void; catchUpToLive: () => void; needsPrune: boolean }>()
 let sharedRafId: number | null = null
 let sharedPruneRefCount = 0
+let lastCatchUpTime = 0
 
 function rafLoop() {
+  const now = performance.now()
+  const shouldCatchUp = now - lastCatchUpTime >= 100
   for (const s of activeStreams) {
-    s.catchUpToLive()
+    if (shouldCatchUp) s.catchUpToLive()
     if (s.needsPrune) {
       s.needsPrune = false
       s.pruneBuffer()
     }
   }
+  if (shouldCatchUp) lastCatchUpTime = now
   if (activeStreams.size > 0) {
     sharedRafId = requestAnimationFrame(rafLoop)
   }
@@ -55,13 +59,13 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
 }
 
 /** 保留当前播放位置前多少秒缓冲区 */
-const BUFFER_RETAIN_SECONDS = 0.5
+const BUFFER_RETAIN_SECONDS = 1.0
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 1.0
+const LIVE_SEEK_THRESHOLD = 1.5
 
-/** pending 队列最大段数，超过则丢弃最旧的段（实时流保持低延迟） */
-const MAX_PENDING_SEGMENTS = 1
+/** pending 队列最大段数，超过则丢弃最旧的段（允许缓冲 3 段避免频繁丢帧） */
+const MAX_PENDING_SEGMENTS = 3
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
@@ -111,8 +115,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let pruning = false
   /** append 计数（用于控制 pruneBuffer 频率，避免每次 append 后都 remove） */
   let appendCount = 0
-  /** 每 N 次 append 执行一次 pruneBuffer（15次≈0.6s@25fps，减少 remove 与 append 竞争） */
-  const PRUNE_EVERY_N_APPENDS = 15
+  /** 每 N 次 append 执行一次 pruneBuffer（30次≈2s@15fps，减少 remove 与 append 竞争） */
+  const PRUNE_EVERY_N_APPENDS = 30
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {

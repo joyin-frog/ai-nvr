@@ -369,10 +369,22 @@ const frameCounts = new Map<string, number>();
 eventBus.on("frame", ({ cameraId }) => {
   frameCounts.set(cameraId, (frameCounts.get(cameraId) ?? 0) + 1);
 });
+/** fMP4 segment 帧率统计 */
+const fmp4Counts = new Map<string, number>();
+const fmp4Bytes = new Map<string, number>();
+eventBus.on("fmp4:segment", ({ cameraId, moofData, mdatData }) => {
+  fmp4Counts.set(cameraId, (fmp4Counts.get(cameraId) ?? 0) + 1);
+  fmp4Bytes.set(cameraId, (fmp4Bytes.get(cameraId) ?? 0) + moofData.length + mdatData.length);
+});
 setInterval(() => {
   for (const [id, count] of frameCounts) {
-    console.log(`[Frame] ${id}: ${count} 帧/5s`);
+    const fmp4Count = fmp4Counts.get(id) ?? 0;
+    const bytes = fmp4Bytes.get(id) ?? 0;
+    const kbPerSeg = fmp4Count > 0 ? (bytes / fmp4Count / 1024).toFixed(0) : "0";
+    console.log(`[FPS] ${id}: JPEG=${count}/5s, fMP4=${fmp4Count}/5s (${kbPerSeg} KB/seg)`);
     frameCounts.set(id, 0);
+    fmp4Counts.set(id, 0);
+    fmp4Bytes.set(id, 0);
   }
 }, 5000);
 

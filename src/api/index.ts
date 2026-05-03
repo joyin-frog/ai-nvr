@@ -251,7 +251,9 @@ export function startServer(
     /** 实时流每帧内容不同，跳过缓存命中检查，直接编码并广播 */
     const encoded = encodeFmp4MediaFromParts(moofData, mdatData);
     for (const client of clientSet) {
-      /** 背压保护：缓冲区积压超过 2MB 时跳过（fMP4 允许更大缓冲，丢帧后 MSE 自动追赶到最新） */
+      /** 背压保护：缓冲区积压超过 3 帧大小时跳过（实时流低延迟优先）
+       *  每帧 ~600KB（2880x1624 全 I 帧），3 帧 = ~1.8MB
+       *  阈值太低（512KB）会导致每帧都被跳过，实际帧率减半 */
       if (client.getBufferedAmount() > 2097152) continue;
       client.send(encoded, false);
     }
@@ -463,9 +465,17 @@ export function startServer(
 
       /** 系统健康检查 + 性能指标 */
       if (url.pathname === "/api/health") {
-        const cameraIds = cameraManager.getStatus().map(c => c.id);
+        const cameraStatuses = cameraManager.getStatus();
+        const cameraIds = cameraStatuses.map(c => c.id);
+        const metrics = monitor.getMetrics(cameraIds);
+        /** 用 fMP4 流帧率覆盖 monitor 的帧率（monitor 统计的是 JPEG frame 事件） */
+        const streamFpsMap = new Map(cameraStatuses.map(c => [c.id, c.streamFps]));
+        for (const cam of metrics.cameras) {
+          const sf = streamFpsMap.get(cam.cameraId);
+          if (sf !== undefined && sf > 0) cam.fps = sf;
+        }
         return Response.json({
-          ...monitor.getMetrics(cameraIds),
+          ...metrics,
           storage: diskUsage.getInfo(),
         });
       }
