@@ -226,7 +226,7 @@ const thumbnailGenerator = new ThumbnailGenerator(join(dataDir, "thumbnails"), c
 const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 
 /** 录像导出器 */
-const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs);
+const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs, eventStorage);
 
 /** 统一存储清理管理器 */
 const cleaner = new StorageCleaner(runtimeConfig, eventStorage, detectRuleStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);

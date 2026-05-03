@@ -1241,7 +1241,11 @@ export function startServer(
           const resolved = await realpath(videoPath);
           if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
 
-          const result = await exporter.exportAsync(resolved, startSec, endSec, cameraId ?? "unknown");
+          /** 从文件名解析录像起始时间戳（用于事件字幕） */
+          const fnMatch = file.match(/^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+          const baseTimestamp = fnMatch ? new Date(`${fnMatch[1]}T${fnMatch[2]}:${fnMatch[3]}:${fnMatch[4]}`).getTime() : undefined;
+
+          const result = await exporter.exportAsync(resolved, startSec, endSec, cameraId ?? "unknown", baseTimestamp);
           if (!result) return new Response("Export failed", { status: 500 });
 
           const exportFilename = result.filePath.split("/").pop()!;
