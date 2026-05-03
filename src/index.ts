@@ -183,6 +183,7 @@ const detectRuleStorage = new DetectRuleStorage(join(dataDir, "detect-rules.db")
 const stateStorage = new StateStorage(join(dataDir, "state.db"));
 const detectRuleEngine = new DetectRuleEngine(eventBus, detectRuleStorage, cameraManager, runtimeConfig, roiStorage, stateStorage);
 detectRuleEngine.setRecorder(recorder);
+detectRuleEngine.setTrackStores(trajectoryStorage, trackStorage);
 detectRuleEngine.setSaveSnapshot((cameraId, timestamp, jpeg) => {
   alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
 });

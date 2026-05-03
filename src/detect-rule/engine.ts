@@ -3,6 +3,8 @@ import { type DetectRule, DetectRuleStorage } from "@/detect-rule/storage";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type RoiStorage } from "@/storage/roi";
 import { type StateStorage } from "@/state/storage";
+import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
+import { type TrackStorage } from "@/storage/tracks";
 import sharp from "sharp";
 
 /** 帧获取接口（由 CameraManager 实现） */
@@ -105,9 +107,18 @@ export class DetectRuleEngine {
   private saveSnapshot?: (cameraId: string, timestamp: number, jpeg: Buffer) => void;
   /** Recorder 引用（用于获取上下文帧） */
   private recorder: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> } | null = null;
+  /** 轨迹存储（用于生成目标运动上下文） */
+  private trajectoryStorage?: TrackTrajectoryStorage;
+  /** 追踪存储（用于获取目标名称和语义标签） */
+  private trackStorage?: TrackStorage;
 
   setRecorder(rec: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> }): void {
     this.recorder = rec;
+  }
+
+  setTrackStores(trajectory?: TrackTrajectoryStorage, track?: TrackStorage): void {
+    this.trajectoryStorage = trajectory;
+    this.trackStorage = track;
   }
 
   constructor(
@@ -289,6 +300,55 @@ export class DetectRuleEngine {
     }
   }
 
+  /** 构建目标运动+语义上下文文本（注入 VLM prompt 帮助小模型理解场景） */
+  private buildTrackContext(cameraId: string, timestamp: number): string {
+    if (!this.trajectoryStorage) return "";
+
+    const trajectories = this.trajectoryStorage.getCameraTrajectories(cameraId, timestamp - 120_000);
+    if (trajectories.length === 0) return "";
+
+    const parts: string[] = [];
+    for (const traj of trajectories.slice(0, 6)) {
+      const pts = traj.points;
+      if (pts.length < 2) continue;
+
+      /** 计算运动摘要：起点→终点方向和距离 */
+      const first = pts[0]!;
+      const last = pts[pts.length - 1]!;
+      const dx = last.x - first.x;
+      const dy = last.y - first.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const durationSec = Math.round((last.ts - first.ts) / 1000);
+
+      /** 获取目标名称和语义标签 */
+      let label = `#${traj.trackId}`;
+      if (this.trackStorage) {
+        const record = this.trackStorage.getRecord(traj.trackId);
+        if (record?.customName) {
+          label = record.customName;
+        } else {
+          label = `${record?.label ?? "object"}#${traj.trackId}`;
+          if (record?.semanticLabel) label += ` (${record.semanticLabel})`;
+        }
+      }
+
+      /** 简单方向描述 */
+      let movement = "";
+      if (dist > 0.05) {
+        const dirX = dx > 0.02 ? "right" : dx < -0.02 ? "left" : "";
+        const dirY = dy > 0.02 ? "down" : dy < -0.02 ? "up" : "";
+        const dir = [dirY, dirX].filter(Boolean).join("-") || "moved";
+        movement = ` moved ${dir}`;
+      } else {
+        movement = " stationary";
+      }
+
+      parts.push(`${label}:${movement} ${durationSec}s, now at (${last.x.toFixed(2)},${last.y.toFixed(2)})`);
+    }
+
+    return parts.length > 0 ? `Active objects: ${parts.join("; ")}` : "";
+  }
+
   /** 执行单次规则检测 */
   private async executeRule(rule: DetectRule, frame: Buffer, timestamp: number): Promise<void> {
     this.concurrent++;
@@ -355,10 +415,16 @@ export class DetectRuleEngine {
 
       /** 构建 user content：当前帧 + 上下文帧 */
       const imageDataUrl = await resizeImage(jpeg);
-      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-        { type: "text", text: rule.prompt },
-        { type: "image_url", image_url: { url: imageDataUrl } },
-      ];
+      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+      /** 注入轨迹+语义上下文（帮助 0.8B 模型理解运动和目标信息） */
+      const contextLines = this.buildTrackContext(rule.cameraId, timestamp);
+      if (contextLines) {
+        userContent.push({ type: "text", text: `[Context] ${contextLines}` });
+      }
+
+      userContent.push({ type: "text", text: rule.prompt });
+      userContent.push({ type: "image_url", image_url: { url: imageDataUrl } });
 
       /** 附加上下文帧（并行 resize） */
       if (hasContext) {
