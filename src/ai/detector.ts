@@ -39,6 +39,10 @@ interface VlmDetection {
   box?: { xmin: number; ymin: number; xmax: number; ymax: number };
   /** VLM 生成的语义描述 */
   description?: string;
+  /** VLM 检测的主色调 */
+  color?: string;
+  /** VLM 检测的姿态/朝向 */
+  pose?: string;
 }
 
 /** VLM API 返回的结构化结果 */
@@ -53,15 +57,18 @@ interface VlmAnalysisResult {
 
 /** VLM 检测 prompt（针对 0.8B 小模型极致优化：归一化坐标、最小化 token、清晰格式） */
 const VLM_SYSTEM_PROMPT = `Detect objects. JSON array:
-[{"box":[x1,y1,x2,y2],"label":"type","desc":"brief"}]
+[{"box":[x1,y1,x2,y2],"label":"type","color":"main color","pose":"stance","desc":"brief"}]
 box: normalized 0.0-1.0. label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other.
+color: dominant color (red/blue/green/white/black/yellow/brown/gray/orange/pink).
+pose: person=standing|sitting|walking|running|crouching, vehicle=facing-left|facing-right|facing-camera|facing-away, other=still|moving.
 One object per entry. Tight box. Never empty if visible.`;
 
 /** 多帧时序分析 prompt（精简版：只要求简单运动判断，不要求复杂的活动识别） */
 const VLM_MULTI_FRAME_SYSTEM_PROMPT = `Multiple frames from same camera. First=LATEST, rest=older context.
 Detect objects in LATEST frame. Compare with context to note movement.
-JSON array: [{"box":[x1,y1,x2,y2],"label":"type","desc":"brief with movement"}]
+JSON array: [{"box":[x1,y1,x2,y2],"label":"type","color":"main color","pose":"stance","desc":"brief with movement"}]
 box: normalized 0.0-1.0. label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other.
+color: dominant color. pose: standing|sitting|walking|running|crouching|still|moving.
 One object per entry. Tight box. Never empty if visible.`;
 
 /**
@@ -593,6 +600,8 @@ export class AiDetector {
         score,
         box,
         description: typeof (raw.desc ?? raw.description) === "string" ? (raw.desc ?? raw.description) as string : undefined,
+        color: typeof raw.color === "string" ? raw.color : undefined,
+        pose: typeof raw.pose === "string" ? raw.pose : undefined,
       });
     }
 
@@ -656,6 +665,8 @@ export class AiDetector {
         score: obj.score,
         box: obj.box ?? { xmin: 0, ymin: 0, xmax: 0, ymax: 0 },
         semanticLabel: obj.description,
+        dominantColor: obj.color,
+        pose: obj.pose,
       }));
 
       /** 过滤低置信度 */

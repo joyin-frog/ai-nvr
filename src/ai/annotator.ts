@@ -92,9 +92,10 @@ export class Annotator {
       /** 标签：优先显示自定义名称，然后 semanticLabel，最后 label */
       const trackPrefix = det.trackId != null ? `#${det.trackId} ` : "";
       const displayLabel = det.semanticLabel || det.label;
+      const poseTag = det.pose ? ` ${det.pose}` : "";
       const labelText = det.trackName
-        ? `${det.trackName} ${(det.score * 100).toFixed(0)}%`
-        : `${trackPrefix}${displayLabel} ${(det.score * 100).toFixed(0)}%`;
+        ? `${det.trackName}${poseTag} ${(det.score * 100).toFixed(0)}%`
+        : `${trackPrefix}${displayLabel}${poseTag} ${(det.score * 100).toFixed(0)}%`;
       const fontSize = Math.max(14, Math.min(width, height) / 30);
       /** 估算文字宽度：中文等宽字符约 1.0em，ASCII 约 0.6em */
       let charWidthSum = 0;

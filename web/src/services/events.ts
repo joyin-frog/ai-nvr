@@ -14,6 +14,8 @@ export interface Detection {
   dominantColor?: string
   /** CLIP 零样本分类语义标签（如 "a black dog", "a person walking"） */
   semanticLabel?: string
+  /** VLM 检测的姿态/朝向（如 standing, walking, facing-camera） */
+  pose?: string
 }
 
 /** 事件载荷类型 */
