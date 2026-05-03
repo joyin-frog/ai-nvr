@@ -637,7 +637,6 @@ defineExpose({ loadTracks, selectTrack })
                 {{ track.customName || track.label }}
               </span>
               <span v-if="track.customName" class="track-original-label">{{ track.label }}</span>
-              <span v-if="track.semanticLabel" class="track-semantic-label">{{ track.semanticLabel }}</span>
               <span v-if="track.searchScore" class="track-search-score">{{ (track.searchScore * 100).toFixed(0) }}%</span>
               <!-- dHash 匹配建议：一键应用 -->
               <button
@@ -649,6 +648,10 @@ defineExpose({ loadTracks, selectTrack })
                 ≈ {{ suggestions.get(track.trackId)!.name }} ({{ ((1 - suggestions.get(track.trackId)!.distance) * 100).toFixed(0) }}%)
               </button>
             </template>
+          </div>
+          <div v-if="track.semanticLabel && !track.customName" class="track-semantic-row" :title="t('tracks.aiDescription', 'AI 描述')">
+            <span class="track-semantic-label">{{ track.semanticLabel }}</span>
+          </div>
           </div>
           <div class="track-meta">
             <span class="track-id">#{{ track.trackId }}</span>
@@ -1013,11 +1016,13 @@ defineExpose({ loadTracks, selectTrack })
   font-size: 10px;
 }
 
+.track-semantic-row {
+  padding: 0 6px 2px;
+}
+
 .track-semantic-label {
-  color: #9c27b0;
-  font-size: 10px;
-  font-style: italic;
-  margin-left: 4px;
+  color: #ba68c8;
+  font-size: 11px;
 }
 
 .track-search-score {
