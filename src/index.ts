@@ -193,6 +193,11 @@ import { BehaviorAnalyzer } from "@/ai/behavior";
 const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage, runtimeConfig);
 behaviorAnalyzer.start();
 
+/** 目标活动档案收集器（追踪目标全生命周期，消失时 AI 摘要） */
+import { TrackActivityCollector } from "@/ai/track-activity";
+const trackActivityCollector = new TrackActivityCollector(eventBus, runtimeConfig);
+trackActivityCollector.start();
+
 /** 多模态 LLM 分析器（场景语义描述） */
 const multimodalAnalyzer = new MultimodalAnalyzer(eventBus, runtimeConfig.get().ai.llm);
 multimodalAnalyzer.setRecorder(recorder);
@@ -280,7 +285,7 @@ function flushPendingEvents() {
 }
 
 /** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
-const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "llm:scene", "state:changed"] as const;
+const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "llm:scene", "track:activity-summary", "state:changed"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
     /** 0 目标或重复检测结果不记录事件 */
@@ -328,6 +333,10 @@ for (const eventType of RECORDED_EVENTS) {
       if (p.targetTrackName) obj.targetTrackName = p.targetTrackName;
       if (p.targetSemanticLabel) obj.targetSemanticLabel = p.targetSemanticLabel;
       if (p.distance !== undefined) obj.distance = p.distance;
+      if (p.summary !== undefined) obj.summary = p.summary;
+      if (p.lifespanMs !== undefined) obj.lifespanMs = p.lifespanMs;
+      if (p.zoneCount !== undefined) obj.zoneCount = p.zoneCount;
+      if (p.eventCount !== undefined) obj.eventCount = p.eventCount;
       detail = JSON.stringify(obj);
     }
     pendingEvents.push({ type: eventType, cameraId: (payload as { cameraId: string }).cameraId, timestamp: (payload as { timestamp: number }).timestamp ?? Date.now(), detail });
@@ -350,6 +359,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   cameraManager.stop();
   recorder.stop();
   behaviorAnalyzer.stop();
+  trackActivityCollector.stop();
   multimodalAnalyzer.stop();
   eventSummarizer.stop();
   patrolScanner.stop();

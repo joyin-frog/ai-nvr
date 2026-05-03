@@ -314,6 +314,7 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'llm:scene': { labelKey: 'event.llmScene', bg: '#7C4DFF', color: '#fff' },
   'llm:summary': { labelKey: 'event.llmSummary', bg: '#5C6BC0', color: '#fff' },
   'llm:patrol': { labelKey: 'event.llmPatrol', bg: '#26A69A', color: '#fff' },
+  'track:activity-summary': { labelKey: 'event.trackActivity', bg: '#7E57C2', color: '#fff' },
   'detect:rule': { labelKey: 'event.detectRule', bg: '#FF6B6B', color: '#fff' },
   'state:changed': { labelKey: 'event.stateChanged', bg: '#FF9800', color: '#fff' },
 }
@@ -653,6 +654,14 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       if (obj.hasAnomaly) items.push({ label: t('event.anomaly', '异常'), value: String(obj.anomalyDetail || obj.analysis) })
       if (obj.cameraName) items.push({ label: t('event.camera', '摄像头'), value: String(obj.cameraName) })
       if (obj.inferMs !== undefined) items.push({ label: t('event.inferTime', '推理耗时'), value: `${Math.round(obj.inferMs)}ms` })
+    }
+    /** 目标活动摘要 */
+    if (e.type === 'track:activity-summary') {
+      if (obj.summary) items.push({ label: t('event.summary', '摘要'), value: String(obj.summary) })
+      if (obj.lifespanMs !== undefined) items.push({ label: t('event.duration', '存活时间'), value: `${Math.round(obj.lifespanMs as number / 1000)}s` })
+      if (obj.zoneCount !== undefined) items.push({ label: t('event.zones', '区域'), value: String(obj.zoneCount) })
+      if (obj.eventCount !== undefined) items.push({ label: t('event.eventCount', '事件数'), value: String(obj.eventCount) })
+      if (obj.trackId !== undefined) items.push({ label: 'trackId', value: String(obj.trackId), trackId: obj.trackId as number })
     }
     /** 用户检测规则事件 */
     if (e.type === 'detect:rule') {

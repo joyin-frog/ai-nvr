@@ -3,6 +3,7 @@ import { type Fmp4InitSegment } from "@/camera/h264-fmp4-muxer";
 import { type LlmSceneResult } from "@/ai/multimodal-analyzer";
 import { type EventSummary } from "@/ai/event-summarizer";
 import { type PatrolResult } from "@/ai/patrol";
+import { type TrackActivitySummary } from "@/ai/track-activity";
 
 /** 事件载荷类型定义 */
 export interface EventPayloads {
@@ -332,6 +333,9 @@ export interface EventPayloads {
 
   /** AI 主动巡逻结果 */
   "llm:patrol": PatrolResult;
+
+  /** 目标活动摘要（消失时 AI 生成） */
+  "track:activity-summary": TrackActivitySummary;
 
   /** 状态变更事件：检测规则更新了关联状态的值 */
   "state:changed": {

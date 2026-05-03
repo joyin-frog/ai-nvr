@@ -711,22 +711,24 @@ export class AiDetector {
               this.trackStorage.setSemanticLabel(target.trackId, semanticLabel);
             }
 
-            /** CLIP 分类（可选，补充更丰富的语义标签） */
+            /** CLIP 分类（补充更丰富的语义属性） */
             if (this.clipService && target.box) {
               this.clipService.classifyTarget(jpeg, target.box, target.label)
                 .then(result => {
-                  const top = ClipService.getTopLabels(result, 1);
-                  /** CLIP 结果仅在 VLM 没有描述时补充 */
-                  if (top.length > 0 && top[0]!.score > 0.25 && !semanticLabel) {
-                    this.semanticLabelCache.set(target.trackId, top[0]!.label);
+                  const top = ClipService.getTopLabels(result, 3);
+                  /** CLIP Top-3 标签融合为属性描述 */
+                  if (top.length > 0 && top[0]!.score > 0.2) {
+                    const clipLabel = top.slice(0, 2).map(t => t.label.replace(/^a /, "")).join(", ");
+                    /** VLM 没有描述时用 CLIP 作为主标签；VLM 有描述时作为补充 */
+                    const finalLabel = semanticLabel ? `${semanticLabel}; ${clipLabel}` : clipLabel;
+                    this.semanticLabelCache.set(target.trackId, finalLabel);
                     if (this.semanticLabelCache.size > AiDetector.MAX_SEMANTIC_CACHE_SIZE) {
                       const oldest = this.semanticLabelCache.keys().next().value;
                       if (oldest != null) this.semanticLabelCache.delete(oldest);
                     }
                     if (this.trackStorage) {
-                      this.trackStorage.setSemanticLabel(target.trackId, top[0]!.label);
+                      this.trackStorage.setSemanticLabel(target.trackId, finalLabel);
                     }
-                    console.log(`[AiDetector] CLIP 补充分类: track#${target.trackId} (${target.label}) → ${top[0]!.label} (${(top[0]!.score * 100).toFixed(0)}%)`);
                   }
 
                   /** CLIP image embedding 用于 ReID */

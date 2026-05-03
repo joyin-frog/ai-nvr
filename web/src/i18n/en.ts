@@ -88,6 +88,7 @@ export default {
     llmScene: 'AI Analysis',
     llmSummary: 'AI Summary',
     llmPatrol: 'AI Patrol',
+    trackActivity: 'Activity Summary',
     detectRule: 'Detect Rule',
     stateChanged: 'State Change',
     ratio: 'Motion Ratio',

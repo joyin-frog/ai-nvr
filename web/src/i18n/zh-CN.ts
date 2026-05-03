@@ -88,6 +88,7 @@ export default {
     llmScene: 'AI分析',
     llmSummary: 'AI摘要',
     llmPatrol: 'AI巡逻',
+    trackActivity: '活动摘要',
     detectRule: '检测规则',
     stateChanged: '状态变更',
     ratio: '变动比例',

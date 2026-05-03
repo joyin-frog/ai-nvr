@@ -948,6 +948,12 @@ function setupEventListeners() {
     }
   })
 
+  /** 目标活动摘要（消失时 AI 生成） */
+  client.on('track:activity-summary', (payload) => {
+    const name = payload.trackName || `#${payload.trackId}`
+    eventPanel.value?.addEvent('track:activity-summary', payload.cameraId, `${name}(${payload.label}): ${payload.summary}`)
+  })
+
 }
 
 useKeyboardShortcuts()
