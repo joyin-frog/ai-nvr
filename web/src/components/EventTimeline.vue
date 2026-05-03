@@ -23,6 +23,9 @@ const typeColors: Record<string, string> = {
   'camera:online': '#4CAF50',
   'camera:offline': '#F44336',
   alert: '#FFD93D',
+  'llm:scene': '#7E57C2',
+  'llm:summary': '#5C6BC0',
+  'llm:patrol': '#26A69A',
 }
 
 /** 计算日期范围（当天 00:00 - 24:00） */

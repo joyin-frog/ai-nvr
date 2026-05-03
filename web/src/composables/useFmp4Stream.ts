@@ -84,6 +84,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
   let mediaSource: MediaSource | null = null
   let sourceBuffer: SourceBuffer | null = null
+  /** 音频 SourceBuffer（当 fMP4 包含音频轨道时创建） */
+  let audioSourceBuffer: SourceBuffer | null = null
+  /** 当前音频 codec */
+  let currentAudioCodec = ''
   let ws: WebSocket | null = null
   /** 待 append 的段队列 */
   let pendingQueue: BufferSource[] = []
@@ -243,6 +247,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     appending = false
     pruning = false
     currentCodec = ''
+    currentAudioCodec = ''
     vfcFrameCount = 0
     vfcStartTime = performance.now()
     segmentCount = 0
@@ -295,18 +300,29 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       const type = raw[0]
 
       if (type === FMP4_TYPE_INIT) {
-        /** 解析 codec + fMP4 data */
-        if (raw.length < 3) return
-        const codecLen = (raw[2]! << 8) | raw[1]!
-        if (raw.length < 3 + codecLen) return
-        const codec = textDecoder.decode(raw.subarray(3, 3 + codecLen))
-        /** slice 创建独立 ArrayBuffer，避免 subarray.buffer 指向完整原始 buffer */
-        const fmp4Data = raw.slice(3 + codecLen).buffer
+        /** 解析协议: [0x01][2B video_codec_len][video_codec][2B audio_codec_len][audio_codec][fMP4 data] */
+        if (raw.length < 5) return
+        let off = 1
+        const videoCodecLen = (raw[off + 1]! << 8) | raw[off]!
+        off += 2
+        if (raw.length < off + videoCodecLen + 2) return
+        const codec = textDecoder.decode(raw.subarray(off, off + videoCodecLen))
+        off += videoCodecLen
+        const audioCodecLen = (raw[off + 1]! << 8) | raw[off]!
+        off += 2
+        let audioCodec = ''
+        if (audioCodecLen > 0 && raw.length >= off + audioCodecLen) {
+          audioCodec = textDecoder.decode(raw.subarray(off, off + audioCodecLen))
+        }
+        off += audioCodecLen
+        const fmp4Data = raw.slice(off).buffer
 
         /** codec 变化时需要重建 SourceBuffer */
-        if (currentCodec !== codec) {
+        const codecChanged = currentCodec !== codec || currentAudioCodec !== audioCodec
+        if (codecChanged) {
           currentCodec = codec
-          if (!ensureSourceBuffer(codec)) {
+          currentAudioCodec = audioCodec
+          if (!ensureSourceBuffer(codec, audioCodec)) {
             failed.value = true
             ws?.close()
             return
@@ -315,11 +331,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
           pendingInit = null
           doAppend(fmp4Data)
         } else {
-          /**
-           * 同 codec：ffmpeg 重启/分辨率变化后重发 init segment
-           * 缓存 init segment，等下一个 media segment 到来时再一起重建缓冲区
-           * 这样避免在收到 init 和 media 之间出现黑屏
-           */
           pendingInit = fmp4Data
           pendingQueue = []
         }
@@ -364,8 +375,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
-  /** 创建或重建 SourceBuffer，返回是否成功 */
-  function ensureSourceBuffer(codec: string): boolean {
+  /** 创建或重建 SourceBuffer（视频 + 可选音频），返回是否成功 */
+  function ensureSourceBuffer(codec: string, audioCodec: string): boolean {
     if (!mediaSource || mediaSource.readyState !== 'open') return false
 
     /** 移除旧的 SourceBuffer */
@@ -376,18 +387,47 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       }
       sourceBuffer = null
     }
+    if (audioSourceBuffer) {
+      audioSourceBuffer.removeEventListener('updateend', onUpdateEnd)
+      if (!audioSourceBuffer.updating) {
+        mediaSource.removeSourceBuffer(audioSourceBuffer)
+      }
+      audioSourceBuffer = null
+    }
 
     /** 优先使用服务器提供的 codec，失败则回退 */
     const hevcCodecs = ['hvc1.1.6.L93.B0', 'hev1.1.6.L93.B0']
     const avcCodecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
-    /** HEVC codec 优先使用服务端提供的，否则用通用 HEVC */
     const codecs = codec.startsWith('hvc1') || codec.startsWith('hev1')
       ? [codec, ...hevcCodecs, ...avcCodecs]
       : [codec, ...avcCodecs, ...hevcCodecs]
-    /** 去重 */
     const unique = [...new Set(codecs)]
 
-    /** 先用 isTypeSupported 过滤掉明确不支持的 codec，避免抛异常 */
+    /**
+     * 音频+视频合一模式：尝试用 video/mp4; codecs="video,audio" 创建单个 SourceBuffer
+     * MSE 会自动将 muxed fMP4 中的视频和音频分发到对应轨道
+     */
+    if (audioCodec) {
+      for (const c of unique) {
+        const combinedMime = `video/mp4; codecs="${c}, ${audioCodec}"`
+        if (MediaSource.isTypeSupported(combinedMime)) {
+          try {
+            sourceBuffer = mediaSource.addSourceBuffer(combinedMime)
+            sourceBuffer.addEventListener('updateend', onUpdateEnd)
+            sourceBuffer.addEventListener('error', onBufferError)
+            sourceBuffer.mode = 'segments'
+            console.debug(`[fMP4] Muxed SourceBuffer created: ${c} + ${audioCodec}`)
+            return true
+          } catch {
+            /* continue */
+          }
+        }
+      }
+      /** 合一模式不支持，尝试分离模式（双 SourceBuffer） */
+      console.debug(`[fMP4] 合一 SourceBuffer 不支持，尝试分离模式`)
+    }
+
+    /** 纯视频模式 或 分离模式中的视频 SourceBuffer */
     const supported = unique.filter(c =>
       MediaSource.isTypeSupported(`video/mp4; codecs="${c}"`)
     )
@@ -402,14 +442,33 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         sourceBuffer.addEventListener('updateend', onUpdateEnd)
         sourceBuffer.addEventListener('error', onBufferError)
         sourceBuffer.mode = 'segments'
-        console.debug(`[fMP4] SourceBuffer created: ${c}`)
-        return true
+        console.debug(`[fMP4] Video SourceBuffer created: ${c}`)
+        break
       } catch {
         /** codec 不支持，尝试下一个 */
       }
     }
-    console.error('[fMP4] 无法创建 SourceBuffer')
-    return false
+    if (!sourceBuffer) {
+      console.error('[fMP4] 无法创建 Video SourceBuffer')
+      return false
+    }
+
+    /** 分离模式：创建独立音频 SourceBuffer */
+    if (audioCodec && MediaSource.isTypeSupported(`audio/mp4; codecs="${audioCodec}"`)) {
+      try {
+        audioSourceBuffer = mediaSource.addSourceBuffer(`audio/mp4; codecs="${audioCodec}"`)
+        audioSourceBuffer.addEventListener('updateend', onUpdateEnd)
+        audioSourceBuffer.mode = 'segments'
+        console.debug(`[fMP4] Audio SourceBuffer created: ${audioCodec}`)
+      } catch (e) {
+        console.warn(`[fMP4] 音频 SourceBuffer 创建失败:`, e)
+        audioSourceBuffer = null
+      }
+    } else if (audioCodec) {
+      console.warn(`[fMP4] 浏览器不支持音频 codec ${audioCodec}，仅播放视频`)
+    }
+
+    return true
   }
 
   function queueAppend(data: BufferSource) {
@@ -640,6 +699,13 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       } catch { /* */ }
     }
     sourceBuffer = null
+    if (audioSourceBuffer && mediaSource && mediaSource.readyState === 'open') {
+      audioSourceBuffer.removeEventListener('updateend', onUpdateEnd)
+      try {
+        mediaSource.removeSourceBuffer(audioSourceBuffer)
+      } catch { /* */ }
+    }
+    audioSourceBuffer = null
     if (mediaSource) {
       mediaSource.removeEventListener('sourceopen', onSourceOpen)
       if (mediaSource.readyState === 'open') {
@@ -653,6 +719,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       currentBlobUrl = null
     }
     currentCodec = ''
+    currentAudioCodec = ''
     pendingInit = null
     pendingQueue = []
     appending = false

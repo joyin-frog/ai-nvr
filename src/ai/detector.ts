@@ -51,23 +51,26 @@ interface VlmAnalysisResult {
   inferMs: number;
 }
 
-/** VLM 检测 prompt（要求输出结构化 JSON，包含 bbox_2d 坐标） */
-const VLM_SYSTEM_PROMPT = `You are a real-time surveillance camera analyzer. Detect ALL visible objects in the image.
+/** VLM 检测 prompt（针对小模型优化：简洁明确、减少 token、结构化输出） */
+const VLM_SYSTEM_PROMPT = `Detect all objects in this surveillance image. Output JSON array:
+[{"bbox_2d":[x1,y1,x2,y2],"label":"type","description":"brief detail"}]
+bbox: pixel coordinates. label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other.
+Rules: tightest bbox, separate entries per object, include edge objects, never empty if anything visible.`;
 
-For each object, output a JSON object with:
-- "bbox_2d": [x1, y1, x2, y2] in PIXELS (tight bounding box around the object)
-- "label": one of: person, car, truck, bus, motorcycle, bicycle, dog, cat, bird, bag, box, other
-- "count": always 1 (each bbox is one object)
-- "description": short description including color, size, activity, distinctive features
+/** 多帧时序分析 prompt（用于 contextIntervalMs > 0 时，指导模型利用时间信息） */
+const VLM_MULTI_FRAME_SYSTEM_PROMPT = `You are a surveillance camera analyzer. You receive multiple frames from the same camera at different times.
 
-Output a JSON array ONLY. No markdown, no explanation.
-Example: [{"bbox_2d": [120, 45, 280, 400], "label": "person", "count": 1, "description": "person in black jacket walking"}]
+First image is the LATEST frame. Other images are earlier context frames (older).
 
-Rules:
-- Draw the TIGHTEST possible bounding box around each object
-- If multiple objects of the same type exist, create separate entries
-- Include partially visible objects at image edges
-- Never return an empty array if any object is visible`;
+Detect all objects in the LATEST frame. Use context frames to:
+1. Determine if objects are moving (compare positions across frames)
+2. Identify activities (walking, running, standing, entering, leaving)
+3. Track object consistency (same person appearing across frames)
+
+Output JSON array for the LATEST frame:
+[{"bbox_2d":[x1,y1,x2,y2],"label":"type","description":"brief detail with activity"}]
+label: person|car|truck|bus|motorcycle|bicycle|dog|cat|bird|bag|box|other
+Rules: tightest bbox, separate entries per object, include edge objects, never empty if anything visible.`;
 
 /**
  * AI 目标检测器
@@ -419,28 +422,32 @@ export class AiDetector {
       return `data:image/jpeg;base64,${img.toString("base64")}`;
     };
 
-    /** 根据用户语言配置注入语言约束 */
+    /** 构建上下文帧列表 */
+    let contextFrames: Array<{ data: Buffer; timestamp: number }> = [];
+    if (this.recorder && llmConfig.contextIntervalMs > 0) {
+      contextFrames = this.recorder.getContextFrames(cameraId, timestamp, llmConfig.contextIntervalMs);
+    }
+    const hasContext = contextFrames.length > 0;
+
+    /** 根据是否有上下文帧选择对应的 prompt */
     const lang = this.runtimeConfig.get().language;
     const langInstruction = lang.startsWith("zh") ? "\nIMPORTANT: Write ALL descriptions in Chinese (中文)." : "";
-    const systemPrompt = VLM_SYSTEM_PROMPT + langInstruction;
+    const systemPrompt = (hasContext ? VLM_MULTI_FRAME_SYSTEM_PROMPT : VLM_SYSTEM_PROMPT) + langInstruction;
 
     /** 构建 user content：当前帧 + 上下文帧 */
     const imageDataUrl = await resizeImage(jpeg);
     const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
-      { type: "text", text: "Analyze this surveillance camera image (latest frame):" },
+      { type: "text", text: hasContext ? "Latest frame:" : "Detect objects:" },
       { type: "image_url", image_url: { url: imageDataUrl } },
     ];
 
-    /** 从帧缓冲区取上下文帧（并行 resize 减少延迟） */
-    if (this.recorder && llmConfig.contextIntervalMs > 0) {
-      const contextFrames = this.recorder.getContextFrames(cameraId, timestamp, llmConfig.contextIntervalMs);
-      if (contextFrames.length > 0) {
-        const ctxUrls = await Promise.all(contextFrames.map(f => resizeImage(f.data)));
-        for (let i = 0; i < contextFrames.length; i++) {
-          const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
-          userContent.push({ type: "text", text: `Context frame from ${agoSec}s ago:` });
-          userContent.push({ type: "image_url", image_url: { url: ctxUrls[i]! } });
-        }
+    /** 上下文帧（并行 resize 减少延迟） */
+    if (hasContext) {
+      const ctxUrls = await Promise.all(contextFrames.map(f => resizeImage(f.data)));
+      for (let i = 0; i < contextFrames.length; i++) {
+        const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
+        userContent.push({ type: "text", text: `${agoSec}s ago:` });
+        userContent.push({ type: "image_url", image_url: { url: ctxUrls[i]! } });
       }
     }
 

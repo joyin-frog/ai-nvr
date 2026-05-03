@@ -36,6 +36,8 @@ export interface EventMap {
   'track:loiter': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; zoneId: number; zoneName: string; durationMs: number }
   'track:match-suggest': { cameraId: string; timestamp: number; trackId: number; label: string; matches: Array<{ trackId: number; customName: string; distance: number }> }
   'llm:scene': { cameraId: string; timestamp: number; description: string; trigger: string; inferMs: number }
+  'llm:summary': { text: string; fromTime: number; toTime: number; eventCount: number; inferMs: number }
+  'llm:patrol': { cameraId: string; cameraName: string; timestamp: number; analysis: string; hasAnomaly: boolean; anomalyDetail: string; inferMs: number }
   'detect:rule': { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> }
   'track:approach': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; targetTrackId: number; targetLabel: string; targetTrackName?: string; targetSemanticLabel?: string; distance: number }
   'state:changed': { stateId: number; stateName: string; cameraId: string; oldValue: string; newValue: string; source: string; sourceRuleId: number; timestamp: number; notify: boolean }

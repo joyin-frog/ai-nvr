@@ -287,6 +287,8 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'track:loiter': { labelKey: 'event.trackLoiter', bg: '#795548', color: '#fff' },
   'track:match-suggest': { labelKey: 'event.trackMatchSuggest', bg: '#9C27B0', color: '#fff' },
   'llm:scene': { labelKey: 'event.llmScene', bg: '#7C4DFF', color: '#fff' },
+  'llm:summary': { labelKey: 'event.llmSummary', bg: '#5C6BC0', color: '#fff' },
+  'llm:patrol': { labelKey: 'event.llmPatrol', bg: '#26A69A', color: '#fff' },
   'detect:rule': { labelKey: 'event.detectRule', bg: '#FF6B6B', color: '#fff' },
   'state:changed': { labelKey: 'event.stateChanged', bg: '#FF9800', color: '#fff' },
 }
@@ -613,6 +615,19 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       if (obj.trigger) items.push({ label: t('event.trigger', '触发'), value: String(obj.trigger) })
       if (obj.inferMs !== undefined) items.push({ label: t('event.inferTime', '推理耗时'), value: `${Math.round(obj.inferMs)}ms` })
     }
+    /** AI 事件摘要 */
+    if (e.type === 'llm:summary') {
+      if (obj.text) items.push({ label: t('event.summary', '摘要'), value: String(obj.text) })
+      if (obj.eventCount !== undefined) items.push({ label: t('event.eventCount', '事件数'), value: String(obj.eventCount) })
+      if (obj.inferMs !== undefined) items.push({ label: t('event.inferTime', '推理耗时'), value: `${Math.round(obj.inferMs)}ms` })
+    }
+    /** AI 主动巡逻 */
+    if (e.type === 'llm:patrol') {
+      if (obj.analysis) items.push({ label: t('event.analysis', '分析'), value: String(obj.analysis) })
+      if (obj.hasAnomaly) items.push({ label: t('event.anomaly', '异常'), value: String(obj.anomalyDetail || obj.analysis) })
+      if (obj.cameraName) items.push({ label: t('event.camera', '摄像头'), value: String(obj.cameraName) })
+      if (obj.inferMs !== undefined) items.push({ label: t('event.inferTime', '推理耗时'), value: `${Math.round(obj.inferMs)}ms` })
+    }
     /** 用户检测规则事件 */
     if (e.type === 'detect:rule') {
       if (obj.ruleName) items.push({ label: t('event.rule', '规则'), value: String(obj.ruleName) })
@@ -748,6 +763,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
           <button :class="['type-chip', { active: filterType === 'track:line-cross' }]" @click="filterType = 'track:line-cross'; onFilterChange('type')">{{ t('event.trackLineCross') }}</button>
           <button :class="['type-chip', { active: filterType === 'track:loiter' }]" @click="filterType = 'track:loiter'; onFilterChange('type')">{{ t('event.trackLoiter') }}</button>
           <button :class="['type-chip', { active: filterType === 'llm:scene' }]" @click="filterType = 'llm:scene'; onFilterChange('type')">{{ t('event.llmScene') }}</button>
+          <button :class="['type-chip', { active: filterType === 'llm:summary' }]" @click="filterType = 'llm:summary'; onFilterChange('type')">{{ t('event.llmSummary', 'AI摘要') }}</button>
+          <button :class="['type-chip', { active: filterType === 'llm:patrol' }]" @click="filterType = 'llm:patrol'; onFilterChange('type')">{{ t('event.llmPatrol', 'AI巡逻') }}</button>
           <button :class="['type-chip', { active: filterType === 'state:changed' }]" @click="filterType = 'state:changed'; onFilterChange('type')">{{ t('event.stateChanged') }}</button>
         </template>
         <button class="type-chip more-chip" @click="showAllTypes = !showAllTypes">{{ showAllTypes ? '▲' : '…' }}</button>

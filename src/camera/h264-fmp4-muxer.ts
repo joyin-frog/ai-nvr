@@ -53,6 +53,8 @@ function probeHardwareEncoder(ffmpegPath: string, vaapiDevice: string): Promise<
 export interface Fmp4InitSegment {
   type: "init";
   codec: string;
+  /** 音频 codec（如 "mp4a.40.2"），无音频时为空字符串 */
+  audioCodec: string;
   data: Buffer;
 }
 
@@ -101,8 +103,10 @@ class Fmp4StreamParser {
   private width = 0;
   /** 视频高度 */
   private height = 0;
-  /** 从 moov 中提取的 codec */
+  /** 从 moov 中提取的视频 codec */
   private codec = "avc1.42C01E";
+  /** 从 moov 中提取的音频 codec（空字符串表示无音频） */
+  private audioCodec = "";
   /** timescale（从 moov 的 mdhd 提取） */
   private timescale = 0;
   /** 下一帧 PTS（增量式递增） */
@@ -227,6 +231,7 @@ class Fmp4StreamParser {
         const init: Fmp4InitSegment = {
           type: "init",
           codec: this.codec,
+          audioCodec: this.audioCodec,
           data: initData,
         };
         this.cachedInit = init;
@@ -275,6 +280,61 @@ class Fmp4StreamParser {
     if (codec) {
       this.codec = codec;
     }
+    /** 提取音频 codec */
+    const acodec = this.findAudioCodecInMoov(moov, 8);
+    if (acodec) {
+      this.audioCodec = acodec;
+    }
+  }
+
+  /** 递归搜索 moov 中的音频轨道 codec（mp4a sample entry） */
+  private findAudioCodecInMoov(data: Buffer, start: number): string | null {
+    let offset = start;
+    while (offset + 8 <= data.length) {
+      const size = data.readUInt32BE(offset);
+      const type = data.subarray(offset + 4, offset + 8).toString("ascii");
+      if (size < 8 || offset + size > data.length) break;
+
+      /** mp4a sample entry = AAC 音频 */
+      if (type === "mp4a") {
+        const payload = data.subarray(offset + 8, offset + size);
+        const esds = this.findSubBoxInPayload(payload, "esds");
+        if (esds && esds.length > 4) {
+          /** esds 中包含 AudioObjectType，从 ES Descriptor 提取
+           *  简化处理：直接返回 mp4a.40.2（AAC-LC） */
+          return "mp4a.40.2";
+        }
+        return "mp4a.40.2";
+      }
+
+      /** 递归搜索容器 box */
+      const isContainer = type === "moov" || type === "trak" || type === "mdia" || type === "minf" || type === "stbl" || type === "stsd";
+      if (isContainer) {
+        const childStart = offset + 8 + (type === "stsd" ? 8 : 0);
+        const result = this.findAudioCodecInMoov(data, childStart);
+        if (result) return result;
+      }
+
+      offset += size;
+    }
+    return null;
+  }
+
+  /** 在 audio sample entry payload 中搜索子 box（audio header = 28 字节） */
+  private findSubBoxInPayload(payload: Buffer, target: string): Buffer | null {
+    /** audio sample entry 头部: 6B reserved + 2B data_ref_idx + 8B reserved + 2B channel_count + 2B sample_size
+     *  + 2B pre_defined + 2B reserved + 4B sample_rate = 28 bytes */
+    let offset = 28;
+    while (offset + 8 <= payload.length) {
+      const size = payload.readUInt32BE(offset);
+      const type = payload.subarray(offset + 4, offset + 8).toString("ascii");
+      if (size < 8 || offset + size > payload.length) break;
+      if (type === target) {
+        return payload.subarray(offset + 8, offset + size);
+      }
+      offset += size;
+    }
+    return null;
   }
 
   /** 递归搜索 box 中的 codec 信息 */
@@ -617,6 +677,9 @@ export class H264Fmp4Extractor {
     /** movflags: frag_keyframe 在每个关键帧处切 fragment，配合 -g 1 即每帧一个 fragment */
     const movflags = "frag_keyframe+empty_moov+default_base_moof";
 
+    /** 音频编码参数：AAC 64kbps 单声道（-map 0:a? 的 ? 表示无音频流时不报错） */
+    const audioArgs = ["-map", "0:a?", "-c:a", "aac", "-b:a", "64k", "-ac", "1"];
+
     switch (encoder) {
       case "h264_vaapi": {
         const vaapiDev = this.runtimeConfig?.get().recording.vaapiDevice ?? "/dev/dri/renderD128";
@@ -627,7 +690,8 @@ export class H264Fmp4Extractor {
           "-map", "[v1hw]", "-c:v", "h264_vaapi",
           "-qp", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
           "-bf", "0", "-flags", "+low_delay", "-async_depth", "1",
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",
@@ -640,7 +704,8 @@ export class H264Fmp4Extractor {
           "-map", "[v1]", "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll",
           "-cq", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
           "-bf", "0", "-rc-lookahead", "0", "-zerolatency", "1",
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",
@@ -652,7 +717,8 @@ export class H264Fmp4Extractor {
           "-map", "[v1]", "-c:v", "h264_qsv", "-preset", "veryfast",
           "-global_quality", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
           "-bf", "0", "-async_depth", "1",
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",
@@ -663,7 +729,8 @@ export class H264Fmp4Extractor {
           "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
           "-map", "[v1]", "-c:v", "h264_videotoolbox", "-q:v", "28",
           "-g", String(gopSize), "-keyint_min", String(gopSize), "-realtime", "1",
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",
@@ -675,7 +742,8 @@ export class H264Fmp4Extractor {
           "-map", "[v1]", "-c:v", "h264_amf", "-usage", "ultralowlatency",
           "-quality", "speed", "-rc", "cqp", "-qp_i", "28", "-qp_p", "28",
           "-g", String(gopSize), "-keyint_min", String(gopSize),
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",
@@ -686,7 +754,8 @@ export class H264Fmp4Extractor {
           "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
           "-map", "[v1]", "-c:v", "h264_v4l2m2m", "-pix_fmt", "yuv420p",
           "-g", String(gopSize), "-keyint_min", String(gopSize), "-bf", "0",
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",
@@ -699,7 +768,8 @@ export class H264Fmp4Extractor {
           "-crf", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
           "-x264-params", "bframes=0:sync-lookahead=0:rc-lookahead=0",
           "-threads", "2",
-          "-an", "-f", "mp4", "-movflags", movflags,
+          ...audioArgs,
+          "-f", "mp4", "-movflags", movflags,
           "-flush_packets", "1", "pipe:1",
           "-map", "[v2out]", "-c:v", "mjpeg", "-q:v", String(jpegQuality),
           "-f", "image2pipe", "pipe:3",

@@ -38,12 +38,15 @@ export interface LlmSceneResult {
   [key: string]: unknown;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are an intelligent security camera analyst. Analyze the surveillance image and provide a concise scene description in the user's language.
-Focus on:
-1. What objects/people/animals are present and what they are doing
-2. Any unusual or noteworthy activities
-3. Potential safety concerns
-Keep the description under 3 sentences. Be factual and specific.`;
+const DEFAULT_SYSTEM_PROMPT = `You are a security camera analyst. Describe the scene concisely in the user's language.
+Focus on: objects/people/activities, unusual events, safety concerns. Max 3 sentences.`;
+
+/** 多帧场景分析 prompt（当有上下文帧时使用） */
+const MULTI_FRAME_SYSTEM_PROMPT = `You are a security camera analyst. You receive multiple frames from the same camera.
+The first image is the latest, others are earlier context frames.
+Describe the scene focusing on: what is happening, movement patterns, activities, unusual events.
+Use context frames to detect changes, movement direction, and activity progression.
+Keep description under 3 sentences. Be factual and specific.`;
 
 const DEFAULT_TRIGGERS = ["track:appeared", "track:enter-zone", "track:loiter"];
 
@@ -70,6 +73,13 @@ export class MultimodalAnalyzer {
   /** 全局并发信号量（防止突发流量压垮 VLM 服务） */
   private concurrency = 0;
   private static readonly MAX_CONCURRENCY = 3;
+
+  /** Recorder 引用（用于获取上下文帧） */
+  private recorder: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> } | null = null;
+
+  setRecorder(rec: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> }): void {
+    this.recorder = rec;
+  }
   private waitQueue: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
 
   private acquire(): Promise<void> {
@@ -130,8 +140,11 @@ export class MultimodalAnalyzer {
     /** 订阅配置的触发事件 */
     const triggers = this.config.triggers.length > 0 ? this.config.triggers : DEFAULT_TRIGGERS;
     for (const trigger of triggers) {
-      const unsub = this.eventBus.on(trigger as keyof import("@/event-bus").EventPayloads, (payload: { cameraId: string; timestamp?: number }) => {
-        this.scheduleAnalysis(payload.cameraId, trigger, payload.timestamp ?? Date.now());
+      const unsub = this.eventBus.on(trigger as keyof import("@/event-bus").EventPayloads, (payload) => {
+        const camId = (payload as Record<string, unknown>).cameraId as string;
+        const ts = (payload as Record<string, unknown>).timestamp as number | undefined;
+        if (!camId) return;
+        this.scheduleAnalysis(camId, trigger, ts ?? Date.now());
       });
       this.unsubs.push(unsub);
     }
@@ -157,6 +170,15 @@ export class MultimodalAnalyzer {
     }
     this.waitQueue = [];
     this.concurrency = 0;
+  }
+
+  /** 按需分析：前端触发时直接分析指定摄像头当前帧（跳过节流） */
+  async analyzeNow(cameraId: string): Promise<LlmSceneResult | null> {
+    const frame = this.latestFrames.get(cameraId);
+    if (!frame) return null;
+    await this.analyzeScene(cameraId, frame.data, "manual", Date.now());
+    /** analyzeScene 通过 eventBus emit 结果，这里返回 null 即可（前端通过 WS 接收） */
+    return null;
   }
 
   /** 调度分析（带节流） */
@@ -198,31 +220,52 @@ export class MultimodalAnalyzer {
   private async doAnalyze(cameraId: string, jpeg: Buffer, trigger: string, timestamp: number): Promise<void> {
     const t0 = performance.now();
 
-    /** 将 JPEG 转为 base64 data URL */
-    let imageDataUrl: string;
-    if (this.config.imageWidth > 0) {
-      /** 缩放图片减少传输和推理开销 */
-      const resized = await sharp(jpeg)
-        .resize(this.config.imageWidth)
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      imageDataUrl = `data:image/jpeg;base64,${resized.toString("base64")}`;
-    } else {
-      imageDataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    /** 图片缩放辅助函数 */
+    const resizeImage = async (img: Buffer): Promise<string> => {
+      if (this.config.imageWidth > 0) {
+        const resized = await sharp(img)
+          .resize(this.config.imageWidth)
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        return `data:image/jpeg;base64,${resized.toString("base64")}`;
+      }
+      return `data:image/jpeg;base64,${img.toString("base64")}`;
+    };
+
+    /** 获取上下文帧（与检测器共享 contextIntervalMs 配置） */
+    let contextFrames: Array<{ data: Buffer; timestamp: number }> = [];
+    if (this.recorder && this.config.contextIntervalMs > 0) {
+      contextFrames = this.recorder.getContextFrames(cameraId, timestamp, this.config.contextIntervalMs);
+    }
+    const hasContext = contextFrames.length > 0;
+
+    /** 构建 user content：当前帧 + 上下文帧 */
+    const imageDataUrl = await resizeImage(jpeg);
+    const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+      { type: "text", text: hasContext ? "Latest frame:" : "Analyze this surveillance camera image:" },
+      { type: "image_url", image_url: { url: imageDataUrl } },
+    ];
+
+    if (hasContext) {
+      const ctxUrls = await Promise.all(contextFrames.map(f => resizeImage(f.data)));
+      for (let i = 0; i < contextFrames.length; i++) {
+        const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
+        userContent.push({ type: "text", text: `${agoSec}s ago:` });
+        userContent.push({ type: "image_url", image_url: { url: ctxUrls[i]! } });
+      }
     }
 
+    /** 选择 prompt：有上下文帧时使用多帧分析 prompt */
+    const basePrompt = this.config.systemPrompt || (hasContext ? MULTI_FRAME_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT);
+
     /** 构建 OpenAI 兼容请求 */
-    const systemPrompt = this.config.systemPrompt || DEFAULT_SYSTEM_PROMPT;
     const body = {
       model: this.config.model,
       messages: [
-        { role: "system" as const, content: systemPrompt },
+        { role: "system" as const, content: basePrompt },
         {
           role: "user" as const,
-          content: [
-            { type: "text" as const, text: "Analyze this surveillance camera image:" },
-            { type: "image_url" as const, image_url: { url: imageDataUrl } },
-          ],
+          content: userContent,
         },
       ],
       max_tokens: this.config.maxTokens,

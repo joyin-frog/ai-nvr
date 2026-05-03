@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, takePatrolStatus, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 import { registerShortcut } from '../composables/useKeyboard'
@@ -336,6 +336,29 @@ function drawOverlayOnce() {
   if (llmDesc) {
     drawLlmDescription(ctx, cssW, cssH, llmDesc)
   }
+
+  /** AI 巡逻异常状态指示器 */
+  const patrol = takePatrolStatus(props.cameraId)
+  if (patrol && patrol.status !== 'normal') {
+    const color = patrol.status === 'alert' ? 'rgba(231, 76, 60, 0.85)' : 'rgba(243, 156, 18, 0.85)'
+    const icon = patrol.status === 'alert' ? '⚠' : '⚡'
+    const text = patrol.anomalyDetail || patrol.analysis
+    ctx.save()
+    ctx.font = 'bold 13px system-ui, sans-serif'
+    const maxW = cssW - 16
+    const truncated = text.length > 60 ? text.slice(0, 57) + '...' : text
+    const tw = ctx.measureText(`${icon} ${truncated}`).width + 16
+    const bh = 28
+    const bx = 8
+    const by = cssH - bh - 8
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.roundRect(bx, by, Math.min(tw, maxW), bh, 4)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(`${icon} ${truncated}`, bx + 8, by + 18)
+    ctx.restore()
+  }
 }
 
 function stopOverlayLoop() {
@@ -363,6 +386,10 @@ const trailFadeStart = new Map<number, number>()
 
 /** 热力图状态 */
 const showHeatmap = ref(false)
+/** 音频是否静音（默认静音，用户可点击切换） */
+const isMuted = ref(true)
+/** AI 按需分析中 */
+const aiAnalyzing = ref(false)
 /** 热力图网格数据 */
 const heatmapGrid = ref<number[][]>([])
 const heatmapMaxCount = ref(0)
@@ -1892,6 +1919,25 @@ watch(() => props.recording, (on) => {
 }, { immediate: true })
 
 /** 截图下载当前画面（从 video + overlay canvas 合成，包含检测框+轨迹+ROI+OSD） */
+/** 按需 AI 分析当前帧 */
+async function analyzeFrame() {
+  if (aiAnalyzing.value) return
+  aiAnalyzing.value = true
+  try {
+    const resp = await authFetch('/api/ai/analyze-frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cameraId: props.cameraId }),
+    })
+    if (!resp.ok) {
+      console.warn('[CameraView] AI 分析请求失败:', resp.status)
+    }
+    /** 结果通过 WebSocket llm:scene 事件异步推送到 overlay */
+  } finally {
+    setTimeout(() => { aiAnalyzing.value = false }, 2000)
+  }
+}
+
 async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
@@ -2234,6 +2280,8 @@ onUnmounted(() => {
       <span v-else-if="frozen" class="frozen-badge">{{ t('camera.frozen') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
+      <button v-if="online" :class="['ai-btn', { loading: aiAnalyzing }]" @click="analyzeFrame" :title="t('camera.aiAnalyze', 'AI 分析')" :disabled="aiAnalyzing">{{ aiAnalyzing ? '&#x23F3;' : '&#x1F916;' }}</button>
+      <button v-if="online" :class="['mute-btn', { active: !isMuted }]" @click="isMuted = !isMuted" :title="isMuted ? t('camera.unmute', '取消静音') : t('camera.mute', '静音')">{{ isMuted ? '&#x1F507;' : '&#x1F50A;' }}</button>
       <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
       <button v-if="online" :class="['pip-btn', { active: isPip }]" @click="togglePip" :title="t('camera.pip')">&#x1F4BB;</button>
       <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
@@ -2261,7 +2309,8 @@ onUnmounted(() => {
             :ref="(el: any) => fmp4.setVideo(el as HTMLVideoElement | null)"
             class="camera-video"
             :style="{ filter: imageFilter }"
-            autoplay muted playsinline
+            autoplay playsinline
+            :muted="isMuted"
             disablePictureInPicture
             disableremoteplayback
             @contextmenu.prevent="onCanvasContext"
@@ -2513,6 +2562,48 @@ onUnmounted(() => {
 
 .screenshot-btn:hover {
   color: #4ECDC4;
+}
+
+.mute-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.mute-btn:hover {
+  color: #e0e0e0;
+}
+
+.mute-btn.active {
+  color: #4ECDC4;
+}
+
+.ai-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.ai-btn:hover {
+  color: #e0e0e0;
+}
+
+.ai-btn.loading {
+  color: #f1c40f;
+  cursor: wait;
+}
+
+.ai-btn:disabled {
+  cursor: wait;
 }
 
 .heatmap-btn {

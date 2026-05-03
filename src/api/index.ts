@@ -119,7 +119,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:match-suggest", "llm:scene", "state:changed"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "state:changed"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -155,6 +155,7 @@ export function startServer(
   detectRuleStorage?: DetectRuleStorage,
   detectRuleEngine?: DetectRuleEngine,
   stateStorage?: StateStorage,
+  patrolScanner?: import("@/ai/patrol").AiPatrolScanner,
 ): void {
   /** 缓存 storageRoot 的 realpath（路径不变，避免每次请求重复解析） */
   let cachedStorageRoot: string | null = null;
@@ -192,7 +193,7 @@ export function startServer(
     bus.on("fmp4:init", (payload) => {
       const clientSet = fmp4ClientsByCamera.get(payload.cameraId);
       if (!clientSet || clientSet.size === 0) return;
-      const encoded = getOrEncodeInit(payload.cameraId, payload.segment.codec, payload.segment.data);
+      const encoded = getOrEncodeInit(payload.cameraId, payload.segment.codec, payload.segment.audioCodec, payload.segment.data);
       for (const client of clientSet) {
         client.send(encoded, false);
       }
@@ -216,14 +217,20 @@ export function startServer(
   const FMP4_TYPE_INIT = 0x01;
   const FMP4_TYPE_MEDIA = 0x02;
 
-  /** 封装 fMP4 init segment 为带协议头的二进制消息 */
-  function encodeFmp4Init(codec: string, data: Buffer): Buffer {
+  /** 封装 fMP4 init segment 为带协议头的二进制消息
+   *  协议格式: [0x01][2B video_codec_len LE][video_codec][2B audio_codec_len LE][audio_codec][fMP4 data]
+   *  audio_codec 为空字符串时表示无音频 */
+  function encodeFmp4Init(codec: string, audioCodec: string, data: Buffer): Buffer {
     const codecBuf = Buffer.from(codec, "ascii");
-    const msg = Buffer.allocUnsafe(1 + 2 + codecBuf.length + data.length);
-    msg[0] = FMP4_TYPE_INIT;
-    msg.writeUInt16LE(codecBuf.length, 1);
-    codecBuf.copy(msg, 3);
-    data.copy(msg, 3 + codecBuf.length);
+    const audioBuf = Buffer.from(audioCodec, "ascii");
+    const msg = Buffer.allocUnsafe(1 + 2 + codecBuf.length + 2 + audioBuf.length + data.length);
+    let off = 0;
+    msg[off++] = FMP4_TYPE_INIT;
+    msg.writeUInt16LE(codecBuf.length, off); off += 2;
+    codecBuf.copy(msg, off); off += codecBuf.length;
+    msg.writeUInt16LE(audioBuf.length, off); off += 2;
+    audioBuf.copy(msg, off); off += audioBuf.length;
+    data.copy(msg, off);
     return msg;
   }
 
@@ -239,10 +246,10 @@ export function startServer(
   /** 缓存最近编码的 init segment（按摄像头分区） */
   const cachedInitByCamera = new Map<string, { dataPtr: Buffer; encoded: Buffer }>();
 
-  function getOrEncodeInit(cameraId: string, codec: string, data: Buffer): Buffer {
+  function getOrEncodeInit(cameraId: string, codec: string, audioCodec: string, data: Buffer): Buffer {
     const cached = cachedInitByCamera.get(cameraId);
     if (cached && cached.dataPtr === data) return cached.encoded;
-    const encoded = encodeFmp4Init(codec, data);
+    const encoded = encodeFmp4Init(codec, audioCodec, data);
     cachedInitByCamera.set(cameraId, { dataPtr: data, encoded });
     return encoded;
   }
@@ -282,7 +289,7 @@ export function startServer(
 
     /** 发送缓存的 init segment（带协议头，关闭压缩） */
     if (extractor.initSegment) {
-      ws.send(getOrEncodeInit(cameraId, extractor.initSegment.codec, extractor.initSegment.data), false);
+      ws.send(getOrEncodeInit(cameraId, extractor.initSegment.codec, extractor.initSegment.audioCodec, extractor.initSegment.data), false);
     }
 
     /** 发送缓存的最近 media segment（立即显示画面，关闭压缩） */
@@ -1770,6 +1777,22 @@ export function startServer(
       /** 重新加载 AI 模型（VLM 模式下为空操作，保留 API 兼容） */
       if (url.pathname === "/api/ai/reload-model" && req.method === "POST") {
         const result = await aiDetector.reloadModel();
+        return Response.json(result);
+      }
+
+      /** 按需 AI 分析：前端点击按钮触发当前帧场景分析 */
+      if (url.pathname === "/api/ai/analyze-frame" && req.method === "POST") {
+        if (!multimodalAnalyzer) return Response.json({ error: "Multimodal analyzer not available" }, { status: 503 });
+        const body = await req.json() as { cameraId?: string };
+        if (!body.cameraId) return Response.json({ error: "cameraId required" }, { status: 400 });
+        const result = await multimodalAnalyzer.analyzeNow(body.cameraId);
+        return Response.json(result ?? { triggered: true });
+      }
+
+      /** 手动触发一轮 AI 巡逻 */
+      if (url.pathname === "/api/ai/patrol/trigger" && req.method === "POST") {
+        if (!patrolScanner) return Response.json({ error: "Patrol scanner not available" }, { status: 503 });
+        const result = await patrolScanner.triggerNow();
         return Response.json(result);
       }
 

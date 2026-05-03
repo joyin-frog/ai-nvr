@@ -55,6 +55,9 @@ export default {
     saveFailed: '保存失败',
     doubleClickToName: '双击命名',
     buffering: '缓冲中...',
+    aiAnalyze: 'AI 分析',
+    mute: '静音',
+    unmute: '取消静音',
   },
   event: {
     title: '事件日志',
@@ -83,6 +86,8 @@ export default {
     loiterInZone: '{name} 徘徊 {zone} ({sec}s)',
     approachTarget: '{aName} 接近 {bName}',
     llmScene: 'AI分析',
+    llmSummary: 'AI摘要',
+    llmPatrol: 'AI巡逻',
     detectRule: '检测规则',
     stateChanged: '状态变更',
     ratio: '变动比例',

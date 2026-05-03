@@ -55,6 +55,9 @@ export default {
     saveFailed: 'Save failed',
     doubleClickToName: 'Double-click to name',
     buffering: 'Buffering...',
+    aiAnalyze: 'AI Analyze',
+    mute: 'Mute',
+    unmute: 'Unmute',
   },
   event: {
     title: 'Event Log',
@@ -83,6 +86,8 @@ export default {
     loiterInZone: '{name} loitering {zone} ({sec}s)',
     approachTarget: '{aName} approaching {bName}',
     llmScene: 'AI Analysis',
+    llmSummary: 'AI Summary',
+    llmPatrol: 'AI Patrol',
     detectRule: 'Detect Rule',
     stateChanged: 'State Change',
     ratio: 'Motion Ratio',

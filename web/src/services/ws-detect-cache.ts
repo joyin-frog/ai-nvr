@@ -239,3 +239,41 @@ export function takeRuleRegions(cameraId: string): RuleRegion[] {
   }
   return entry.regions
 }
+
+/**
+ * AI 巡逻异常状态缓存
+ * llm:patrol 异常事件到达时存入，CameraView 显示巡逻状态指示器
+ */
+
+export interface PatrolStatus {
+  /** 巡逻状态：normal / unusual / alert */
+  status: 'normal' | 'unusual' | 'alert'
+  /** AI 分析描述 */
+  analysis: string
+  /** 异常详情 */
+  anomalyDetail: string
+  /** 巡逻时间 */
+  timestamp: number
+}
+
+/** 巡逻状态显示时长（ms，异常状态显示 30 秒） */
+const PATROL_STATUS_TTL = 30_000
+
+/** 每个摄像头的巡逻状态 */
+const patrolStatuses = new Map<string, PatrolStatus>()
+
+/** 存入巡逻状态 */
+export function putPatrolStatus(cameraId: string, status: PatrolStatus): void {
+  patrolStatuses.set(cameraId, status)
+}
+
+/** 获取并清理过期的巡逻状态 */
+export function takePatrolStatus(cameraId: string): PatrolStatus | null {
+  const entry = patrolStatuses.get(cameraId)
+  if (!entry) return null
+  if (Date.now() - entry.timestamp > PATROL_STATUS_TTL) {
+    patrolStatuses.delete(cameraId)
+    return null
+  }
+  return entry
+}

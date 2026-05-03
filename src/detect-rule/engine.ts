@@ -25,20 +25,16 @@ interface VlmRuleResult {
 }
 
 /** 检测规则系统 prompt */
-const RULE_SYSTEM_PROMPT = `You are an intelligent surveillance camera analyzer. The user wants to detect a specific situation in the camera image.
+const RULE_SYSTEM_PROMPT = `Detect if the described situation is occurring in this surveillance image. Output JSON only:
+{"matched":false,"confidence":0.8,"description":"what you observe"{stateSlot}{regionSlot}}
+matched: true only if clearly occurring. confidence: 0.0-1.0. description: factual observation in user's language. When in doubt, set matched to false.{stateInstructions}{regionInstructions}`;
 
-Analyze the image carefully and determine whether the described situation is currently occurring.
-
-You MUST respond with ONLY a JSON object in this exact format:
-{"matched": true/false, "confidence": 0.0-1.0, "description": "brief description of what you observe"{stateSlot}{regionSlot}}
-
-Rules:
-- "matched" must be true ONLY if the described situation is clearly occurring
-- "confidence" indicates how certain you are (0.0 = not sure, 1.0 = absolutely certain)
-- "description" should be a factual observation in the user's language
-- When in doubt, set matched to false
-- Do not include any text outside the JSON object
-{stateInstructions}{regionInstructions}`;
+/** 多帧规则检测 prompt（当有上下文帧时使用） */
+const RULE_MULTI_FRAME_SYSTEM_PROMPT = `Analyze multiple frames from the same camera. First image=latest, others=older context.
+Use context frames to track movement, determine duration, identify activities over time.
+Detect if the described situation is occurring. Output JSON only:
+{"matched":false,"confidence":0.8,"description":"what you observe including temporal changes"{stateSlot}{regionSlot}}
+matched: true only if clearly occurring. confidence: 0.0-1.0. When in doubt, set matched to false.{stateInstructions}{regionInstructions}`;
 
 /** 状态评估指令片段（仅当关联了状态时注入） */
 const STATE_SLOT = `, "states": [{"id": <state_id>, "value": "<new_value>"}, ...]`;
@@ -108,6 +104,12 @@ export class DetectRuleEngine {
   private started = false;
   /** 快照保存回调 */
   private saveSnapshot?: (cameraId: string, timestamp: number, jpeg: Buffer) => void;
+  /** Recorder 引用（用于获取上下文帧） */
+  private recorder: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> } | null = null;
+
+  setRecorder(rec: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> }): void {
+    this.recorder = rec;
+  }
 
   constructor(
     eventBus: EventBus,
@@ -303,17 +305,23 @@ export class DetectRuleEngine {
 
       /** 缩放图片（per-rule 分辨率覆盖全局配置） */
       const imageWidth = rule.imageWidth > 0 ? rule.imageWidth : llmConfig.imageWidth;
-      let imageDataUrl: string;
-      if (imageWidth > 0) {
-        /** sharp 管线：resize + jpeg 编码一步完成，避免中间 Buffer 分配 */
-        const resized = await sharp(jpeg, { failOn: "none" })
-          .resize(imageWidth)
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        imageDataUrl = `data:image/jpeg;base64,${resized.toString("base64")}`;
-      } else {
-        imageDataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+      const resizeImage = async (img: Buffer): Promise<string> => {
+        if (imageWidth > 0) {
+          const resized = await sharp(img, { failOn: "none" })
+            .resize(imageWidth)
+            .jpeg({ quality: 80 })
+            .toBuffer();
+          return `data:image/jpeg;base64,${resized.toString("base64")}`;
+        }
+        return `data:image/jpeg;base64,${img.toString("base64")}`;
+      };
+
+      /** 获取上下文帧 */
+      let contextFrames: Array<{ data: Buffer; timestamp: number }> = [];
+      if (this.recorder && llmConfig.contextIntervalMs > 0) {
+        contextFrames = this.recorder.getContextFrames(rule.cameraId, timestamp, llmConfig.contextIntervalMs);
       }
+      const hasContext = contextFrames.length > 0;
 
       /** 语言约束 */
       const lang = this.runtimeConfig.get().language;
@@ -338,11 +346,30 @@ export class DetectRuleEngine {
       const regionSlot = rule.outputRegions ? REGION_SLOT : "";
       const regionInstructions = rule.outputRegions ? REGION_INSTRUCTIONS : "";
 
-      const systemPrompt = RULE_SYSTEM_PROMPT
+      /** 选择 prompt 模板：有上下文帧时使用多帧 prompt */
+      const basePrompt = hasContext ? RULE_MULTI_FRAME_SYSTEM_PROMPT : RULE_SYSTEM_PROMPT;
+      const systemPrompt = basePrompt
         .replace("{stateSlot}", stateSlot)
         .replace("{stateInstructions}", stateInstructions)
         .replace("{regionSlot}", regionSlot)
         .replace("{regionInstructions}", regionInstructions) + langInstruction;
+
+      /** 构建 user content：当前帧 + 上下文帧 */
+      const imageDataUrl = await resizeImage(jpeg);
+      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+        { type: "text", text: rule.prompt },
+        { type: "image_url", image_url: { url: imageDataUrl } },
+      ];
+
+      /** 附加上下文帧（并行 resize） */
+      if (hasContext) {
+        const ctxUrls = await Promise.all(contextFrames.map(f => resizeImage(f.data)));
+        for (let i = 0; i < contextFrames.length; i++) {
+          const agoSec = Math.round((timestamp - contextFrames[i]!.timestamp) / 1000);
+          userContent.push({ type: "text", text: `${agoSec}s ago:` });
+          userContent.push({ type: "image_url", image_url: { url: ctxUrls[i]! } });
+        }
+      }
 
       /** 调用 VLM（有关联状态时增加 max_tokens） */
       const body = {
@@ -351,10 +378,7 @@ export class DetectRuleEngine {
           { role: "system" as const, content: systemPrompt },
           {
             role: "user" as const,
-            content: [
-              { type: "text" as const, text: rule.prompt },
-              { type: "image_url" as const, image_url: { url: imageDataUrl } },
-            ],
+            content: userContent,
           },
         ],
         max_tokens: (rule.stateIds.length > 0 || rule.outputRegions) ? 500 : 200,

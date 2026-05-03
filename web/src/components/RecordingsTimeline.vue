@@ -38,6 +38,9 @@ const EVENT_MARKER_COLORS: Record<string, string> = {
   'track:approach': '#e91e63',
   'track:appeared': '#66bb6a',
   'track:disappeared': '#ef5350',
+  'llm:scene': '#7E57C2',
+  'llm:summary': '#5C6BC0',
+  'llm:patrol': '#26A69A',
 }
 
 const props = defineProps<{

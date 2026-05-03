@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame, removeFrameCache } from './services/ws-frame-cache'
-import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions } from './services/ws-detect-cache'
+import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions, putPatrolStatus } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -926,6 +926,26 @@ function setupEventListeners() {
   client.on('llm:scene', (payload) => {
     putLlmDescription(payload.cameraId, payload.description, payload.timestamp)
     eventPanel.value?.addEvent('llm:scene', payload.cameraId, `AI: ${payload.description}`)
+  })
+
+  /** AI 事件摘要 → 推送到事件面板 */
+  client.on('llm:summary', (payload) => {
+    eventPanel.value?.addEvent('llm:summary', '', payload.text)
+  })
+
+  /** AI 主动巡逻 → 推送到事件面板 + 巡逻状态指示器 */
+  client.on('llm:patrol', (payload) => {
+    putPatrolStatus(payload.cameraId, {
+      status: payload.hasAnomaly ? 'alert' : 'normal',
+      analysis: payload.analysis,
+      anomalyDetail: payload.anomalyDetail,
+      timestamp: payload.timestamp,
+    })
+    if (payload.hasAnomaly) {
+      const alertText = `⚠ ${payload.anomalyDetail || payload.analysis}`
+      putLlmDescription(payload.cameraId, alertText, payload.timestamp)
+      eventPanel.value?.addEvent('llm:patrol', payload.cameraId, `[${payload.cameraName}] ${payload.anomalyDetail || payload.analysis}`)
+    }
   })
 
 }

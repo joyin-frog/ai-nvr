@@ -33,6 +33,9 @@ const EVENT_MARKER_COLORS: Record<string, string> = {
   motion: '#f0ad4e',
   alert: '#d9534f',
   'camera:offline': '#d9534f',
+  'llm:scene': '#7E57C2',
+  'llm:summary': '#5C6BC0',
+  'llm:patrol': '#26A69A',
 }
 
 const props = defineProps<{

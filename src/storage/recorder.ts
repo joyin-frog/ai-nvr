@@ -506,7 +506,7 @@ export class MotionRecorder {
 
     /** 写入 init segment */
     if (preBuffer?.initSegment) {
-      await state.writer.writeInit(preBuffer.initSegment as { type: "init"; codec: string; data: Buffer });
+      await state.writer.writeInit(preBuffer.initSegment as { type: "init"; codec: string; audioCodec: string; data: Buffer });
     }
 
     /** 写入预缓冲的 media segments */

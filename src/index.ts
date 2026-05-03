@@ -182,6 +182,7 @@ alertEngine.start();
 const detectRuleStorage = new DetectRuleStorage(join(dataDir, "detect-rules.db"));
 const stateStorage = new StateStorage(join(dataDir, "state.db"));
 const detectRuleEngine = new DetectRuleEngine(eventBus, detectRuleStorage, cameraManager, runtimeConfig, roiStorage, stateStorage);
+detectRuleEngine.setRecorder(recorder);
 detectRuleEngine.setSaveSnapshot((cameraId, timestamp, jpeg) => {
   alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
 });
@@ -194,6 +195,7 @@ behaviorAnalyzer.start();
 
 /** 多模态 LLM 分析器（场景语义描述） */
 const multimodalAnalyzer = new MultimodalAnalyzer(eventBus, runtimeConfig.get().ai.llm);
+multimodalAnalyzer.setRecorder(recorder);
 if (runtimeConfig.get().ai.llm.enabled) {
   multimodalAnalyzer.start();
 }
@@ -224,6 +226,20 @@ const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPa
 const cleaner = new StorageCleaner(runtimeConfig, eventStorage, detectRuleStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
 cleaner.start();
 
+/** AI 事件摘要器（定期用 LLM 汇总事件流） */
+import { EventSummarizer } from "@/ai/event-summarizer";
+const eventSummarizer = new EventSummarizer(eventBus, eventStorage, runtimeConfig);
+if (runtimeConfig.get().ai.llm.enabled) {
+  eventSummarizer.start();
+}
+
+/** AI 主动巡逻扫描器（定期扫描所有摄像头，生成全局态势感知） */
+import { AiPatrolScanner } from "@/ai/patrol";
+const patrolScanner = new AiPatrolScanner(eventBus, runtimeConfig, cameraManager, eventStorage);
+if (runtimeConfig.get().ai.llm.enabled) {
+  patrolScanner.start();
+}
+
 /** 磁盘用量统计已在上方创建 */
 
 /** PTZ 云台控制器 */
@@ -248,7 +264,7 @@ void Promise.allSettled(ptzRegistrations);
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, detectRuleStorage, detectRuleEngine, stateStorage);
+startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, detectRuleStorage, detectRuleEngine, stateStorage, patrolScanner);
 
 /** 自动记录事件到 SQLite */
 /** 事件收集缓冲区（同一微任务周期内的事件批量写入） */
@@ -334,6 +350,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
   recorder.stop();
   behaviorAnalyzer.stop();
   multimodalAnalyzer.stop();
+  eventSummarizer.stop();
+  patrolScanner.stop();
   clipService.dispose();
   aiDetector.dispose();
   cleaner.stop();
