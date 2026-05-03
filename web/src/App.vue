@@ -958,6 +958,8 @@ function setupEventListeners() {
       status: payload.hasAnomaly ? 'alert' : 'normal',
       analysis: payload.analysis,
       anomalyDetail: payload.anomalyDetail,
+      count: payload.count,
+      movement: payload.movement,
       timestamp: payload.timestamp,
     })
     if (payload.hasAnomaly) {

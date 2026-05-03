@@ -359,6 +359,29 @@ function drawOverlayOnce() {
     ctx.fillText(`${icon} ${truncated}`, bx + 8, by + 18)
     ctx.restore()
   }
+
+  /** AI 巡逻计数标签（右上角，显示人数/车辆数） */
+  if (patrol?.count) {
+    const parts: string[] = []
+    if (patrol.count.person) parts.push(`${patrol.count.person}人`)
+    if (patrol.count.vehicle) parts.push(`${patrol.count.vehicle}车`)
+    if (parts.length > 0) {
+      ctx.save()
+      ctx.font = 'bold 12px system-ui, sans-serif'
+      const label = parts.join(' ')
+      const lw = ctx.measureText(label).width + 12
+      const lh = 22
+      const lx = cssW - lw - 8
+      const ly = 36
+      ctx.fillStyle = patrol.status === 'normal' ? 'rgba(78, 205, 196, 0.8)' : 'rgba(231, 76, 60, 0.85)'
+      ctx.beginPath()
+      ctx.roundRect(lx, ly, lw, lh, 4)
+      ctx.fill()
+      ctx.fillStyle = '#fff'
+      ctx.fillText(label, lx + 6, ly + 15)
+      ctx.restore()
+    }
+  }
 }
 
 function stopOverlayLoop() {

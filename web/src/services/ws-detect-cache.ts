@@ -252,6 +252,10 @@ export interface PatrolStatus {
   analysis: string
   /** 异常详情 */
   anomalyDetail: string
+  /** 人数/车辆计数 */
+  count?: Record<string, number>
+  /** 运动轨迹描述 */
+  movement?: string
   /** 巡逻时间 */
   timestamp: number
 }
