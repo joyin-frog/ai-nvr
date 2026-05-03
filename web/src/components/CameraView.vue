@@ -1938,6 +1938,33 @@ async function analyzeFrame() {
   }
 }
 
+const showAiAsk = ref(false)
+const aiQuestion = ref('')
+const aiAsking = ref(false)
+const aiAnswer = ref('')
+
+/** AI 场景问答 */
+async function askAi() {
+  if (!aiQuestion.value.trim() || aiAsking.value) return
+  aiAsking.value = true
+  aiAnswer.value = ''
+  try {
+    const resp = await authFetch('/api/ai/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cameraId: props.cameraId, question: aiQuestion.value.trim() }),
+    })
+    if (resp.ok) {
+      const data = await resp.json()
+      aiAnswer.value = data.answer || 'No answer'
+    }
+  } catch {
+    // ignore
+  } finally {
+    aiAsking.value = false
+  }
+}
+
 async function takeScreenshot() {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
@@ -2281,6 +2308,14 @@ onUnmounted(() => {
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
       <button v-if="online" :class="['ai-btn', { loading: aiAnalyzing }]" @click="analyzeFrame" :title="t('camera.aiAnalyze', 'AI 分析')" :disabled="aiAnalyzing">{{ aiAnalyzing ? '&#x23F3;' : '&#x1F916;' }}</button>
+      <div v-if="online" class="ai-ask-wrapper">
+        <button class="ai-ask-btn" @click="showAiAsk = !showAiAsk" :title="t('camera.aiAsk', 'AI 问答')">&#x2753;</button>
+        <div v-if="showAiAsk" class="ai-ask-panel">
+          <input v-model="aiQuestion" class="ai-ask-input" :placeholder="t('camera.aiAskPlaceholder', '输入关于画面的问题...')" @keydown.enter="askAi" />
+          <button class="ai-ask-submit" @click="askAi" :disabled="aiAsking">{{ aiAsking ? '...' : '&#x27A4;' }}</button>
+          <div v-if="aiAnswer" class="ai-ask-answer">{{ aiAnswer }}</div>
+        </div>
+      </div>
       <button v-if="online" :class="['mute-btn', { active: !isMuted }]" @click="isMuted = !isMuted" :title="isMuted ? t('camera.unmute', '取消静音') : t('camera.mute', '静音')">{{ isMuted ? '&#x1F507;' : '&#x1F50A;' }}</button>
       <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
       <button v-if="online" :class="['pip-btn', { active: isPip }]" @click="togglePip" :title="t('camera.pip')">&#x1F4BB;</button>
@@ -2606,7 +2641,81 @@ onUnmounted(() => {
   cursor: wait;
 }
 
-.heatmap-btn {
+.ai-ask-wrapper {
+  position: relative;
+}
+
+.ai-ask-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.ai-ask-btn:hover {
+  color: #b388ff;
+}
+
+.ai-ask-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid rgba(124, 77, 255, 0.4);
+  border-radius: 8px;
+  padding: 8px;
+  width: 280px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-ask-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: #eee;
+  font-size: 12px;
+  outline: none;
+}
+
+.ai-ask-input:focus {
+  border-color: #7c4dff;
+}
+
+.ai-ask-submit {
+  background: #7c4dff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ai-ask-submit:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.ai-ask-answer {
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ddd;
+  background: rgba(124, 77, 255, 0.1);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+}
   background: none;
   border: none;
   color: #888;

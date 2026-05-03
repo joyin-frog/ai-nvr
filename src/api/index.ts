@@ -1910,6 +1910,60 @@ export function startServer(
         return Response.json(result ?? { triggered: true });
       }
 
+      /** AI 场景问答：用户对当前画面自由提问 */
+      if (url.pathname === "/api/ai/ask" && req.method === "POST") {
+        const body = await req.json() as { cameraId?: string; question?: string };
+        if (!body.cameraId || !body.question) return Response.json({ error: "cameraId and question required" }, { status: 400 });
+
+        const llmConfig = runtimeConfig.get().ai.llm;
+        if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) {
+          return Response.json({ error: "AI not configured" }, { status: 503 });
+        }
+
+        /** 获取最新帧 */
+        const latestFrame = cameraManager.getLatestFrameWithTimestamp(body.cameraId);
+        if (!latestFrame) return Response.json({ error: "No frame available" }, { status: 404 });
+
+        const lang = runtimeConfig.get().language;
+        const langInstruction = lang.startsWith("zh") ? "用中文回复。" : "Reply in English.";
+        const systemPrompt = `You are a surveillance camera assistant. Answer questions about the image accurately and concisely. ${langInstruction}`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15_000);
+        const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
+          ? llmConfig.apiUrl
+          : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+        const t0 = performance.now();
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: llmConfig.model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: [
+                  { type: "image_url", image_url: { url: `data:image/jpeg;base64,${latestFrame.data.toString("base64")}` } },
+                  { type: "text", text: body.question },
+                ],
+              },
+            ],
+            max_tokens: 200,
+            temperature: 0.3,
+          }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+
+        if (!response.ok) return Response.json({ error: "LLM request failed" }, { status: 502 });
+
+        const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const answer = result.choices?.[0]?.message?.content?.trim() ?? "";
+
+        return Response.json({ answer, inferMs: performance.now() - t0 });
+      }
+
       /** 手动触发一轮 AI 巡逻 */
       if (url.pathname === "/api/ai/patrol/trigger" && req.method === "POST") {
         if (!patrolScanner) return Response.json({ error: "Patrol scanner not available" }, { status: 503 });
