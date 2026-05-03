@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame, removeFrameCache } from './services/ws-frame-cache'
-import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions, putPatrolStatus } from './services/ws-detect-cache'
+import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions, putPatrolStatus, pushRuleMatch } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -837,6 +837,15 @@ function setupEventListeners() {
     detectRulePanel.value?.addRecord(payload)
     if (payload.regions?.length) {
       putRuleRegions(payload.cameraId, payload.regions.map(r => ({ ...r, ruleName: payload.ruleName })))
+    }
+    if (payload.matched !== false) {
+      pushRuleMatch(payload.cameraId, {
+        ruleName: payload.ruleName,
+        result: payload.result ?? '',
+        confidence: payload.confidence ?? 0,
+        timestamp: payload.timestamp ?? Date.now(),
+        snapshotUrl: payload.snapshotUrl,
+      })
     }
     notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId, 'detect:rule')
     flashTitle(`${t('detectRule.title')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)

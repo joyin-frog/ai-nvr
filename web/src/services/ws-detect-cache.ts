@@ -285,3 +285,43 @@ export function takePatrolStatus(cameraId: string): PatrolStatus | null {
   }
   return entry
 }
+
+/**
+ * 检测规则匹配通知缓存
+ * detect:rule 事件匹配时存入，CameraView overlay 显示规则名称和结果
+ */
+
+export interface RuleMatchNotification {
+  /** 规则名称 */
+  ruleName: string
+  /** 匹配结果描述 */
+  result: string
+  /** 置信度 */
+  confidence: number
+  /** 事件时间戳 */
+  timestamp: number
+  /** 快照 URL */
+  snapshotUrl?: string | null
+}
+
+/** 规则匹配显示时长（ms） */
+const RULE_MATCH_TTL = 8000
+
+/** 每个摄像头的规则匹配通知 */
+const ruleMatchNotifications = new Map<string, RuleMatchNotification>()
+
+/** 存入规则匹配通知 */
+export function pushRuleMatch(cameraId: string, notification: RuleMatchNotification): void {
+  ruleMatchNotifications.set(cameraId, notification)
+}
+
+/** 获取并清理过期的规则匹配通知 */
+export function takeRuleMatch(cameraId: string): RuleMatchNotification | null {
+  const entry = ruleMatchNotifications.get(cameraId)
+  if (!entry) return null
+  if (Date.now() - entry.timestamp > RULE_MATCH_TTL) {
+    ruleMatchNotifications.delete(cameraId)
+    return null
+  }
+  return entry
+}

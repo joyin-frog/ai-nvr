@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, takePatrolStatus, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, takePatrolStatus, takeRuleMatch, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 import { registerShortcut } from '../composables/useKeyboard'
@@ -335,6 +335,25 @@ function drawOverlayOnce() {
   const llmDesc = takeLlmDescription(props.cameraId)
   if (llmDesc) {
     drawLlmDescription(ctx, cssW, cssH, llmDesc.text, llmDesc.fadeRatio)
+  }
+
+  /** 检测规则匹配 toast（左上角，显示规则名称和结果） */
+  const ruleMatch = takeRuleMatch(props.cameraId)
+  if (ruleMatch) {
+    ctx.save()
+    ctx.font = 'bold 12px system-ui, sans-serif'
+    const ruleText = `🔍 ${ruleMatch.ruleName}: ${ruleMatch.result.length > 40 ? ruleMatch.result.slice(0, 37) + '...' : ruleMatch.result}`
+    const rtw = ctx.measureText(ruleText).width + 16
+    const rbh = 26
+    const rbx = 8
+    const rby = 40
+    ctx.fillStyle = 'rgba(155, 89, 182, 0.85)'
+    ctx.beginPath()
+    ctx.roundRect(rbx, rby, Math.min(rtw, cssW - 16), rbh, 4)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.fillText(ruleText, rbx + 8, rby + 17)
+    ctx.restore()
   }
 
   /** AI 巡逻异常状态指示器 */
