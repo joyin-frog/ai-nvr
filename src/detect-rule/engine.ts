@@ -101,6 +101,12 @@ export class DetectRuleEngine {
   private statesCacheTime = 0;
   /** schedule 解析缓存（rule.schedule -> ScheduleConfig | null） */
   private scheduleCache = new Map<string, ScheduleConfig | null>();
+  /** 近匹配趋势：最近一次近匹配的置信度（ruleId → confidence） */
+  private nearMatchLastConf = new Map<number, number>();
+  /** 近匹配趋势：连续上升次数（ruleId → count） */
+  private nearMatchRiseCount = new Map<number, number>();
+  /** 近匹配趋势：上次趋势告警时间（ruleId → timestamp） */
+  private nearMatchLastAlert = new Map<number, number>();
   /** 是否已启动 */
   private started = false;
   /** 快照保存回调 */
@@ -488,6 +494,11 @@ export class DetectRuleEngine {
         JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt, rawResponse: content, regions: vlmResult.regions }),
       );
 
+      /** 近匹配趋势检测：未匹配但置信度 > 0.5 且连续上升时发出趋势警告 */
+      if (!vlmResult.matched && vlmResult.confidence >= 0.5) {
+        this.checkNearMatchTrend(rule, timestamp, vlmResult.confidence, vlmResult.description);
+      }
+
       /** 处理状态更新（跳过已禁用的状态） */
       if (vlmResult.states && this.stateStorage) {
         for (const stateUpdate of vlmResult.states) {
@@ -542,6 +553,34 @@ export class DetectRuleEngine {
     } finally {
       this.concurrent--;
       this.processQueue();
+    }
+  }
+
+  /** 近匹配趋势检测：置信度连续上升时发出趋势警告 */
+  private checkNearMatchTrend(rule: DetectRule, timestamp: number, confidence: number, description: string): void {
+    const lastConf = this.nearMatchLastConf.get(rule.id) ?? 0;
+    const rising = confidence > lastConf;
+    const count = this.nearMatchRiseCount.get(rule.id) ?? 0;
+    const newCount = rising ? count + 1 : 0;
+    this.nearMatchLastConf.set(rule.id, confidence);
+    this.nearMatchRiseCount.set(rule.id, newCount);
+
+    /** 连续 3 次置信度上升且 > 0.6 → 发出趋势警告（5 分钟内只发一次） */
+    const lastAlert = this.nearMatchLastAlert.get(rule.id) ?? 0;
+    if (newCount >= 3 && confidence >= 0.6 && timestamp - lastAlert > 300_000) {
+      this.nearMatchLastAlert.set(rule.id, timestamp);
+      this.eventBus.emit("detect:rule", {
+        ruleId: rule.id,
+        ruleName: `${rule.name} (趋势)`,
+        cameraId: rule.cameraId,
+        timestamp,
+        prompt: rule.prompt,
+        result: `置信度持续上升: ${(lastConf * 100).toFixed(0)}% → ${(confidence * 100).toFixed(0)}% (${newCount}次连续上升)。${description}`,
+        confidence,
+        regions: undefined,
+        detail: JSON.stringify({ confidence, trend: true }),
+      });
+      console.log(`[DetectRuleEngine] 规则 "${rule.name}" 近匹配趋势: ${newCount}次上升, 置信度 ${(confidence * 100).toFixed(0)}%`);
     }
   }
 
