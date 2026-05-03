@@ -25,7 +25,7 @@ const { setPref, getPref } = usePreferences()
 const aiActionLoading = ref<'patrol' | ''>('')
 
 /** AI 引擎状态 */
-const aiStats = ref<{ vlm: { enabled: boolean; model: string }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number }; labelDistribution?: Record<string, number> } | null>(null)
+const aiStats = ref<{ vlm: { enabled: boolean; model: string; contextIntervalMs?: number }; clip?: { enabled: boolean }; stats5m?: { detectCount: number; alertCount: number; llmCount: number; trackEventCount: number }; tracks?: { total: number; active: number; named: number }; trajectories?: { pointCount: number }; labelDistribution?: Record<string, number>; anomaly?: { score: number } } | null>(null)
 
 /** 加载 AI 状态 */
 async function loadAiStats() {
@@ -793,6 +793,8 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
       <span v-if="aiStats.tracks" class="ai-stat" :title="`活跃 ${aiStats.tracks.active} / 已命名 ${aiStats.tracks.named}`">追踪 {{ aiStats.tracks.total }} ({{ aiStats.tracks.active }} 活跃)</span>
       <span v-if="aiStats.trajectories" class="ai-stat">轨迹 {{ aiStats.trajectories.pointCount }} 点</span>
       <span v-if="aiStats.clip?.enabled" class="ai-stat">🟢 CLIP</span>
+      <span v-if="(aiStats.anomaly?.score ?? 0) > 0" :class="['ai-stat', 'anomaly-badge', aiStats.anomaly!.score > 0.3 ? 'high' : 'low']" :title="`异常评分: ${Math.round(aiStats.anomaly!.score * 100)}%`">{{ Math.round(aiStats.anomaly!.score * 100) }}% 异常</span>
+      <span v-if="aiStats.vlm.contextIntervalMs" class="ai-stat" title="多帧分析间隔">📐 {{ (aiStats.vlm.contextIntervalMs / 1000).toFixed(0) }}s</span>
       <div v-if="aiStats.labelDistribution && Object.keys(aiStats.labelDistribution).length > 0" class="ai-label-dist">
         <span v-for="(count, label) in aiStats.labelDistribution" :key="label" class="label-chip" :style="{ opacity: 0.4 + 0.6 * (count / Math.max(...Object.values(aiStats.labelDistribution as Record<string, number>))) }">{{ label }} {{ count }}</span>
       </div>
@@ -1004,6 +1006,26 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
 
 .ai-stat {
   white-space: nowrap;
+}
+
+.anomaly-badge {
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.anomaly-badge.low {
+  color: #f0ad4e;
+}
+
+.anomaly-badge.high {
+  color: #e74c3c;
+  animation: anomaly-pulse 2s ease-in-out infinite;
+}
+
+@keyframes anomaly-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .ai-label-dist {
