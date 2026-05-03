@@ -277,10 +277,32 @@ export class AiPatrolScanner {
       inferMs,
     };
 
-    /** 异常时写入事件存储（使巡逻报告可在事件面板中回溯查询） */
-    if (patrolResult.hasAnomaly && this.eventStorage) {
+    /** 始终写入事件存储（用于趋势分析），异常时 detail 包含更多信息 */
+    if (this.eventStorage) {
       const detailJson = JSON.stringify(patrolResult);
       this.eventStorage.insert("llm:patrol", cam.id, timestamp, detailJson);
+    }
+
+    /** 人群趋势检测：比较最近几次巡逻的人数变化 */
+    if (parsed.count?.person && this.eventStorage) {
+      const recentPatrols = this.eventStorage.query({ type: "llm:patrol", cameraId: cam.id, since: timestamp - 600_000, limit: 5 });
+      if (recentPatrols.length >= 3) {
+        const personCounts: number[] = [parsed.count.person];
+        for (const ev of recentPatrols) {
+          const detail = JSON.parse(ev.detail || "{}") as { count?: { person?: number } };
+          if (detail.count?.person != null) personCounts.push(detail.count.person);
+        }
+        /** 连续 3 次人数递增 → 人群聚集趋势 */
+        if (personCounts.length >= 3 && personCounts[0]! > personCounts[1]! && personCounts[1]! > personCounts[2]!) {
+          this.eventBus.emit("track:crowd" as keyof import("@/event-bus").EventPayloads, {
+            cameraId: cam.id,
+            timestamp,
+            count: parsed.count.person,
+            trend: "increasing",
+            message: `${cam.name}: 人数持续增长至 ${parsed.count.person} 人`,
+          } as never);
+        }
+      }
     }
 
     this.eventBus.emit("llm:patrol" as keyof import("@/event-bus").EventPayloads, patrolResult as never);
