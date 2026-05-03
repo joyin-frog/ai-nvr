@@ -257,6 +257,8 @@ let firstConnection = true
 
 /** 磁盘空间预警 */
 const diskWarn = ref<{ percent: number; free: string } | null>(null)
+const headerAiStatus = ref<{ vlm: { enabled: boolean; model: string }; stats5m?: { detectCount: number; alertCount: number; llmCount: number }; tracks?: { active: number } } | null>(null)
+let headerAiTimer: ReturnType<typeof setInterval> | null = null
 let diskCheckTimer: ReturnType<typeof setInterval> | null = null
 /** PWA 更新检查定时器 */
 let pwaUpdateTimer: ReturnType<typeof setInterval> | null = null
@@ -697,6 +699,14 @@ async function loadTrackLabels() {
   Object.assign(trackLabelsMap, map)
 }
 
+/** 刷新 header AI 状态指示器 */
+async function refreshHeaderAi() {
+  try {
+    const res = await authFetch('/api/ai/status')
+    if (res.ok) headerAiStatus.value = await res.json()
+  } catch { /* ignore */ }
+}
+
 /** 启动应用主逻辑 */
 function startApp() {
   loadCameras().then(() => loadTrackLabels())
@@ -719,6 +729,8 @@ function startApp() {
   })
   checkDiskSpace()
   diskCheckTimer = setInterval(checkDiskSpace, 300000)
+  refreshHeaderAi()
+  headerAiTimer = setInterval(refreshHeaderAi, 30000)
 }
 
 /** 浏览器通知（点击后聚焦窗口并跳转到对应摄像头） */
@@ -1056,6 +1068,7 @@ onUnmounted(() => {
   stopPatrol()
   if (syncTimer) clearInterval(syncTimer)
   if (diskCheckTimer) clearInterval(diskCheckTimer)
+  if (headerAiTimer) clearInterval(headerAiTimer)
   if (pwaUpdateTimer) clearInterval(pwaUpdateTimer)
 })
 </script>
@@ -1072,6 +1085,9 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
+      <span v-if="headerAiStatus" class="ai-header-badge" :title="`VLM: ${headerAiStatus.vlm.model}\n检测: ${headerAiStatus.stats5m?.detectCount ?? 0}/5m\n追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃`">
+        <span :class="['ai-dot', headerAiStatus.vlm.enabled ? 'on' : 'off']">AI</span>
+      </span>
       <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? t('header.wsConnected') : wsState === 'connecting' ? t('header.wsConnecting') : t('header.wsDisconnected')">
         {{ wsState === 'connected' ? '●' : wsState === 'connecting' ? '◐' : '○' }}
       </span>
@@ -1385,6 +1401,28 @@ onUnmounted(() => {
 .ws-indicator {
   font-size: 10px;
   line-height: 1;
+}
+
+.ai-header-badge {
+  cursor: default;
+}
+
+.ai-dot {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.ai-dot.on {
+  color: #4ECDC4;
+  border: 1px solid rgba(78, 205, 196, 0.4);
+}
+
+.ai-dot.off {
+  color: #888;
+  border: 1px solid rgba(136, 136, 136, 0.3);
 }
 
 .ws-indicator.connected {

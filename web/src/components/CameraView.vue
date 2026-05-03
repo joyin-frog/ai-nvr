@@ -1376,9 +1376,11 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     if (tid && dwellSec >= 5) {
       dwellSuffix = dwellSec < 60 ? ` ${Math.round(dwellSec)}s` : ` ${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`
     }
+    /** 姿态标签（紧凑显示在标签末尾） */
+    const poseTag = d.pose ? ` ${d.pose}` : ''
     const text = customName
-      ? `${customName} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
-      : `${tid ? `#${tid} ` : ''}${displayLabel} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
+      ? `${customName}${poseTag} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
+      : `${tid ? `#${tid} ` : ''}${displayLabel}${poseTag} ${(d.score * 100).toFixed(0)}%${dwellSuffix}`
 
     const textMetrics = ctx.measureText(text)
     const labelH = 18
@@ -1437,6 +1439,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       if (customName) lines.push(`名称: ${customName}`)
       lines.push(`置信度: ${(d.score * 100).toFixed(0)}%`)
       if (d.dominantColor) lines.push(`\0color:${d.dominantColor}`)
+      if (d.pose) lines.push(`姿态: ${d.pose}`)
       if (d.velocity) {
         const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
         if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
