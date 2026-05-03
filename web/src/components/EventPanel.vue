@@ -399,6 +399,23 @@ function addEvent(type: string, cameraId: string, detail: string) {
     }
   }
 
+  /** track 行为事件去重：同类型同摄像头同目标 10 秒内只更新 */
+  if (type.startsWith('track:') && type !== 'track:appeared' && type !== 'track:disappeared') {
+    const dedupWindow = 10_000
+    const matchIdx = events.value.findIndex(e =>
+      e.type === type && e.cameraId === cameraId && (now - e.timestamp) < dedupWindow
+    )
+    if (matchIdx >= 0) {
+      const existing = events.value[matchIdx]!
+      existing.detail = detail
+      existing.summary = detail
+      existing.rawDetail = detail
+      existing.time = formatTime(now)
+      existing.timestamp = now
+      return
+    }
+  }
+
   const time = formatTime(now)
   events.value.unshift({ id: now, time, timestamp: now, type, cameraId, detail, summary: detail, rawDetail: detail, starred: false, isNew: true })
   scheduleIsNewClear(now)
