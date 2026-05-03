@@ -131,6 +131,40 @@ const availableStates = computed(() => {
   return stateList.value.filter(s => !s.cameraId || s.cameraId === camId)
 })
 
+/** 状态 ID -> 名称映射（用于规则卡片显示） */
+const stateNameMap = computed(() => {
+  const map: Record<number, string> = {}
+  for (const s of stateList.value) map[s.id] = s.name
+  return map
+})
+
+/** 快速创建状态 */
+const quickStateName = ref('')
+
+async function quickCreateState() {
+  const name = quickStateName.value.trim()
+  if (!name) return
+  try {
+    const res = await authFetch('/api/states', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        cameraId: form.value.cameraId || '',
+        valueType: 'boolean',
+        initialValue: 'false',
+        enabled: true,
+      }),
+    })
+    if (res.ok) {
+      const state = await res.json()
+      form.value.stateIds.push(state.id)
+      quickStateName.value = ''
+      await loadStateList()
+    }
+  } catch { /* ignore */ }
+}
+
 /** 构建 schedule JSON */
 function buildScheduleJson(): string {
   if (!form.value.scheduleEnabled) return ''
@@ -480,6 +514,25 @@ defineExpose({ loadRecords, addRecord })
           <input v-model.number="form.cooldownMs" type="number" step="1000" min="1000" class="input" />
         </div>
       </div>
+      <!-- 关联状态 -->
+      <div class="form-field">
+        <label>{{ t('detectRule.linkedStates') }}</label>
+        <div v-if="availableStates.length > 0" class="chip-group">
+          <button
+            v-for="st in availableStates" :key="st.id"
+            :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
+            @click="toggleStateId(st.id)"
+          >{{ st.name }}</button>
+        </div>
+        <div v-else class="chip-group">
+          <span class="hint-inline">{{ t('detectRule.noStatesYet') }}</span>
+        </div>
+        <div class="quick-state-row">
+          <input v-model="quickStateName" class="input quick-state-input" :placeholder="t('detectRule.quickStatePlaceholder')" @keyup.enter="quickCreateState" />
+          <button class="quick-state-btn" @click="quickCreateState" :disabled="!quickStateName.trim()">{{ t('detectRule.quickCreate') }}</button>
+        </div>
+        <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
+      </div>
       <!-- 高级设置 -->
       <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
         {{ showAdvanced ? '▾' : '▸' }} {{ t('settings.title') }}
@@ -496,18 +549,6 @@ defineExpose({ loadRecords, addRecord })
               {{ t('state.saveOriginal') }}
             </label>
           </div>
-        </div>
-        <!-- 关联状态 -->
-        <div v-if="availableStates.length > 0" class="form-field">
-          <label>{{ t('detectRule.linkedStates') }}</label>
-          <div class="chip-group">
-            <button
-              v-for="st in availableStates" :key="st.id"
-              :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
-              @click="toggleStateId(st.id)"
-            >{{ st.name }}</button>
-          </div>
-          <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
         </div>
         <!-- 启用时段 -->
         <div class="schedule-section">
@@ -582,6 +623,25 @@ defineExpose({ loadRecords, addRecord })
                 <input v-model.number="form.cooldownMs" type="number" class="input" />
               </div>
             </div>
+            <!-- 关联状态（编辑） -->
+            <div class="form-field">
+              <label>{{ t('detectRule.linkedStates') }}</label>
+              <div v-if="availableStates.length > 0" class="chip-group">
+                <button
+                  v-for="st in availableStates" :key="st.id"
+                  :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
+                  @click="toggleStateId(st.id)"
+                >{{ st.name }}</button>
+              </div>
+              <div v-else class="chip-group">
+                <span class="hint-inline">{{ t('detectRule.noStatesYet') }}</span>
+              </div>
+              <div class="quick-state-row">
+                <input v-model="quickStateName" class="input quick-state-input" :placeholder="t('detectRule.quickStatePlaceholder')" @keyup.enter="quickCreateState" />
+                <button class="quick-state-btn" @click="quickCreateState" :disabled="!quickStateName.trim()">{{ t('detectRule.quickCreate') }}</button>
+              </div>
+              <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
+            </div>
             <!-- 高级设置（编辑） -->
             <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
               {{ showAdvanced ? '▾' : '▸' }} {{ t('settings.title') }}
@@ -598,17 +658,6 @@ defineExpose({ loadRecords, addRecord })
                     {{ t('state.saveOriginal') }}
                   </label>
                 </div>
-              </div>
-              <div v-if="availableStates.length > 0" class="form-field">
-                <label>{{ t('detectRule.linkedStates') }}</label>
-                <div class="chip-group">
-                  <button
-                    v-for="st in availableStates" :key="st.id"
-                    :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
-                    @click="toggleStateId(st.id)"
-                  >{{ st.name }}</button>
-                </div>
-                <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
               </div>
               <div class="schedule-section">
                 <label class="checkbox-label">
@@ -650,6 +699,9 @@ defineExpose({ loadRecords, addRecord })
             <span class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
             <span v-if="rule.roiId > 0" class="meta-tag roi">ROI #{{ rule.roiId }}</span>
             <span class="meta-info">{{ rule.intervalMs / 1000 }}{{ t('detectRule.secondsUnit') }} · {{ t('detectRule.cooldownLabel') }}{{ rule.cooldownMs / 1000 }}{{ t('detectRule.secondsUnit') }}</span>
+            <template v-if="rule.stateIds?.length > 0">
+              <span v-for="sid in rule.stateIds" :key="sid" class="meta-tag state">{{ stateNameMap[sid] ?? `#${sid}` }}</span>
+            </template>
             <span class="meta-prompt">{{ rule.prompt.slice(0, 60) }}{{ rule.prompt.length > 60 ? '...' : '' }}</span>
           </div>
         </template>
@@ -1198,6 +1250,47 @@ select.input {
 
 .state-chip:hover {
   border-color: #4ECDC4;
+}
+
+.hint-inline {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+}
+
+.quick-state-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.quick-state-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  font-size: 11px;
+}
+.quick-state-btn {
+  padding: 2px 10px;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  background: transparent;
+  color: #4ECDC4;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.quick-state-btn:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+.quick-state-btn:hover:not(:disabled) {
+  border-color: #4ECDC4;
+  background: rgba(78, 205, 196, 0.1);
+}
+
+.meta-tag.state {
+  border-color: #9C27B0;
+  color: #CE93D8;
 }
 
 .hint {

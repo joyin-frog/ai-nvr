@@ -64,10 +64,11 @@ export class SnapshotStorage {
 
   /** 保存快照（原始帧 + 检测结果 JSON） — 异步 */
   async saveSnapshot(cameraId: string, timestamp: number, frameImage: Buffer, detections?: Detection[]): Promise<string> {
-    const date = new Date(timestamp);
-    const dateStr = date.toISOString().slice(0, 10);
-    const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
-    const ms = String(date.getMilliseconds()).padStart(3, "0");
+    const d = new Date(timestamp);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const timeStr = `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+    const ms = String(d.getMilliseconds()).padStart(3, "0");
     const filename = `${dateStr}_${timeStr}_${ms}`;
     const relativePath = `${cameraId}/${filename}`;
 

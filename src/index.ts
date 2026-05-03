@@ -175,10 +175,7 @@ const alertSnapshotStorage = new SnapshotStorage(storageFs, eventBus, "alert-sna
 
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
-const alertEngine = new AlertEngine(eventBus, alertStorage, trackLabelStorage, roiStorage, annotator);
-alertEngine.setSaveAlertSnapshot((cameraId, timestamp, jpeg) => {
-  alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
-});
+const alertEngine = new AlertEngine(eventBus, alertStorage);
 alertEngine.start();
 
 /** 检测规则引擎 */

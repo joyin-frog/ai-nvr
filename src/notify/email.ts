@@ -16,6 +16,7 @@ const EVENT_LABELS: Record<string, string> = {
   "track:leave-zone": "离开区域",
   "track:dwell": "区域停留",
   "track:speed": "高速移动",
+  "state:changed": "状态变更",
 };
 
 /** 事件类型对应 CSS 颜色 */
@@ -31,10 +32,11 @@ const EVENT_COLORS: Record<string, string> = {
   "track:leave-zone": "#7E57C2",
   "track:dwell": "#FF7043",
   "track:speed": "#E91E63",
+  "state:changed": "#9C27B0",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed"];
 
 /**
  * 邮件告警通知
@@ -58,6 +60,8 @@ export class EmailNotifier {
 
   /** 处理事件 */
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
+    /** state:changed 事件只在 notify=true 时推送 */
+    if (event === "state:changed" && !payload.notify) return;
     const config = this.runtimeConfig.get().notify?.email;
     if (!config?.enabled || !config.smtp) return;
 
@@ -144,6 +148,12 @@ export class EmailNotifier {
       const speed = payload.speed as number | undefined;
       const displayName = trackName ?? semanticLabel ?? trackLabel ?? "未知";
       detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)</td></tr>`;
+    } else if (event === "state:changed") {
+      const stateName = payload.stateName as string | undefined;
+      const oldValue = payload.oldValue as string | undefined;
+      const newValue = payload.newValue as string | undefined;
+      detailHtml = `<tr><td>状态名称</td><td><strong>${stateName ?? ""}</strong></td></tr>`;
+      detailHtml += `<tr><td>变更</td><td>${oldValue ?? ""} → ${newValue ?? ""}</td></tr>`;
     }
 
     const subject = `[JK NVR] ${label} - ${cameraId}`;

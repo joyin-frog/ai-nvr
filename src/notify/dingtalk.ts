@@ -28,10 +28,11 @@ const EVENT_LABELS: Record<string, string> = {
   "track:leave-zone": "离开区域",
   "track:dwell": "区域停留",
   "track:speed": "高速移动",
+  "state:changed": "状态变更",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed"];
 
 /**
  * 钉钉机器人通知推送
@@ -55,6 +56,8 @@ export class DingTalkNotifier {
 
   /** 处理事件 */
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
+    /** state:changed 事件只在 notify=true 时推送 */
+    if (event === "state:changed" && !payload.notify) return;
     const config = this.runtimeConfig.get().notify?.dingtalk;
     if (!config?.enabled || !config.webhookUrl) return;
 
@@ -136,6 +139,11 @@ export class DingTalkNotifier {
       const speed = payload.speed as number | undefined;
       const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)`;
+    } else if (event === "state:changed") {
+      const stateName = payload.stateName as string | undefined;
+      const oldValue = payload.oldValue as string | undefined;
+      const newValue = payload.newValue as string | undefined;
+      body = `状态: ${stateName ?? ""}\n${oldValue ?? ""} → ${newValue ?? ""}`;
     }
 
     const title = `JK NVR - ${label}`;

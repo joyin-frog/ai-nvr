@@ -1,39 +1,26 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { authFetch, authUrl } from '../services/auth'
+import { authFetch } from '../services/auth'
 import { useToast } from '../composables/useToast'
 import { confirmDialog } from '../composables/useConfirm'
-
-/** 告警规则 */
-/** ROI 区域 */
-interface RoiItem {
-  id: number
-  cameraId: string
-  name: string
-  points: string
-  enabled: boolean
-}
 
 interface AlertRule {
   id: number
   name: string
   eventType: string
   cameraId: string
-  labels: string
-  trackNames: string
   windowSeconds: number
   threshold: number
   cooldownSeconds: number
   enabled: boolean
   silentStart: string
   silentEnd: string
-  minCount: number
-  roiId: number
-  minSpeed: number
+  sourceRuleId: number
+  sourceStateId: number
+  condition: string
 }
 
-/** 告警记录 */
 interface AlertRecord {
   id: number
   ruleId: number
@@ -41,11 +28,11 @@ interface AlertRecord {
   cameraId: string
   timestamp: number
   detail: string
-  /** 告警快照 URL */
-  snapshotUrl?: string | null
-  /** 是否为实时新增（用于入场动画） */
   isNew?: boolean
 }
+
+interface DetectRuleItem { id: number; name: string; cameraId: string }
+interface StateItem { id: number; name: string; cameraId: string; valueType: string; currentValue: string }
 
 const { t, locale } = useI18n()
 const { error: toastError } = useToast()
@@ -53,125 +40,126 @@ const { error: toastError } = useToast()
 const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
 const loading = ref(false)
+const detectRuleList = ref<DetectRuleItem[]>([])
+const stateList = ref<StateItem[]>([])
 
-/** 告警历史筛选参数 */
 const filterCamera = ref('')
-/** 日期筛选（YYYY-MM-DD） */
 const filterDate = ref('')
-/** 分页偏移 */
 const alertOffset = ref(0)
-/** 每页条数 */
 const PAGE_SIZE = 50
-/** 筛选条件下的总数 */
 const alertTotal = ref(0)
 
 const props = defineProps<{
-  /** 摄像头列表（用于名称映射） */
   cameras?: Array<{ id: string; name: string }>
 }>()
 
 const emit = defineEmits<{
-  /** 点击告警跳转录像 */
   jumpToRecording: [cameraId: string, timestamp: number]
 }>()
 
-/** 摄像头 ID → 名称映射 */
 const cameraNameMap = computed(() => {
   const map: Record<string, string> = {}
-  for (const cam of (props.cameras ?? [])) {
-    map[cam.id] = cam.name
-  }
+  for (const cam of (props.cameras ?? [])) map[cam.id] = cam.name
   return map
 })
 
-/** 显示添加表单 */
 const showAddForm = ref(false)
-/** 正在编辑的规则 ID（null 为新增模式） */
 const editingRuleId = ref<number | null>(null)
-/** ROI 区域列表缓存 */
-const roiList = ref<RoiItem[]>([])
+
+/** 表单中的条件（从 condition JSON 解析） */
+interface ConditionForm {
+  resultContains: string
+  valueEquals: string
+  valueNotEquals: string
+}
 
 const form = ref({
   name: '',
-  eventType: 'detect',
+  eventType: 'detect:rule',
   cameraId: '',
-  labels: '',
-  trackNames: '',
   windowSeconds: 60,
-  threshold: 3,
+  threshold: 1,
   cooldownSeconds: 300,
   silentStart: '',
   silentEnd: '',
-  minCount: 0,
-  roiId: 0,
-  minSpeed: 0,
+  sourceRuleId: 0,
+  sourceStateId: 0,
+  conditionForm: { resultContains: '', valueEquals: '', valueNotEquals: '' } as ConditionForm,
 })
 
 const emptyForm = {
-  name: '', eventType: 'detect', cameraId: '', labels: '', trackNames: '',
-  windowSeconds: 60, threshold: 3, cooldownSeconds: 300,
-  silentStart: '', silentEnd: '', minCount: 0, roiId: 0, minSpeed: 0,
+  name: '', eventType: 'detect:rule', cameraId: '',
+  windowSeconds: 60, threshold: 1, cooldownSeconds: 300,
+  silentStart: '', silentEnd: '', sourceRuleId: 0, sourceStateId: 0,
+  conditionForm: { resultContains: '', valueEquals: '', valueNotEquals: '' } as ConditionForm,
+}
+
+/** 构建 condition JSON */
+function buildConditionJson(): string {
+  const cf = form.value.conditionForm
+  const obj: Record<string, string> = {}
+  if (form.value.eventType === 'detect:rule' && cf.resultContains) obj.resultContains = cf.resultContains
+  if (form.value.eventType === 'state:changed') {
+    if (cf.valueEquals) obj.valueEquals = cf.valueEquals
+    if (cf.valueNotEquals) obj.valueNotEquals = cf.valueNotEquals
+  }
+  return Object.keys(obj).length > 0 ? JSON.stringify(obj) : ''
+}
+
+/** 解析 condition JSON 到表单 */
+function parseCondition(condition: string): ConditionForm {
+  const cf: ConditionForm = { resultContains: '', valueEquals: '', valueNotEquals: '' }
+  if (!condition) return cf
+  try {
+    const obj = JSON.parse(condition) as Record<string, string>
+    if (obj.resultContains) cf.resultContains = obj.resultContains
+    if (obj.valueEquals) cf.valueEquals = obj.valueEquals
+    if (obj.valueNotEquals) cf.valueNotEquals = obj.valueNotEquals
+  } catch { /* ignore */ }
+  return cf
 }
 
 /** 事件类型选项 */
 const eventTypes = computed(() => [
-  { value: 'detect', label: t('alert.eventTypeDetect') },
-  { value: 'motion', label: t('alert.eventTypeMotion') },
-  { value: 'camera:offline', label: t('alert.eventTypeOffline') },
-  { value: 'camera:lowfps', label: t('alert.eventTypeLowfps') },
-  { value: 'track:appeared', label: t('alert.eventTypeTrackAppeared', '目标出现') },
-  { value: 'track:disappeared', label: t('alert.eventTypeTrackDisappeared', '目标消失') },
-  { value: 'track:enter-zone', label: t('event.trackEnterZone', '进入区域') },
-  { value: 'track:leave-zone', label: t('event.trackLeaveZone', '离开区域') },
-  { value: 'track:dwell', label: t('event.trackDwell', '停留') },
-  { value: 'track:speed', label: t('event.trackSpeed', '高速移动') },
-  { value: 'track:line-cross', label: t('event.trackLineCross', '越线') },
-  { value: 'track:loiter', label: t('event.trackLoiter', '徘徊') },
+  { value: 'detect:rule', label: t('alert.eventTypeDetectRule') },
+  { value: 'state:changed', label: t('alert.eventTypeStateChanged') },
 ])
 
-/** 是否显示标签/命名过滤字段（detect 和 track 事件类型都适用） */
-const showLabelFields = computed(() =>
-  form.value.eventType === 'detect'
-  || form.value.eventType === 'track:appeared'
-  || form.value.eventType === 'track:disappeared'
-  || form.value.eventType === 'track:enter-zone'
-  || form.value.eventType === 'track:leave-zone'
-  || form.value.eventType === 'track:dwell'
-  || form.value.eventType === 'track:speed'
-  || form.value.eventType === 'track:line-cross'
-  || form.value.eventType === 'track:loiter',
-)
-
-/** 加载 ROI 列表 */
-async function loadRoiList() {
-  try {
-    const res = await authFetch('/api/roi')
-    if (res.ok) roiList.value = await res.json()
-  } catch {
-    // ignore
-  }
-}
-
-/** 当前选中摄像头对应的 ROI 列表 */
-const cameraRoiOptions = computed(() => {
-  if (!form.value.cameraId) return roiList.value
-  return roiList.value.filter(r => r.cameraId === form.value.cameraId)
+/** 当前摄像头过滤后的检测规则 */
+const cameraDetectRules = computed(() => {
+  const camId = form.value.cameraId
+  if (!camId) return detectRuleList.value
+  return detectRuleList.value.filter(r => !r.cameraId || r.cameraId === camId)
 })
 
-/** 加载规则列表 */
+/** 当前摄像头过滤后的状态 */
+const cameraStates = computed(() => {
+  const camId = form.value.cameraId
+  if (!camId) return stateList.value
+  return stateList.value.filter(s => !s.cameraId || s.cameraId === camId)
+})
+
+/** 加载检测规则和状态列表（供事件源选择） */
+async function loadSourceOptions() {
+  try {
+    const [rulesRes, statesRes] = await Promise.all([
+      authFetch('/api/detect-rules'),
+      authFetch('/api/states'),
+    ])
+    if (rulesRes.ok) detectRuleList.value = await rulesRes.json()
+    if (statesRes.ok) stateList.value = await statesRes.json()
+  } catch { /* ignore */ }
+}
+
 async function loadRules() {
   loading.value = true
   try {
     const res = await authFetch('/api/alerts/rules')
     if (res.ok) rules.value = await res.json()
-  } catch {
-    // ignore
-  } finally {
-    loading.value = false
-  }
+  } catch { /* ignore */ }
+  finally { loading.value = false }
 }
 
-/** 加载告警历史（支持筛选和分页） */
 async function loadAlerts(append = false) {
   try {
     const params = new URLSearchParams()
@@ -181,42 +169,42 @@ async function loadAlerts(append = false) {
     if (filterCamera.value) params.set('cameraId', filterCamera.value)
     if (filterDate.value) {
       const since = new Date(`${filterDate.value}T00:00:00`).getTime()
-      const until = since + 86_400_000
       params.set('since', String(since))
-      params.set('until', String(until))
+      params.set('until', String(since + 86_400_000))
     }
     const res = await authFetch(`/api/alerts/history?${params}`)
     if (res.ok) {
       const data = await res.json()
-      alerts.value = append ? [...alerts.value, ...data.alerts] : data.alerts
+      alerts.value = append ? [...alerts.value, ...data.records] : data.records
       alertTotal.value = data.total ?? alerts.value.length
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
-/** 加载更多（追加下一页） */
 function loadMoreAlerts() {
   alertOffset.value += PAGE_SIZE
   loadAlerts(true)
 }
 
-/** 是否还有更多 */
 const hasMore = computed(() => alerts.value.length < alertTotal.value)
 
-/** 添加规则 */
+/** 构建提交 body（去掉 conditionForm，加上 condition） */
+function buildBody(): Record<string, unknown> {
+  const { conditionForm, ...rest } = form.value
+  return { ...rest, condition: buildConditionJson() }
+}
+
 async function addRule() {
   if (!form.value.name || !form.value.eventType) return
   try {
     const res = await authFetch('/api/alerts/rules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form.value),
+      body: JSON.stringify(buildBody()),
     })
     if (res.ok) {
       showAddForm.value = false
-      form.value = { ...emptyForm }
+      form.value = { ...emptyForm, conditionForm: { ...emptyForm.conditionForm } }
       loadRules()
     } else {
       toastError(t('alert.saveFailed'))
@@ -233,31 +221,28 @@ function startEdit(rule: AlertRule) {
     name: rule.name,
     eventType: rule.eventType,
     cameraId: rule.cameraId,
-    labels: rule.labels,
-    trackNames: rule.trackNames ?? '',
     windowSeconds: rule.windowSeconds,
     threshold: rule.threshold,
     cooldownSeconds: rule.cooldownSeconds,
-    silentStart: rule.silentStart,
-    silentEnd: rule.silentEnd,
-    minCount: rule.minCount ?? 0,
-    roiId: rule.roiId ?? 0,
-    minSpeed: rule.minSpeed ?? 0,
+    silentStart: rule.silentStart ?? '',
+    silentEnd: rule.silentEnd ?? '',
+    sourceRuleId: rule.sourceRuleId ?? 0,
+    sourceStateId: rule.sourceStateId ?? 0,
+    conditionForm: parseCondition(rule.condition ?? ''),
   }
 }
 
-/** 保存编辑 */
 async function saveEdit() {
   if (!editingRuleId.value || !form.value.name) return
   try {
     const res = await authFetch(`/api/alerts/rules/${editingRuleId.value}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form.value),
+      body: JSON.stringify(buildBody()),
     })
     if (res.ok) {
       editingRuleId.value = null
-      form.value = { ...emptyForm }
+      form.value = { ...emptyForm, conditionForm: { ...emptyForm.conditionForm } }
       loadRules()
     } else {
       toastError(t('alert.saveFailed'))
@@ -267,13 +252,11 @@ async function saveEdit() {
   }
 }
 
-/** 取消编辑 */
 function cancelEdit() {
   editingRuleId.value = null
-  form.value = { ...emptyForm }
+  form.value = { ...emptyForm, conditionForm: { ...emptyForm.conditionForm } }
 }
 
-/** 切换启用 */
 async function toggleRule(rule: AlertRule) {
   try {
     await authFetch(`/api/alerts/rules/${rule.id}`, {
@@ -287,7 +270,6 @@ async function toggleRule(rule: AlertRule) {
   }
 }
 
-/** 删除规则 */
 async function deleteRule(id: number) {
   if (!await confirmDialog(t('alert.confirmDelete'))) return
   try {
@@ -298,54 +280,54 @@ async function deleteRule(id: number) {
   }
 }
 
-/** 格式化时间 */
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleString(locale.value)
 }
 
-/** 事件类型中文 */
 function eventTypeLabel(type: string): string {
   return eventTypes.value.find(e => e.value === type)?.label ?? type
 }
 
-/** 格式化告警详情 JSON 为可读文本 */
+/** 获取规则显示用的源名称 */
+function sourceLabel(rule: AlertRule): string {
+  if (rule.eventType === 'detect:rule') {
+    if (rule.sourceRuleId > 0) {
+      const r = detectRuleList.value.find(d => d.id === rule.sourceRuleId)
+      return r?.name ?? `#${rule.sourceRuleId}`
+    }
+    return t('alert.anyRule')
+  }
+  if (rule.eventType === 'state:changed') {
+    if (rule.sourceStateId > 0) {
+      const s = stateList.value.find(st => st.id === rule.sourceStateId)
+      return s?.name ?? `#${rule.sourceStateId}`
+    }
+    return t('alert.anyState')
+  }
+  return ''
+}
+
 function formatDetail(detail: string): string {
   let obj: Record<string, unknown>
-  try {
-    obj = JSON.parse(detail)
-  } catch {
-    return detail
-  }
+  try { obj = JSON.parse(detail) } catch { return detail }
   const parts: string[] = []
-  if (typeof obj.detections === 'string') parts.push(obj.detections)
-  if (typeof obj.ratio === 'number') parts.push(`${t('event.motionRatio', { ratio: (obj.ratio * 100).toFixed(1) })}`)
-  if (typeof obj.count === 'number') parts.push(`×${obj.count}`)
-  if (typeof obj.fps === 'number') parts.push(`FPS: ${obj.fps}`)
-  if (typeof obj.speed === 'number') parts.push(`${obj.speed.toFixed(1)} m/s`)
-  if (typeof obj.zoneName === 'string') parts.push(obj.zoneName)
-  if (typeof obj.dwellMs === 'number') parts.push(`${(obj.dwellMs / 1000).toFixed(1)}s`)
-  if (typeof obj.trackName === 'string') parts.push(obj.trackName)
-  if (typeof obj.label === 'string' && !obj.detections) parts.push(obj.label)
+  if (typeof obj.sourceRuleName === 'string') parts.push(obj.sourceRuleName)
+  if (typeof obj.sourceStateName === 'string') parts.push(`${obj.sourceStateName}: ${obj.oldValue ?? ""} → ${obj.newValue ?? ""}`)
+  if (typeof obj.result === 'string') parts.push(obj.result)
   return parts.length > 0 ? parts.join(' · ') : detail
 }
 
-/** 实时追加告警（WebSocket 推送时调用，替代全量刷新） */
 function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; detail: string }) {
-  /** 如果当前筛选不匹配则忽略 */
   if (filterCamera.value && filterCamera.value !== payload.cameraId) return
   if (filterDate.value) {
     const since = new Date(`${filterDate.value}T00:00:00`).getTime()
-    const until = since + 86_400_000
-    if (payload.timestamp < since || payload.timestamp > until) return
+    if (payload.timestamp < since || payload.timestamp > since + 86_400_000) return
   }
   const record: AlertRecord = {
     id: -(Date.now()),
-    ruleId: payload.ruleId,
-    ruleName: payload.ruleName,
-    cameraId: payload.cameraId,
-    timestamp: payload.timestamp,
-    detail: payload.detail,
-    isNew: true,
+    ruleId: payload.ruleId, ruleName: payload.ruleName,
+    cameraId: payload.cameraId, timestamp: payload.timestamp,
+    detail: payload.detail, isNew: true,
   }
   alerts.value.unshift(record)
   alertTotal.value++
@@ -356,10 +338,8 @@ function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string;
   }, 1000)
 }
 
-/** Tab 切换 */
 const activeView = ref<'rules' | 'history'>('rules')
 
-/** 导出告警历史为 CSV */
 async function exportCsv() {
   const params = new URLSearchParams({ limit: '10000', offset: '0' })
   if (filterCamera.value) params.set('cameraId', filterCamera.value)
@@ -370,9 +350,9 @@ async function exportCsv() {
   }
   const res = await authFetch(`/api/alerts/history?${params}`)
   if (!res.ok) return
-  const { alerts: rows } = await res.json() as { alerts: AlertRecord[] }
+  const { records } = await res.json() as { records: AlertRecord[] }
   const header = 'ID,Rule Name,Camera,Time,Detail'
-  const csvRows = rows.map(a =>
+  const csvRows = records.map(a =>
     `${a.id},"${a.ruleName}","${cameraNameMap.value[a.cameraId] ?? a.cameraId}","${new Date(a.timestamp).toLocaleString(locale.value)}","${(a.detail ?? '').replace(/"/g, '""')}"`
   )
   const csv = [header, ...csvRows].join('\n')
@@ -385,10 +365,15 @@ async function exportCsv() {
   URL.revokeObjectURL(link.href)
 }
 
+/** 新增/编辑表单的事件源条件区域（复用模板） */
+function resetConditionForm() {
+  form.value.conditionForm = { resultContains: '', valueEquals: '', valueNotEquals: '' }
+}
+
 onMounted(() => {
   loadRules()
   loadAlerts()
-  loadRoiList()
+  loadSourceOptions()
 })
 
 defineExpose({ loadAlerts, addAlert })
@@ -410,7 +395,7 @@ defineExpose({ loadAlerts, addAlert })
       </div>
       <div class="form-field">
         <label>{{ t('alert.eventType') }}</label>
-        <select v-model="form.eventType" class="input">
+        <select v-model="form.eventType" class="input" @change="resetConditionForm">
           <option v-for="et in eventTypes" :key="et.value" :value="et.value">{{ et.label }}</option>
         </select>
       </div>
@@ -421,21 +406,40 @@ defineExpose({ loadAlerts, addAlert })
           <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name || cam.id }}</option>
         </select>
       </div>
-      <div class="form-field" v-if="showLabelFields">
-        <label>{{ t('alert.labelFilter') }}</label>
-        <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholder')" class="input" />
-      </div>
-      <div class="form-field" v-if="showLabelFields">
-        <label>{{ t('alert.trackNameFilter') }}</label>
-        <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
-      </div>
-      <div class="form-field" v-if="showLabelFields && cameraRoiOptions.length > 0">
-        <label>ROI</label>
-        <select v-model.number="form.roiId" class="input">
-          <option :value="0">{{ t('alert.allRegions', '全部区域') }}</option>
-          <option v-for="roi in cameraRoiOptions" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }} ({{ roi.cameraId }})</option>
-        </select>
-      </div>
+      <!-- detect:rule 事件源配置 -->
+      <template v-if="form.eventType === 'detect:rule'">
+        <div class="form-field">
+          <label>{{ t('alert.sourceRule') }}</label>
+          <select v-model.number="form.sourceRuleId" class="input">
+            <option :value="0">{{ t('alert.anyRule') }}</option>
+            <option v-for="r in cameraDetectRules" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>{{ t('alert.resultContains') }}</label>
+          <input v-model="form.conditionForm.resultContains" class="input" :placeholder="t('alert.resultContains')" />
+        </div>
+      </template>
+      <!-- state:changed 事件源配置 -->
+      <template v-if="form.eventType === 'state:changed'">
+        <div class="form-field">
+          <label>{{ t('alert.sourceState') }}</label>
+          <select v-model.number="form.sourceStateId" class="input">
+            <option :value="0">{{ t('alert.anyState') }}</option>
+            <option v-for="s in cameraStates" :key="s.id" :value="s.id">{{ s.name }}</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-field half">
+            <label>{{ t('alert.valueEquals') }}</label>
+            <input v-model="form.conditionForm.valueEquals" class="input" />
+          </div>
+          <div class="form-field half">
+            <label>{{ t('alert.valueNotEquals') }}</label>
+            <input v-model="form.conditionForm.valueNotEquals" class="input" />
+          </div>
+        </div>
+      </template>
       <div class="form-row">
         <div class="form-field half">
           <label>{{ t('alert.windowSeconds') }}</label>
@@ -451,10 +455,6 @@ defineExpose({ loadAlerts, addAlert })
           <label>{{ t('alert.cooldown') }}</label>
           <input v-model.number="form.cooldownSeconds" type="number" class="input" />
         </div>
-        <div class="form-field half">
-          <label>{{ t('alert.minCount') }}</label>
-          <input v-model.number="form.minCount" type="number" min="0" class="input" />
-        </div>
       </div>
       <div class="form-row">
         <div class="form-field half">
@@ -466,17 +466,13 @@ defineExpose({ loadAlerts, addAlert })
           <input v-model="form.silentEnd" type="time" class="input" />
         </div>
       </div>
-      <div class="form-field" v-if="form.eventType === 'track:speed'">
-        <label>{{ t('alert.minSpeed', '最小速度 (m/s)') }}</label>
-        <input v-model.number="form.minSpeed" type="number" min="0" step="0.1" class="input" />
-      </div>
       <button class="submit-btn" @click="addRule">{{ t('alert.confirmAdd') }}</button>
     </div>
 
     <!-- 视图切换 -->
     <div class="view-tabs">
       <button :class="['view-btn', { active: activeView === 'rules' }]" @click="activeView = 'rules'">{{ t('alert.rulesTab') }} ({{ rules.length }})</button>
-      <button :class="['view-btn', { active: activeView === 'history' }]" @click="activeView = 'history'; loadAlerts()">{{ t('alert.historyTab') }} ({{ alerts.length }})</button>
+      <button :class="['view-btn', { active: activeView === 'history' }]" @click="activeView = 'history'; loadAlerts()">{{ t('alert.historyTab') }} ({{ alertTotal }})</button>
     </div>
 
     <!-- 规则列表 -->
@@ -492,7 +488,7 @@ defineExpose({ loadAlerts, addAlert })
             </div>
             <div class="form-field">
               <label>{{ t('alert.eventType') }}</label>
-              <select v-model="form.eventType" class="input">
+              <select v-model="form.eventType" class="input" @change="resetConditionForm">
                 <option v-for="et in eventTypes" :key="et.value" :value="et.value">{{ et.label }}</option>
               </select>
             </div>
@@ -503,21 +499,38 @@ defineExpose({ loadAlerts, addAlert })
                 <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name || cam.id }}</option>
               </select>
             </div>
-            <div class="form-field" v-if="showLabelFields">
-              <label>{{ t('alert.labelFilter') }}</label>
-              <input v-model="form.labels" :placeholder="t('alert.labelsPlaceholderShort')" class="input" />
-            </div>
-            <div class="form-field" v-if="showLabelFields">
-              <label>{{ t('alert.trackNameFilter') }}</label>
-              <input v-model="form.trackNames" :placeholder="t('alert.trackNamesPlaceholder')" class="input" />
-            </div>
-            <div class="form-field" v-if="showLabelFields && cameraRoiOptions.length > 0">
-              <label>ROI</label>
-              <select v-model.number="form.roiId" class="input">
-                <option :value="0">{{ t('alert.allRegions', '全部区域') }}</option>
-                <option v-for="roi in cameraRoiOptions" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }} ({{ roi.cameraId }})</option>
-              </select>
-            </div>
+            <template v-if="form.eventType === 'detect:rule'">
+              <div class="form-field">
+                <label>{{ t('alert.sourceRule') }}</label>
+                <select v-model.number="form.sourceRuleId" class="input">
+                  <option :value="0">{{ t('alert.anyRule') }}</option>
+                  <option v-for="r in cameraDetectRules" :key="r.id" :value="r.id">{{ r.name }}</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>{{ t('alert.resultContains') }}</label>
+                <input v-model="form.conditionForm.resultContains" class="input" />
+              </div>
+            </template>
+            <template v-if="form.eventType === 'state:changed'">
+              <div class="form-field">
+                <label>{{ t('alert.sourceState') }}</label>
+                <select v-model.number="form.sourceStateId" class="input">
+                  <option :value="0">{{ t('alert.anyState') }}</option>
+                  <option v-for="s in cameraStates" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <div class="form-field half">
+                  <label>{{ t('alert.valueEquals') }}</label>
+                  <input v-model="form.conditionForm.valueEquals" class="input" />
+                </div>
+                <div class="form-field half">
+                  <label>{{ t('alert.valueNotEquals') }}</label>
+                  <input v-model="form.conditionForm.valueNotEquals" class="input" />
+                </div>
+              </div>
+            </template>
             <div class="form-row">
               <div class="form-field half">
                 <label>{{ t('alert.windowSeconds') }}</label>
@@ -533,10 +546,6 @@ defineExpose({ loadAlerts, addAlert })
                 <label>{{ t('alert.cooldown') }}</label>
                 <input v-model.number="form.cooldownSeconds" type="number" class="input" />
               </div>
-              <div class="form-field half">
-                <label>{{ t('alert.minCount') }}</label>
-                <input v-model.number="form.minCount" type="number" min="0" class="input" />
-              </div>
             </div>
             <div class="form-row">
               <div class="form-field half">
@@ -547,10 +556,6 @@ defineExpose({ loadAlerts, addAlert })
                 <label>{{ t('alert.silentEndLabel') }}</label>
                 <input v-model="form.silentEnd" type="time" class="input" />
               </div>
-            </div>
-            <div class="form-field" v-if="form.eventType === 'track:speed'">
-              <label>{{ t('alert.minSpeed', '最小速度 (m/s)') }}</label>
-              <input v-model.number="form.minSpeed" type="number" min="0" step="0.1" class="input" />
             </div>
             <div class="edit-actions">
               <button class="save-btn" @click="saveEdit">{{ t('alert.save') }}</button>
@@ -570,12 +575,9 @@ defineExpose({ loadAlerts, addAlert })
           </div>
           <div class="rule-meta">
             <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
+            <span class="meta-tag source">{{ sourceLabel(rule) }}</span>
             <span v-if="rule.cameraId" class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
-            <span v-if="rule.labels" class="meta-tag label">{{ rule.labels }}</span>
-            <span v-if="rule.trackNames" class="meta-tag track-name">{{ rule.trackNames }}</span>
-            <span v-if="rule.minCount > 0" class="meta-tag count">≥{{ rule.minCount }}</span>
-            <span v-if="rule.roiId > 0" class="meta-tag roi">ROI #{{ rule.roiId }}</span>
-            <span v-if="rule.minSpeed > 0" class="meta-tag speed">≥{{ rule.minSpeed }} m/s</span>
+            <span v-if="rule.condition" class="meta-tag cond">{{ rule.condition }}</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
           </div>
@@ -591,14 +593,11 @@ defineExpose({ loadAlerts, addAlert })
       </select>
       <input type="date" v-model="filterDate" @change="loadAlerts()" class="filter-date" :title="t('alert.filterDate')" />
       <span v-if="alertTotal > 0" class="alert-total">{{ t('alert.totalCount', { count: alertTotal }) }}</span>
-      <button v-if="activeView === 'history'" class="csv-btn" @click="exportCsv" :title="t('alert.exportCsv')">CSV</button>
+      <button class="csv-btn" @click="exportCsv" :title="t('alert.exportCsv')">CSV</button>
     </div>
     <div v-if="activeView === 'history'" class="alert-list">
       <div v-if="alerts.length === 0" class="empty">{{ t('alert.noAlertRecords') }}</div>
       <div v-for="alert in alerts" :key="alert.id" :class="['alert-item', { 'new-alert': alert.isNew }]" @click="emit('jumpToRecording', alert.cameraId, alert.timestamp)">
-        <div v-if="alert.snapshotUrl" class="alert-thumb">
-          <img :src="authUrl(alert.snapshotUrl)" alt="" />
-        </div>
         <div class="alert-info">
           <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
           <div class="alert-body">
@@ -685,7 +684,6 @@ defineExpose({ loadAlerts, addAlert })
   border-bottom: 2px solid #FFD93D;
 }
 
-/* 添加表单 */
 .add-form {
   padding: 10px 12px;
   border-bottom: 1px solid #2a2a4a;
@@ -748,7 +746,6 @@ select.input {
 
 .submit-btn:hover { background: #ffe066; }
 
-/* 规则列表 */
 .rule-list {
   flex: 1;
   overflow-y: auto;
@@ -814,7 +811,6 @@ select.input {
 
 .edit-btn:hover { color: #4ECDC4; }
 
-/* 编辑表单 */
 .edit-form {
   padding: 8px;
   background: #0a0a1a;
@@ -870,20 +866,15 @@ select.input {
 }
 
 .meta-tag.cam { color: #4ECDC4; }
-.meta-tag.label { color: #FFD93D; }
-.meta-tag.track-name { color: #FF6B6B; }
+.meta-tag.source { color: #9C27B0; }
+.meta-tag.cond { color: #FF9800; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-tag.silent { color: #e74c3c; }
-.meta-tag.count { color: #FF9800; }
-.meta-tag.roi { color: #9C27B0; }
-.meta-tag.speed { color: #E91E63; }
 
 .meta-info {
   font-size: 11px;
   color: #555;
-  margin-left: auto;
 }
 
-/* 告警历史 */
 .history-filters {
   display: flex;
   align-items: center;
@@ -935,7 +926,6 @@ select.input {
   padding: 2px 8px;
   font-size: 12px;
   cursor: pointer;
-  margin-left: auto;
 }
 
 .csv-btn:hover { background: #3a3a5a; }
@@ -953,9 +943,7 @@ select.input {
   margin-top: 4px;
 }
 
-.load-more-btn:hover {
-  background: #3a3a5a;
-}
+.load-more-btn:hover { background: #3a3a5a; }
 
 .alert-item {
   display: flex;
@@ -969,32 +957,13 @@ select.input {
   transition: background 0.15s;
 }
 
-.alert-item:hover {
-  background: #1a2a4a;
-}
+.alert-item:hover { background: #1a2a4a; }
 
-.alert-item.new-alert {
-  animation: alert-flash 1s ease-out;
-}
+.alert-item.new-alert { animation: alert-flash 1s ease-out; }
 
 @keyframes alert-flash {
   0% { background: rgba(255, 217, 61, 0.25); }
   100% { background: #16213e; }
-}
-
-.alert-thumb {
-  flex-shrink: 0;
-  width: 64px;
-  height: 36px;
-  border-radius: 3px;
-  overflow: hidden;
-  background: #0a0a1a;
-}
-
-.alert-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .alert-info {

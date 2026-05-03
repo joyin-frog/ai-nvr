@@ -1025,17 +1025,24 @@ function scrollToFocused() {
 /** 日期前后导航 */
 function shiftDate(delta: number) {
   if (!filterDate.value) {
-    filterDate.value = new Date().toISOString().slice(0, 10)
+    filterDate.value = localDateString()
   }
   const d = new Date(`${filterDate.value}T00:00:00`)
   d.setDate(d.getDate() + delta)
-  filterDate.value = d.toISOString().slice(0, 10)
+  filterDate.value = localDateString(d)
   loadRecordings()
+}
+
+/** 本地日期字符串 YYYY-MM-DD */
+function localDateString(d?: Date): string {
+  const date = d ?? new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 /** 跳转到今天 */
 function goToday() {
-  filterDate.value = new Date().toISOString().slice(0, 10)
+  filterDate.value = localDateString()
   loadRecordings()
 }
 
@@ -1053,7 +1060,7 @@ function jumpToTime() {
   let targetTs: number
   /** 如果只输入了时间 (HH:MM 或 HH:MM:SS) */
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(input)) {
-    const date = filterDate.value || new Date().toISOString().slice(0, 10)
+    const date = filterDate.value || localDateString()
     targetTs = new Date(`${date}T${input}`).getTime()
   } else {
     targetTs = new Date(input).getTime()

@@ -4,6 +4,15 @@ import { join, basename } from "node:path";
 import * as archiver from "archiver";
 import { type StorageFs } from "@/storage/storage-fs";
 
+/** 本地时间格式化为 YYYY-MM-DD_HH-MM-SS */
+function localTimestamp(d: Date): { dateStr: string; timeStr: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    dateStr: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    timeStr: `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`,
+  };
+}
+
 /** 导出任务结果 */
 export interface ExportResult {
   /** 导出文件绝对路径 */
@@ -39,9 +48,7 @@ export class RecordingExporter {
     const duration = endTimeSec - startTimeSec;
     if (duration <= 0) return null;
 
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const { dateStr, timeStr } = localTimestamp(new Date());
     const filename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
     const outputPath = join(this.exportDir, filename);
 
@@ -83,9 +90,7 @@ export class RecordingExporter {
       const srcExists = await this.storageFs.exists(src);
       if (!srcExists) return null;
 
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10);
-      const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+      const { dateStr, timeStr } = localTimestamp(new Date());
       const filename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
       const outputPath = join(this.exportDir, filename);
       const args = ["-i", src, "-c", "copy", "-movflags", "+faststart", "-y", outputPath];
@@ -105,9 +110,7 @@ export class RecordingExporter {
       if (!exists) return null;
     }
 
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const { dateStr, timeStr } = localTimestamp(new Date());
     const outputFilename = `export_${cameraId}_${dateStr}_${timeStr}.mp4`;
     const outputPath = join(this.exportDir, outputFilename);
     const concatListPath = join(this.exportDir, `_concat_${dateStr}_${timeStr}.txt`);
@@ -164,9 +167,7 @@ export class RecordingExporter {
     const duration = endTimeSec - startTimeSec;
     if (duration <= 0) return null;
 
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const { dateStr, timeStr } = localTimestamp(new Date());
     const filename = `export_${cameraId}_${dateStr}_${timeStr}.gif`;
     const outputPath = join(this.exportDir, filename);
     const palettePath = join(this.exportDir, `_palette_${dateStr}_${timeStr}.png`);
@@ -221,9 +222,7 @@ export class RecordingExporter {
       if (!exists) return null;
     }
 
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const { dateStr, timeStr } = localTimestamp(new Date());
     const filename = `export_${cameraId}_${dateStr}_${timeStr}.zip`;
     const outputPath = join(this.exportDir, filename);
 

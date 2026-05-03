@@ -623,9 +623,10 @@ export class MotionRecorder {
       state.stopTimer = null;
     }
 
-    const date = new Date(timestamp);
-    const dateStr = date.toISOString().slice(0, 10);
-    const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "-");
+    const d = new Date(timestamp);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const timeStr = `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
     const filename = `${dateStr}_${timeStr}.mp4`;
 
     /** 确保录像目录存在 */

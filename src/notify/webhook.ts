@@ -19,7 +19,7 @@ interface WebhookPayload {
  */
 export class WebhookNotifier {
   /** 要推送的事件类型 */
-  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed"];
+  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed"];
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -38,6 +38,8 @@ export class WebhookNotifier {
 
   /** 处理事件：构建载荷并推送到所有 Webhook URL */
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
+    /** state:changed 事件只在 notify=true 时推送 */
+    if (event === "state:changed" && !payload.notify) return;
     const urls = this.runtimeConfig.get().webhook?.urls;
     if (!urls || urls.length === 0) return;
 
@@ -108,6 +110,13 @@ export class WebhookNotifier {
       detail.trackName = payload.trackName;
       if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
       detail.speed = payload.speed;
+    } else if (event === "state:changed") {
+      detail.stateId = payload.stateId;
+      detail.stateName = payload.stateName;
+      detail.oldValue = payload.oldValue;
+      detail.newValue = payload.newValue;
+      detail.source = payload.source;
+      if (payload.sourceRuleId) detail.sourceRuleId = payload.sourceRuleId;
     }
 
     return { event, cameraId, timestamp, detail };

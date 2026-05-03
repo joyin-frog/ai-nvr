@@ -1576,6 +1576,71 @@ export function startServer(
         return Response.json({ records, total });
       }
 
+      // ===== 告警规则 API =====
+
+      /** 告警规则列表 */
+      if (url.pathname === "/api/alerts/rules" && req.method === "GET") {
+        return Response.json(alertStorage.listRules());
+      }
+
+      /** 添加告警规则 */
+      if (url.pathname === "/api/alerts/rules" && req.method === "POST") {
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const name = obj.name as string | undefined;
+          const eventType = obj.eventType as string | undefined;
+          if (!name || !eventType) return new Response("Missing name or eventType", { status: 400 });
+          const id = alertStorage.addRule({
+            name,
+            eventType,
+            cameraId: (obj.cameraId as string) ?? "",
+            windowSeconds: (obj.windowSeconds as number) ?? 60,
+            threshold: (obj.threshold as number) ?? 3,
+            cooldownSeconds: (obj.cooldownSeconds as number) ?? 300,
+            silentStart: (obj.silentStart as string) ?? "",
+            silentEnd: (obj.silentEnd as string) ?? "",
+            sourceRuleId: (obj.sourceRuleId as number) ?? 0,
+            sourceStateId: (obj.sourceStateId as number) ?? 0,
+            condition: (obj.condition as string) ?? "",
+          });
+          return Response.json({ id });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 更新告警规则 */
+      const alertRuleMatch = url.pathname.match(/^\/api\/alerts\/rules\/(\d+)$/);
+      if (alertRuleMatch && req.method === "PATCH") {
+        const ruleId = Number(alertRuleMatch[1]!);
+        return req.json().then((body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const updates: Record<string, unknown> = {};
+          for (const key of ["name", "eventType", "cameraId", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "sourceRuleId", "sourceStateId", "condition"] as const) {
+            if (obj[key] !== undefined) updates[key] = obj[key];
+          }
+          alertStorage.updateRule(ruleId, updates as never);
+          return Response.json({ ok: true });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
+      /** 删除告警规则 */
+      if (alertRuleMatch && req.method === "DELETE") {
+        const ruleId = Number(alertRuleMatch[1]!);
+        alertStorage.removeRule(ruleId);
+        return Response.json({ ok: true });
+      }
+
+      /** 告警历史记录 */
+      if (url.pathname === "/api/alerts/history" && req.method === "GET") {
+        const { records, total } = alertStorage.queryAlerts({
+          cameraId: url.searchParams.get("cameraId") ?? undefined,
+          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
+          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
+          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+        });
+        return Response.json({ records, total });
+      }
+
       // ===== 状态管理 API =====
 
       /** 列出所有状态 */
