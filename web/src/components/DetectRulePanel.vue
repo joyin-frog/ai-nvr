@@ -834,7 +834,7 @@ function switchToHistory() {
             </div>
           </template>
           <div v-if="record.snapshotUrl" class="detail-snapshot">
-            <img :src="authUrl(record.snapshotUrl)" class="snapshot-img" loading="lazy" @load="onSnapshotLoad($event, record)" />
+            <img :src="authUrl(record.snapshotUrl)" class="snapshot-img" crossorigin="anonymous" loading="lazy" @load="onSnapshotLoad($event, record)" />
           </div>
           <div class="detail-actions">
             <button class="action-btn recording-btn" @click="emit('jumpToRecording', record.cameraId, record.timestamp)">{{ t('detectRule.viewRecording') }}</button>
