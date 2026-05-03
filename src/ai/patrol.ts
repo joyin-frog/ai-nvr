@@ -40,14 +40,20 @@ export interface PatrolResult {
 
 /** 巡逻 system prompt：精简版，适配 0.8B 小模型 */
 const PATROL_SYSTEM_PROMPT = `Analyze this surveillance image. Output JSON only:
-{"status":"normal","observations":"what you see","anomaly":""}
-status: "normal", "unusual", or "alert". anomaly: describe the concern, or "" if normal.`;
+{"status":"normal","observations":"what you see","count":{"person":0,"vehicle":0},"anomaly":""}
+status: "normal", "unusual", or "alert".
+count: number of people and vehicles visible.
+anomaly: describe the concern, or "" if normal.`;
 
-/** 多帧巡逻 prompt */
-const PATROL_MULTI_FRAME_PROMPT = `Multiple frames from same camera. First=latest, rest=older context. Detect changes and movement.
+/** 多帧巡逻 prompt：增加运动轨迹和时序变化分析 */
+const PATROL_MULTI_FRAME_PROMPT = `Multiple frames from same camera. First=latest, rest=older context.
+Analyze movement, direction, and changes over time.
 Output JSON only:
-{"status":"normal","observations":"what you see including changes","anomaly":""}
-status: "normal", "unusual", or "alert". anomaly: describe the concern, or "" if normal.`;
+{"status":"normal","observations":"scene description with movement","count":{"person":0,"vehicle":0},"movement":"who moved where","anomaly":""}
+status: "normal", "unusual", or "alert".
+count: number in latest frame.
+movement: brief description of movement (e.g. "person walked left to right").
+anomaly: describe the concern, or "" if normal.`;
 
 /**
  * AI 主动巡逻扫描器
@@ -266,6 +272,8 @@ export class AiPatrolScanner {
       analysis: parsed.observations,
       hasAnomaly: parsed.status !== "normal",
       anomalyDetail: parsed.anomaly,
+      movement: parsed.movement,
+      count: parsed.count,
       inferMs,
     };
 
@@ -284,7 +292,7 @@ export class AiPatrolScanner {
   }
 
   /** 解析巡逻结果 */
-  private parsePatrolResult(content: string): { status: string; observations: string; anomaly: string } {
+  private parsePatrolResult(content: string): { status: string; observations: string; anomaly: string; movement?: string; count?: Record<string, number> } {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
@@ -293,6 +301,8 @@ export class AiPatrolScanner {
           status: typeof obj.status === "string" ? obj.status : "normal",
           observations: typeof obj.observations === "string" ? obj.observations : content,
           anomaly: typeof obj.anomaly === "string" ? obj.anomaly : "",
+          movement: typeof obj.movement === "string" ? obj.movement : undefined,
+          count: typeof obj.count === "object" && obj.count !== null ? obj.count as Record<string, number> : undefined,
         };
       } catch { /* fallback */ }
     }
