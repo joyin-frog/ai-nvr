@@ -1932,7 +1932,21 @@ Be specific and factual. ${langInstruction}`;
 
         const lang = runtimeConfig.get().language;
         const langInstruction = lang.startsWith("zh") ? "用中文回复。" : "Reply in English.";
-        const systemPrompt = `You are a surveillance camera assistant. Answer questions about the image accurately and concisely. ${langInstruction}`;
+
+        /** 收集当前检测结果作为上下文 */
+        const detections = annotator.getLatestDetections(body.cameraId);
+        const detectCtx = detections.length > 0
+          ? `\nCurrent detections: ${detections.map(d => {
+              const parts = [d.label];
+              if (d.trackName) parts.push(`name="${d.trackName}"`);
+              if (d.semanticLabel) parts.push(d.semanticLabel);
+              if (d.pose) parts.push(d.pose);
+              if (d.dominantColor) parts.push(d.dominantColor);
+              return parts.join(" ");
+            }).join("; ")}`
+          : "";
+
+        const systemPrompt = `You are a surveillance camera assistant. Answer questions about the image accurately and concisely. You can see tracked objects with names and descriptions. ${detectCtx}${langInstruction}`;
 
         /** 构建消息列表（支持历史上下文） */
         const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [

@@ -48,6 +48,11 @@ export class Annotator {
     return undefined;
   }
 
+  /** 获取缓存的最新检测结果 */
+  getLatestDetections(cameraId: string): Detection[] {
+    return this.latestFrames.get(cameraId)?.detections ?? [];
+  }
+
   /** 按需生成标注图 */
   async generateAnnotated(cameraId: string): Promise<Buffer | undefined> {
     const cached = this.latestFrames.get(cameraId);
