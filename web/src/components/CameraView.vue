@@ -331,10 +331,10 @@ function drawOverlayOnce() {
     drawDynamicOverlay(ctx, cssW, cssH)
   }
 
-  /** LLM 场景描述（AI 分析覆盖层） */
+  /** LLM 场景描述（AI 分析覆盖层，带淡出） */
   const llmDesc = takeLlmDescription(props.cameraId)
   if (llmDesc) {
-    drawLlmDescription(ctx, cssW, cssH, llmDesc)
+    drawLlmDescription(ctx, cssW, cssH, llmDesc.text, llmDesc.fadeRatio)
   }
 
   /** AI 巡逻异常状态指示器 */
@@ -906,7 +906,7 @@ let llmWrapCacheWidth = 0
 let llmWrapCacheLines: string[] = []
 
 /** 绘制 LLM 场景描述（左下角半透明条） */
-function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height: number, desc: string) {
+function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height: number, desc: string, fadeRatio = 1) {
   ctx.save()
   const fontSize = 12
   ctx.font = `${fontSize}px sans-serif`
@@ -938,6 +938,7 @@ function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height
   const boxH = displayLines.length * lineHeight + pad * 2
   const boxY = height - 26 - boxH - 4
 
+  ctx.globalAlpha = fadeRatio
   ctx.fillStyle = 'rgba(156, 39, 176, 0.7)'
   ctx.fillRect(4, boxY, width - 8, boxH)
 

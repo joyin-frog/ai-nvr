@@ -192,16 +192,20 @@ export function putLlmDescription(cameraId: string, description: string, timesta
   llmDescriptions.set(cameraId, { description, timestamp })
 }
 
-/** 获取并清理过期的 LLM 描述 */
-export function takeLlmDescription(cameraId: string): string | null {
+/** 获取并清理过期的 LLM 描述，附带剩余 TTL 比例（用于淡出动画） */
+export function takeLlmDescription(cameraId: string): { text: string; fadeRatio: number } | null {
   const entry = llmDescriptions.get(cameraId)
   if (!entry) return null
   const now = Date.now()
-  if (now - entry.timestamp > LLM_DESC_TTL) {
+  const elapsed = now - entry.timestamp
+  if (elapsed > LLM_DESC_TTL) {
     llmDescriptions.delete(cameraId)
     return null
   }
-  return entry.description
+  /** 最后 3 秒淡出 */
+  const fadeStart = LLM_DESC_TTL - 3000
+  const fadeRatio = elapsed > fadeStart ? 1 - (elapsed - fadeStart) / 3000 : 1
+  return { text: entry.description, fadeRatio: Math.max(0, Math.min(1, fadeRatio)) }
 }
 
 /**
