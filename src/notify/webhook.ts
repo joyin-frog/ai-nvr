@@ -21,6 +21,10 @@ export class WebhookNotifier {
   /** 要推送的事件类型 */
   private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:scene", "llm:patrol"];
 
+  /** 去抖：同一事件+摄像头在窗口内只推送一次 */
+  private recentKeys = new Map<string, number>();
+  private static readonly DEDUP_WINDOW_MS = 60_000;
+
   constructor(
     private runtimeConfig: RuntimeConfig,
     private eventBus: EventBus,
@@ -40,6 +44,23 @@ export class WebhookNotifier {
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
     /** state:changed 事件只在 notify=true 时推送 */
     if (event === "state:changed" && !payload.notify) return;
+
+    /** 去抖：高频事件（track:*、detect）同一摄像头 60s 内只推一次 */
+    const cameraId = (payload.cameraId as string) ?? "";
+    const dedupKey = `${event}:${cameraId}`;
+    const now = Date.now();
+    const lastSent = this.recentKeys.get(dedupKey);
+    const isHighFreq = event.startsWith("track:") || event === "detect" || event === "motion";
+    if (isHighFreq && lastSent && now - lastSent < WebhookNotifier.DEDUP_WINDOW_MS) return;
+    if (isHighFreq) this.recentKeys.set(dedupKey, now);
+
+    /** 清理过期去重记录 */
+    if (this.recentKeys.size > 500) {
+      for (const [key, ts] of this.recentKeys) {
+        if (now - ts > WebhookNotifier.DEDUP_WINDOW_MS) this.recentKeys.delete(key);
+      }
+    }
+
     const urls = this.runtimeConfig.get().webhook?.urls;
     if (!urls || urls.length === 0) return;
 
