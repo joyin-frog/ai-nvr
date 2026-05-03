@@ -72,6 +72,14 @@ export class RecordingExporter {
       args.push("-c", "copy");
     }
 
+    /** 注入 MP4 元数据 */
+    const dateLabel = new Date().toLocaleDateString("zh-CN");
+    const timeRange = `${this.formatSec(startTimeSec)}-${this.formatSec(endTimeSec)}`;
+    args.push(
+      "-metadata", `title=JK NVR ${cameraId} ${dateLabel} ${timeRange}`,
+      "-metadata", `comment=Camera: ${cameraId}, Duration: ${Math.round(duration)}s`,
+    );
+
     args.push("-movflags", "+faststart", "-y", outputPath);
 
     const ok = await this.runFfmpeg(args, 30_000);
@@ -159,6 +167,15 @@ export class RecordingExporter {
     const ms = Math.round((sec % 1) * 1000);
     const pad = (n: number, w: number) => String(n).padStart(w, "0");
     return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
+  }
+
+  /** 格式化秒数为可读时间 (HH:MM:SS) */
+  private formatSec(sec: number): string {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
   }
 
   /** 获取导出文件路径（供下载服务使用） */
