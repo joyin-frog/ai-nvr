@@ -1527,6 +1527,7 @@ export function startServer(
             stateIds: (obj.stateIds as number[]) ?? [],
             schedule: (obj.schedule as string) ?? "",
             saveOriginal: (obj.saveOriginal as boolean) ?? true,
+            outputRegions: (obj.outputRegions as boolean) ?? false,
           });
           detectRuleEngine?.reloadRules();
           return Response.json({ id });
@@ -1540,7 +1541,7 @@ export function startServer(
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "cameraId", "roiId", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal"] as const) {
+          for (const key of ["name", "cameraId", "roiId", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal", "outputRegions"] as const) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
           detectRuleStorage.updateRule(ruleId, updates as never);
@@ -1573,6 +1574,15 @@ export function startServer(
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
           matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
         });
+        /** 关联快照路径 */
+        if (alertSnapshotStorage && records.length > 0) {
+          const snapEntries = records.map(r => ({ cameraId: r.cameraId, timestamp: r.timestamp }));
+          const snapPaths = alertSnapshotStorage.batchFindSnapshotPaths(snapEntries);
+          for (const r of records) {
+            const snapPath = snapPaths.get(`${r.cameraId}:${r.timestamp}`);
+            (r as unknown as Record<string, unknown>).snapshotUrl = snapPath ? `/api/alert-snapshots/${snapPath}` : null;
+          }
+        }
         return Response.json({ records, total });
       }
 

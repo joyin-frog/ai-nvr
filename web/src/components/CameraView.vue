@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
 import { authFetch } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, type ZoneNotification } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 import { registerShortcut } from '../composables/useKeyboard'
@@ -1635,6 +1635,41 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
         }
       }
     }
+  }
+
+  /** 绘制 VLM 检测规则区域（虚线框 + 规则名称标签） */
+  const ruleRegions = takeRuleRegions(props.cameraId)
+  if (ruleRegions.length > 0) {
+    ctx.setLineDash([8, 4])
+    ctx.lineWidth = 2
+    for (const region of ruleRegions) {
+      const { xmin, ymin, xmax, ymax } = region.box
+      const rx = xmin * width
+      const ry = ymin * height
+      const rw = (xmax - xmin) * width
+      const rh = (ymax - ymin) * height
+
+      /** 虚线矩形 */
+      ctx.strokeStyle = '#FF6B6B'
+      ctx.strokeRect(rx, ry, rw, rh)
+
+      /** 半透明填充 */
+      ctx.fillStyle = 'rgba(255, 107, 107, 0.08)'
+      ctx.fillRect(rx, ry, rw, rh)
+
+      /** 标签背景 + 文字 */
+      const label = region.label ? `${region.ruleName}: ${region.label}` : region.ruleName
+      ctx.font = 'bold 11px sans-serif'
+      const textW = ctx.measureText(label).width + 8
+      ctx.setLineDash([])
+      ctx.fillStyle = 'rgba(255, 107, 107, 0.85)'
+      ctx.fillRect(rx, ry - 16, textW, 16)
+      ctx.fillStyle = '#fff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, rx + 4, ry - 8)
+      ctx.setLineDash([8, 4])
+    }
+    ctx.setLineDash([])
   }
 
   ctx.restore()

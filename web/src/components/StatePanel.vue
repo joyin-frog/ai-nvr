@@ -43,6 +43,13 @@ const showAdd = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
 
+/** 检测规则 ID→名称 映射 */
+const detectRuleNames = ref<Record<number, string>>({})
+
+const emit = defineEmits<{
+  jumpToDetectHistory: [ruleId: number]
+}>()
+
 /** 添加/编辑表单 */
 const formName = ref('')
 const formDescription = ref('')
@@ -76,10 +83,26 @@ function displayValue(val: string, type: 'boolean' | 'string' | 'number' | 'auto
   return val
 }
 
-function sourceLabel(source: string): string {
+function sourceLabel(source: string, sourceRuleId: number): string {
   if (source === 'manual') return t('state.sourceManual')
+  if (source.startsWith('rule:') && sourceRuleId > 0) {
+    const ruleName = detectRuleNames.value[sourceRuleId]
+    return ruleName ? `${t('state.sourceRule')}: ${ruleName}` : `${t('state.sourceRule')} #${sourceRuleId}`
+  }
   if (source.startsWith('rule:')) return t('state.sourceRule')
   return source
+}
+
+async function loadDetectRuleNames() {
+  try {
+    const res = await authFetch('/api/detect-rules')
+    if (res.ok) {
+      const rules = await res.json() as Array<{ id: number; name: string }>
+      const map: Record<number, string> = {}
+      for (const r of rules) map[r.id] = r.name
+      detectRuleNames.value = map
+    }
+  } catch { /* ignore */ }
 }
 
 async function loadStates() {
@@ -226,6 +249,7 @@ function cancelEdit() {
 onMounted(() => {
   loadStates()
   loadRecords()
+  loadDetectRuleNames()
 })
 
 defineExpose({ loadStates, loadRecords })
@@ -376,7 +400,8 @@ defineExpose({ loadStates, loadRecords })
             <span class="arrow">→</span>
             <span class="new-val">{{ displayValue(rec.newValue, 'auto') }}</span>
           </span>
-          <span class="history-source">{{ sourceLabel(rec.source) }}</span>
+          <span class="history-source">{{ sourceLabel(rec.source, rec.sourceRuleId) }}</span>
+          <button v-if="rec.sourceRuleId > 0" class="btn-sm link-btn" @click="emit('jumpToDetectHistory', rec.sourceRuleId)">{{ t('state.viewDetectRule') }}</button>
           <span v-if="rec.cameraId" class="camera-tag">{{ cameraName(rec.cameraId) }}</span>
         </div>
       </div>
@@ -696,6 +721,13 @@ defineExpose({ loadStates, loadRecords })
   font-size: 10px;
   color: #aaa;
 }
+
+.link-btn {
+  color: #4ECDC4 !important;
+  font-size: 10px;
+  padding: 1px 6px;
+}
+.link-btn:hover { background: #2a2a4a !important; }
 
 .btn-load-more {
   background: none;

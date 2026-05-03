@@ -386,6 +386,8 @@ export default {
     scheduleEnd: '结束',
     scheduleDays: '星期',
     dayMon: '一', dayTue: '二', dayWed: '三', dayThu: '四', dayFri: '五', daySat: '六', daySun: '日',
+    viewRecording: '查看录像',
+    outputRegions: '输出目标区域坐标',
   },
   state: {
     title: '状态管理',
@@ -400,6 +402,7 @@ export default {
     noHistory: '暂无变更记录',
     sourceManual: '手动',
     sourceRule: '检测规则',
+    viewDetectRule: '查看检测记录',
     saveOriginal: '保存原图',
   },
   settings: {

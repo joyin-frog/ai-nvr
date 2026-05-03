@@ -27,6 +27,8 @@ export interface DetectRule {
   schedule: string;
   /** 匹配时是否保存原图 */
   saveOriginal: boolean;
+  /** 是否输出目标区域坐标 */
+  outputRegions: boolean;
 }
 
 /** 检测规则匹配记录 */
@@ -107,7 +109,7 @@ export class DetectRuleStorage {
       `SELECT id, name, camera_id as cameraId, roi_id as roiId, prompt,
         interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
         image_width as imageWidth, state_ids as stateIdsJson,
-        schedule, save_original as saveOriginal
+        schedule, save_original as saveOriginal, output_regions as outputRegions
       FROM detect_rules WHERE enabled = 1`
     );
   }
@@ -130,6 +132,9 @@ export class DetectRuleStorage {
     if (!columns.has("save_original")) {
       this.db.run("ALTER TABLE detect_rules ADD COLUMN save_original INTEGER NOT NULL DEFAULT 1");
     }
+    if (!columns.has("output_regions")) {
+      this.db.run("ALTER TABLE detect_rules ADD COLUMN output_regions INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   /** 列出所有规则 */
@@ -138,7 +143,7 @@ export class DetectRuleStorage {
       `SELECT id, name, camera_id as cameraId, roi_id as roiId, prompt,
         interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
         image_width as imageWidth, state_ids as stateIdsJson,
-        schedule, save_original as saveOriginal
+        schedule, save_original as saveOriginal, output_regions as outputRegions
       FROM detect_rules ORDER BY id`
     ).all() as Array<DetectRule & { stateIdsJson: string }>).map(this.mapRule);
   }
@@ -152,19 +157,20 @@ export class DetectRuleStorage {
   addRule(rule: Omit<DetectRule, "id" | "enabled">): number {
     const stateIdsJson = JSON.stringify(rule.stateIds ?? []);
     const row = this.db.query(
-      `INSERT INTO detect_rules (name, camera_id, roi_id, prompt, interval_ms, cooldown_ms, enabled, image_width, state_ids, schedule, save_original)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO detect_rules (name, camera_id, roi_id, prompt, interval_ms, cooldown_ms, enabled, image_width, state_ids, schedule, save_original, output_regions)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?) RETURNING id`
     ).get(
       rule.name, rule.cameraId, rule.roiId ?? 0, rule.prompt,
       rule.intervalMs, rule.cooldownMs,
       rule.imageWidth ?? 0, stateIdsJson, rule.schedule ?? "",
       rule.saveOriginal !== false ? 1 : 0,
+      rule.outputRegions ? 1 : 0,
     );
     return (row as { id: number }).id;
   }
 
   /** 更新规则 */
-  updateRule(id: number, updates: Partial<Pick<DetectRule, "name" | "cameraId" | "roiId" | "prompt" | "intervalMs" | "cooldownMs" | "enabled" | "imageWidth" | "stateIds" | "schedule" | "saveOriginal">>): boolean {
+  updateRule(id: number, updates: Partial<Pick<DetectRule, "name" | "cameraId" | "roiId" | "prompt" | "intervalMs" | "cooldownMs" | "enabled" | "imageWidth" | "stateIds" | "schedule" | "saveOriginal" | "outputRegions">>): boolean {
     const sets: string[] = [];
     const params: (string | number)[] = [];
 
@@ -179,6 +185,7 @@ export class DetectRuleStorage {
     if (updates.stateIds !== undefined) { sets.push("state_ids = ?"); params.push(JSON.stringify(updates.stateIds)); }
     if (updates.schedule !== undefined) { sets.push("schedule = ?"); params.push(updates.schedule); }
     if (updates.saveOriginal !== undefined) { sets.push("save_original = ?"); params.push(updates.saveOriginal ? 1 : 0); }
+    if (updates.outputRegions !== undefined) { sets.push("output_regions = ?"); params.push(updates.outputRegions ? 1 : 0); }
 
     if (sets.length === 0) return false;
     params.push(id);

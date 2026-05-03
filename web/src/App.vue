@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
 import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
 import { putFrame, removeFrameCache } from './services/ws-frame-cache'
-import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription } from './services/ws-detect-cache'
+import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -479,6 +479,15 @@ async function onPlayRecording(cameraId: string, timestamp: number) {
   await recordingsPanel.value?.playAtTime(cameraId, timestamp)
 }
 
+/** 从状态面板跳转到检测规则历史 */
+function onJumpToDetectHistory() {
+  activeTab.value = 'alerts'
+  alertSubTab.value = 'detect'
+  setTimeout(() => {
+    detectRulePanel.value?.switchToHistory()
+  }, 50)
+}
+
 /** 切换到录像标签时刷新列表 */
 function switchTab(tab: SidebarTab) {
   activeTab.value = tab
@@ -814,6 +823,9 @@ function setupEventListeners() {
   client.on('detect:rule', (payload) => {
     eventPanel.value?.addEvent('detect:rule', payload.cameraId, `${t('detectRule.title')}: ${payload.ruleName}`)
     detectRulePanel.value?.addRecord(payload)
+    if (payload.regions?.length) {
+      putRuleRegions(payload.cameraId, payload.regions.map(r => ({ ...r, ruleName: payload.ruleName })))
+    }
     notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId, 'detect:rule')
     flashTitle(`${t('detectRule.title')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
@@ -1185,7 +1197,7 @@ onUnmounted(() => {
             <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
             <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           </template>
-          <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" />
+          <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" @jump-to-detect-history="onJumpToDetectHistory" />
           <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
         </div>
       </div>
@@ -1247,7 +1259,7 @@ onUnmounted(() => {
           <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
         </template>
-        <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" />
+        <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" @jump-to-detect-history="onJumpToDetectHistory" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

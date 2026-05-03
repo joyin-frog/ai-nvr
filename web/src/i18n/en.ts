@@ -99,6 +99,7 @@ export default {
     zone: 'Zone',
     dwellTime: 'Dwell Time',
     viewRecording: 'View Recording',
+    outputRegions: 'Output Target Regions',
     noEvents: 'No events',
     loadMore: 'Load More',
     truncatedHint: '{total} events total, showing latest {shown}',
@@ -398,6 +399,7 @@ export default {
     noHistory: 'No change history',
     sourceManual: 'Manual',
     sourceRule: 'Detect Rule',
+    viewDetectRule: 'View Detect Records',
     saveOriginal: 'Save Original',
   },
   settings: {

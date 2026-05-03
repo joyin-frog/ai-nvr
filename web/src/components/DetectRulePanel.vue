@@ -32,6 +32,8 @@ interface DetectRule {
   schedule: string
   /** 匹配时是否保存原图 */
   saveOriginal: boolean
+  /** 是否输出目标区域坐标 */
+  outputRegions: boolean
 }
 
 /** 检测记录 */
@@ -105,13 +107,14 @@ const form = ref({
   scheduleEnd: '18:00',
   scheduleDays: [1, 2, 3, 4, 5] as number[],
   saveOriginal: true,
+  outputRegions: false,
 })
 
 const emptyForm = {
   name: '', cameraId: '', roiId: 0, prompt: '', intervalMs: 5000, cooldownMs: 30000,
   imageWidth: 0, stateIds: [] as number[], scheduleEnabled: false,
   scheduleStart: '08:00', scheduleEnd: '18:00', scheduleDays: [1, 2, 3, 4, 5] as number[],
-  saveOriginal: true,
+  saveOriginal: true, outputRegions: false,
 }
 
 /** 星期选项 */
@@ -317,10 +320,11 @@ function startEdit(rule: DetectRule) {
     scheduleEnd: '18:00',
     scheduleDays: [1, 2, 3, 4, 5],
     saveOriginal: rule.saveOriginal ?? true,
+    outputRegions: rule.outputRegions ?? false,
   }
   parseScheduleJson(rule.schedule ?? '')
   /** 有高级配置时自动展开 */
-  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal
+  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions
 }
 
 async function saveEdit() {
@@ -403,6 +407,58 @@ function autoGrowTextarea(e: Event) {
   el.style.height = `${Math.max(80, el.scrollHeight)}px`
 }
 
+/** 展开的记录 ID */
+const expandedRecordId = ref<number | null>(null)
+
+function toggleExpand(record: DetectRuleRecord) {
+  expandedRecordId.value = expandedRecordId.value === record.id ? null : record.id
+}
+
+/** 解析 detail JSON */
+function parseDetail(detail: string): { confidence?: number; prompt?: string; rawResponse?: string; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> } {
+  if (!detail) return {}
+  try { return JSON.parse(detail) } catch { return {} }
+}
+
+/** 快照图片加载后叠加 regions 检测框 */
+function onSnapshotLoad(e: Event, record: DetectRuleRecord) {
+  const img = e.target as HTMLImageElement
+  const regions = parseDetail(record.detail).regions
+  if (!regions?.length) return
+
+  const canvas = document.createElement('canvas')
+  canvas.width = img.naturalWidth
+  canvas.height = img.naturalHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  ctx.drawImage(img, 0, 0)
+  for (const r of regions) {
+    const { xmin, ymin, xmax, ymax } = r.box
+    const x = xmin * canvas.width
+    const y = ymin * canvas.height
+    const w = (xmax - xmin) * canvas.width
+    const h = (ymax - ymin) * canvas.height
+
+    ctx.strokeStyle = '#FF6B6B'
+    ctx.lineWidth = 2
+    ctx.setLineDash([6, 3])
+    ctx.strokeRect(x, y, w, h)
+    ctx.setLineDash([])
+
+    if (r.label) {
+      ctx.font = 'bold 12px sans-serif'
+      const tw = ctx.measureText(r.label).width + 8
+      ctx.fillStyle = 'rgba(255, 107, 107, 0.85)'
+      ctx.fillRect(x, y - 16, tw, 16)
+      ctx.fillStyle = '#fff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(r.label, x + 4, y - 8)
+    }
+  }
+  img.src = canvas.toDataURL('image/jpeg', 0.9)
+}
+
 /** 实时追加记录 */
 function addRecord(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number }) {
   if (filterCamera.value && filterCamera.value !== payload.cameraId) return
@@ -464,7 +520,12 @@ onMounted(() => {
   loadStateList()
 })
 
-defineExpose({ loadRecords, addRecord })
+defineExpose({ loadRecords, addRecord, switchToHistory })
+
+function switchToHistory() {
+  activeView.value = 'history'
+  loadRecords()
+}
 </script>
 
 <template>
@@ -547,6 +608,14 @@ defineExpose({ loadRecords, addRecord })
             <label class="checkbox-label">
               <input type="checkbox" v-model="form.saveOriginal" />
               {{ t('state.saveOriginal') }}
+            </label>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field half">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="form.outputRegions" />
+              {{ t('detectRule.outputRegions') }}
             </label>
           </div>
         </div>
@@ -659,6 +728,14 @@ defineExpose({ loadRecords, addRecord })
                   </label>
                 </div>
               </div>
+              <div class="form-row">
+                <div class="form-field half">
+                  <label class="checkbox-label">
+                    <input type="checkbox" v-model="form.outputRegions" />
+                    {{ t('detectRule.outputRegions') }}
+                  </label>
+                </div>
+              </div>
               <div class="schedule-section">
                 <label class="checkbox-label">
                   <input type="checkbox" v-model="form.scheduleEnabled" />
@@ -721,16 +798,46 @@ defineExpose({ loadRecords, addRecord })
     </div>
     <div v-if="activeView === 'history'" class="record-list">
       <div v-if="records.length === 0" class="empty">{{ t('detectRule.noRecords') }}</div>
-      <div v-for="record in records" :key="record.id" :class="['record-item', { 'new-record': record.isNew }]" @click="emit('jumpToRecording', record.cameraId, record.timestamp)">
-        <div class="record-info">
-          <div class="record-time">{{ formatTime(record.timestamp) }}</div>
-          <div class="record-body">
-            <span class="record-rule">{{ record.ruleName }}</span>
-            <span class="record-cam">{{ cameraNameMap[record.cameraId] ?? record.cameraId }}</span>
-            <span v-if="record.matched" class="record-matched">{{ t('detectRule.matched') }}</span>
-            <span v-else class="record-unmatched">{{ t('detectRule.unmatched') }}</span>
+      <div v-for="record in records" :key="record.id" :class="['record-item', { 'new-record': record.isNew, expanded: expandedRecordId === record.id }]">
+        <div class="record-summary" @click="toggleExpand(record)">
+          <div class="record-info">
+            <div class="record-time">{{ formatTime(record.timestamp) }}</div>
+            <div class="record-body">
+              <span class="record-rule">{{ record.ruleName }}</span>
+              <span class="record-cam">{{ cameraNameMap[record.cameraId] ?? record.cameraId }}</span>
+              <span v-if="record.matched" class="record-matched">{{ t('detectRule.matched') }}</span>
+              <span v-else class="record-unmatched">{{ t('detectRule.unmatched') }}</span>
+            </div>
+            <div v-if="record.result" class="record-result-preview">{{ record.result.slice(0, 80) }}{{ record.result.length > 80 ? '...' : '' }}</div>
           </div>
-          <div v-if="record.result" class="record-result">{{ record.result }}</div>
+          <span class="expand-arrow">{{ expandedRecordId === record.id ? '▾' : '▸' }}</span>
+        </div>
+        <div v-if="expandedRecordId === record.id" class="record-detail">
+          <div class="detail-section">
+            <div class="detail-label">AI Response</div>
+            <div class="detail-text">{{ record.result || '(empty)' }}</div>
+          </div>
+          <template v-if="parseDetail(record.detail).confidence !== undefined || parseDetail(record.detail).prompt || parseDetail(record.detail).rawResponse">
+            <div class="detail-row">
+              <span v-if="parseDetail(record.detail).confidence !== undefined" class="detail-tag confidence">
+                Confidence: {{ (parseDetail(record.detail).confidence! * 100).toFixed(1) }}%
+              </span>
+            </div>
+            <div v-if="parseDetail(record.detail).rawResponse" class="detail-section">
+              <div class="detail-label">Raw Response</div>
+              <pre class="detail-code">{{ parseDetail(record.detail).rawResponse }}</pre>
+            </div>
+            <div v-if="parseDetail(record.detail).prompt" class="detail-section">
+              <div class="detail-label">Prompt</div>
+              <div class="detail-text detail-prompt">{{ parseDetail(record.detail).prompt }}</div>
+            </div>
+          </template>
+          <div v-if="record.snapshotUrl" class="detail-snapshot">
+            <img :src="authUrl(record.snapshotUrl)" class="snapshot-img" loading="lazy" @load="onSnapshotLoad($event, record)" />
+          </div>
+          <div class="detail-actions">
+            <button class="action-btn recording-btn" @click="emit('jumpToRecording', record.cameraId, record.timestamp)">{{ t('detectRule.viewRecording') }}</button>
+          </div>
         </div>
       </div>
       <button v-if="hasMore" class="load-more-btn" @click="loadMoreRecords">{{ t('alert.loadMore') }}</button>
@@ -1084,18 +1191,26 @@ select.input {
 .load-more-btn:hover { background: #3a3a5a; }
 
 .record-item {
-  display: flex;
-  gap: 8px;
-  padding: 6px 8px;
   border-radius: 4px;
   border-left: 3px solid #4ECDC4;
   margin-bottom: 4px;
   background: #16213e;
-  cursor: pointer;
   transition: background 0.15s;
 }
 
-.record-item:hover { background: #1a2a4a; }
+.record-item.expanded {
+  border-left-color: #3ad4c8;
+}
+
+.record-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.record-summary:hover { background: #1a2a4a; }
 
 .record-item.new-record {
   animation: record-flash 1s ease-out;
@@ -1104,6 +1219,17 @@ select.input {
 @keyframes record-flash {
   0% { background: rgba(78, 205, 196, 0.25); }
   100% { background: #16213e; }
+}
+
+.expand-arrow {
+  color: #555;
+  font-size: 11px;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+
+.record-item.expanded .expand-arrow {
+  color: #4ECDC4;
 }
 
 .record-info {
@@ -1147,11 +1273,113 @@ select.input {
   color: #666;
 }
 
-.record-result {
+.record-result-preview {
   font-size: 11px;
   color: #666;
   margin-top: 2px;
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/** 展开的详细内容 */
+.record-detail {
+  padding: 0 12px 10px;
+  border-top: 1px solid #2a2a4a;
+}
+
+.detail-section {
+  margin-top: 8px;
+}
+
+.detail-label {
+  font-size: 10px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.detail-text {
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.detail-prompt {
+  color: #888;
+  font-style: italic;
+}
+
+.detail-code {
+  font-size: 11px;
+  color: #aaa;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'Menlo', 'Consolas', monospace;
+  line-height: 1.4;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.detail-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.detail-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.detail-tag.confidence {
+  background: rgba(78, 205, 196, 0.15);
+  color: #4ECDC4;
+}
+
+.detail-snapshot {
+  margin-top: 8px;
+}
+
+.snapshot-img {
+  max-width: 100%;
+  border-radius: 4px;
+  border: 1px solid #2a2a4a;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.action-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s;
+}
+
+.recording-btn {
+  background: #2a2a4a;
+  color: #4ECDC4;
+}
+
+.recording-btn:hover {
+  background: #3a3a5a;
 }
 
 /** 提示词快速模板 */

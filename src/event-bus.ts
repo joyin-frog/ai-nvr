@@ -115,6 +115,8 @@ export interface EventPayloads {
     confidence: number;
     /** 详细信息 JSON */
     detail: string;
+    /** 目标区域坐标（可选） */
+    regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }>;
   };
 
   /** 追踪目标出现 */

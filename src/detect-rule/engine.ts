@@ -20,6 +20,8 @@ interface VlmRuleResult {
   description: string;
   /** 状态更新（可选） */
   states?: Array<{ id: number; value: string }>;
+  /** 目标区域坐标（可选，归一化 0-1） */
+  regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }>;
 }
 
 /** 检测规则系统 prompt */
@@ -28,25 +30,33 @@ const RULE_SYSTEM_PROMPT = `You are an intelligent surveillance camera analyzer.
 Analyze the image carefully and determine whether the described situation is currently occurring.
 
 You MUST respond with ONLY a JSON object in this exact format:
-{"matched": true/false, "confidence": 0.0-1.0, "description": "brief description of what you observe"}
+{"matched": true/false, "confidence": 0.0-1.0, "description": "brief description of what you observe"{stateSlot}{regionSlot}}
 
 Rules:
 - "matched" must be true ONLY if the described situation is clearly occurring
 - "confidence" indicates how certain you are (0.0 = not sure, 1.0 = absolutely certain)
 - "description" should be a factual observation in the user's language
 - When in doubt, set matched to false
-- Do not include any text outside the JSON object`;
+- Do not include any text outside the JSON object
+{stateInstructions}{regionInstructions}`;
 
-/** 带状态评估的系统 prompt 后缀 */
-const STATE_PROMPT_SUFFIX = `
+/** 状态评估指令片段（仅当关联了状态时注入） */
+const STATE_SLOT = `, "states": [{"id": <state_id>, "value": "<new_value>"}, ...]`;
+const STATE_INSTRUCTIONS = `
 
-Additionally, evaluate the following states based on the current image. Include a "states" array in your JSON response:
-"states": [{"id": <state_id>, "value": "<new_value>"}, ...]
-
-State definitions:
+Additionally, you MUST evaluate the following states based on the current image and include them in the "states" array:
 {stateDefinitions}
 
 For boolean states, use "true" or "false". For string/number states, use the appropriate value.`;
+
+/** 目标区域输出指令片段（仅当 outputRegions=true 时注入） */
+const REGION_SLOT = `, "regions": [{"label": "description", "box": [x1, y1, x2, y2]}, ...]`;
+const REGION_INSTRUCTIONS = `
+
+Additionally, identify and locate ALL relevant objects/entities mentioned in the image. Include a "regions" array with bounding boxes.
+Each region: {"label": "what this is", "box": [x1, y1, x2, y2]} where coordinates are normalized 0.0-1.0.
+(x1,y1) is top-left corner, (x2,y2) is bottom-right corner.
+IMPORTANT: You MUST add a bounding box for every key object/entity you can identify (people, animals, vehicles, etc.), not just background areas.`;
 
 /** 时段配置接口（预计算分钟数，避免每次 split） */
 interface ScheduleConfig {
@@ -294,7 +304,8 @@ export class DetectRuleEngine {
       const langInstruction = lang.startsWith("zh") ? "\nIMPORTANT: Write the description in Chinese (中文)." : "";
 
       /** 状态评估 prompt（当规则关联了状态时） */
-      let statePrompt = "";
+      let stateSlot = "";
+      let stateInstructions = "";
       if (rule.stateIds.length > 0 && this.stateStorage) {
         const allStates = this.getCachedStates();
         const linkedStates = allStates.filter(s => rule.stateIds.includes(s.id));
@@ -302,11 +313,20 @@ export class DetectRuleEngine {
           const defs = linkedStates.map(s =>
             `- ID ${s.id}: "${s.name}" (type: ${s.valueType}, current: "${s.currentValue}")${s.description ? ` — ${s.description}` : ""}`
           ).join("\n");
-          statePrompt = STATE_PROMPT_SUFFIX.replace("{stateDefinitions}", defs);
+          stateSlot = STATE_SLOT;
+          stateInstructions = STATE_INSTRUCTIONS.replace("{stateDefinitions}", defs);
         }
       }
 
-      const systemPrompt = RULE_SYSTEM_PROMPT + langInstruction + statePrompt;
+      /** 目标区域输出 prompt（当 outputRegions 启用时） */
+      const regionSlot = rule.outputRegions ? REGION_SLOT : "";
+      const regionInstructions = rule.outputRegions ? REGION_INSTRUCTIONS : "";
+
+      const systemPrompt = RULE_SYSTEM_PROMPT
+        .replace("{stateSlot}", stateSlot)
+        .replace("{stateInstructions}", stateInstructions)
+        .replace("{regionSlot}", regionSlot)
+        .replace("{regionInstructions}", regionInstructions) + langInstruction;
 
       /** 调用 VLM（有关联状态时增加 max_tokens） */
       const body = {
@@ -321,7 +341,7 @@ export class DetectRuleEngine {
             ],
           },
         ],
-        max_tokens: rule.stateIds.length > 0 ? 400 : 200,
+        max_tokens: (rule.stateIds.length > 0 || rule.outputRegions) ? 500 : 200,
         temperature: 0.1,
       };
 
@@ -360,7 +380,7 @@ export class DetectRuleEngine {
         rule.id, rule.name, rule.cameraId, timestamp,
         vlmResult.description,
         vlmResult.matched,
-        JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt }),
+        JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt, rawResponse: content, regions: vlmResult.regions }),
       );
 
       /** 处理状态更新（跳过已禁用的状态） */
@@ -385,7 +405,7 @@ export class DetectRuleEngine {
         }
       }
 
-      if (vlmResult.matched) {
+      if (vlmResult.matched || rule.outputRegions) {
         /** 保存快照（原图优先） */
         if (this.saveSnapshot) {
           if (rule.saveOriginal) {
@@ -405,6 +425,7 @@ export class DetectRuleEngine {
           prompt: rule.prompt,
           result: vlmResult.description,
           confidence: vlmResult.confidence,
+          regions: vlmResult.regions,
           detail: JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt }),
         });
 
@@ -431,11 +452,16 @@ export class DetectRuleEngine {
             value: typeof s.value === "string" ? s.value : String(s.value),
           })).filter(s => s.id > 0)
           : undefined;
+
+        /** 解析目标区域坐标 */
+        const regions = this.parseRegions(obj.regions);
+
         return {
           matched: obj.matched === true,
           confidence: typeof obj.confidence === "number" ? obj.confidence : 0.5,
           description: typeof obj.description === "string" ? obj.description : content,
           states,
+          regions: regions.length > 0 ? regions : undefined,
         };
       } catch {
         // JSON 解析失败，走 fallback
@@ -447,6 +473,42 @@ export class DetectRuleEngine {
     const matched = lower.includes("matched\": true") || lower.includes("matched\":true") ||
       (lower.includes("matched") && !lower.includes("matched\": false") && !lower.includes("matched\":false"));
     return { matched, confidence: 0.3, description: content };
+  }
+
+  /** 解析 VLM 返回的 regions 数组，支持数组格式 box 和对象格式 box */
+  private parseRegions(raw: unknown): Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> {
+    if (!Array.isArray(raw)) return [];
+    const result: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> = [];
+    for (const item of raw as Array<Record<string, unknown>>) {
+      const label = typeof item.label === "string" ? item.label : "unknown";
+      const box = item.box;
+      let xmin: number | undefined, ymin: number | undefined, xmax: number | undefined, ymax: number | undefined;
+
+      if (Array.isArray(box) && box.length >= 4) {
+        /** 数组格式 [x1, y1, x2, y2] */
+        xmin = this.clamp01(Number(box[0]));
+        ymin = this.clamp01(Number(box[1]));
+        xmax = this.clamp01(Number(box[2]));
+        ymax = this.clamp01(Number(box[3]));
+      } else if (box && typeof box === "object" && !Array.isArray(box)) {
+        /** 对象格式 {xmin, ymin, xmax, ymax} */
+        const b = box as Record<string, unknown>;
+        xmin = this.clamp01(Number(b.xmin ?? b.x1 ?? 0));
+        ymin = this.clamp01(Number(b.ymin ?? b.y1 ?? 0));
+        xmax = this.clamp01(Number(b.xmax ?? b.x2 ?? 0));
+        ymax = this.clamp01(Number(b.ymax ?? b.y2 ?? 0));
+      }
+
+      if (xmin !== undefined && ymin !== undefined && xmax !== undefined && ymax !== undefined && xmax > xmin && ymax > ymin) {
+        result.push({ label, box: { xmin, ymin, xmax, ymax } });
+      }
+    }
+    return result;
+  }
+
+  /** 坐标 clamp 到 [0, 1] */
+  private clamp01(v: number): number {
+    return Math.max(0, Math.min(1, v));
   }
 
   /** 裁剪帧到 ROI 区域 */

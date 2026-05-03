@@ -203,3 +203,39 @@ export function takeLlmDescription(cameraId: string): string | null {
   }
   return entry.description
 }
+
+/**
+ * VLM 检测规则区域缓存
+ * detect:rule 事件携带的 regions 坐标，CameraView overlay 用虚线框叠加显示
+ */
+
+export interface RuleRegion {
+  /** 区域描述 */
+  label: string
+  /** 归一化坐标 [0,1] */
+  box: { xmin: number; ymin: number; xmax: number; ymax: number }
+  /** 来源规则名称 */
+  ruleName: string
+}
+
+/** 规则区域显示时长（ms） */
+const RULE_REGION_TTL = 10_000
+
+/** 每个摄像头的规则区域缓存 */
+const ruleRegionsCache = new Map<string, { regions: RuleRegion[]; timestamp: number }>()
+
+/** 存入规则区域 */
+export function putRuleRegions(cameraId: string, regions: RuleRegion[]): void {
+  ruleRegionsCache.set(cameraId, { regions, timestamp: Date.now() })
+}
+
+/** 获取并清理过期的规则区域 */
+export function takeRuleRegions(cameraId: string): RuleRegion[] {
+  const entry = ruleRegionsCache.get(cameraId)
+  if (!entry) return []
+  if (Date.now() - entry.timestamp > RULE_REGION_TTL) {
+    ruleRegionsCache.delete(cameraId)
+    return []
+  }
+  return entry.regions
+}
