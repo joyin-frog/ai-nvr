@@ -2109,6 +2109,11 @@ ${langInstruction}`;
         /** 轨迹点统计 */
         const trajPoints = trajectoryStorage?.getPointCount() ?? 0;
 
+        /** 异常评分：检测事件和追踪事件 */
+        const detectAnomaly = eventStorage.getAnomalyScore({ type: "detect" });
+        const trackAnomaly = eventStorage.getAnomalyScore({ type: "track:appeared" });
+        const anomalyScore = Math.max(detectAnomaly.score, trackAnomaly.score);
+
         return Response.json({
           vlm: { enabled: llm.enabled, model: llm.model, apiUrl: llm.apiUrl ? "***" : "", imageWidth: llm.imageWidth, contextIntervalMs: llm.contextIntervalMs },
           clip: { enabled: aiConfig.clip.enabled },
@@ -2116,6 +2121,7 @@ ${langInstruction}`;
           tracks: { total: allTracks.length, active: activeTracks, named: namedTracks },
           trajectories: { pointCount: trajPoints },
           labelDistribution: labelCounts,
+          anomaly: { score: Math.round(anomalyScore * 100) / 100, detect: detectAnomaly, track: trackAnomaly },
         });
       }
 

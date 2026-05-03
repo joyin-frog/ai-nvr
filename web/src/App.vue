@@ -257,7 +257,7 @@ let firstConnection = true
 
 /** 磁盘空间预警 */
 const diskWarn = ref<{ percent: number; free: string } | null>(null)
-const headerAiStatus = ref<{ vlm: { enabled: boolean; model: string }; stats5m?: { detectCount: number; alertCount: number; llmCount: number }; tracks?: { active: number } } | null>(null)
+const headerAiStatus = ref<{ vlm: { enabled: boolean; model: string; contextIntervalMs?: number }; stats5m?: { detectCount: number; alertCount: number; llmCount: number }; tracks?: { active: number; named?: number }; anomaly?: { score: number } } | null>(null)
 let headerAiTimer: ReturnType<typeof setInterval> | null = null
 let diskCheckTimer: ReturnType<typeof setInterval> | null = null
 /** PWA 更新检查定时器 */
@@ -1087,8 +1087,8 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
-      <span v-if="headerAiStatus" class="ai-header-badge" :title="`VLM: ${headerAiStatus.vlm.model}\n多帧: ${headerAiStatus.vlm.contextIntervalMs ? headerAiStatus.vlm.contextIntervalMs + 'ms' : '关闭'}\n检测: ${headerAiStatus.stats5m?.detectCount ?? 0}/5m\n告警: ${headerAiStatus.stats5m?.alertCount ?? 0}/5m\n追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃 / ${headerAiStatus.tracks?.named ?? 0} 已命名`">
-        <span :class="['ai-dot', headerAiStatus.vlm.enabled ? 'on' : 'off']">AI</span>
+      <span v-if="headerAiStatus" class="ai-header-badge" :title="`VLM: ${headerAiStatus.vlm.model}\n多帧: ${headerAiStatus.vlm.contextIntervalMs ? headerAiStatus.vlm.contextIntervalMs + 'ms' : '关闭'}\n检测: ${headerAiStatus.stats5m?.detectCount ?? 0}/5m\n告警: ${headerAiStatus.stats5m?.alertCount ?? 0}/5m\n追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃 / ${headerAiStatus.tracks?.named ?? 0} 已命名\n异常评分: ${Math.round((headerAiStatus.anomaly?.score ?? 0) * 100)}%`">
+        <span :class="['ai-dot', (headerAiStatus.anomaly?.score ?? 0) > 0.3 ? 'alert' : headerAiStatus.vlm.enabled ? 'on' : 'off']">AI</span>
         <span v-if="headerAiStatus.tracks?.active" class="ai-active-count">{{ headerAiStatus.tracks.active }}</span>
       </span>
       <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? t('header.wsConnected') : wsState === 'connecting' ? t('header.wsConnecting') : t('header.wsDisconnected')">
@@ -1421,6 +1421,17 @@ onUnmounted(() => {
 .ai-dot.on {
   color: #4ECDC4;
   border: 1px solid rgba(78, 205, 196, 0.4);
+}
+
+.ai-dot.alert {
+  color: #FF6B6B;
+  border: 1px solid rgba(255, 107, 107, 0.5);
+  animation: ai-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ai-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .ai-dot.off {

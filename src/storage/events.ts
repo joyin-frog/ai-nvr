@@ -2,6 +2,16 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+/** 事件记录 */
+export interface EventRecord {
+  id: number;
+  type: string;
+  camera_id: string;
+  timestamp: number;
+  detail: string | null;
+  starred?: number;
+}
+
 /** 事件持久化存储 */
 export class EventStorage {
   private db: Database;
@@ -356,14 +366,37 @@ export class EventStorage {
 
     return { conditions, params };
   }
-}
 
-/** 事件记录 */
-export interface EventRecord {
-  id: number;
-  type: string;
-  camera_id: string;
-  timestamp: number;
-  detail: string | null;
-  starred?: number;
+  /**
+   * 计算事件异常评分
+   * 比较当前窗口的事件数与过去 N 个同窗口的历史平均
+   * 返回 0-1 的异常分数（越高越异常）
+   */
+  getAnomalyScore(options: { type: string; cameraId?: string; windowMs?: number }): { score: number; current: number; baseline: number } {
+    const windowMs = options.windowMs ?? 300_000;
+    const now = Date.now();
+    const currentStart = now - windowMs;
+
+    /** 当前窗口事件数 */
+    const current = this.count({ type: options.type, cameraId: options.cameraId, since: currentStart, until: now });
+
+    /** 过去 24 小时内同类型同窗口的平均事件数（取 6 个窗口样本） */
+    const samples = 6;
+    let totalHistorical = 0;
+    let validSamples = 0;
+    for (let i = 1; i <= samples; i++) {
+      const sampleStart = now - windowMs * (i + 1);
+      const sampleEnd = now - windowMs * i;
+      const count = this.count({ type: options.type, cameraId: options.cameraId, since: sampleStart, until: sampleEnd });
+      totalHistorical += count;
+      validSamples++;
+    }
+    const baseline = validSamples > 0 ? totalHistorical / validSamples : 0;
+
+    /** 异常评分：当前值超过平均 2 倍时开始计分，最高 1.0 */
+    if (baseline === 0) return { score: current > 0 ? 0.5 : 0, current, baseline };
+    const ratio = current / baseline;
+    const score = Math.min(1, Math.max(0, (ratio - 2) / 3));
+    return { score, current, baseline: Math.round(baseline * 10) / 10 };
+  }
 }
