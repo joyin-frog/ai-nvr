@@ -460,7 +460,7 @@ function onSnapshotLoad(e: Event, record: DetectRuleRecord) {
 }
 
 /** 实时追加记录 */
-function addRecord(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number }) {
+function addRecord(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number; detail?: string; snapshotUrl?: string | null }) {
   if (filterCamera.value && filterCamera.value !== payload.cameraId) return
   if (filterMatched.value) return
   const record: DetectRuleRecord = {
@@ -471,7 +471,8 @@ function addRecord(payload: { ruleId: number; ruleName: string; cameraId: string
     timestamp: payload.timestamp,
     result: payload.result,
     matched: true,
-    detail: '',
+    detail: payload.detail ?? '',
+    snapshotUrl: payload.snapshotUrl ?? undefined,
     isNew: true,
   }
   records.value.unshift(record)

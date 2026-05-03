@@ -2463,6 +2463,15 @@ export function startServer(
             : detectPayload.detections;
           header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: filteredDetections, changed: detectPayload.changed, inferMs: detectPayload.inferMs };
         }
+      } else if (event === "detect:rule") {
+        /** detect:rule 事件：附加快照路径 */
+        const dr = payload as { cameraId: string; timestamp: number; [k: string]: unknown };
+        let snapshotUrl: string | null = null;
+        if (alertSnapshotStorage) {
+          const snapPath = alertSnapshotStorage.findSnapshotPath(dr.cameraId, dr.timestamp);
+          if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
+        }
+        header = { event, ...payload, snapshotUrl };
       } else {
         header = { event, ...payload };
       }

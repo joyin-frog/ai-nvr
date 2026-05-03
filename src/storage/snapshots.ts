@@ -72,6 +72,10 @@ export class SnapshotStorage {
     const filename = `${dateStr}_${timeStr}_${ms}`;
     const relativePath = `${cameraId}/${filename}`;
 
+    /** 预填充路径缓存（写入是异步的，事件推送在写入完成前就需要查找） */
+    const pathKey = `${cameraId}:${timestamp}`;
+    this.pathCache.set(pathKey, `${relativePath}.jpg`);
+
     const labels = detections && detections.length > 0
       ? [...new Set(detections.map(d => d.label))].join(", ")
       : undefined;
@@ -102,9 +106,6 @@ export class SnapshotStorage {
       }
     }
 
-    const pathKey = `${cameraId}:${timestamp}`;
-    this.pathCache.set(pathKey, relativePath);
-
     if (process.env.DEBUG) {
       console.log(`[Snapshot] 已保存: ${relativePath}.jpg (${frameImage.length} bytes)`);
     }
@@ -133,9 +134,12 @@ export class SnapshotStorage {
     return latest ? `${latest.relativePath}` : null;
   }
 
-  /** 获取快照文件路径 */
+  /** 获取快照文件/目录的绝对路径（含子目录路径时自动补 .jpg） */
   getSnapshotPath(relativePath: string): string {
-    return this.storageFs.resolve(join(this.dirName, relativePath.endsWith(".jpg") ? relativePath : `${relativePath}.jpg`));
+    const hasExt = relativePath.endsWith(".jpg") || relativePath.endsWith(".json");
+    const needsSuffix = !hasExt && relativePath.includes("/");
+    const path = needsSuffix ? `${relativePath}.jpg` : relativePath;
+    return this.storageFs.resolve(join(this.dirName, path));
   }
 
   /** 获取快照的检测结果元数据（优先内存缓存） */
@@ -197,8 +201,9 @@ export class SnapshotStorage {
     });
     if (entries.length > 0) {
       const path = entries[0]!.relativePath;
-      this.pathCache.set(pathKey, path);
-      return path;
+      const fullPath = path.endsWith(".jpg") ? path : `${path}.jpg`;
+      this.pathCache.set(pathKey, fullPath);
+      return fullPath;
     }
     this.pathCache.set(pathKey, "");
     return null;

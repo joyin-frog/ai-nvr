@@ -87,6 +87,8 @@ export class DetectRuleEngine {
 
   /** 每条规则的定时器 */
   private timers = new Map<number, ReturnType<typeof setInterval>>();
+  /** 每条规则定时器的间隔（用于检测 intervalMs 变更） */
+  private timerIntervals = new Map<number, number>();
   /** 每条规则上次触发时间（冷却） */
   private lastTriggerTime = new Map<number, number>();
   /** 当前并发数 */
@@ -141,6 +143,7 @@ export class DetectRuleEngine {
     this.started = false;
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
+    this.timerIntervals.clear();
     this.lastTriggerTime.clear();
     this.queue = [];
     this.concurrent = 0;
@@ -175,17 +178,27 @@ export class DetectRuleEngine {
 
     const rules = this.storage.getEnabledRules();
     const activeIds = new Set(rules.map(r => r.id));
+    const rulesById = new Map(rules.map(r => [r.id, r]));
 
-    /** 停止已删除/禁用的规则定时器 */
+    /** 停止已删除/禁用的规则定时器，以及 intervalMs 变更的定时器 */
     for (const [id, timer] of this.timers) {
       if (!activeIds.has(id)) {
         clearInterval(timer);
         this.timers.delete(id);
+        this.timerIntervals.delete(id);
         this.lastTriggerTime.delete(id);
+      } else {
+        const currentRule = rulesById.get(id)!;
+        const currentInterval = Math.max(currentRule.intervalMs, 1000);
+        if (this.timerIntervals.get(id) !== currentInterval) {
+          clearInterval(timer);
+          this.timers.delete(id);
+          this.timerIntervals.delete(id);
+        }
       }
     }
 
-    /** 启动新规则 */
+    /** 启动新规则（包括 intervalMs 变更需要重建的） */
     for (const rule of rules) {
       if (!this.timers.has(rule.id)) {
         this.startRuleTimer(rule);
@@ -195,14 +208,17 @@ export class DetectRuleEngine {
     this.rulesCache = rules;
   }
 
-  /** 为单条规则启动定时器 */
+  /** 为单条规则启动定时器（回调通过 ruleId 从缓存查找最新 rule） */
   private startRuleTimer(rule: DetectRule): void {
     const interval = Math.max(rule.intervalMs, 1000);
+    const ruleId = rule.id;
     const timer = setInterval(() => {
       this.refreshAndStartTimers();
-      this.scheduleExecution(rule);
+      const latestRule = this.rulesCache.find(r => r.id === ruleId);
+      if (latestRule) this.scheduleExecution(latestRule);
     }, interval);
-    this.timers.set(rule.id, timer);
+    this.timers.set(ruleId, timer);
+    this.timerIntervals.set(ruleId, interval);
   }
 
   /** 调度执行（带并发控制 + 时段检查） */
@@ -417,6 +433,7 @@ export class DetectRuleEngine {
         }
 
         /** 发出事件 */
+        const detail = JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt, rawResponse: content, regions: vlmResult.regions });
         this.eventBus.emit("detect:rule", {
           ruleId: rule.id,
           ruleName: rule.name,
@@ -426,7 +443,7 @@ export class DetectRuleEngine {
           result: vlmResult.description,
           confidence: vlmResult.confidence,
           regions: vlmResult.regions,
-          detail: JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt }),
+          detail,
         });
 
         console.log(`[DetectRuleEngine] 规则 "${rule.name}" 匹配 (${(vlmResult.confidence * 100).toFixed(0)}%): ${vlmResult.description.slice(0, 80)}`);
