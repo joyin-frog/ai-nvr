@@ -29,7 +29,12 @@ export interface EventSummary {
   [key: string]: unknown;
 }
 
-const DEFAULT_SUMMARY_PROMPT = `Summarize these surveillance events concisely. Focus on key activities, safety concerns, patterns. Max 3 sentences. Be factual.`;
+const DEFAULT_SUMMARY_PROMPT = `Summarize these surveillance events concisely. Focus on:
+1. Key activities across cameras (who, what, where)
+2. Cross-camera correlations (same person appearing in different cameras)
+3. Safety concerns or anomalies
+4. Patterns or trends
+Max 3 sentences. Be factual and specific.`;
 
 /**
  * AI 事件摘要器
