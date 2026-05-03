@@ -1910,9 +1910,9 @@ export function startServer(
         return Response.json(result ?? { triggered: true });
       }
 
-      /** AI 场景问答：用户对当前画面自由提问 */
+      /** AI 场景问答：用户对当前画面自由提问（支持多轮对话历史） */
       if (url.pathname === "/api/ai/ask" && req.method === "POST") {
-        const body = await req.json() as { cameraId?: string; question?: string };
+        const body = await req.json() as { cameraId?: string; question?: string; history?: Array<{ role: string; content: string }> };
         if (!body.cameraId || !body.question) return Response.json({ error: "cameraId and question required" }, { status: 400 });
 
         const llmConfig = runtimeConfig.get().ai.llm;
@@ -1928,6 +1928,30 @@ export function startServer(
         const langInstruction = lang.startsWith("zh") ? "用中文回复。" : "Reply in English.";
         const systemPrompt = `You are a surveillance camera assistant. Answer questions about the image accurately and concisely. ${langInstruction}`;
 
+        /** 构建消息列表（支持历史上下文） */
+        const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [
+          { role: "system", content: systemPrompt },
+        ];
+
+        /** 加入历史消息（最多保留 6 条，防止 token 过多） */
+        if (body.history && Array.isArray(body.history)) {
+          const recentHistory = body.history.slice(-6);
+          for (const msg of recentHistory) {
+            if (msg.role === "user" || msg.role === "assistant") {
+              messages.push({ role: msg.role, content: msg.content });
+            }
+          }
+        }
+
+        /** 当前问题 + 最新帧图像 */
+        messages.push({
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${latestFrame.data.toString("base64")}` } },
+            { type: "text", text: body.question },
+          ],
+        });
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000);
         const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
@@ -1940,16 +1964,7 @@ export function startServer(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: llmConfig.model,
-            messages: [
-              { role: "system", content: systemPrompt },
-              {
-                role: "user",
-                content: [
-                  { type: "image_url", image_url: { url: `data:image/jpeg;base64,${latestFrame.data.toString("base64")}` } },
-                  { type: "text", text: body.question },
-                ],
-              },
-            ],
+            messages,
             max_tokens: 200,
             temperature: 0.3,
           }),

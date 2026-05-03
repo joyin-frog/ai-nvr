@@ -1978,22 +1978,32 @@ async function analyzeFrame() {
 const showAiAsk = ref(false)
 const aiQuestion = ref('')
 const aiAsking = ref(false)
-const aiAnswer = ref('')
 
-/** AI 场景问答 */
+/** AI 问答历史记录 */
+interface AiChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+const aiChatHistory = ref<AiChatMessage[]>([])
+
+/** AI 场景问答（支持多轮对话） */
 async function askAi() {
   if (!aiQuestion.value.trim() || aiAsking.value) return
   aiAsking.value = true
-  aiAnswer.value = ''
+  const q = aiQuestion.value.trim()
+  aiChatHistory.value.push({ role: 'user', content: q })
+  aiQuestion.value = ''
   try {
+    /** 发送历史消息（最近 6 条）用于上下文 */
+    const history = aiChatHistory.value.slice(0, -1).slice(-6).map(m => ({ role: m.role, content: m.content }))
     const resp = await authFetch('/api/ai/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cameraId: props.cameraId, question: aiQuestion.value.trim() }),
+      body: JSON.stringify({ cameraId: props.cameraId, question: q, history }),
     })
     if (resp.ok) {
       const data = await resp.json()
-      aiAnswer.value = data.answer || 'No answer'
+      aiChatHistory.value.push({ role: 'assistant', content: data.answer || 'No answer' })
     }
   } catch {
     // ignore
@@ -2348,9 +2358,13 @@ onUnmounted(() => {
       <div v-if="online" class="ai-ask-wrapper">
         <button class="ai-ask-btn" @click="showAiAsk = !showAiAsk" :title="t('camera.aiAsk', 'AI 问答')">&#x2753;</button>
         <div v-if="showAiAsk" class="ai-ask-panel">
-          <input v-model="aiQuestion" class="ai-ask-input" :placeholder="t('camera.aiAskPlaceholder', '输入关于画面的问题...')" @keydown.enter="askAi" />
-          <button class="ai-ask-submit" @click="askAi" :disabled="aiAsking">{{ aiAsking ? '...' : '&#x27A4;' }}</button>
-          <div v-if="aiAnswer" class="ai-ask-answer">{{ aiAnswer }}</div>
+          <div class="ai-chat-history" v-if="aiChatHistory.length > 0" ref="aiChatScrollRef">
+            <div v-for="(msg, idx) in aiChatHistory" :key="idx" :class="['ai-chat-msg', msg.role]">{{ msg.content }}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <input v-model="aiQuestion" class="ai-ask-input" :placeholder="t('camera.aiAskPlaceholder', '输入关于画面的问题...')" @keydown.enter="askAi" />
+            <button class="ai-ask-submit" @click="askAi" :disabled="aiAsking">{{ aiAsking ? '...' : '&#x27A4;' }}</button>
+          </div>
         </div>
       </div>
       <button v-if="online" :class="['mute-btn', { active: !isMuted }]" @click="isMuted = !isMuted" :title="isMuted ? t('camera.unmute', '取消静音') : t('camera.mute', '静音')">{{ isMuted ? '&#x1F507;' : '&#x1F50A;' }}</button>
@@ -2705,10 +2719,11 @@ onUnmounted(() => {
   border: 1px solid rgba(124, 77, 255, 0.4);
   border-radius: 8px;
   padding: 8px;
-  width: 280px;
+  width: 300px;
+  max-height: 340px;
   z-index: 20;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 
@@ -2743,15 +2758,37 @@ onUnmounted(() => {
   cursor: wait;
 }
 
-.ai-ask-answer {
+.ai-chat-history {
   width: 100%;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #ddd;
-  background: rgba(124, 77, 255, 0.1);
-  border-radius: 4px;
-  padding: 6px 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-chat-msg {
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 6px;
+  max-width: 90%;
   white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-chat-msg.user {
+  align-self: flex-end;
+  background: rgba(78, 205, 196, 0.2);
+  color: #4ECDC4;
+  border-bottom-right-radius: 2px;
+}
+
+.ai-chat-msg.assistant {
+  align-self: flex-start;
+  background: rgba(124, 77, 255, 0.15);
+  color: #ddd;
+  border-bottom-left-radius: 2px;
 }
   background: none;
   border: none;
