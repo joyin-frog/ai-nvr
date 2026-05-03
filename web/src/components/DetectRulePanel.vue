@@ -400,6 +400,40 @@ function applyTemplate(prompt: string) {
   form.value.prompt = prompt
 }
 
+/** AI 规则建议 */
+interface AiRuleSuggestion {
+  name: string
+  prompt: string
+  interval: number
+  reason: string
+}
+const aiSuggestions = ref<AiRuleSuggestion[]>([])
+const aiSuggestLoading = ref(false)
+
+async function fetchAiSuggestions() {
+  if (!form.value.cameraId) return
+  aiSuggestLoading.value = true
+  aiSuggestions.value = []
+  const res = await authFetch('/api/ai/suggest-rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cameraId: form.value.cameraId }),
+  }).catch(() => null)
+  if (res?.ok) {
+    const data = await res.json() as { suggestions?: AiRuleSuggestion[] }
+    aiSuggestions.value = data.suggestions ?? []
+  }
+  aiSuggestLoading.value = false
+}
+
+/** 一键应用 AI 建议到表单 */
+function applySuggestion(s: AiRuleSuggestion) {
+  form.value.name = s.name
+  form.value.prompt = s.prompt
+  form.value.intervalMs = s.interval
+  aiSuggestions.value = []
+}
+
 /** textarea 自动增长高度 */
 function autoGrowTextarea(e: Event) {
   const el = e.target as HTMLTextAreaElement
@@ -564,6 +598,15 @@ function switchToHistory() {
       <div class="prompt-templates">
         <div class="template-chips">
           <button v-for="tpl in promptTemplates" :key="tpl.label" :class="['tpl-chip', { active: form.prompt === tpl.prompt }]" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
+          <button class="tpl-chip ai-suggest-btn" @click="fetchAiSuggestions" :disabled="aiSuggestLoading || !form.cameraId" :title="!form.cameraId ? '请先选择摄像头' : 'AI 分析当前画面并建议规则'">✨ AI 建议</button>
+        </div>
+        <div v-if="aiSuggestLoading" class="ai-suggest-loading">AI 正在分析画面...</div>
+        <div v-if="aiSuggestions.length > 0" class="ai-suggestions">
+          <div v-for="(s, i) in aiSuggestions" :key="i" class="ai-suggest-item" @click="applySuggestion(s)">
+            <div class="ai-suggest-name">{{ s.name }}</div>
+            <div class="ai-suggest-prompt">{{ s.prompt }}</div>
+            <div class="ai-suggest-reason">{{ s.reason }}</div>
+          </div>
         </div>
       </div>
       <div class="form-row">
@@ -1414,6 +1457,67 @@ select.input {
   border-color: #4ECDC4;
   background: rgba(78, 205, 196, 0.15);
   color: #4ECDC4;
+}
+
+.ai-suggest-btn {
+  border-color: #9b59b6;
+  color: #9b59b6;
+}
+
+.ai-suggest-btn:hover:not(:disabled) {
+  border-color: #8e44ad;
+  color: #8e44ad;
+  background: rgba(155, 89, 182, 0.1);
+}
+
+.ai-suggest-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ai-suggest-loading {
+  font-size: 11px;
+  color: #9b59b6;
+  padding: 4px 0;
+}
+
+.ai-suggestions {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-suggest-item {
+  padding: 6px 8px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ai-suggest-item:hover {
+  border-color: #9b59b6;
+  background: rgba(155, 89, 182, 0.08);
+}
+
+.ai-suggest-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9b59b6;
+}
+
+.ai-suggest-prompt {
+  font-size: 11px;
+  color: #aaa;
+  margin-top: 2px;
+}
+
+.ai-suggest-reason {
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
+  font-style: italic;
 }
 
 /** 高级设置折叠 */
