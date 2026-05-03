@@ -1422,6 +1422,36 @@ async function doGifExport() {
   }
 }
 
+const aiSummaryLoading = ref(false)
+const aiSummaryText = ref('')
+
+/** 生成录像片段 AI 摘要 */
+async function generateAiSummary() {
+  if (!selectedRecording.value) return
+  aiSummaryLoading.value = true
+  aiSummaryText.value = ''
+  try {
+    const res = await authFetch('/api/recordings/ai-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file: selectedRecording.value.filename,
+        cameraId: selectedRecording.value.cameraId,
+        startSec: exportStartSec.value,
+        endSec: exportEndSec.value,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      aiSummaryText.value = data.summary || 'No summary'
+    }
+  } catch {
+    // ignore
+  } finally {
+    aiSummaryLoading.value = false
+  }
+}
+
 /** 下载导出文件 */
 function downloadExport() {
   if (!exportFilename.value) return
@@ -1914,6 +1944,16 @@ defineExpose({ loadRecordings, playAtTime })
             </button>
             <button v-if="exportFilename" class="download-btn" @click="downloadExport">{{ t('recording.download') }} MP4 ({{ exportDurationText }})</button>
             <button v-if="gifFilename" class="download-btn" @click="downloadGif">{{ t('recording.download') }} GIF ({{ exportDurationText }})</button>
+            <button v-if="!exportFilename && !gifFilename && !aiSummaryText" class="ai-summary-btn" @click="generateAiSummary" :disabled="aiSummaryLoading || exportEndSec <= exportStartSec">
+              {{ aiSummaryLoading ? '...' : 'AI' }}
+            </button>
+            <div v-if="aiSummaryText" class="ai-summary-result">
+              <div class="ai-summary-header">
+                <span>AI {{ t('recording.summary', '摘要') }}</span>
+                <button class="ai-summary-close" @click="aiSummaryText = ''">✕</button>
+              </div>
+              <p>{{ aiSummaryText }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -3367,6 +3407,65 @@ defineExpose({ loadRecordings, playAtTime })
 
 .gif-btn:hover {
   opacity: 0.85;
+}
+
+.ai-summary-btn {
+  background: #7c4dff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.ai-summary-btn:hover {
+  opacity: 0.85;
+}
+
+.ai-summary-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ai-summary-result {
+  margin-top: 8px;
+  background: rgba(124, 77, 255, 0.12);
+  border: 1px solid rgba(124, 77, 255, 0.3);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.ai-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b388ff;
+}
+
+.ai-summary-close {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+}
+
+.ai-summary-close:hover {
+  color: #fff;
+}
+
+.ai-summary-result p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #ddd;
 }
 
 .gif-btn:disabled {

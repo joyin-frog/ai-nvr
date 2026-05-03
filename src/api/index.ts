@@ -1249,6 +1249,127 @@ export function startServer(
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
+      /** 录像片段 AI 摘要：提取关键帧 + 事件列表发给 LLM */
+      if (url.pathname === "/api/recordings/ai-summary" && req.method === "POST") {
+        return req.json().then(async (body: unknown) => {
+          const obj = body as Record<string, unknown>;
+          const file = obj.file as string | undefined;
+          const startSec = obj.startSec as number | undefined;
+          const endSec = obj.endSec as number | undefined;
+          const cameraId = obj.cameraId as string | undefined;
+          if (!file || startSec === undefined || endSec === undefined || !cameraId) {
+            return new Response("Missing file, startSec, endSec, cameraId", { status: 400 });
+          }
+
+          const llmConfig = runtimeConfig.get().ai.llm;
+          if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) {
+            return Response.json({ error: "AI not configured" }, { status: 503 });
+          }
+
+          const videoPath = recorder.getRecordingPath(file);
+          if ((await Bun.file(videoPath).size) === undefined) return new Response("Not Found", { status: 404 });
+
+          /** 路径遍历防护 */
+          const storageRoot = await getStorageRoot();
+          const resolved = await realpath(videoPath);
+          if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
+
+          const ffmpegPath = cameraManager.getFfmpegPath();
+          const durationSec = endSec - startSec;
+          if (durationSec <= 0) return new Response("Invalid duration", { status: 400 });
+
+          /** 均匀提取 4 帧关键帧 */
+          const frameCount = Math.min(4, Math.max(1, Math.ceil(durationSec / 10)));
+          const frameBuffers: Buffer[] = [];
+          for (let i = 0; i < frameCount; i++) {
+            const seekTime = startSec + (durationSec * (i + 0.5)) / frameCount;
+            const captureResult = await new Promise<Buffer | null>((resolve) => {
+              const args = ["-ss", String(seekTime), "-i", resolved, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v:1", "5", "-vf", "scale=640:-2", "-an", "pipe:1"];
+              const proc = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "ignore"] });
+              const chunks: Buffer[] = [];
+              proc.stdout?.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+              const timer = setTimeout(() => { proc.stdout?.destroy(); proc.kill("SIGKILL"); proc.unref(); resolve(null); }, 5000);
+              proc.on("exit", () => { clearTimeout(timer); proc.unref(); resolve(chunks.length > 0 ? Buffer.concat(chunks) : null); });
+              proc.on("error", () => { clearTimeout(timer); proc.unref(); resolve(null); });
+            });
+            if (captureResult) frameBuffers.push(captureResult);
+          }
+
+          /** 从文件名解析录像起始时间戳 */
+          const fnMatch = file.match(/^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+          const baseTimestamp = fnMatch ? new Date(`${fnMatch[1]}T${fnMatch[2]}:${fnMatch[3]}:${fnMatch[4]}`).getTime() : 0;
+
+          /** 查询该时间段事件 */
+          const events = eventStorage.query({
+            cameraId,
+            since: baseTimestamp + startSec * 1000,
+            until: baseTimestamp + endSec * 1000,
+            limit: 30,
+          });
+          const filteredEvents = events.filter(e => e.type !== "motion");
+
+          const t0 = performance.now();
+          const lang = runtimeConfig.get().language;
+          const langInstruction = lang.startsWith("zh") ? "用中文回复。" : "Write in English.";
+
+          /** 构建事件文本 */
+          const typeCounts: Record<string, number> = {};
+          const detailLines: string[] = [];
+          for (const e of filteredEvents) {
+            typeCounts[e.type] = (typeCounts[e.type] ?? 0) + 1;
+            if (e.detail && detailLines.length < 15) {
+              detailLines.push(`${e.type}: ${e.detail.slice(0, 80)}`);
+            }
+          }
+          const typeSummary = Object.entries(typeCounts).map(([t, c]) => `${t}(${c})`).join(", ");
+
+          /** 构建 LLM 请求 */
+          const systemPrompt = `Analyze this surveillance clip. Describe what happened in 2-3 sentences. Be specific about people, vehicles, activities. ${langInstruction}`;
+
+          const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+          contentParts.push({ type: "text", text: `Video clip: ${Math.round(durationSec)}s, camera ${cameraId}\nEvents: ${typeSummary}\nDetails:\n${detailLines.join("\n")}` });
+
+          for (const buf of frameBuffers) {
+            contentParts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${buf.toString("base64")}` } });
+          }
+
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15_000);
+          const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
+            ? llmConfig.apiUrl
+            : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+
+          const response = await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: llmConfig.model,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: contentParts },
+              ],
+              max_tokens: 200,
+              temperature: 0.3,
+            }),
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timeout));
+
+          if (!response.ok) {
+            return Response.json({ error: "LLM request failed" }, { status: 502 });
+          }
+
+          const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+          const summaryText = result.choices?.[0]?.message?.content?.trim() ?? "";
+
+          return Response.json({
+            summary: summaryText,
+            eventCount: filteredEvents.length,
+            frameCount: frameBuffers.length,
+            inferMs: performance.now() - t0,
+          });
+        }).catch(() => new Response("Invalid JSON", { status: 400 }));
+      }
+
       /** 录像合并导出：合并多个录像文件 */
       if (url.pathname === "/api/recordings/merge" && req.method === "POST") {
         return req.json().then(async (body: unknown) => {
