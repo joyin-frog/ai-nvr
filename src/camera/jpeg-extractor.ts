@@ -62,8 +62,9 @@ export class JpegFrameSplitter {
     this.frameChunks.push(data.subarray(0, frameEnd));
     this.frameSize += frameEnd;
 
+    /** 独立拷贝：切断对 ffmpeg stdout chunk 的 ArrayBuffer 引用，避免阻止 GC */
     const frame = this.frameChunks.length === 1
-      ? this.frameChunks[0]!
+      ? Buffer.from(this.frameChunks[0]!)
       : Buffer.concat(this.frameChunks, this.frameSize);
     frames.push(frame);
 

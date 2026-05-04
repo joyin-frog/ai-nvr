@@ -74,13 +74,6 @@ export type Fmp4Segment = Fmp4InitSegment | Fmp4MediaSegment;
  * ffmpeg 使用 `-f mp4 -movflags frag_keyframe+empty_moov+default_base_moof` 输出标准 fMP4
  */
 /** O(1) 快速拼接两个 Buffer（避免 Buffer.concat 对 2 元素数组的迭代开销） */
-/** 独立拷贝，切断 subarray 对原始 Buffer 的引用 */
-function copyBuf(src: Buffer): Buffer {
-  const out = Buffer.allocUnsafe(src.length);
-  src.copy(out, 0);
-  return out;
-}
-
 function concat2(a: Buffer, b: Buffer): Buffer {
   const result = Buffer.allocUnsafe(a.length + b.length);
   a.copy(result, 0);
@@ -211,9 +204,9 @@ class Fmp4StreamParser {
       offset += actualSize;
     }
 
-    /** 拷贝截断，避免 subarray 保留对大 buffer 的引用导致内存无法释放 */
+    /** 拷贝截断，切断对旧 buffer 的引用 */
     if (offset > 0) {
-      this.buffer = copyBuf(buf.subarray(offset));
+      this.buffer = Buffer.from(buf.subarray(offset));
     } else {
       this.buffer = buf;
     }
@@ -251,9 +244,9 @@ class Fmp4StreamParser {
 
       /** moof 后面跟的 mdat 组成一个完整的 media segment */
       if (type === "mdat" && this.hasMoof) {
-        /** 独立拷贝，切断对 this.buffer 的引用，避免阻止 GC 回收大块内存 */
-        let moofData = copyBuf(this.completedBoxes[0]!.data);
-        const mdatData = copyBuf(this.completedBoxes[1]!.data);
+        /** 独立拷贝，切断对 this.buffer 的 subarray 引用 */
+        let moofData = Buffer.from(this.completedBoxes[0]!.data);
+        const mdatData = Buffer.from(this.completedBoxes[1]!.data);
 
         /** 重写 tfdt 为 wall clock PTS，对齐真实时间 */
         moofData = this.fixMoof(moofData);
@@ -797,7 +790,7 @@ export class H264Fmp4Extractor {
     });
 
     /** 高水位线 128KB：让单个 fMP4 segment 更可能一次读取完毕，减少 feed/flatten 调用 */
-    const stdout = new Readable({ highWaterMark: 131072 }).wrap(this.proc.stdout!);
+    const stdout = new Readable({ highWaterMark: 32768 }).wrap(this.proc.stdout!);
     let initCached = false;
     stdout.on("data", (chunk: Buffer) => {
       this.parser.feed(chunk, this.eventBus, this.config.id);
@@ -822,7 +815,7 @@ export class H264Fmp4Extractor {
     /** fd3 = JPEG 帧（filter_complex split 的第二个输出分支） */
     const jpegFd = this.proc.stdio[3];
     if (jpegFd) {
-      const jpegReadable = new Readable({ highWaterMark: 65536 }).wrap(jpegFd as any);
+      const jpegReadable = new Readable({ highWaterMark: 8192 }).wrap(jpegFd as any);
       jpegReadable.on("data", (chunk: Buffer) => {
         const frames = this.jpegSplitter.feed(chunk);
         for (const frame of frames) {

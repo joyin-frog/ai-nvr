@@ -396,7 +396,7 @@ setInterval(() => {
 /** 定期强制 GC，避免 Bun/JSC 懒惰回收导致内存持续增长 */
 setInterval(() => {
   if (typeof Bun !== "undefined" && Bun.gc) Bun.gc(true);
-}, 5000);
+}, 3000);
 
 /** 控制台日志：打印变动事件 */
 eventBus.on("motion", ({ cameraId, ratio, timestamp }) => {
