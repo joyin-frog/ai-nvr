@@ -366,6 +366,16 @@ export class ClipService {
           reject(err);
         }
       });
+
+      worker.on("exit", (code: number) => {
+        if (!this.initialized) {
+          reject(new Error(`[ClipService] Worker 在初始化前退出 (code=${code})`));
+        } else {
+          console.warn(`[ClipService] Worker 意外退出 (code=${code})`);
+          this.initialized = false;
+          this.worker = null;
+        }
+      });
     });
   }
 
@@ -397,14 +407,17 @@ export class ClipService {
     };
 
     return new Promise<ZeroShotResult>((resolve, reject) => {
-      pendingClassify.set(id, { resolve, reject });
+      pendingClassify.set(id, {
+        resolve: (r: ZeroShotResult) => { clearTimeout(timer); resolve(r); },
+        reject: (e: unknown) => { clearTimeout(timer); reject(e); },
+      });
       this.worker!.postMessage(req);
 
-      /** 超时保护：10 秒内未返回则丢弃 */
-      setTimeout(() => {
+      /** 超时保护：10 秒内未返回则 reject */
+      const timer = setTimeout(() => {
         if (pendingClassify.has(id)) {
           pendingClassify.delete(id);
-          resolve({ labels: [], scores: [], inferMs: 0 });
+          reject(new Error("[ClipService] classify timed out (10s)"));
         }
       }, 10_000);
     });
@@ -432,14 +445,17 @@ export class ClipService {
     };
 
     return new Promise<ImageEmbedResult>((resolve, reject) => {
-      pendingEmbed.set(id, { resolve, reject });
+      pendingEmbed.set(id, {
+        resolve: (r: ImageEmbedResult) => { clearTimeout(timer); resolve(r); },
+        reject: (e: unknown) => { clearTimeout(timer); reject(e); },
+      });
       this.worker!.postMessage(req);
 
-      /** 超时保护：10 秒内未返回则丢弃 */
-      setTimeout(() => {
+      /** 超时保护：10 秒内未返回则 reject */
+      const timer = setTimeout(() => {
         if (pendingEmbed.has(id)) {
           pendingEmbed.delete(id);
-          resolve({ embedding: [], inferMs: 0 });
+          reject(new Error("[ClipService] image embed timed out (10s)"));
         }
       }, 10_000);
     });
@@ -486,6 +502,7 @@ export class ClipService {
     return new Promise<TextEmbedResult>((resolve, reject) => {
       pendingTextEmbed.set(id, {
         resolve: (result) => {
+          clearTimeout(timer);
           /** 合并缓存和新结果 */
           const embeddings: number[][] = [...cached];
           for (let j = 0; j < uncachedIndices.length; j++) {
@@ -503,14 +520,14 @@ export class ClipService {
           }
           resolve({ embeddings, inferMs: result.inferMs });
         },
-        reject,
+        reject: (e: unknown) => { clearTimeout(timer); reject(e); },
       });
       this.worker!.postMessage(req);
 
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (pendingTextEmbed.has(id)) {
           pendingTextEmbed.delete(id);
-          resolve({ embeddings: [], inferMs: 0 });
+          reject(new Error("[ClipService] text embed timed out (10s)"));
         }
       }, 10_000);
     });

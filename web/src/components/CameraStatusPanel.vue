@@ -2,8 +2,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+import { useToast } from '../composables/useToast'
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 
 /** 摄像头性能指标 */
 interface CameraMetric {
@@ -216,7 +218,7 @@ async function loadLogs() {
     params.set('limit', '50')
     const res = await authFetch(`/api/logs?${params}`)
     if (res.ok) logEntries.value = await res.json()
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
   logLoading.value = false
 }
 
@@ -293,9 +295,7 @@ async function loadMetrics() {
       }
       camFpsHistory.value = fpsMap
     }
-  } catch {
-    // ignore
-  }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 /** 加载今日事件统计 */
@@ -320,9 +320,7 @@ async function loadTodayStats() {
       byHour: data.byHour as Array<{ hour: number; count: number; type: string }>,
       byLabel: (data.byLabel ?? []) as Array<{ label: string; count: number }>,
     }
-  } catch {
-    // ignore
-  }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 /** 加载 7 天趋势数据（并行请求，7 天同时发起） */

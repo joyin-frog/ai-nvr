@@ -387,6 +387,8 @@ type EventCallback<T extends EventName> = (payload: EventPayloads[T]) => void;
 export class EventBus {
   /** 监听器列表（存储的是 error-safe 包装后的回调） */
   private listeners = new Map<EventName, Set<EventCallback<EventName>>>();
+  /** 动态（无类型）监听器：用于运行时确定事件名的场景 */
+  private anyListeners = new Map<string, Set<(payload: unknown) => void>>();
 
   /** 订阅事件 */
   on<T extends EventName>(event: T, callback: EventCallback<T>): () => void {
@@ -411,10 +413,37 @@ export class EventBus {
   /** 触发事件（热路径：for...of 比 forEach 快 ~10%，避免每次迭代闭包创建） */
   emit<T extends EventName>(event: T, payload: EventPayloads[T]): void {
     const set = this.listeners.get(event);
-    if (!set) return;
-    for (const cb of set) {
-      (cb as EventCallback<T>)(payload);
+    if (set) {
+      for (const cb of set) {
+        (cb as EventCallback<T>)(payload);
+      }
     }
+    /** 同时通知动态监听器 */
+    const anySet = this.anyListeners.get(event);
+    if (anySet) {
+      for (const cb of anySet) {
+        try {
+          cb(payload);
+        } catch (err) {
+          console.error(`[EventBus] 动态监听器 "${event}" 异常:`, err);
+        }
+      }
+    }
+  }
+
+  /**
+   * 订阅任意事件名（用于运行时动态确定事件名的场景，如告警引擎）
+   * 回调接收 unknown 类型 payload，由调用方自行断言
+   */
+  onAny(event: string, callback: (payload: unknown) => void): () => void {
+    if (!this.anyListeners.has(event)) {
+      this.anyListeners.set(event, new Set());
+    }
+    this.anyListeners.get(event)!.add(callback);
+    return () => {
+      const s = this.anyListeners.get(event);
+      if (s) { s.delete(callback); if (s.size === 0) this.anyListeners.delete(event); }
+    };
   }
 
   /** 移除指定事件的所有监听器 */
@@ -425,5 +454,6 @@ export class EventBus {
   /** 清空所有监听器 */
   clear(): void {
     this.listeners.clear();
+    this.anyListeners.clear();
   }
 }

@@ -90,7 +90,7 @@ export class AlertEngine {
     /** 订阅新类型 */
     for (const eventType of neededTypes) {
       if (!this.subscribedEventTypes.has(eventType)) {
-        const unsub = this.eventBus.on(eventType as never, (payload: never) => {
+        const unsub = this.eventBus.onAny(eventType, (payload) => {
           this.onEvent(eventType, payload as Record<string, unknown>);
         });
         this.unsubscribers.push(unsub);

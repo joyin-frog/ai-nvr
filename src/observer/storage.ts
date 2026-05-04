@@ -176,7 +176,11 @@ export class ObserverStorage {
     }
 
     /** 删除旧列 */
-    this.db.run("ALTER TABLE observers DROP COLUMN eval_signal_ids");
+    try {
+      this.db.run("ALTER TABLE observers DROP COLUMN eval_signal_ids");
+    } catch {
+      /** 列可能已不存在（重复执行或新安装） */
+    }
     console.log(`[ObserverStorage] 合并 eval_signal_ids → signal_ids 完成`);
   }
 
