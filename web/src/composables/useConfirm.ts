@@ -9,6 +9,10 @@ const confirmState = ref<{
 /** 请求确认，返回 Promise<boolean> */
 export function confirmDialog(message: string): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
+    /** 如果已有弹窗，先关闭它（resolve false） */
+    if (confirmState.value) {
+      confirmState.value.resolve(false)
+    }
     confirmState.value = { message, resolve }
   })
 }

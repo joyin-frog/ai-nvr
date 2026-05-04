@@ -92,14 +92,19 @@ export class RoiStorage {
       `UPDATE roi SET ${sets.join(", ")} WHERE id = ?`,
       params
     );
-    if (result.changes > 0) this.invalidateCache();
+    if (result.changes > 0) {
+      const row = this.db.prepare("SELECT camera_id FROM roi WHERE id = ?").get(id) as { camera_id: string } | undefined;
+      if (row) this.invalidateCache(row.camera_id);
+    }
     return result.changes > 0;
   }
 
   /** 删除 ROI */
   remove(id: number): boolean {
+    const row = this.db.prepare("SELECT camera_id FROM roi WHERE id = ?").get(id) as { camera_id: string } | undefined;
+    const cameraId = row?.camera_id;
     const result = this.db.run("DELETE FROM roi WHERE id = ?", [id]);
-    if (result.changes > 0) this.invalidateCache();
+    if (result.changes > 0 && cameraId) this.invalidateCache(cameraId);
     return result.changes > 0;
   }
 

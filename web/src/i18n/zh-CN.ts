@@ -304,6 +304,12 @@ export default {
     logs: '系统日志',
     allLevels: '全部',
     ffmpegUsage: '{processes} 进程 / {memory} MB',
+    ffmpeg: 'FFmpeg',
+    kb: 'KB',
+    mbPerSec: 'MB/s',
+    msAi: 'ms AI',
+    warnPlus: 'warn+',
+    errorLevel: 'error',
   },
   manage: {
     title: '摄像头管理',

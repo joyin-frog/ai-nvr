@@ -2,8 +2,10 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
+import { useToast } from '../composables/useToast'
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 
 /** 摄像头 ID */
 const props = defineProps<{
@@ -25,6 +27,7 @@ async function ptzCommand(action: string, body?: Record<string, unknown>): Promi
     })
     return res.ok
   } catch {
+    toastError(t('settings.saveFailed'))
     return false
   }
 }
@@ -51,7 +54,7 @@ async function loadPresets() {
     if (!res.ok) return
     const data = await res.json()
     presets.value = data.presets ?? []
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 /** 跳转预置位 */

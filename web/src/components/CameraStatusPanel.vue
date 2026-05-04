@@ -376,7 +376,7 @@ onUnmounted(() => {
         <span class="stat-value">{{ metrics.memoryUsedMb }} MB</span>
       </div>
       <div v-if="metrics.ffmpegProcessCount > 0" class="stat-row">
-        <span class="stat-label">ffmpeg</span>
+        <span class="stat-label">{{ t('status.ffmpeg') }}</span>
         <span class="stat-value">{{ t('status.ffmpegUsage', { processes: metrics.ffmpegProcessCount, memory: metrics.ffmpegTotalRssMb }) }}</span>
       </div>
       <div class="stat-row">
@@ -392,14 +392,14 @@ onUnmounted(() => {
     <div v-if="perfHistory.length >= 2" class="perf-section">
       <div class="perf-row">
         <div class="perf-chart">
-          <div class="perf-label">FPS</div>
+          <div class="perf-label">{{ t('status.fps') }}</div>
           <svg viewBox="0 0 100 40" preserveAspectRatio="none" class="perf-svg">
             <polyline :points="fpsLinePoints" fill="none" stroke="#4ECDC4" stroke-width="1.5" stroke-linejoin="round" />
           </svg>
           <span class="perf-val">{{ perfHistory[perfHistory.length - 1].totalFps.toFixed(1) }}</span>
         </div>
         <div class="perf-chart">
-          <div class="perf-label">MEM</div>
+          <div class="perf-label">{{ t('status.memory') }}</div>
           <svg viewBox="0 0 100 40" preserveAspectRatio="none" class="perf-svg">
             <polyline :points="memLinePoints" fill="none" stroke="#FFEAA7" stroke-width="1.5" stroke-linejoin="round" />
           </svg>
@@ -547,15 +547,15 @@ onUnmounted(() => {
     <!-- 系统日志 -->
     <div class="logs-section">
       <div class="logs-header" @click="toggleLogs">
-        <span>{{ t('status.logs', '系统日志') }}</span>
+        <span>{{ t('status.logs') }}</span>
         <span class="logs-toggle">{{ showLogs ? '▲' : '▼' }}</span>
       </div>
       <div v-if="showLogs" class="logs-content">
         <div class="logs-toolbar">
           <select v-model="logLevel" class="log-level-select" @change="loadLogs">
-            <option value="">{{ t('status.allLevels', '全部') }}</option>
-            <option value="warn">warn+</option>
-            <option value="error">error</option>
+            <option value="">{{ t('status.allLevels') }}</option>
+            <option value="warn">{{ t('status.warnPlus') }}</option>
+            <option value="error">{{ t('status.errorLevel') }}</option>
           </select>
           <button class="log-refresh-btn" @click="loadLogs" :disabled="logLoading">↻</button>
         </div>
@@ -595,7 +595,7 @@ onUnmounted(() => {
           <div class="cam-metrics">
             <div class="metric">
               <span class="metric-val" :style="{ color: fpsColor(cam.fps) }">{{ cam.fps }}</span>
-              <span class="metric-unit">fps</span>
+              <span class="metric-unit">{{ t('status.fps') }}</span>
             </div>
             <div class="metric">
               <span class="metric-val">{{ cam.motionCount }}</span>
@@ -614,12 +614,12 @@ onUnmounted(() => {
               <span class="metric-unit">{{ t('status.todayEvents') }}</span>
             </div>
             <div v-if="cam.avgFrameSizeKb > 0" class="metric">
-              <span class="metric-val">{{ cam.avgFrameSizeKb.toFixed(0) }}<span class="metric-unit">KB</span></span>
-              <span class="metric-unit">~{{ (cam.avgFrameSizeKb * cam.fps / 1024).toFixed(1) }} MB/s</span>
+              <span class="metric-val">{{ cam.avgFrameSizeKb.toFixed(0) }}<span class="metric-unit">{{ t('status.kb') }}</span></span>
+              <span class="metric-unit">~{{ (cam.avgFrameSizeKb * cam.fps / 1024).toFixed(1) }} {{ t('status.mbPerSec') }}</span>
             </div>
             <div v-if="cam.avgInferMs > 0" class="metric">
               <span class="metric-val" :style="{ color: cam.avgInferMs < 100 ? '#4CAF50' : cam.avgInferMs < 300 ? '#FFC107' : '#F44336' }">{{ cam.avgInferMs }}</span>
-              <span class="metric-unit">ms AI</span>
+              <span class="metric-unit">{{ t('status.msAi') }}</span>
             </div>
           </div>
         </div>

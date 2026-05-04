@@ -1,8 +1,16 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { confirmState, resolveConfirm } from '../composables/useConfirm'
 
 const { t } = useI18n()
+
+function onEsc(e: KeyboardEvent) {
+  if (e.key === 'Escape' && confirmState.value) resolveConfirm(false)
+}
+
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 </script>
 
 <template>

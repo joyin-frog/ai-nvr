@@ -302,6 +302,12 @@ export default {
     logs: 'System Logs',
     allLevels: 'All',
     ffmpegUsage: '{processes} processes / {memory} MB',
+    ffmpeg: 'FFmpeg',
+    kb: 'KB',
+    mbPerSec: 'MB/s',
+    msAi: 'ms AI',
+    warnPlus: 'warn+',
+    errorLevel: 'error',
   },
   manage: {
     title: 'Camera Management',
