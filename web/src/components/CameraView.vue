@@ -8,9 +8,11 @@ import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 import { registerShortcut } from '../composables/useKeyboard'
+import { useToast } from '../composables/useToast'
 import { LABEL_COLORS } from '../services/constants'
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 const { setPref, getPref } = usePreferences()
 
 /** 主色调 → 颜色映射（常量，避免每帧每检测目标重建） */
@@ -419,7 +421,7 @@ async function loadHeatmap() {
     }
     heatmapDataHash = `${data.maxCount}:${nonZeroCount}:${nonZeroSum}`
     staticLayerDirty = true
-  } catch { /* 静默降级 */ }
+  } catch (e) { console.warn('[CameraView] heatmap load failed:', e) }
 }
 
 /** 切换热力图显示 */
@@ -480,7 +482,7 @@ async function loadHistoryTrails() {
         trail.splice(0, trail.length - MAX_TRAIL_POINTS * 3)
       }
     }
-  } catch { /* 静默降级 */ }
+  } catch (e) { console.warn('[CameraView] history trails load failed:', e) }
 }
 
 /** 清理不再活跃的轨迹（消失后保留 3 秒渐隐） */
@@ -1941,7 +1943,7 @@ async function askAi() {
       }
     }
   } catch {
-    // ignore
+    toastError(t('camera.aiAskFailed'))
   } finally {
     aiAsking.value = false
   }
@@ -2269,6 +2271,20 @@ onUnmounted(() => {
   trackSnapshotCache.clear()
   fadeOutBoxes.clear()
   snapshotLoading.clear()
+  trailFadeStart.clear()
+  lastDetectTsMap.clear()
+  sortedDetectionsCache = []
+  smoothBoxFrameCache.clear()
+  velocityShifts.computed = false
+  velocityShifts.shifts.clear()
+  staticCacheCanvas = null
+  staticCacheKey = ""
+  heatmapCacheCanvas = null
+  heatmapCacheKey = ""
+  /** 注销全屏缩放快捷键 */
+  unregZoomIn?.()
+  unregZoomOut?.()
+  unregZoomReset?.()
 })
 </script>
 

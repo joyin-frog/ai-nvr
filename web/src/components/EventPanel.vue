@@ -5,6 +5,7 @@ import EventTimeline from './EventTimeline.vue'
 import { authFetch, authUrl } from '../services/auth'
 import { usePreferences } from '../composables/usePreferences'
 import { useCameraNameMap } from '../composables/useCameraNameMap'
+import { useToast } from '../composables/useToast'
 
 /** 检测结果 */
 interface Detection {
@@ -19,6 +20,7 @@ interface Detection {
 }
 
 const { t, locale } = useI18n()
+const { error: toastError } = useToast()
 
 const { setPref, getPref } = usePreferences()
 
@@ -33,7 +35,7 @@ async function loadAiStats() {
   try {
     const resp = await authFetch('/api/ai/status')
     if (resp.ok) aiStats.value = await resp.json()
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 /** 手动触发一轮 AI 巡逻 */
@@ -137,7 +139,7 @@ async function semanticSearch() {
       filterCamera.value = ''
       filterRange.value = ''
     }
-  } catch { /* ignore */ } finally {
+  } catch { toastError(t('settings.loadFailed')) } finally {
     semanticSearching.value = false
   }
 }
@@ -252,9 +254,7 @@ async function loadSnapshots() {
     if (res.ok) {
       snapshotList.value = await res.json()
     }
-  } catch {
-    // ignore
-  } finally {
+  } catch { toastError(t('settings.loadFailed')) } finally {
     snapshotLoading.value = false
   }
 }
@@ -546,9 +546,7 @@ async function loadHistory() {
       totalCount.value = (data.total as number) ?? 0
       hasMore.value = historyEvents.length >= PAGE_SIZE
     }
-  } catch {
-    // ignore
-  } finally {
+  } catch { toastError(t('settings.loadFailed')) } finally {
     loading.value = false
   }
 }
@@ -597,9 +595,7 @@ async function loadMore() {
         hasMore.value = moreEvents.length >= PAGE_SIZE
       }
     }
-  } catch {
-    // ignore
-  } finally {
+  } catch { toastError(t('settings.loadFailed')) } finally {
     loading.value = false
   }
 }
@@ -624,6 +620,7 @@ onUnmounted(() => {
   loadMoreObserver?.disconnect()
   loadMoreObserver = null
   if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null }
+  if (isNewRafId) { cancelAnimationFrame(isNewRafId); isNewRafId = 0 }
   trackSnapshotMap.clear()
   trackSnapshotLoading.clear()
 })
@@ -783,9 +780,7 @@ async function toggleStar(id: number) {
       const item = events.value.find(e => e.id === id)
       if (item) item.starred = data.starred
     }
-  } catch {
-    // ignore
-  }
+  } catch { toastError(t('settings.saveFailed')) }
 }
 
 /** 外部调用：跳转到某追踪 ID 的事件（设置搜索关键词并加载） */

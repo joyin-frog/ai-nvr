@@ -74,6 +74,7 @@ export default {
     zoomIn: '放大',
     zoomOut: '缩小',
     aiAsk: 'AI 问答',
+    aiAskFailed: 'AI 问答失败',
     aiAskPlaceholder: '输入关于画面的问题...',
     aiSuggestDescribe: '描述当前画面',
     aiSuggestCount: '有多少人？',

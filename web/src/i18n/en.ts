@@ -74,6 +74,7 @@ export default {
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     aiAsk: 'AI Ask',
+    aiAskFailed: 'AI ask failed',
     aiAskPlaceholder: 'Ask about the scene...',
     aiSuggestDescribe: 'Describe scene',
     aiSuggestCount: 'How many people?',
