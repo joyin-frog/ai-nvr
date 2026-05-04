@@ -245,11 +245,11 @@ class Fmp4StreamParser {
       /** moof 后面跟的 mdat 组成一个完整的 media segment */
       if (type === "mdat" && this.hasMoof) {
         /** 独立拷贝，切断对 this.buffer 的 subarray 引用 */
-        let moofData = Buffer.from(this.completedBoxes[0]!.data);
+        const moofData = Buffer.from(this.completedBoxes[0]!.data);
         const mdatData = Buffer.from(this.completedBoxes[1]!.data);
 
-        /** 重写 tfdt 为 wall clock PTS，对齐真实时间 */
-        moofData = this.fixMoof(moofData);
+        /** 重写 tfdt 为 wall clock PTS（原地修改） */
+        this.fixMoof(moofData);
 
         this.lastMoof = moofData;
         this.lastMdat = mdatData;
@@ -763,7 +763,7 @@ export class H264Fmp4Extractor {
           ...inputArgs,
           "-filter_complex", `[0:v]split=2[v1][v2];[v2]${jpegFilter}[v2out]`,
           "-map", "[v1]", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-          "-crf", "28", "-g", String(gopSize), "-keyint_min", String(gopSize),
+          "-crf", "18", "-g", String(gopSize), "-keyint_min", String(gopSize),
           "-x264-params", "bframes=0:sync-lookahead=0:rc-lookahead=0",
           "-threads", "2",
           ...audioArgs,

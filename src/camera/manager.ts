@@ -219,9 +219,10 @@ export class CameraManager {
     this.fmp4Extractors.set(cam.id, fmp4Extractor);
     fmp4Extractor.start();
 
-    /** 为录像器创建 fMP4 环形缓冲区 */
+    /** 为录像器创建 fMP4 环形缓冲区
+     *  按 2MB/s 估算（覆盖 4K CRF18 场景），确保预缓冲能容纳完整的 bufferDurationMs 时长 */
     const config = this.runtimeConfig.get().recording;
-    const maxBytes = config.bufferDurationMs * 256 * 1024;
+    const maxBytes = Math.ceil(config.bufferDurationMs / 1000) * 2 * 1024 * 1024;
     const ringBuf = new Fmp4RingBuffer(maxBytes);
     this.ringBuffers.set(cam.id, ringBuf);
     this.recorder.setRingBuffer(cam.id, ringBuf);
