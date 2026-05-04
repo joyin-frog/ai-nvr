@@ -179,7 +179,7 @@ export function loadConfig(configPath?: string): AppConfig {
   /** 认证配置 */
   const authNode = doc.auth as Record<string, unknown> | undefined;
 
-  return {
+  const config: AppConfig = {
     ffmpegPath,
     cameras,
     motion: {
@@ -204,6 +204,55 @@ export function loadConfig(configPath?: string): AppConfig {
         ?? resolve(import.meta.dir, "../data"),
     },
   };
+
+  validateConfig(config);
+  return config;
+}
+
+/** 运行时配置校验，发现不合理值时 warn 并自动修正 */
+function validateConfig(config: AppConfig): void {
+  const warnings: string[] = [];
+
+  if (config.motion.threshold <= 0 || config.motion.threshold > 1) {
+    warnings.push(`motion.threshold=${config.motion.threshold} 不在 (0,1] 范围，已修正为 0.01`);
+    config.motion.threshold = 0.01;
+  }
+  if (config.motion.cooldown < 0) {
+    warnings.push(`motion.cooldown=${config.motion.cooldown} 为负数，已修正为 1000`);
+    config.motion.cooldown = 1000;
+  }
+  if (config.server.port < 1 || config.server.port > 65535) {
+    warnings.push(`server.port=${config.server.port} 不在合法端口范围，已修正为 3100`);
+    config.server.port = 3100;
+  }
+
+  for (const cam of config.cameras) {
+    if (cam.detectFps <= 0 || cam.detectFps > 120) {
+      warnings.push(`摄像头 ${cam.id}: detectFps=${cam.detectFps} 不合理，已修正为 15`);
+      cam.detectFps = 15;
+    }
+    if (cam.jpegQuality < 1 || cam.jpegQuality > 31) {
+      warnings.push(`摄像头 ${cam.id}: jpegQuality=${cam.jpegQuality} 不在 [1,31]，已修正为 10`);
+      cam.jpegQuality = 10;
+    }
+    if (cam.enabled && !cam.stream.hd && !cam.stream.sd) {
+      warnings.push(`摄像头 ${cam.id}: 已启用但未配置任何 RTSP 流地址`);
+    }
+  }
+
+  if (config.ai.llm.enabled) {
+    if (config.ai.llm.interval < 1000) {
+      warnings.push(`ai.llm.interval=${config.ai.llm.interval} 过低（最小 1000ms），已修正`);
+      config.ai.llm.interval = 1000;
+    }
+    if (!config.ai.llm.apiUrl) {
+      warnings.push("ai.llm 已启用但未配置 api_url，将跳过 LLM 调用");
+    }
+  }
+
+  if (warnings.length > 0) {
+    for (const w of warnings) console.warn("[Config] " + w);
+  }
 }
 
 /** 解析 LLM 配置 */

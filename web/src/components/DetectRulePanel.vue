@@ -202,7 +202,7 @@ async function quickCreateSignal() {
       quickSignalName.value = ''
       await loadSignalList()
     }
-  } catch { /* ignore */ }
+  } catch { toastError(t('alert.saveFailed')) }
 }
 
 /** 构建 schedule JSON */
@@ -253,7 +253,7 @@ async function loadRoiList() {
     const res = await authFetch('/api/roi')
     if (res.ok) roiList.value = await res.json()
   } catch {
-    // ignore
+    toastError(t('settings.loadFailed'))
   }
 }
 
@@ -263,7 +263,7 @@ async function loadSignalList() {
     const res = await authFetch('/api/signals')
     if (res.ok) signalList.value = await res.json()
   } catch {
-    // ignore
+    toastError(t('settings.loadFailed'))
   }
 }
 
@@ -274,7 +274,7 @@ async function loadObservers() {
     const res = await authFetch('/api/observers')
     if (res.ok) observers.value = await res.json()
   } catch {
-    // ignore
+    toastError(t('settings.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -302,7 +302,7 @@ async function loadRecords(append = false) {
       recordTotal.value = data.total ?? records.value.length
     }
   } catch {
-    // ignore
+    toastError(t('settings.loadFailed'))
   }
 }
 
@@ -572,7 +572,7 @@ async function saveRoiDraw() {
         await loadRoiList()
       }
     }
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.saveFailed')) }
 }
 
 function cancelRoiDraw() {

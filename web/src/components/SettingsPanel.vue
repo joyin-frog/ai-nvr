@@ -171,7 +171,7 @@ async function loadSettings() {
       settings.value = data
     }
   } catch {
-    // ignore
+    toast.error(t('settings.loadFailed'))
   }
 }
 
@@ -194,7 +194,7 @@ async function saveSettings() {
       successTimer = setTimeout(() => { success.value = false }, 2000)
     }
   } catch {
-    // ignore
+    toast.error(t('settings.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -247,7 +247,7 @@ async function loadClipCandidates() {
       clipCandidatesLoaded.value = true
     }
   } catch {
-    // ignore
+    toast.error(t('settings.loadFailed'))
   }
 }
 
@@ -311,7 +311,7 @@ async function loadCameras() {
       cameraList.value = data.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))
     }
   } catch {
-    // ignore
+    toast.error(t('settings.loadFailed'))
   }
 }
 
@@ -345,7 +345,7 @@ async function runCleanup() {
     }
     loadCleanupStats()
   } catch {
-    // ignore
+    toast.error(t('settings.saveFailed'))
   }
 }
 
@@ -357,7 +357,7 @@ async function loadCleanupStats() {
     const res = await authFetch('/api/cleanup/stats')
     if (res.ok) cleanupStats.value = await res.json()
   } catch {
-    // ignore
+    toast.error(t('settings.loadFailed'))
   }
 }
 

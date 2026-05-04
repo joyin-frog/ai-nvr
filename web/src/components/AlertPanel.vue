@@ -159,7 +159,7 @@ async function loadSourceOptions() {
     ])
     if (observersRes.ok) observerList.value = await observersRes.json()
     if (signalsRes.ok) signalList.value = await signalsRes.json()
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 async function loadRules() {
@@ -167,7 +167,7 @@ async function loadRules() {
   try {
     const res = await authFetch('/api/alerts/rules')
     if (res.ok) rules.value = await res.json()
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
   finally { loading.value = false }
 }
 
@@ -189,7 +189,7 @@ async function loadAlerts(append = false) {
       alerts.value = append ? [...alerts.value, ...data.records] : data.records
       alertTotal.value = data.total ?? alerts.value.length
     }
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 function loadMoreAlerts() {
@@ -385,7 +385,7 @@ async function exportCsv() {
     link.download = `alerts_${dateStr}.csv`
     link.click()
     URL.revokeObjectURL(link.href)
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 /** 根据事件类型重置条件表单 */

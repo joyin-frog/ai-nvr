@@ -101,14 +101,14 @@ async function loadObserverNames() {
       for (const o of observers) map[o.id] = o.name
       observerNames.value = map
     }
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 async function loadSignals() {
   try {
     const res = await authFetch('/api/signals')
     if (res.ok) signals.value = await res.json()
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 async function loadRecords(append = false) {
@@ -129,7 +129,7 @@ async function loadRecords(append = false) {
       records.value = append ? [...records.value, ...data.records] : data.records
       recordTotal.value = data.total
     }
-  } catch { /* ignore */ }
+  } catch { toastError(t('settings.loadFailed')) }
 }
 
 function resetForm() {
@@ -181,7 +181,7 @@ async function addSignal() {
     showAdd.value = false
     resetForm()
     await loadSignals()
-  } catch { /* ignore */ } finally {
+  } catch { toastError(t('alert.saveFailed')) } finally {
     saving.value = false
   }
 }
@@ -208,7 +208,7 @@ async function saveEdit() {
     editingId.value = null
     resetForm()
     await loadSignals()
-  } catch { /* ignore */ }
+  } catch { toastError(t('alert.saveFailed')) }
 }
 
 async function toggleSignal(signal: Signal) {
@@ -223,7 +223,7 @@ async function toggleSignal(signal: Signal) {
       return
     }
     await loadSignals()
-  } catch { /* ignore */ }
+  } catch { toastError(t('alert.saveFailed')) }
 }
 
 async function toggleBoolValue(signal: Signal) {
@@ -239,7 +239,7 @@ async function toggleBoolValue(signal: Signal) {
       return
     }
     await loadSignals()
-  } catch { /* ignore */ }
+  } catch { toastError(t('alert.saveFailed')) }
 }
 
 async function deleteSignal(id: number) {
@@ -251,7 +251,7 @@ async function deleteSignal(id: number) {
       return
     }
     await loadSignals()
-  } catch { /* ignore */ }
+  } catch { toastError(t('alert.deleteFailed')) }
 }
 
 function cancelEdit() {
