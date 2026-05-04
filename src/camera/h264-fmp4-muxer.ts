@@ -790,7 +790,7 @@ export class H264Fmp4Extractor {
     });
 
     /** 高水位线 128KB：让单个 fMP4 segment 更可能一次读取完毕，减少 feed/flatten 调用 */
-    const stdout = new Readable({ highWaterMark: 32768 }).wrap(this.proc.stdout!);
+    const stdout = new Readable({ highWaterMark: 131072 }).wrap(this.proc.stdout!);
     let initCached = false;
     stdout.on("data", (chunk: Buffer) => {
       this.parser.feed(chunk, this.eventBus, this.config.id);

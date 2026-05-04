@@ -58,14 +58,14 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
   }
 }
 
-/** 保留当前播放位置前多少秒缓冲区 */
-const BUFFER_RETAIN_SECONDS = 0.5
+/** 保留当前播放位置前多少秒缓冲区（给 MSE 解码器足够余量） */
+const BUFFER_RETAIN_SECONDS = 1.0
 
 /** 延迟超过此值（秒）直接 seek 到最新 */
 const LIVE_SEEK_THRESHOLD = 0.8
 
-/** pending 队列最大段数，超过则丢弃最旧的段 */
-const MAX_PENDING_SEGMENTS = 4
+/** pending 队列最大段数，超过则丢弃最旧的段（14fps 下 ~570ms 缓冲） */
+const MAX_PENDING_SEGMENTS = 8
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */
@@ -119,8 +119,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let pruning = false
   /** append 计数（用于控制 pruneBuffer 频率，避免每次 append 后都 remove） */
   let appendCount = 0
-  /** 每 N 次 append 执行一次 pruneBuffer（30次≈2s@15fps，减少 remove 与 append 竞争） */
-  const PRUNE_EVERY_N_APPENDS = 15
+  /** 每 N 次 append 执行一次 pruneBuffer（减少 remove 与 append 竞争） */
+  const PRUNE_EVERY_N_APPENDS = 20
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
@@ -170,8 +170,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
   /** 绑定 video 元素的关键事件 */
   function bindVideoEvents(el: HTMLVideoElement) {
-    /** 播放卡住时立即 seek 到最新位置（不等待 rAF，减少 16ms 延迟）
-     *  即使 sourceBuffer.updating 也直接 seek — video.currentTime 赋值不依赖 SB 空闲 */
+    /** 播放卡住时 seek 到最新位置（不等待 rAF，减少延迟） */
     const onWaiting = () => {
       const video = videoRef.value
       if (!video || !sourceBuffer) return
@@ -179,10 +178,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       if (buffered.length > 0) {
         const end = buffered.end(buffered.length - 1)
         if (end - video.currentTime > 0.05) {
-          video.currentTime = end - 0.01
+          video.currentTime = end - 0.05
         }
       }
-      catchUpToLive()
     }
 
     /** 解码错误时重连（通过 scheduleReconnect 带退避和上限） */
@@ -585,7 +583,15 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       doAppend(pendingQueue.shift()!)
       return
     }
-    /** 多段合并为一次 append（减少 MSE API 调用开销） */
+    /** 多段合并为一次 append（减少 MSE API 调用开销）
+     *  如果 pendingInit 存在，先独立 append init，剩余 media 段再合并 */
+    if (pendingInit) {
+      const initData = pendingInit
+      pendingInit = null
+      doAppend(initData)
+      /** init append 完成后 onUpdateEnd 会再次调用 drainPending 处理剩余段 */
+      return
+    }
     const batch = pendingQueue.splice(0, pendingQueue.length)
     const total = batch.reduce((sum, b) => sum + b.byteLength, 0)
     const merged = new Uint8Array(total)

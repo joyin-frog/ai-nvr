@@ -254,10 +254,10 @@ export function startServer(
     /** 实时流每帧内容不同，跳过缓存命中检查，直接编码并广播 */
     const encoded = encodeFmp4MediaFromParts(moofData, mdatData);
     for (const client of clientSet) {
-      /** 背压保护：缓冲区积压超过 3 帧大小时跳过（实时流低延迟优先）
-       *  每帧 ~600KB（2880x1624 全 I 帧），3 帧 = ~1.8MB
-       *  阈值太低（512KB）会导致每帧都被跳过，实际帧率减半 */
-      if (client.getBufferedAmount() > 2097152) continue;
+      /** 背压保护：缓冲区积压超过阈值时跳过（实时流低延迟优先）
+       *  每帧 ~1.2MB（2880x1624 CRF18 全 I 帧），4MB ≈ 3.3 帧缓冲
+       *  过低会导致网络波动时立即丢帧，过高则增加延迟 */
+      if (client.getBufferedAmount() > 4194304) continue;
       client.send(encoded, false);
     }
   }
@@ -305,7 +305,7 @@ export function startServer(
   }
 
   function cleanupFmp4Connection(ws: WsClient) {
-    const camId = (ws as unknown as { cameraId?: string }).cameraId;
+    const camId = (ws as unknown as { data?: { cameraId?: string } }).data?.cameraId;
     if (camId) {
       const clientSet = fmp4ClientsByCamera.get(camId);
       if (clientSet) {
