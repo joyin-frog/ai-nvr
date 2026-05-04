@@ -255,9 +255,8 @@ export function startServer(
     const encoded = encodeFmp4MediaFromParts(moofData, mdatData);
     for (const client of clientSet) {
       /** 背压保护：缓冲区积压超过阈值时跳过（实时流低延迟优先）
-       *  每帧 ~1.2MB（2880x1624 CRF18 全 I 帧），4MB ≈ 3.3 帧缓冲
-       *  过低会导致网络波动时立即丢帧，过高则增加延迟 */
-      if (client.getBufferedAmount() > 4194304) continue;
+       *  GOP=15 时每个 segment ~1.7MB，6MB ≈ 3-4 个 segment 缓冲 */
+      if (client.getBufferedAmount() > 6291456) continue;
       client.send(encoded, false);
     }
   }
@@ -1648,13 +1647,31 @@ Be specific and factual. ${langInstruction}`;
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
           matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
         });
-        /** 关联快照路径 */
+        /** 关联快照路径：通过 ruleId 查出规则的所有摄像头，为每个摄像头查找快照 */
         if (alertSnapshotStorage && records.length > 0) {
-          const snapEntries = records.map(r => ({ cameraId: r.cameraId, timestamp: r.timestamp }));
-          const snapPaths = alertSnapshotStorage.batchFindSnapshotPaths(snapEntries);
+          /** 构建规则 ID → cameras 列表映射 */
+          const allRules = detectRuleStorage.listRules();
+          const ruleMap = new Map(allRules.map(r => [r.id, r.cameras.map(c => c.cameraId)]));
+          /** 收集所有需要查找的 cameraId:timestamp 条目 */
+          const allSnapEntries: Array<{ cameraId: string; timestamp: number }> = [];
           for (const r of records) {
-            const snapPath = snapPaths.get(`${r.cameraId}:${r.timestamp}`);
-            (r as unknown as Record<string, unknown>).snapshotUrl = snapPath ? `/api/alert-snapshots/${snapPath}` : null;
+            const camIds = ruleMap.get(r.ruleId) ?? [r.cameraId];
+            for (const camId of camIds) {
+              allSnapEntries.push({ cameraId: camId, timestamp: r.timestamp });
+            }
+          }
+          const snapPaths = alertSnapshotStorage.batchFindSnapshotPaths(allSnapEntries);
+          for (const r of records) {
+            const camIds = ruleMap.get(r.ruleId) ?? [r.cameraId];
+            const snapshotUrls: Array<{ cameraId: string; url: string }> = [];
+            for (const camId of camIds) {
+              const snapPath = snapPaths.get(`${camId}:${r.timestamp}`);
+              if (snapPath) {
+                snapshotUrls.push({ cameraId: camId, url: `/api/alert-snapshots/${snapPath}` });
+              }
+            }
+            (r as unknown as Record<string, unknown>).snapshotUrl = snapshotUrls.length > 0 ? snapshotUrls[0]!.url : null;
+            (r as unknown as Record<string, unknown>).snapshotUrls = snapshotUrls;
           }
         }
         return Response.json({ records, total });

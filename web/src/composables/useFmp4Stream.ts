@@ -58,14 +58,14 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
   }
 }
 
-/** 保留当前播放位置前多少秒缓冲区（给 MSE 解码器足够余量） */
-const BUFFER_RETAIN_SECONDS = 1.0
+/** 保留当前播放位置前多少秒缓冲区（GOP=15 时每个 segment 跨越 1 秒，需要更大余量） */
+const BUFFER_RETAIN_SECONDS = 2.0
 
-/** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 0.8
+/** 延迟超过此值（秒）直接 seek 到最新（需覆盖一个完整 segment 的时长） */
+const LIVE_SEEK_THRESHOLD = 2.0
 
-/** pending 队列最大段数，超过则丢弃最旧的段（14fps 下 ~570ms 缓冲） */
-const MAX_PENDING_SEGMENTS = 8
+/** pending 队列最大段数（GOP=15 时每个 segment ~1 秒视频，3 个足够） */
+const MAX_PENDING_SEGMENTS = 3
 
 export function useFmp4Stream(cameraId: Ref<string>) {
   /** video 元素引用 */

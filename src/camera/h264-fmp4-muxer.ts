@@ -95,8 +95,9 @@ class Fmp4StreamParser {
   private lastMdat: Buffer | null = null;
   /** 缓存的合并结果（被 lastMediaSegment getter 消费后清除） */
   private lastMergedMedia: Buffer | null = null;
-  /** 帧率统计 */
+  /** 帧率统计（按实际帧数，非 segment 数） */
   private segmentCount = 0;
+  private frameCount = 0;
   private segmentCountStart = Date.now();
   private currentFps = 0;
   /** 视频宽度 */
@@ -259,12 +260,15 @@ class Fmp4StreamParser {
         this.completedBoxes.length = 0;
         this.hasMoof = false;
 
-        /** FPS 统计 */
+        /** FPS 统计（按实际帧数，GOP>1 时每个 segment 含多帧） */
+        const sampleCount = this.extractSampleCount(moofData);
         this.segmentCount++;
+        this.frameCount += sampleCount;
         const now = Date.now();
         if (now - this.segmentCountStart >= 5000) {
-          this.currentFps = this.segmentCount * 1000 / (now - this.segmentCountStart);
+          this.currentFps = this.frameCount * 1000 / (now - this.segmentCountStart);
           this.segmentCount = 0;
+          this.frameCount = 0;
           this.segmentCountStart = now;
         }
       }
@@ -490,11 +494,13 @@ class Fmp4StreamParser {
       return moof;
     }
 
-    /** 增量式 PTS：每帧 PTS = 上一帧 PTS + ptsStep
-     *  ptsStep 动态跟随 parser 实测帧率，避免 fps 变化时 PTS 跳变 */
+    /** 增量式 PTS：每 segment 的 tfdt = 上一个 segment 的 tfdt + segment 时长
+     *  segment 时长 = sample_count × (timescale / fps)
+     *  GOP=1 时 sample_count=1，GOP=15 时 sample_count=15 */
     const fps = this.currentFps > 0 ? this.currentFps : 15;
-    const step = BigInt(Math.round(this.timescale / fps));
-    this.nextPts += step;
+    const sampleCount = this.extractSampleCount(moof);
+    const frameStep = BigInt(Math.round(this.timescale / fps));
+    this.nextPts += frameStep * BigInt(sampleCount);
 
     /** 原地写入 tfdt */
     this.writeTfdt(moof, this.nextPts);
@@ -526,6 +532,32 @@ class Fmp4StreamParser {
       off += size;
     }
     return null;
+  }
+
+  /** 从 moof 的 trun 中提取 sample_count */
+  private extractSampleCount(moof: Buffer): number {
+    let off = 8;
+    while (off + 8 <= moof.length) {
+      const size = moof.readUInt32BE(off);
+      const type = moof.subarray(off + 4, off + 8).toString("ascii");
+      if (size < 8 || off + size > moof.length) break;
+      if (type === "traf") {
+        const end = off + size;
+        let tOff = off + 8;
+        while (tOff + 16 <= end) {
+          const sSize = moof.readUInt32BE(tOff);
+          const sType = moof.subarray(tOff + 4, tOff + 8).toString("ascii");
+          if (sSize < 8 || tOff + sSize > end) break;
+          if (sType === "trun") {
+            /** trun: [4B size][4B type][1B version][3B flags][4B sample_count] */
+            return moof.readUInt32BE(tOff + 12);
+          }
+          tOff += sSize;
+        }
+      }
+      off += size;
+    }
+    return 1;
   }
 
   /** 原地写入 tfdt PTS */
@@ -671,8 +703,8 @@ export class H264Fmp4Extractor {
     ];
 
     /** 注意：fMP4 输出必须保持原始分辨率和帧率，不得降低，我们要提供最好的体验给用户 */
-    const gopSize = 1;
-    /** movflags: frag_keyframe 在每个关键帧处切 fragment，配合 -g 1 即每帧一个 fragment */
+    const gopSize = 15;
+    /** movflags: frag_keyframe 在每个关键帧处切 fragment */
     const movflags = "frag_keyframe+empty_moov+default_base_moof";
 
     /** 音频编码参数：AAC 64kbps 单声道（-map 0:a? 的 ? 表示无音频流时不报错） */
