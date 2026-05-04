@@ -4,41 +4,35 @@ import { authWsUrl } from '../services/auth'
 /**
  * fMP4/MSE 流播放器
  * 通过 WebSocket 接收 fMP4 段，用 MediaSource + <video> 硬件解码
- * 零 CPU 解码开销，GPU 原生渲染
  *
  * WS 二进制协议：
- * Init segment: [0x01][2B codec长度 LE uint16][codec ASCII][fMP4 data]
+ * Init segment: [0x01][2B codec长度 LE uint16][codec ASCII][2B audio_codec_len LE][audio_codec][fMP4 data]
  * Media segment: [0x02][fMP4 data]
  */
 const FMP4_TYPE_INIT = 0x01
 const FMP4_TYPE_MEDIA = 0x02
 
-/** 全局 TextDecoder 单例（避免每次 init segment 创建新实例） */
+/** 全局 TextDecoder 单例 */
 const textDecoder = new TextDecoder()
 
-/** 全局共享 prune 循环：使用 rAF 驱动，catchUpToLive 节流 100ms */
-const activeStreams = new Set<{ pruneBuffer: () => void; catchUpToLive: () => void; needsPrune: boolean }>()
+/** 全局共享 rAF 循环 */
+const activeStreams = new Set<{ pruneBuffer: () => void; needsPrune: boolean }>()
 let sharedRafId: number | null = null
 let sharedPruneRefCount = 0
-let lastCatchUpTime = 0
 
 function rafLoop() {
-  const now = performance.now()
-  const shouldCatchUp = now - lastCatchUpTime >= 100
   for (const s of activeStreams) {
-    if (shouldCatchUp) s.catchUpToLive()
     if (s.needsPrune) {
       s.needsPrune = false
       s.pruneBuffer()
     }
   }
-  if (shouldCatchUp) lastCatchUpTime = now
   if (activeStreams.size > 0) {
     sharedRafId = requestAnimationFrame(rafLoop)
   }
 }
 
-function registerStream(stream: { pruneBuffer: () => void; catchUpToLive: () => void; needsPrune: boolean }) {
+function registerStream(stream: { pruneBuffer: () => void; needsPrune: boolean }) {
   activeStreams.add(stream)
   sharedPruneRefCount++
   if (sharedRafId === null) {
@@ -46,7 +40,7 @@ function registerStream(stream: { pruneBuffer: () => void; catchUpToLive: () => 
   }
 }
 
-function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () => void; needsPrune: boolean }) {
+function unregisterStream(stream: { pruneBuffer: () => void; needsPrune: boolean }) {
   activeStreams.delete(stream)
   sharedPruneRefCount--
   if (sharedPruneRefCount <= 0) {
@@ -59,77 +53,54 @@ function unregisterStream(stream: { pruneBuffer: () => void; catchUpToLive: () =
 }
 
 /** 保留当前播放位置前多少秒缓冲区 */
-const BUFFER_RETAIN_SECONDS = 1.0
+const BUFFER_RETAIN_SECONDS = 0.3
 
-/** 延迟超过此值（秒）直接 seek 到最新 */
-const LIVE_SEEK_THRESHOLD = 1.5
+/** 延迟超过此值（秒）seek 到最新 */
+const LIVE_SEEK_THRESHOLD = 0.3
 
-/** pending 队列最大段数，超过则丢弃最旧的段（允许缓冲 3 段避免频繁丢帧） */
-const MAX_PENDING_SEGMENTS = 3
+/** pending 队列最大段数 */
+const MAX_PENDING_SEGMENTS = 5
 
 export function useFmp4Stream(cameraId: Ref<string>) {
-  /** video 元素引用 */
   const videoRef = ref<HTMLVideoElement | null>(null)
-  /** 是否已连接 */
   const connected = ref(false)
-  /** 是否正在播放 */
   const playing = ref(false)
-  /** 当前解码分辨率 */
   const videoWidth = ref(0)
   const videoHeight = ref(0)
-  /** MSE 连接是否彻底失败（连续重连失败），用于回退到 Canvas */
+  /** MSE 连接是否彻底失败 */
   const failed = ref(false)
   /** 用户真实看到的渲染帧率 */
   const fps = ref(0)
 
   let mediaSource: MediaSource | null = null
   let sourceBuffer: SourceBuffer | null = null
-  /** 音频 SourceBuffer（当 fMP4 包含音频轨道时创建） */
   let audioSourceBuffer: SourceBuffer | null = null
-  /** 当前音频 codec */
   let currentAudioCodec = ''
   let ws: WebSocket | null = null
-  /** 待 append 的段队列 */
   let pendingQueue: BufferSource[] = []
-  /** 是否正在 append */
   let appending = false
-  /** 重连定时器 */
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  /** 重连次数 */
   let retryCount = 0
-  /** 当前使用的 codec */
   let currentCodec = ''
-  /** FPS 统计：requestVideoFrameCallback 计数 */
   let vfcFrameCount = 0
   let vfcStartTime = 0
   let videoFrameCallbackId: number | null = null
-  /** rVFC 最近一次更新时间（用于判断 rVFC 是否在工作） */
   let lastVfcUpdateTime = 0
-  /** FPS 统计：media segment 到达计数（不依赖 rVFC，作为备选） */
   let segmentCount = 0
   let segmentFpsStart = 0
-  /** video 元素事件处理器引用（用于清理） */
   let videoEventHandlers: Array<{ event: string; handler: EventListener }> = []
-  /** 待重初始化的 init segment（ffmpeg 重启后等待第一个 media segment 一起处理） */
   let pendingInit: BufferSource | null = null
-
-  /** 解码检测定时器：连接后一段时间内 videoWidth=0 则判定为解码失败 */
   let decodeCheckTimer: ReturnType<typeof setTimeout> | null = null
-  /** pruneBuffer 是否正在执行中（防止 remove 和 append 竞争） */
   let pruning = false
-  /** append 计数（用于控制 pruneBuffer 频率，避免每次 append 后都 remove） */
   let appendCount = 0
-  /** 每 N 次 append 执行一次 pruneBuffer（30次≈2s@15fps，减少 remove 与 append 竞争） */
-  const PRUNE_EVERY_N_APPENDS = 30
+  const PRUNE_EVERY_N_APPENDS = 8
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
-    /** 清理旧的 video frame callback */
     if (videoFrameCallbackId != null && videoRef.value) {
       videoRef.value.cancelVideoFrameCallback?.(videoFrameCallbackId)
       videoFrameCallbackId = null
     }
-    /** 清理旧事件 */
     if (videoRef.value) {
       for (const { event, handler } of videoEventHandlers) {
         videoRef.value.removeEventListener(event, handler)
@@ -139,16 +110,13 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
     videoRef.value = el
 
-    /** 绑定 video 元素事件 */
     if (el) {
       bindVideoEvents(el)
-      /** 如果已有 MediaSource 但还没绑定到 video，现在绑定 */
       if (mediaSource && !el.src) {
         if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl)
         currentBlobUrl = URL.createObjectURL(mediaSource)
         el.src = currentBlobUrl
       }
-      /** 使用 requestVideoFrameCallback 精确测量实际视频帧率 */
       if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
         vfcStartTime = performance.now()
         vfcFrameCount = 0
@@ -168,29 +136,24 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
-  /** 绑定 video 元素的关键事件 */
   function bindVideoEvents(el: HTMLVideoElement) {
-    /** 播放卡住时立即 seek 到最新位置（不等待 rAF，减少 16ms 延迟）
-     *  即使 sourceBuffer.updating 也直接 seek — video.currentTime 赋值不依赖 SB 空闲 */
+    /** 播放卡住时立即 seek */
     const onWaiting = () => {
       const video = videoRef.value
       if (!video || !sourceBuffer) return
       const buffered = sourceBuffer.buffered
       if (buffered.length > 0) {
         const end = buffered.end(buffered.length - 1)
-        if (end - video.currentTime > 0.05) {
-          video.currentTime = end - 0.01
+        if (end - video.currentTime > 0.02) {
+          video.currentTime = end - 0.02
         }
       }
-      catchUpToLive()
     }
 
-    /** 解码错误时重连（通过 scheduleReconnect 带退避和上限） */
     const onError = () => {
       const err = el.error
       if (err) {
         console.warn(`[fMP4] video error: code=${err.code} ${err.message}`)
-        /** MEDIA_ERR_DECODE (3) 或 MEDIA_ERR_SRC_NOT_SUPPORTED (4) → 延迟重连 */
         if (err.code >= 3) {
           ws?.close()
           scheduleReconnect()
@@ -198,13 +161,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       }
     }
 
-    const onPlaying = () => {
-      playing.value = true
-    }
-
-    const onPause = () => {
-      playing.value = false
-    }
+    const onPlaying = () => { playing.value = true }
+    const onPause = () => { playing.value = false }
 
     el.addEventListener('waiting', onWaiting)
     el.addEventListener('error', onError)
@@ -219,27 +177,9 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ]
   }
 
-  /** 追赶直播：PTS 均匀递增，只需处理异常延迟 */
-  function catchUpToLive() {
-    const video = videoRef.value
-    if (!video || !sourceBuffer) return
-    const buffered = sourceBuffer.buffered
-    if (buffered.length === 0) return
-
-    const end = buffered.end(buffered.length - 1)
-    const delay = end - video.currentTime
-
-    if (delay > LIVE_SEEK_THRESHOLD || delay < -0.5) {
-      /** 异常延迟或播放位置跑偏，seek 到最新 */
-      video.currentTime = end - 0.01
-    }
-  }
-
-  /** 当前 blob URL（用于清理释放） */
   let currentBlobUrl: string | null = null
+  const streamHandle = { pruneBuffer, needsPrune: false }
 
-  /** 连接 fMP4 流 */
-  const streamHandle = { pruneBuffer, catchUpToLive, needsPrune: false }
   function connect() {
     disconnect()
     pendingQueue = []
@@ -255,18 +195,13 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
     mediaSource = new MediaSource()
     if (videoRef.value) {
-      /** 释放旧 blob URL */
-      if (currentBlobUrl) {
-        URL.revokeObjectURL(currentBlobUrl)
-      }
+      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl)
       currentBlobUrl = URL.createObjectURL(mediaSource)
       videoRef.value.src = currentBlobUrl
     }
 
     mediaSource.addEventListener('sourceopen', onSourceOpen)
-    mediaSource.addEventListener('sourceclose', () => {
-      connected.value = false
-    })
+    mediaSource.addEventListener('sourceclose', () => { connected.value = false })
   }
 
   function onSourceOpen() {
@@ -281,14 +216,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     ws.onopen = () => {
       connected.value = true
       retryCount = 0
-      /** 启动解码检测：5 秒后如果 video 仍无解码输出，判定为不支持 */
       if (decodeCheckTimer) clearTimeout(decodeCheckTimer)
       decodeCheckTimer = setTimeout(() => {
         if (!videoRef.value) return
-        /** videoWidth > 0 说明解码成功 */
         if (videoRef.value.videoWidth > 0) return
-        /** 有数据但无法解码 — 可能是浏览器不支持该 codec */
-        console.warn('[fMP4] 5秒内未检测到解码输出，codec 可能不被支持，回退到 Canvas')
+        console.warn('[fMP4] 5秒内未检测到解码输出，回退到 Canvas')
         failed.value = true
       }, 5000)
     }
@@ -300,7 +232,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       const type = raw[0]
 
       if (type === FMP4_TYPE_INIT) {
-        /** 解析协议: [0x01][2B video_codec_len][video_codec][2B audio_codec_len][audio_codec][fMP4 data] */
         if (raw.length < 5) return
         let off = 1
         const videoCodecLen = (raw[off + 1]! << 8) | raw[off]!
@@ -317,7 +248,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         off += audioCodecLen
         const fmp4Data = raw.slice(off).buffer
 
-        /** codec 变化时需要重建 SourceBuffer */
         const codecChanged = currentCodec !== codec || currentAudioCodec !== audioCodec
         if (codecChanged) {
           currentCodec = codec
@@ -327,7 +257,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
             ws?.close()
             return
           }
-          /** 新 SourceBuffer：直接 append init segment */
           pendingInit = null
           doAppend(fmp4Data)
         } else {
@@ -335,15 +264,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
           pendingQueue = []
         }
       } else if (type === FMP4_TYPE_MEDIA) {
-        /** subarray 零拷贝视图（共享底层 ArrayBuffer），直接传给 MSE 的 appendBuffer */
         const fmp4Data = raw.subarray(1)
 
-        /** 基于 media segment 到达频率计算 FPS（rVFC 不工作时作为备选） */
         segmentCount++
         const segElapsed = performance.now() - segmentFpsStart
         if (segElapsed >= 2000) {
           const segFps = Math.round(segmentCount * 1000 / segElapsed)
-          /** rVFC 超过 4 秒没产出 FPS（浏览器不支持或 HEVC 不触发 rVFC），用 segment 频率 */
           if (segFps > 0 && performance.now() - lastVfcUpdateTime > 4000) {
             fps.value = segFps
           }
@@ -351,14 +277,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
           segmentFpsStart = performance.now()
         }
 
-        /** 有待处理的 init segment：先 append 新数据，再异步清理旧缓冲区 */
         if (pendingInit) {
           const initData = pendingInit
           pendingInit = null
-          /** 直接 append init + media，不先 remove — 新数据到来后视频立刻有内容，消除黑闪 */
           doAppend(initData)
           queueAppend(fmp4Data)
-          /** 延迟清理旧缓冲区（等新数据 append 完成后由 pruneBuffer 异步处理） */
         } else {
           queueAppend(fmp4Data)
         }
@@ -370,16 +293,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       scheduleReconnect()
     }
 
-    ws.onerror = () => {
-      ws?.close()
-    }
+    ws.onerror = () => { ws?.close() }
   }
 
-  /** 创建或重建 SourceBuffer（视频 + 可选音频），返回是否成功 */
   function ensureSourceBuffer(codec: string, audioCodec: string): boolean {
     if (!mediaSource || mediaSource.readyState !== 'open') return false
 
-    /** 移除旧的 SourceBuffer */
     if (sourceBuffer) {
       sourceBuffer.removeEventListener('updateend', onUpdateEnd)
       if (!sourceBuffer.updating) {
@@ -395,7 +314,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       audioSourceBuffer = null
     }
 
-    /** 优先使用服务器提供的 codec，失败则回退 */
     const hevcCodecs = ['hvc1.1.6.L93.B0', 'hev1.1.6.L93.B0']
     const avcCodecs = ['avc1.640029', 'avc1.64001F', 'avc1.4D401F', 'avc1.42C01E']
     const codecs = codec.startsWith('hvc1') || codec.startsWith('hev1')
@@ -403,10 +321,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       : [codec, ...avcCodecs, ...hevcCodecs]
     const unique = [...new Set(codecs)]
 
-    /**
-     * 音频+视频合一模式：尝试用 video/mp4; codecs="video,audio" 创建单个 SourceBuffer
-     * MSE 会自动将 muxed fMP4 中的视频和音频分发到对应轨道
-     */
     if (audioCodec) {
       for (const c of unique) {
         const combinedMime = `video/mp4; codecs="${c}, ${audioCodec}"`
@@ -418,16 +332,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
             sourceBuffer.mode = 'segments'
             console.debug(`[fMP4] Muxed SourceBuffer created: ${c} + ${audioCodec}`)
             return true
-          } catch {
-            /* continue */
-          }
+          } catch { /* continue */ }
         }
       }
-      /** 合一模式不支持，尝试分离模式（双 SourceBuffer） */
       console.debug(`[fMP4] 合一 SourceBuffer 不支持，尝试分离模式`)
     }
 
-    /** 纯视频模式 或 分离模式中的视频 SourceBuffer */
     const supported = unique.filter(c =>
       MediaSource.isTypeSupported(`video/mp4; codecs="${c}"`)
     )
@@ -444,16 +354,13 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         sourceBuffer.mode = 'segments'
         console.debug(`[fMP4] Video SourceBuffer created: ${c}`)
         break
-      } catch {
-        /** codec 不支持，尝试下一个 */
-      }
+      } catch { /* continue */ }
     }
     if (!sourceBuffer) {
       console.error('[fMP4] 无法创建 Video SourceBuffer')
       return false
     }
 
-    /** 分离模式：创建独立音频 SourceBuffer */
     if (audioCodec && MediaSource.isTypeSupported(`audio/mp4; codecs="${audioCodec}"`)) {
       try {
         audioSourceBuffer = mediaSource.addSourceBuffer(`audio/mp4; codecs="${audioCodec}"`)
@@ -474,7 +381,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function queueAppend(data: BufferSource) {
     if (appending || pruning) {
       pendingQueue.push(data)
-      /** 队列溢出保护：只保留最新段，丢弃旧的（实时流优先展示最新画面） */
       if (pendingQueue.length > MAX_PENDING_SEGMENTS) {
         const newest = pendingQueue[pendingQueue.length - 1]!
         pendingQueue = [newest]
@@ -498,76 +404,72 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       sourceBuffer.appendBuffer(data)
     } catch (e) {
       appending = false
-      /** QuotaExceeded: 清理全部缓冲区后重试当前段 */
       if (sourceBuffer && e instanceof DOMException && e.name === 'QuotaExceededError') {
-        console.warn('[fMP4] QuotaExceeded，清理缓冲区并重试')
-        /** 清理全部已缓冲数据 */
-        if (!sourceBuffer.updating && sourceBuffer.buffered.length > 0) {
-          pruning = true
-          try {
-            sourceBuffer.remove(sourceBuffer.buffered.start(0), sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1))
-          } catch { /* ignore */ }
+        console.warn('[fMP4] QuotaExceeded，清理缓冲区')
+        const buf = sourceBuffer.buffered
+        if (!sourceBuffer.updating && buf.length > 0 && videoRef.value) {
+          const ct = videoRef.value.currentTime
+          const removeEnd = ct > buf.start(0) ? ct : buf.end(buf.length - 1)
+          if (removeEnd > buf.start(0)) {
+            pruning = true
+            try { sourceBuffer.remove(buf.start(0), removeEnd) } catch { /* */ }
+          }
         }
-        /** 丢弃待处理队列，等待清理完成后重试当前段 */
         pendingQueue = [data]
       }
     }
   }
 
-  /** SourceBuffer error 事件处理 */
   function onBufferError(): void {
     console.warn('[fMP4] SourceBuffer error，尝试清理缓冲区')
     if (!sourceBuffer) return
     appending = false
     pruning = false
     pendingQueue = []
-    /** 清理已缓冲的数据 */
     if (!sourceBuffer.updating && mediaSource?.readyState === 'open') {
       const buffered = sourceBuffer.buffered
       if (buffered.length > 0) {
-        try {
-          sourceBuffer.remove(buffered.start(0), buffered.end(buffered.length - 1))
-        } catch { /* ignore */ }
+        try { sourceBuffer.remove(buffered.start(0), buffered.end(buffered.length - 1)) } catch { /* */ }
       }
     }
   }
 
   function onUpdateEnd() {
-    /** 区分 append 完成还是 remove 完成 */
     const wasAppending = appending
     const wasPruning = pruning
     appending = false
     pruning = false
 
-    /** remove 完成：如果有等待的数据，立即处理 */
-    if (wasPruning && pendingQueue.length > 0) {
+    /** prune 完成：继续 drain */
+    if (wasPruning) {
       drainPending()
       return
     }
 
-    /** append 完成：处理队列中的段 */
-    if (wasAppending && pendingQueue.length > 0) {
-      drainPending()
-    }
-
-    /** append 完成后立即追赶直播 + 标记需要修剪（全局定时器执行，避免每次 append 后 remove 与下次 append 竞争） */
+    /** append 完成：追赶直播 + 定期 prune */
     if (wasAppending) {
       appendCount++
       catchUpToLive()
+
       if (appendCount >= PRUNE_EVERY_N_APPENDS) {
         appendCount = 0
-        streamHandle.needsPrune = true
+        pruneBuffer()
+        /** prune 启动了，等 remove 完成后再 drain */
+        if (pruning) return
       }
+    }
+
+    /** 处理待追加队列 */
+    if (pendingQueue.length > 0) {
+      drainPending()
     }
 
     /** 自动播放 */
     if (videoRef.value && videoRef.value.paused && sourceBuffer?.buffered.length) {
-      videoRef.value.play().then(() => {
-        playing.value = true
-      }).catch(() => { /* autoplay blocked */ })
+      videoRef.value.play().then(() => { playing.value = true }).catch(() => { /* */ })
     }
 
-    /** 分辨率变化时才更新（避免每帧触发 reactive set） */
+    /** 分辨率更新 */
     if (videoRef.value) {
       const w = videoRef.value.videoWidth
       const h = videoRef.value.videoHeight
@@ -578,15 +480,13 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
-  /** 从 pendingQueue 取出段追加（优先低延迟：单段立即追加） */
   function drainPending() {
     if (pendingQueue.length === 0 || !sourceBuffer || sourceBuffer.updating) return
     if (pendingQueue.length === 1) {
-      /** 单段直接追加，零额外延迟 */
       doAppend(pendingQueue.shift()!)
       return
     }
-    /** 多段合并为一次 append（减少 MSE API 调用开销） */
+    /** 多段合并 */
     const batch = pendingQueue.splice(0, pendingQueue.length)
     const total = batch.reduce((sum, b) => sum + b.byteLength, 0)
     const merged = new Uint8Array(total)
@@ -598,7 +498,22 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     doAppend(merged.buffer)
   }
 
-  /** 清除已播放的缓冲区，防止内存增长（只在定时器中调用，避免与 append 竞争） */
+  /** 追赶直播 */
+  function catchUpToLive() {
+    const video = videoRef.value
+    if (!video || !sourceBuffer) return
+    const buffered = sourceBuffer.buffered
+    if (buffered.length === 0) return
+
+    const end = buffered.end(buffered.length - 1)
+    const delay = end - video.currentTime
+
+    if (delay > LIVE_SEEK_THRESHOLD || delay < -0.3) {
+      video.currentTime = end - 0.02
+    }
+  }
+
+  /** 清除已播放缓冲区 */
   function pruneBuffer() {
     if (!sourceBuffer || !videoRef.value || sourceBuffer.updating || appending || pruning) return
     const buffered = sourceBuffer.buffered
@@ -606,9 +521,8 @@ export function useFmp4Stream(cameraId: Ref<string>) {
 
     const currentTime = videoRef.value.currentTime
 
-    /** 如果有多个 buffered range（init segment 切换后旧 range 残留），清理掉当前 range 之前的所有旧 range */
+    /** 多 range：清理旧 range */
     if (buffered.length > 1) {
-      /** 找到 currentTime 所在的 range */
       let activeIdx = -1
       for (let i = 0; i < buffered.length; i++) {
         if (currentTime >= buffered.start(i) && currentTime <= buffered.end(i)) {
@@ -616,108 +530,70 @@ export function useFmp4Stream(cameraId: Ref<string>) {
           break
         }
       }
-      /** 如果 currentTime 不在任何 range 中，清理到最新 range 的起点 */
       if (activeIdx <= 0) {
         const latestStart = buffered.start(buffered.length - 1)
         if (currentTime < latestStart) {
           pruning = true
-          try {
-            sourceBuffer.remove(buffered.start(0), latestStart)
-          } catch {
-            pruning = false
-          }
+          try { sourceBuffer.remove(buffered.start(0), latestStart) } catch { pruning = false }
           return
         }
       }
-      /** 清理 activeIdx 之前的所有旧 range */
       if (activeIdx > 0) {
         pruning = true
-        try {
-          sourceBuffer.remove(buffered.start(0), buffered.start(activeIdx))
-        } catch {
-          pruning = false
-        }
+        try { sourceBuffer.remove(buffered.start(0), buffered.start(activeIdx)) } catch { pruning = false }
         return
       }
     }
 
-    /** 单 range：正常清理已播放部分 */
+    /** 单 range：清理已播放部分 */
     const start = buffered.start(0)
     const behindDuration = currentTime - start
-    if (behindDuration > BUFFER_RETAIN_SECONDS + 1) {
+    if (behindDuration > BUFFER_RETAIN_SECONDS + 0.5) {
       pruning = true
-      try {
-        sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
-      } catch {
-        pruning = false
-      }
+      try { sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS) } catch { pruning = false }
     }
   }
 
-  /** 重连 */
   function scheduleReconnect() {
     if (reconnectTimer) return
     retryCount++
-    /** 连续失败 5 次标记为失败，让 CameraView 回退到 Canvas 模式 */
     if (retryCount >= 5) {
       console.warn('[fMP4] 连续 5 次连接失败，标记为失败')
       failed.value = true
       return
     }
-    /** 首次 200ms 快速重连，后续指数退避 */
     const delay = Math.min(200 * Math.pow(2, retryCount - 1), 30000)
     console.warn(`[fMP4] ${delay / 1000}s 后重连 (第 ${retryCount} 次)`)
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
-      connect()
-    }, delay)
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, delay)
   }
 
-  /** 断开连接 */
   function disconnect() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    /** 清理 video frame callback */
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
     if (videoFrameCallbackId != null && videoRef.value) {
       try { videoRef.value.cancelVideoFrameCallback?.(videoFrameCallbackId) } catch { /* */ }
       videoFrameCallbackId = null
     }
-    if (decodeCheckTimer) {
-      clearTimeout(decodeCheckTimer)
-      decodeCheckTimer = null
-    }
+    if (decodeCheckTimer) { clearTimeout(decodeCheckTimer); decodeCheckTimer = null }
     unregisterStream(streamHandle)
     ws?.close()
     ws = null
     if (sourceBuffer && mediaSource && mediaSource.readyState === 'open') {
       sourceBuffer.removeEventListener('updateend', onUpdateEnd)
       sourceBuffer.removeEventListener('error', onBufferError)
-      try {
-        mediaSource.removeSourceBuffer(sourceBuffer)
-      } catch { /* */ }
+      try { mediaSource.removeSourceBuffer(sourceBuffer) } catch { /* */ }
     }
     sourceBuffer = null
     if (audioSourceBuffer && mediaSource && mediaSource.readyState === 'open') {
       audioSourceBuffer.removeEventListener('updateend', onUpdateEnd)
-      try {
-        mediaSource.removeSourceBuffer(audioSourceBuffer)
-      } catch { /* */ }
+      try { mediaSource.removeSourceBuffer(audioSourceBuffer) } catch { /* */ }
     }
     audioSourceBuffer = null
     if (mediaSource) {
       mediaSource.removeEventListener('sourceopen', onSourceOpen)
-      if (mediaSource.readyState === 'open') {
-        mediaSource.endOfStream()
-      }
+      if (mediaSource.readyState === 'open') mediaSource.endOfStream()
     }
     mediaSource = null
-    /** 释放 blob URL */
-    if (currentBlobUrl) {
-      URL.revokeObjectURL(currentBlobUrl)
-      currentBlobUrl = null
-    }
+    if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null }
     currentCodec = ''
     currentAudioCodec = ''
     pendingInit = null
@@ -734,53 +610,43 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     failed.value = false
   }
 
-  /** 注册到全局共享 prune 循环（避免每个实例独立 setInterval） */
   registerStream(streamHandle)
 
-  /** 仅关闭 WebSocket 连接，保留 MSE 管道（用于 visibility 切换场景） */
   function pauseWs() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
     ws?.close()
     ws = null
     connected.value = false
   }
 
-  /** 恢复 WebSocket 连接（复用现有 MSE 管道） */
   function resumeWs() {
     if (mediaSource && mediaSource.readyState === 'open' && sourceBuffer) {
       const url = authWsUrl(`/api/stream/${cameraId.value}`)
       connectWs(url)
     } else {
-      /** MSE 管道已失效，需要完全重建 */
       connect()
     }
   }
 
-  /** 页面隐藏时暂停 fMP4 流（仅关闭 WS，保留 MSE 管道），可见时恢复 */
+  /** 页面隐藏/可见 */
   let wasConnectedBeforeHidden = false
   const onVisibilityChange = () => {
     if (document.hidden) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         wasConnectedBeforeHidden = true
         pauseWs()
-        console.debug('[fMP4] 页面隐藏，暂停流')
       }
     } else if (wasConnectedBeforeHidden) {
       wasConnectedBeforeHidden = false
       resumeWs()
-      console.debug('[fMP4] 页面可见，恢复流')
     }
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
 
-  /** 元素视口可见性 — 不可见时断开流节省带宽 */
+  /** 视口可见性 */
   let isInViewport = true
   let wasConnectedBeforeHiddenViewport = false
 
-  /** 外部调用：设置当前视口可见状态 */
   function setVisible(visible: boolean) {
     if (visible === isInViewport) return
     isInViewport = visible
@@ -788,12 +654,10 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         wasConnectedBeforeHiddenViewport = true
         pauseWs()
-        console.debug(`[fMP4] ${cameraId.value} 离开视口，暂停流`)
       }
     } else if (wasConnectedBeforeHiddenViewport) {
       wasConnectedBeforeHiddenViewport = false
       resumeWs()
-      console.debug(`[fMP4] ${cameraId.value} 进入视口，恢复流`)
     }
   }
 
