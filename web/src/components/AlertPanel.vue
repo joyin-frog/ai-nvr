@@ -16,8 +16,9 @@ interface AlertRule {
   enabled: boolean
   silentStart: string
   silentEnd: string
-  sourceRuleId: number
-  sourceStateId: number
+  /** 订阅配置，描述事件来源 */
+  subscription: { eventType: string; sourceId?: number; cameraId?: string } | null
+  /** 条件 JSON */
   condition: string
 }
 
@@ -31,8 +32,8 @@ interface AlertRecord {
   isNew?: boolean
 }
 
-interface DetectRuleItem { id: number; name: string; cameraId: string }
-interface StateItem { id: number; name: string; cameraId: string; valueType: string; currentValue: string }
+interface ObserverItem { id: number; name: string; cameraId: string }
+interface SignalItem { id: number; name: string; cameraId: string; valueType: string; currentValue: string }
 
 const { t, locale } = useI18n()
 const { error: toastError } = useToast()
@@ -40,8 +41,8 @@ const { error: toastError } = useToast()
 const rules = ref<AlertRule[]>([])
 const alerts = ref<AlertRecord[]>([])
 const loading = ref(false)
-const detectRuleList = ref<DetectRuleItem[]>([])
-const stateList = ref<StateItem[]>([])
+const observerList = ref<ObserverItem[]>([])
+const signalList = ref<SignalItem[]>([])
 
 const filterCamera = ref('')
 const filterDate = ref('')
@@ -75,22 +76,21 @@ interface ConditionForm {
 
 const form = ref({
   name: '',
-  eventType: 'detect:rule',
+  eventType: 'observation',
   cameraId: '',
   windowSeconds: 60,
   threshold: 1,
   cooldownSeconds: 300,
   silentStart: '',
   silentEnd: '',
-  sourceRuleId: 0,
-  sourceStateId: 0,
+  sourceId: 0,
   conditionForm: { resultContains: '', valueEquals: '', valueNotEquals: '' } as ConditionForm,
 })
 
 const emptyForm = {
-  name: '', eventType: 'detect:rule', cameraId: '',
+  name: '', eventType: 'observation', cameraId: '',
   windowSeconds: 60, threshold: 1, cooldownSeconds: 300,
-  silentStart: '', silentEnd: '', sourceRuleId: 0, sourceStateId: 0,
+  silentStart: '', silentEnd: '', sourceId: 0,
   conditionForm: { resultContains: '', valueEquals: '', valueNotEquals: '' } as ConditionForm,
 }
 
@@ -98,8 +98,8 @@ const emptyForm = {
 function buildConditionJson(): string {
   const cf = form.value.conditionForm
   const obj: Record<string, string> = {}
-  if (form.value.eventType === 'detect:rule' && cf.resultContains) obj.resultContains = cf.resultContains
-  if (form.value.eventType === 'state:changed') {
+  if (form.value.eventType === 'observation' && cf.resultContains) obj.resultContains = cf.resultContains
+  if (form.value.eventType === 'signal:changed') {
     if (cf.valueEquals) obj.valueEquals = cf.valueEquals
     if (cf.valueNotEquals) obj.valueNotEquals = cf.valueNotEquals
   }
@@ -121,33 +121,45 @@ function parseCondition(condition: string): ConditionForm {
 
 /** 事件类型选项 */
 const eventTypes = computed(() => [
-  { value: 'detect:rule', label: t('alert.eventTypeDetectRule') },
-  { value: 'state:changed', label: t('alert.eventTypeStateChanged') },
+  { value: 'observation', label: t('alert.eventTypeObservation') },
+  { value: 'signal:changed', label: t('alert.eventTypeSignalChanged') },
+  { value: 'track:appeared', label: t('alert.eventTypeTrackAppeared') },
+  { value: 'track:disappeared', label: t('alert.eventTypeTrackDisappeared') },
+  { value: 'track:enter-zone', label: t('alert.eventTypeTrackEnterZone') },
+  { value: 'track:leave-zone', label: t('alert.eventTypeTrackLeaveZone') },
+  { value: 'track:loiter', label: t('alert.eventTypeTrackLoiter') },
+  { value: 'track:line-cross', label: t('alert.eventTypeTrackLineCross') },
+  { value: 'track:approach', label: t('alert.eventTypeTrackApproach') },
+  { value: 'track:crowd', label: t('alert.eventTypeTrackCrowd') },
+  { value: 'track:speed', label: t('alert.eventTypeTrackSpeed') },
+  { value: 'motion', label: t('alert.eventTypeMotion') },
+  { value: 'camera:online', label: t('alert.eventTypeCameraOnline') },
+  { value: 'camera:offline', label: t('alert.eventTypeCameraOffline') },
 ])
 
-/** 当前摄像头过滤后的检测规则 */
-const cameraDetectRules = computed(() => {
+/** 当前摄像头过滤后的观测器 */
+const cameraObservers = computed(() => {
   const camId = form.value.cameraId
-  if (!camId) return detectRuleList.value
-  return detectRuleList.value.filter(r => !r.cameraId || r.cameraId === camId)
+  if (!camId) return observerList.value
+  return observerList.value.filter(r => !r.cameraId || r.cameraId === camId)
 })
 
-/** 当前摄像头过滤后的状态 */
-const cameraStates = computed(() => {
+/** 当前摄像头过滤后的信号 */
+const cameraSignals = computed(() => {
   const camId = form.value.cameraId
-  if (!camId) return stateList.value
-  return stateList.value.filter(s => !s.cameraId || s.cameraId === camId)
+  if (!camId) return signalList.value
+  return signalList.value.filter(s => !s.cameraId || s.cameraId === camId)
 })
 
-/** 加载检测规则和状态列表（供事件源选择） */
+/** 加载观测器和信号列表（供事件源选择） */
 async function loadSourceOptions() {
   try {
-    const [rulesRes, statesRes] = await Promise.all([
-      authFetch('/api/detect-rules'),
-      authFetch('/api/states'),
+    const [observersRes, signalsRes] = await Promise.all([
+      authFetch('/api/observers'),
+      authFetch('/api/signals'),
     ])
-    if (rulesRes.ok) detectRuleList.value = await rulesRes.json()
-    if (statesRes.ok) stateList.value = await statesRes.json()
+    if (observersRes.ok) observerList.value = await observersRes.json()
+    if (signalsRes.ok) signalList.value = await signalsRes.json()
   } catch { /* ignore */ }
 }
 
@@ -188,10 +200,15 @@ function loadMoreAlerts() {
 
 const hasMore = computed(() => alerts.value.length < alertTotal.value)
 
-/** 构建提交 body（去掉 conditionForm，加上 condition） */
+/** 构建提交 body（去掉 conditionForm 和 sourceId，加上 condition 和 subscription） */
 function buildBody(): Record<string, unknown> {
-  const { conditionForm, ...rest } = form.value
-  return { ...rest, condition: buildConditionJson() }
+  const { conditionForm, sourceId, ...rest } = form.value
+  const subscription = {
+    eventType: form.value.eventType,
+    sourceId: form.value.sourceId || undefined,
+    cameraId: form.value.cameraId || undefined,
+  }
+  return { ...rest, condition: buildConditionJson(), subscription }
 }
 
 async function addRule() {
@@ -217,17 +234,17 @@ async function addRule() {
 function startEdit(rule: AlertRule) {
   editingRuleId.value = rule.id
   showAddForm.value = false
+  const sourceId = rule.subscription?.sourceId ?? 0
   form.value = {
     name: rule.name,
-    eventType: rule.eventType,
+    eventType: rule.subscription?.eventType ?? rule.eventType,
     cameraId: rule.cameraId,
     windowSeconds: rule.windowSeconds,
     threshold: rule.threshold,
     cooldownSeconds: rule.cooldownSeconds,
     silentStart: rule.silentStart ?? '',
     silentEnd: rule.silentEnd ?? '',
-    sourceRuleId: rule.sourceRuleId ?? 0,
-    sourceStateId: rule.sourceStateId ?? 0,
+    sourceId,
     conditionForm: parseCondition(rule.condition ?? ''),
   }
 }
@@ -290,19 +307,21 @@ function eventTypeLabel(type: string): string {
 
 /** 获取规则显示用的源名称 */
 function sourceLabel(rule: AlertRule): string {
-  if (rule.eventType === 'detect:rule') {
-    if (rule.sourceRuleId > 0) {
-      const r = detectRuleList.value.find(d => d.id === rule.sourceRuleId)
-      return r?.name ?? `#${rule.sourceRuleId}`
+  const sub = rule.subscription
+  if (!sub) return ''
+  if (sub.eventType === 'observation') {
+    if (sub.sourceId && sub.sourceId > 0) {
+      const r = observerList.value.find(d => d.id === sub.sourceId)
+      return r?.name ?? `#${sub.sourceId}`
     }
-    return t('alert.anyRule')
+    return t('alert.anyObserver')
   }
-  if (rule.eventType === 'state:changed') {
-    if (rule.sourceStateId > 0) {
-      const s = stateList.value.find(st => st.id === rule.sourceStateId)
-      return s?.name ?? `#${rule.sourceStateId}`
+  if (sub.eventType === 'signal:changed') {
+    if (sub.sourceId && sub.sourceId > 0) {
+      const s = signalList.value.find(st => st.id === sub.sourceId)
+      return s?.name ?? `#${sub.sourceId}`
     }
-    return t('alert.anyState')
+    return t('alert.anySignal')
   }
   return ''
 }
@@ -311,8 +330,8 @@ function formatDetail(detail: string): string {
   let obj: Record<string, unknown>
   try { obj = JSON.parse(detail) } catch { return detail }
   const parts: string[] = []
-  if (typeof obj.sourceRuleName === 'string') parts.push(obj.sourceRuleName)
-  if (typeof obj.sourceStateName === 'string') parts.push(`${obj.sourceStateName}: ${obj.oldValue ?? ""} → ${obj.newValue ?? ""}`)
+  if (typeof obj.sourceObserverName === 'string') parts.push(obj.sourceObserverName)
+  if (typeof obj.sourceSignalName === 'string') parts.push(`${obj.sourceSignalName}: ${obj.oldValue ?? ""} → ${obj.newValue ?? ""}`)
   if (typeof obj.result === 'string') parts.push(obj.result)
   return parts.length > 0 ? parts.join(' · ') : detail
 }
@@ -365,9 +384,10 @@ async function exportCsv() {
   URL.revokeObjectURL(link.href)
 }
 
-/** 新增/编辑表单的事件源条件区域（复用模板） */
+/** 根据事件类型重置条件表单 */
 function resetConditionForm() {
   form.value.conditionForm = { resultContains: '', valueEquals: '', valueNotEquals: '' }
+  form.value.sourceId = 0
 }
 
 onMounted(() => {
@@ -406,13 +426,13 @@ defineExpose({ loadAlerts, addAlert })
           <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name || cam.id }}</option>
         </select>
       </div>
-      <!-- detect:rule 事件源配置 -->
-      <template v-if="form.eventType === 'detect:rule'">
+      <!-- observation 事件源配置 -->
+      <template v-if="form.eventType === 'observation'">
         <div class="form-field">
-          <label>{{ t('alert.sourceRule') }}</label>
-          <select v-model.number="form.sourceRuleId" class="input">
-            <option :value="0">{{ t('alert.anyRule') }}</option>
-            <option v-for="r in cameraDetectRules" :key="r.id" :value="r.id">{{ r.name }}</option>
+          <label>{{ t('alert.sourceObserver') }}</label>
+          <select v-model.number="form.sourceId" class="input">
+            <option :value="0">{{ t('alert.anyObserver') }}</option>
+            <option v-for="r in cameraObservers" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
         </div>
         <div class="form-field">
@@ -420,13 +440,13 @@ defineExpose({ loadAlerts, addAlert })
           <input v-model="form.conditionForm.resultContains" class="input" :placeholder="t('alert.resultContains')" />
         </div>
       </template>
-      <!-- state:changed 事件源配置 -->
-      <template v-if="form.eventType === 'state:changed'">
+      <!-- signal:changed 事件源配置 -->
+      <template v-if="form.eventType === 'signal:changed'">
         <div class="form-field">
-          <label>{{ t('alert.sourceState') }}</label>
-          <select v-model.number="form.sourceStateId" class="input">
-            <option :value="0">{{ t('alert.anyState') }}</option>
-            <option v-for="s in cameraStates" :key="s.id" :value="s.id">{{ s.name }}</option>
+          <label>{{ t('alert.sourceSignal') }}</label>
+          <select v-model.number="form.sourceId" class="input">
+            <option :value="0">{{ t('alert.anySignal') }}</option>
+            <option v-for="s in cameraSignals" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
         </div>
         <div class="form-row">
@@ -499,12 +519,13 @@ defineExpose({ loadAlerts, addAlert })
                 <option v-for="cam in cameras" :key="cam.id" :value="cam.id">{{ cam.name || cam.id }}</option>
               </select>
             </div>
-            <template v-if="form.eventType === 'detect:rule'">
+            <!-- observation 事件源配置 -->
+            <template v-if="form.eventType === 'observation'">
               <div class="form-field">
-                <label>{{ t('alert.sourceRule') }}</label>
-                <select v-model.number="form.sourceRuleId" class="input">
-                  <option :value="0">{{ t('alert.anyRule') }}</option>
-                  <option v-for="r in cameraDetectRules" :key="r.id" :value="r.id">{{ r.name }}</option>
+                <label>{{ t('alert.sourceObserver') }}</label>
+                <select v-model.number="form.sourceId" class="input">
+                  <option :value="0">{{ t('alert.anyObserver') }}</option>
+                  <option v-for="r in cameraObservers" :key="r.id" :value="r.id">{{ r.name }}</option>
                 </select>
               </div>
               <div class="form-field">
@@ -512,12 +533,13 @@ defineExpose({ loadAlerts, addAlert })
                 <input v-model="form.conditionForm.resultContains" class="input" />
               </div>
             </template>
-            <template v-if="form.eventType === 'state:changed'">
+            <!-- signal:changed 事件源配置 -->
+            <template v-if="form.eventType === 'signal:changed'">
               <div class="form-field">
-                <label>{{ t('alert.sourceState') }}</label>
-                <select v-model.number="form.sourceStateId" class="input">
-                  <option :value="0">{{ t('alert.anyState') }}</option>
-                  <option v-for="s in cameraStates" :key="s.id" :value="s.id">{{ s.name }}</option>
+                <label>{{ t('alert.sourceSignal') }}</label>
+                <select v-model.number="form.sourceId" class="input">
+                  <option :value="0">{{ t('alert.anySignal') }}</option>
+                  <option v-for="s in cameraSignals" :key="s.id" :value="s.id">{{ s.name }}</option>
                 </select>
               </div>
               <div class="form-row">

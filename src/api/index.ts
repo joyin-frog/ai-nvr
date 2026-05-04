@@ -9,9 +9,9 @@ import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
 import { type AlertStorage } from "@/alert/storage";
-import { type DetectRuleStorage, type RuleCameraSource } from "@/detect-rule/storage";
-import { type DetectRuleEngine } from "@/detect-rule/engine";
-import { type StateStorage } from "@/state/storage";
+import { type ObserverStorage } from "@/observer/storage";
+import { type ObserverEngine } from "@/observer/engine";
+import { type SignalStore } from "@/signal/store";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
@@ -118,7 +118,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "state:changed"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "signal:changed"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -148,9 +148,9 @@ export function startServer(
   trajectoryStorage?: import("@/storage/track-trajectory").TrackTrajectoryStorage,
   multimodalAnalyzer?: import("@/ai/multimodal-analyzer").MultimodalAnalyzer,
   clipService?: import("@/ai/clip-service").ClipService,
-  detectRuleStorage?: DetectRuleStorage,
-  detectRuleEngine?: DetectRuleEngine,
-  stateStorage?: StateStorage,
+  observerStorage?: ObserverStorage,
+  observerEngine?: ObserverEngine,
+  signalStore?: SignalStore,
   patrolScanner?: import("@/ai/patrol").AiPatrolScanner,
 ): void {
   /** 缓存 storageRoot 的 realpath（路径不变，避免每次请求重复解析） */
@@ -322,7 +322,7 @@ export function startServer(
 
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
   async function handleRequest(req: Request): Promise<Response | undefined> {
-    const url = new URL(req.url);
+    let url = new URL(req.url);
 
     if (url.pathname === "/api/auth/check") {
       return Response.json({ enabled: !!authConfig.token });
@@ -364,6 +364,14 @@ export function startServer(
       /** API 认证检查 */
       if (!checkAuth(authConfig, req)) {
         return new Response("Unauthorized", { status: 401 });
+      }
+
+      /** 路由别名：/api/observers/* → /api/detect-rules/*，/api/signals/* → /api/states/* */
+      const aliasPath = url.pathname
+        .replace(/^\/api\/observers(\/|$)/, "/api/detect-rules$1")
+        .replace(/^\/api\/signals(\/|$)/, "/api/states$1");
+      if (aliasPath !== url.pathname) {
+        url = new URL(aliasPath, url.origin);
       }
 
       /** REST API */
@@ -539,8 +547,8 @@ export function startServer(
             const count = eventStorage.purge(Date.now() + 1);
             results.events = `已删除 ${count} 条事件`;
           }
-          if (opts.detectRules && detectRuleStorage) {
-            const count = detectRuleStorage.purgeAll();
+          if (opts.detectRules && observerStorage) {
+            const count = observerStorage.purgeAll();
             results.detectRules = `已删除 ${count} 条检测记录`;
           }
           if (opts.alertSnapshots && alertSnapshotStorage) {
@@ -612,7 +620,7 @@ export function startServer(
             if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
             if (ev.detail) {
               const detailObj = JSON.parse(ev.detail);
-              summary = detailObj?.ruleName ?? null;
+              summary = detailObj?.observerName ?? null;
             }
           } else if (ev.type === "motion" && ev.detail) {
             const detailObj = JSON.parse(ev.detail);
@@ -1548,58 +1556,58 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 检测规则列表 */
-      if (url.pathname === "/api/detect-rules" && req.method === "GET" && detectRuleStorage) {
-        return Response.json(detectRuleStorage.listRules());
+      if (url.pathname === "/api/detect-rules" && req.method === "GET" && observerStorage) {
+        return Response.json(observerStorage.listObservers());
       }
 
       /** 添加检测规则 */
-      if (url.pathname === "/api/detect-rules" && req.method === "POST" && detectRuleStorage) {
+      if (url.pathname === "/api/detect-rules" && req.method === "POST" && observerStorage) {
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
           const prompt = obj.prompt as string | undefined;
           const cameras = (obj.cameras as Array<{ cameraId: string; roiId?: number; offsetSec?: number; videoClip?: unknown }>) ?? [];
           if (!name || !prompt || cameras.length === 0) return new Response("Missing name, prompt or cameras", { status: 400 });
-          const id = detectRuleStorage.addRule({
+          const id = observerStorage.addObserver({
             name,
-            cameras: cameras.map(c => ({ cameraId: c.cameraId, roiId: c.roiId ?? 0, offsetSec: c.offsetSec ?? 0, videoClip: c.videoClip as RuleCameraSource["videoClip"] })),
+            cameras: cameras.map(c => ({ cameraId: c.cameraId, roiId: c.roiId ?? 0, offsetSec: c.offsetSec ?? 0, videoClip: c.videoClip as import("@/observer/types").CameraSource["videoClip"] })),
             prompt,
             intervalMs: (obj.intervalMs as number) ?? 5000,
             cooldownMs: (obj.cooldownMs as number) ?? 30000,
             imageWidth: (obj.imageWidth as number) ?? 0,
-            stateIds: (obj.stateIds as number[]) ?? [],
+            signalIds: (obj.signalIds as number[]) ?? (obj.stateIds as number[]) ?? (obj.evalSignalIds as number[]) ?? [],
             schedule: (obj.schedule as string) ?? "",
             saveOriginal: (obj.saveOriginal as boolean) ?? true,
             outputRegions: (obj.outputRegions as boolean) ?? false,
             refImages: (obj.refImages as string[]) ?? [],
             modelId: (obj.modelId as string) ?? "",
           });
-          detectRuleEngine?.reloadRules();
+          observerEngine?.reloadRules();
           return Response.json({ id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** 更新检测规则 */
       const detectRuleMatch = url.pathname.match(/^\/api\/detect-rules\/(\d+)$/);
-      if (detectRuleMatch && req.method === "PATCH" && detectRuleStorage) {
+      if (detectRuleMatch && req.method === "PATCH" && observerStorage) {
         const ruleId = Number(detectRuleMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal", "outputRegions", "cameras", "refImages", "modelId"] as const) {
+          for (const key of ["name", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "signalIds", "stateIds", "schedule", "saveOriginal", "outputRegions", "cameras", "refImages", "modelId"] as const) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
-          detectRuleStorage.updateRule(ruleId, updates as never);
-          detectRuleEngine?.reloadRules();
+          observerStorage.updateObserver(ruleId, updates as never);
+          observerEngine?.reloadRules();
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** 删除检测规则 */
-      if (detectRuleMatch && req.method === "DELETE" && detectRuleStorage) {
+      if (detectRuleMatch && req.method === "DELETE" && observerStorage) {
         const ruleId = Number(detectRuleMatch[1]!);
-        detectRuleStorage.removeRule(ruleId);
-        detectRuleEngine?.reloadRules();
+        observerStorage.removeObserver(ruleId);
+        observerEngine?.reloadRules();
         return Response.json({ ok: true });
       }
 
@@ -1632,8 +1640,8 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 检测规则历史记录 */
-      if (url.pathname === "/api/detect-rules/history" && detectRuleStorage) {
-        const records = detectRuleStorage.queryRecords({
+      if (url.pathname === "/api/detect-rules/history" && observerStorage) {
+        const records = observerStorage.queryRecords({
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
@@ -1641,33 +1649,38 @@ Be specific and factual. ${langInstruction}`;
           limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
           offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
         });
-        const total = detectRuleStorage.countRecords({
+        const total = observerStorage.countRecords({
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
           matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
         });
-        /** 关联快照路径：通过 ruleId 查出规则的所有摄像头，为每个摄像头查找快照 */
+        /** 关联快照路径：原图 + ROI 裁剪图 */
         if (alertSnapshotStorage && records.length > 0) {
-          /** 构建规则 ID → cameras 列表映射 */
-          const allRules = detectRuleStorage.listRules();
+          const allRules = observerStorage.listObservers();
           const ruleMap = new Map(allRules.map(r => [r.id, r.cameras.map(c => c.cameraId)]));
-          /** 收集所有需要查找的 cameraId:timestamp 条目 */
+          /** 收集原图 + ROI 裁剪图的查找条目 */
           const allSnapEntries: Array<{ cameraId: string; timestamp: number }> = [];
           for (const r of records) {
-            const camIds = ruleMap.get(r.ruleId) ?? [r.cameraId];
+            const camIds = ruleMap.get(r.observerId) ?? [r.cameraId];
             for (const camId of camIds) {
               allSnapEntries.push({ cameraId: camId, timestamp: r.timestamp });
+              allSnapEntries.push({ cameraId: `${camId}_roi`, timestamp: r.timestamp });
             }
           }
           const snapPaths = alertSnapshotStorage.batchFindSnapshotPaths(allSnapEntries);
           for (const r of records) {
-            const camIds = ruleMap.get(r.ruleId) ?? [r.cameraId];
-            const snapshotUrls: Array<{ cameraId: string; url: string }> = [];
+            const camIds = ruleMap.get(r.observerId) ?? [r.cameraId];
+            const snapshotUrls: Array<{ cameraId: string; url: string; roiUrl?: string }> = [];
             for (const camId of camIds) {
-              const snapPath = snapPaths.get(`${camId}:${r.timestamp}`);
-              if (snapPath) {
-                snapshotUrls.push({ cameraId: camId, url: `/api/alert-snapshots/${snapPath}` });
+              const origPath = snapPaths.get(`${camId}:${r.timestamp}`);
+              const roiPath = snapPaths.get(`${camId}_roi:${r.timestamp}`);
+              if (origPath) {
+                snapshotUrls.push({
+                  cameraId: camId,
+                  url: `/api/alert-snapshots/${origPath}`,
+                  roiUrl: roiPath ? `/api/alert-snapshots/${roiPath}` : undefined,
+                });
               }
             }
             (r as unknown as Record<string, unknown>).snapshotUrl = snapshotUrls.length > 0 ? snapshotUrls[0]!.url : null;
@@ -1689,20 +1702,36 @@ Be specific and factual. ${langInstruction}`;
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
-          const eventType = obj.eventType as string | undefined;
-          if (!name || !eventType) return new Response("Missing name or eventType", { status: 400 });
+          if (!name) return new Response("Missing name", { status: 400 });
+
+          /** 兼容旧格式（eventType + sourceRuleId/sourceStateId）和新格式（subscription） */
+          let subscription: import("@/alert/matcher").EventSubscription;
+          if (obj.subscription && typeof obj.subscription === "object") {
+            subscription = obj.subscription as import("@/alert/matcher").EventSubscription;
+          } else {
+            /** 旧格式兼容：eventType → subscription */
+            const eventType = (obj.eventType as string) ?? "observation";
+            const mappedType = eventType === "detect:rule" ? "observation" : eventType === "signal:changed" ? "signal:changed" : eventType;
+            const sourceId = mappedType === "observation"
+              ? (obj.sourceId as number) ?? 0
+              : (obj.sourceStateId as number) ?? 0;
+            subscription = {
+              eventType: mappedType,
+              sourceId,
+              cameraId: (obj.cameraId as string) ?? "",
+            };
+          }
+
           const id = alertStorage.addRule({
             name,
-            eventType,
-            cameraId: (obj.cameraId as string) ?? "",
+            subscription,
+            condition: (obj.condition as string) ?? "",
             windowSeconds: (obj.windowSeconds as number) ?? 60,
-            threshold: (obj.threshold as number) ?? 3,
+            threshold: (obj.threshold as number) ?? 1,
             cooldownSeconds: (obj.cooldownSeconds as number) ?? 300,
             silentStart: (obj.silentStart as string) ?? "",
             silentEnd: (obj.silentEnd as string) ?? "",
-            sourceRuleId: (obj.sourceRuleId as number) ?? 0,
-            sourceStateId: (obj.sourceStateId as number) ?? 0,
-            condition: (obj.condition as string) ?? "",
+            actions: Array.isArray(obj.actions) ? obj.actions as import("@/alert/action").AlertAction[] : [],
           });
           return Response.json({ id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
@@ -1715,9 +1744,22 @@ Be specific and factual. ${langInstruction}`;
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "eventType", "cameraId", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd", "sourceRuleId", "sourceStateId", "condition"] as const) {
+          for (const key of ["name", "condition", "windowSeconds", "threshold", "cooldownSeconds", "enabled", "silentStart", "silentEnd"] as const) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
+          /** 兼容旧格式和新格式的 subscription */
+          if (obj.subscription && typeof obj.subscription === "object") {
+            updates.subscription = obj.subscription;
+          } else if (obj.eventType !== undefined) {
+            const eventType = obj.eventType as string;
+            const mappedType = eventType === "detect:rule" ? "observation" : eventType === "signal:changed" ? "signal:changed" : eventType;
+            updates.subscription = {
+              eventType: mappedType,
+              sourceId: mappedType === "observation" ? (obj.sourceId as number) ?? 0 : (obj.sourceStateId as number) ?? 0,
+              cameraId: (obj.cameraId as string) ?? "",
+            };
+          }
+          if (obj.actions !== undefined) updates.actions = obj.actions;
           alertStorage.updateRule(ruleId, updates as never);
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
@@ -1745,17 +1787,17 @@ Be specific and factual. ${langInstruction}`;
       // ===== 状态管理 API =====
 
       /** 列出所有状态 */
-      if (url.pathname === "/api/states" && req.method === "GET" && stateStorage) {
-        return Response.json(stateStorage.listStates());
+      if (url.pathname === "/api/states" && req.method === "GET" && signalStore) {
+        return Response.json(signalStore.listSignals());
       }
 
       /** 创建状态 */
-      if (url.pathname === "/api/states" && req.method === "POST" && stateStorage) {
+      if (url.pathname === "/api/states" && req.method === "POST" && signalStore) {
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
           if (!name) return new Response("Missing name", { status: 400 });
-          const id = stateStorage.addState({
+          const id = signalStore.addSignal({
             name,
             description: (obj.description as string) ?? "",
             cameraId: (obj.cameraId as string) ?? "",
@@ -1770,41 +1812,41 @@ Be specific and factual. ${langInstruction}`;
 
       /** 更新状态定义 */
       const stateMatch = url.pathname.match(/^\/api\/states\/(\d+)$/);
-      if (stateMatch && req.method === "PATCH" && stateStorage) {
+      if (stateMatch && req.method === "PATCH" && signalStore) {
         const stateId = Number(stateMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
-          stateStorage.updateState(stateId, obj as never);
+          signalStore.updateSignal(stateId, obj as never);
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** 删除状态 */
-      if (stateMatch && req.method === "DELETE" && stateStorage) {
+      if (stateMatch && req.method === "DELETE" && signalStore) {
         const stateId = Number(stateMatch[1]!);
-        stateStorage.removeState(stateId);
+        signalStore.removeSignal(stateId);
         return Response.json({ ok: true });
       }
 
       /** 手动设置状态值 */
       const stateValueMatch = url.pathname.match(/^\/api\/states\/(\d+)\/value$/);
-      if (stateValueMatch && req.method === "PATCH" && stateStorage) {
+      if (stateValueMatch && req.method === "PATCH" && signalStore) {
         const stateId = Number(stateValueMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const newValue = obj.value as string | undefined;
           if (newValue === undefined) return new Response("Missing value", { status: 400 });
-          const change = stateStorage.setValue(stateId, newValue, "manual", 0);
+          const change = signalStore.setValue(stateId, newValue, "manual", 0);
           if (change) {
-            const stateDef = stateStorage.getState(stateId);
-            eventBus.emit("state:changed", {
-              stateId: change.stateId,
-              stateName: change.stateName,
+            const stateDef = signalStore.getSignal(stateId);
+            eventBus.emit("signal:changed", {
+              signalId: change.signalId,
+              signalName: change.signalName,
               cameraId: change.cameraId,
               oldValue: change.oldValue,
               newValue: change.newValue,
               source: "manual",
-              sourceRuleId: 0,
+              sourceId: 0,
               timestamp: change.timestamp,
               notify: stateDef?.notifyOnChange ?? false,
             });
@@ -1813,18 +1855,18 @@ Be specific and factual. ${langInstruction}`;
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
-      /** 状态变更历史 */
-      if (url.pathname === "/api/states/history" && stateStorage) {
-        const records = stateStorage.queryChanges({
-          stateId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
+      /** 信号变更历史 */
+      if (url.pathname === "/api/states/history" && signalStore) {
+        const records = signalStore.queryChanges({
+          signalId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
           limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
           offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
         });
-        const total = stateStorage.countChanges({
-          stateId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
+        const total = signalStore.countChanges({
+          signalId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
           since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
           until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
@@ -1936,8 +1978,8 @@ Be specific and factual. ${langInstruction}`;
         if (!latestFrame) return Response.json({ error: "No frame available" }, { status: 404 });
 
         /** 获取该摄像头已有的规则名称，避免重复建议 */
-        const existingRules = detectRuleStorage?.listRules().filter(r => r.cameras[0]?.cameraId === body.cameraId) ?? [];
-        const existingNames = existingRules.map(r => r.name).join(", ");
+        const existingRules = observerStorage?.listObservers().filter((r: { cameras: Array<{ cameraId: string }> }) => r.cameras[0]?.cameraId === body.cameraId) ?? [];
+        const existingNames = existingRules.map((r: { name: string }) => r.name).join(", ");
 
         const lang = runtimeConfig.get().language;
         const langInstruction = lang.startsWith("zh") ? "用中文。规则名称和 prompt 都用中文。" : "Use English.";
@@ -2040,7 +2082,7 @@ ${langInstruction}`;
             desc = `巡逻: ${(d.analysis as string)?.slice(0, 80) ?? ""}`;
           } else if (e.type === "detect:rule") {
             const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
-            desc = `规则: ${(d.ruleName ?? "")} ${(d.result as string ?? "").slice(0, 60)}`;
+            desc = `规则: ${(d.observerName ?? "")} ${(d.result as string ?? "").slice(0, 60)}`;
           } else {
             desc = `${e.type}: ${(e.detail ?? "").slice(0, 60)}`;
           }

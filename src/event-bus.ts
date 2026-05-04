@@ -352,7 +352,33 @@ export interface EventPayloads {
   /** 目标活动摘要（消失时 AI 生成） */
   "track:activity-summary": TrackActivitySummary;
 
-  /** 状态变更事件：检测规则更新了关联状态的值 */
+  /** 观测事件（原 detect:rule，保留旧名兼容） */
+  observation: {
+    observerId: number;
+    observerName: string;
+    cameraId: string;
+    timestamp: number;
+    prompt: string;
+    result: string;
+    confidence: number;
+    detail: string;
+    regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }>;
+  };
+
+  /** 信号变更事件（原 state:changed，保留旧名兼容） */
+  "signal:changed": {
+    signalId: number;
+    signalName: string;
+    cameraId: string;
+    oldValue: string;
+    newValue: string;
+    source: string;
+    sourceId: number;
+    timestamp: number;
+    notify: boolean;
+  };
+
+  /** @deprecated 使用 observation 替代 */
   "state:changed": {
     /** 状态 ID */
     stateId: number;

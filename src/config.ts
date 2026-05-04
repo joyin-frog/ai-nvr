@@ -147,8 +147,9 @@ export function loadConfig(configPath?: string): AppConfig {
 
   const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
 
-  /** 默认值 */
-  const ffmpegPath = resolve(process.env.HOME!, "tools/ffmpeg/bin/ffmpeg");
+  const ffmpegPath = (doc.ffmpeg_path as string)
+    ? resolve((doc.ffmpeg_path as string).replace(/^~/, process.env.HOME!))
+    : resolve(process.env.HOME!, "tools/ffmpeg/bin/ffmpeg");
 
   const cameras: CameraConfig[] = [];
   for (const [id, cam] of Object.entries(camerasNode)) {
@@ -292,22 +293,20 @@ export function getConfigPath(): string {
 /** 添加摄像头到配置文件并写回 YAML，返回更新后的配置 */
 export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl: string; sdUrl: string; detectFps?: number; group?: string }): Promise<AppConfig> {
   return withConfigLock(async () => {
+    const YAML = await import("yaml");
     const raw = await Bun.file(configFilePath).text();
-    const doc = yaml.load(raw) as Record<string, unknown>;
+    const doc = YAML.parseDocument(raw);
 
-    const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
-
-    camerasNode[cam.id] = {
+    doc.setIn(["cameras", cam.id], {
       enabled: true,
       friendly_name: cam.friendlyName,
       stream: { hd: cam.hdUrl, sd: cam.sdUrl },
       ...(cam.group ? { group: cam.group } : {}),
       record: { enabled: true, continuous: { days: 0 }, motion: { days: 7 } },
       detect: { enabled: true, width: 0, height: 0, fps: cam.detectFps ?? 25 },
-    };
+    });
 
-    const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-    await writeFile(configFilePath, yamlContent, "utf-8");
+    await writeFile(configFilePath, doc.toString(), "utf-8");
     return loadConfig();
   });
 }
@@ -315,14 +314,13 @@ export function addCameraToConfig(cam: { id: string; friendlyName: string; hdUrl
 /** 删除摄像头从配置文件，返回更新后的配置 */
 export function removeCameraFromConfig(cameraId: string): Promise<AppConfig> {
   return withConfigLock(async () => {
+    const YAML = await import("yaml");
     const raw = await Bun.file(configFilePath).text();
-    const doc = yaml.load(raw) as Record<string, unknown>;
+    const doc = YAML.parseDocument(raw);
 
-    const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
-    delete camerasNode[cameraId];
+    doc.deleteIn(["cameras", cameraId]);
 
-    const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-    await writeFile(configFilePath, yamlContent, "utf-8");
+    await writeFile(configFilePath, doc.toString(), "utf-8");
     return loadConfig();
   });
 }
@@ -330,31 +328,19 @@ export function removeCameraFromConfig(cameraId: string): Promise<AppConfig> {
 /** 更新摄像头名称，返回更新后的配置 */
 export function updateCameraInConfig(cameraId: string, updates: { friendlyName?: string; hdUrl?: string; sdUrl?: string; group?: string }): Promise<AppConfig> {
   return withConfigLock(async () => {
+    const YAML = await import("yaml");
     const raw = await Bun.file(configFilePath).text();
-    const doc = yaml.load(raw) as Record<string, unknown>;
+    const doc = YAML.parseDocument(raw);
 
-    const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
+    const camPath = ["cameras", cameraId];
+    if (!doc.hasIn(camPath)) throw new Error(`摄像头 ${cameraId} 不存在`);
 
-    const cam = camerasNode[cameraId];
-    if (!cam) throw new Error(`摄像头 ${cameraId} 不存在`);
+    if (updates.friendlyName) doc.setIn([...camPath, "friendly_name"], updates.friendlyName);
+    if (updates.hdUrl) doc.setIn([...camPath, "stream", "hd"], updates.hdUrl);
+    if (updates.sdUrl) doc.setIn([...camPath, "stream", "sd"], updates.sdUrl);
+    if (updates.group !== undefined) doc.setIn([...camPath, "group"], updates.group);
 
-    if (updates.friendlyName) {
-      (cam as Record<string, unknown>).friendly_name = updates.friendlyName;
-    }
-    if (updates.hdUrl) {
-      const stream = (cam as Record<string, unknown>).stream as Record<string, unknown> | undefined;
-      if (stream) stream.hd = updates.hdUrl;
-    }
-    if (updates.sdUrl) {
-      const stream = (cam as Record<string, unknown>).stream as Record<string, unknown> | undefined;
-      if (stream) stream.sd = updates.sdUrl;
-    }
-    if (updates.group !== undefined) {
-      (cam as Record<string, unknown>).group = updates.group;
-    }
-
-    const yamlContent = yaml.dump(doc, { lineWidth: -1, quotingType: '"', forceQuotes: false });
-    await writeFile(configFilePath, yamlContent, "utf-8");
+    await writeFile(configFilePath, doc.toString(), "utf-8");
     return loadConfig();
   });
 }
@@ -377,5 +363,93 @@ export function watchConfig(configPath: string | undefined, onChange: (config: A
     } catch (err) {
       console.error("[Config] 配置重载失败:", err);
     }
+  });
+}
+
+/** 将运行时设置持久化回 YAML 文件（保留注释，settings 来自 RuntimeConfig.get()） */
+export function saveRuntimeToYaml(settings: Record<string, unknown>): Promise<void> {
+  return withConfigLock(async () => {
+    const raw = await Bun.file(configFilePath).text();
+    const YAML = await import("yaml");
+    const doc = YAML.parseDocument(raw);
+
+    const s = settings as unknown as import("@/runtime-config").RuntimeSettings;
+
+    /** 在 YAML 文档中设置嵌套路径的值 */
+    const set = (path: string[], value: unknown) => {
+      doc.setIn(path, value);
+    };
+
+    set(["language"], s.language);
+
+    set(["motion", "threshold"], s.motion.threshold);
+    set(["motion", "cooldown"], s.motion.cooldown);
+    set(["motion", "compare_width"], s.motion.compareWidth);
+    set(["motion", "compare_height"], s.motion.compareHeight);
+
+    set(["ai", "llm", "enabled"], s.ai.llm.enabled);
+    set(["ai", "llm", "api_url"], s.ai.llm.apiUrl);
+    set(["ai", "llm", "model"], s.ai.llm.model);
+    set(["ai", "llm", "max_tokens"], s.ai.llm.maxTokens);
+    set(["ai", "llm", "interval"], s.ai.llm.interval);
+    set(["ai", "llm", "image_width"], s.ai.llm.imageWidth);
+    set(["ai", "llm", "system_prompt"], s.ai.llm.systemPrompt);
+    set(["ai", "llm", "context_interval_ms"], s.ai.llm.contextIntervalMs);
+
+    set(["ai", "models"], s.ai.models.map(m => ({
+      id: m.id, name: m.name, api_url: m.apiUrl, model: m.model, max_tokens: m.maxTokens,
+    })));
+
+    set(["ai", "clip", "enabled"], s.ai.clip.enabled);
+    set(["ai", "clip", "model"], s.ai.clip.model);
+    set(["ai", "clip", "embedding_dim"], s.ai.clip.embeddingDim);
+    if (s.ai.clip.candidates) {
+      set(["ai", "clip", "candidates"], s.ai.clip.candidates);
+    }
+
+    set(["recording", "mode"], s.recording.mode);
+    set(["recording", "post_motion_duration"], s.recording.postMotionDuration);
+    set(["recording", "retention_days"], s.recording.retentionDays);
+    set(["recording", "segment_duration"], s.recording.segmentDuration);
+    set(["recording", "encoder"], s.recording.encoder);
+    set(["recording", "vaapi_device"], s.recording.vaapiDevice);
+    set(["recording", "watermark", "enabled"], s.recording.watermark.enabled);
+    set(["recording", "watermark", "name_position"], s.recording.watermark.namePosition);
+    set(["recording", "watermark", "time_position"], s.recording.watermark.timePosition);
+    set(["recording", "watermark", "font_size"], s.recording.watermark.fontSize);
+    set(["recording", "event_pre_ms"], s.recording.eventPreMs);
+    set(["recording", "event_post_ms"], s.recording.eventPostMs);
+    set(["recording", "buffer_duration_ms"], s.recording.bufferDurationMs);
+    set(["recording", "event_triggers"], s.recording.eventTriggers);
+
+    if (Object.keys(s.cameraOverrides).length > 0) {
+      set(["camera_overrides"], s.cameraOverrides);
+    } else if (doc.has("camera_overrides")) {
+      doc.delete("camera_overrides");
+    }
+
+    set(["webhook", "urls"], s.webhook.urls);
+
+    set(["notify", "dingtalk", "enabled"], s.notify.dingtalk.enabled);
+    set(["notify", "dingtalk", "webhook_url"], s.notify.dingtalk.webhookUrl);
+    set(["notify", "dingtalk", "secret"], s.notify.dingtalk.secret);
+
+    set(["notify", "email", "enabled"], s.notify.email.enabled);
+    if (s.notify.email.smtp) {
+      set(["notify", "email", "smtp", "host"], s.notify.email.smtp.host);
+      set(["notify", "email", "smtp", "port"], s.notify.email.smtp.port);
+      set(["notify", "email", "smtp", "secure"], s.notify.email.smtp.secure);
+      set(["notify", "email", "smtp", "user"], s.notify.email.smtp.user);
+      set(["notify", "email", "smtp", "pass"], s.notify.email.smtp.pass);
+    }
+    set(["notify", "email", "from"], s.notify.email.from);
+    set(["notify", "email", "to"], s.notify.email.to);
+
+    set(["cleanup", "events_retention_days"], s.cleanup.eventsRetentionDays);
+    set(["cleanup", "alerts_retention_days"], s.cleanup.alertsRetentionDays);
+    set(["cleanup", "snapshots_retention_days"], s.cleanup.snapshotsRetentionDays);
+    set(["cleanup", "thumbnails_retention_days"], s.cleanup.thumbnailsRetentionDays);
+
+    await writeFile(configFilePath, doc.toString(), "utf-8");
   });
 }

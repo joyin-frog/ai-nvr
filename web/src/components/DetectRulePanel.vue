@@ -14,16 +14,11 @@ interface RoiItem {
   enabled: boolean
 }
 
-/** 检测规则 */
-/** 规则摄像头源配置 */
-interface RuleCameraSource {
-  /** 摄像头 ID */
+/** 观测器摄像头源配置 */
+interface ObserverCameraSource {
   cameraId: string
-  /** 裁剪区域 ID（0=不裁剪） */
   roiId: number
-  /** 取多少秒前的帧（0=当前帧） */
   offsetSec: number
-  /** 视频片段配置 */
   videoClip?: {
     startOffsetSec: number
     endOffsetSec: number
@@ -35,50 +30,53 @@ interface RuleCameraSource {
   }
 }
 
-interface DetectRule {
+interface Observer {
   id: number
   name: string
-  /** 摄像头列表（第一个为主摄像头） */
-  cameras: RuleCameraSource[]
+  cameras: ObserverCameraSource[]
   prompt: string
   intervalMs: number
   cooldownMs: number
   enabled: boolean
-  /** AI 推理分辨率（0=使用全局配置） */
   imageWidth: number
-  /** 关联的状态 ID 列表 */
-  stateIds: number[]
-  /** 时段配置 JSON */
+  /** 关联信号 ID（VLM 评估并更新这些信号的值） */
+  signalIds: number[]
   schedule: string
-  /** 匹配时是否保存原图 */
   saveOriginal: boolean
-  /** 是否输出目标区域坐标 */
   outputRegions: boolean
-  /** 参考图片路径列表 */
   refImages: string[]
-  /** 指定使用的模型 ID（空=默认模型） */
   modelId: string
 }
 
+/** 快照信息（多摄像头） */
+interface SnapshotEntry {
+  cameraId: string
+  url: string
+  /** ROI 裁剪后的图片 URL */
+  roiUrl?: string
+}
+
 /** 检测记录 */
-interface DetectRuleRecord {
+interface ObserverRecord {
   id: number
-  ruleId: number
-  ruleName: string
+  observerId: number
+  observerName: string
   cameraId: string
   timestamp: number
   result: string
   matched: boolean
   detail: string
   snapshotUrl?: string | null
+  /** 多摄像头快照列表 */
+  snapshotUrls?: SnapshotEntry[]
   isNew?: boolean
 }
 
 const { t, locale } = useI18n()
 const { error: toastError } = useToast()
 
-const rules = ref<DetectRule[]>([])
-const records = ref<DetectRuleRecord[]>([])
+const observers = ref<Observer[]>([])
+const records = ref<ObserverRecord[]>([])
 const loading = ref(false)
 
 /** 历史筛选 */
@@ -108,7 +106,7 @@ const cameraNameMap = computed(() => {
 
 /** 可选的状态列表 */
 interface StateItem { id: number; name: string; cameraId: string; valueType: string; currentValue: string }
-const stateList = ref<StateItem[]>([])
+const signalList = ref<StateItem[]>([])
 
 /** 可用模型列表 */
 interface ModelOption { id: string; name: string; model: string }
@@ -124,19 +122,19 @@ async function loadModels() {
 
 /** 表单状态 */
 const showAddForm = ref(false)
-const editingRuleId = ref<number | null>(null)
+const editingObserverId = ref<number | null>(null)
 /** 高级设置折叠状态 */
 const showAdvanced = ref(false)
 const roiList = ref<RoiItem[]>([])
 
 const form = ref({
   name: '',
-  cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as RuleCameraSource[],
+  cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as ObserverCameraSource[],
   prompt: '',
   intervalMs: 5000,
   cooldownMs: 30000,
   imageWidth: 0,
-  stateIds: [] as number[],
+  signalIds: [] as number[],
   scheduleEnabled: false,
   scheduleStart: '08:00',
   scheduleEnd: '18:00',
@@ -148,8 +146,8 @@ const form = ref({
 })
 
 const emptyForm = {
-  name: '', cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as RuleCameraSource[], prompt: '', intervalMs: 5000, cooldownMs: 30000,
-  imageWidth: 0, stateIds: [] as number[], scheduleEnabled: false,
+  name: '', cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as ObserverCameraSource[], prompt: '', intervalMs: 5000, cooldownMs: 30000,
+  imageWidth: 0, signalIds: [] as number[], scheduleEnabled: false,
   scheduleStart: '08:00', scheduleEnd: '18:00', scheduleDays: [1, 2, 3, 4, 5] as number[],
   saveOriginal: true, outputRegions: false, refImages: [] as string[], modelId: '',
 }
@@ -169,26 +167,26 @@ const dayOptions = [
 const primaryCamId = computed(() => form.value.cameras[0]?.cameraId ?? '')
 
 /** 可选的状态列表（按主摄像头过滤） */
-const availableStates = computed(() => {
+const availableSignals = computed(() => {
   const camId = primaryCamId.value
-  return stateList.value.filter(s => !s.cameraId || s.cameraId === camId)
+  return signalList.value.filter(s => !s.cameraId || s.cameraId === camId)
 })
 
 /** 状态 ID -> 名称映射（用于规则卡片显示） */
-const stateNameMap = computed(() => {
+const signalNameMap = computed(() => {
   const map: Record<number, string> = {}
-  for (const s of stateList.value) map[s.id] = s.name
+  for (const s of signalList.value) map[s.id] = s.name
   return map
 })
 
 /** 快速创建状态 */
-const quickStateName = ref('')
+const quickSignalName = ref('')
 
-async function quickCreateState() {
-  const name = quickStateName.value.trim()
+async function quickCreateSignal() {
+  const name = quickSignalName.value.trim()
   if (!name) return
   try {
-    const res = await authFetch('/api/states', {
+    const res = await authFetch('/api/signals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -201,9 +199,9 @@ async function quickCreateState() {
     })
     if (res.ok) {
       const state = await res.json()
-      form.value.stateIds.push(state.id)
-      quickStateName.value = ''
-      await loadStateList()
+      form.value.signalIds.push(state.id)
+      quickSignalName.value = ''
+      await loadSignalList()
     }
   } catch { /* ignore */ }
 }
@@ -237,11 +235,11 @@ function toggleDay(day: number) {
   form.value.scheduleDays.sort()
 }
 
-/** 切换状态选择 */
-function toggleStateId(id: number) {
-  const idx = form.value.stateIds.indexOf(id)
-  if (idx >= 0) form.value.stateIds.splice(idx, 1)
-  else form.value.stateIds.push(id)
+/** 切换信号选择 */
+function toggleSignalId(id: number) {
+  const idx = form.value.signalIds.indexOf(id)
+  if (idx >= 0) form.value.signalIds.splice(idx, 1)
+  else form.value.signalIds.push(id)
 }
 
 /** 获取指定摄像头对应的 ROI 列表 */
@@ -261,21 +259,21 @@ async function loadRoiList() {
 }
 
 /** 加载状态列表 */
-async function loadStateList() {
+async function loadSignalList() {
   try {
-    const res = await authFetch('/api/states')
-    if (res.ok) stateList.value = await res.json()
+    const res = await authFetch('/api/signals')
+    if (res.ok) signalList.value = await res.json()
   } catch {
     // ignore
   }
 }
 
 /** 加载规则 */
-async function loadRules() {
+async function loadObservers() {
   loading.value = true
   try {
-    const res = await authFetch('/api/detect-rules')
-    if (res.ok) rules.value = await res.json()
+    const res = await authFetch('/api/observers')
+    if (res.ok) observers.value = await res.json()
   } catch {
     // ignore
   } finally {
@@ -298,7 +296,7 @@ async function loadRecords(append = false) {
       params.set('since', String(since))
       params.set('until', String(until))
     }
-    const res = await authFetch(`/api/detect-rules/history?${params}`)
+    const res = await authFetch(`/api/observers/history?${params}`)
     if (res.ok) {
       const data = await res.json()
       records.value = append ? [...records.value, ...data.records] : data.records
@@ -317,7 +315,7 @@ function loadMoreRecords() {
 const hasMore = computed(() => records.value.length < recordTotal.value)
 
 /** 添加规则 */
-async function addRule() {
+async function addObserver() {
   if (!form.value.name || !form.value.cameras[0]?.cameraId || !form.value.prompt) return
   try {
     const body = { ...form.value, schedule: buildScheduleJson() }
@@ -325,7 +323,7 @@ async function addRule() {
     delete (body as Record<string, unknown>).scheduleStart
     delete (body as Record<string, unknown>).scheduleEnd
     delete (body as Record<string, unknown>).scheduleDays
-    const res = await authFetch('/api/detect-rules', {
+    const res = await authFetch('/api/observers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -333,7 +331,7 @@ async function addRule() {
     if (res.ok) {
       showAddForm.value = false
       form.value = { ...emptyForm }
-      loadRules()
+      loadObservers()
     } else {
       toastError(t('alert.saveFailed'))
     }
@@ -343,8 +341,8 @@ async function addRule() {
 }
 
 /** 编辑规则 */
-function startEdit(rule: DetectRule) {
-  editingRuleId.value = rule.id
+function startEdit(rule: Observer) {
+  editingObserverId.value = rule.id
   showAddForm.value = false
   form.value = {
     name: rule.name,
@@ -353,7 +351,7 @@ function startEdit(rule: DetectRule) {
     intervalMs: rule.intervalMs,
     cooldownMs: rule.cooldownMs,
     imageWidth: rule.imageWidth ?? 0,
-    stateIds: rule.stateIds ?? [],
+    signalIds: rule.signalIds ?? [],
     scheduleEnabled: false,
     scheduleStart: '08:00',
     scheduleEnd: '18:00',
@@ -364,26 +362,26 @@ function startEdit(rule: DetectRule) {
     modelId: rule.modelId ?? '',
   }
   parseScheduleJson(rule.schedule ?? '')
-  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions || rule.cameras.length > 1 || (rule.refImages?.length ?? 0) > 0
+  showAdvanced.value = (rule.imageWidth > 0) || (rule.signalIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions || rule.cameras.length > 1 || (rule.refImages?.length ?? 0) > 0
 }
 
 async function saveEdit() {
-  if (!editingRuleId.value || !form.value.name) return
+  if (!editingObserverId.value || !form.value.name) return
   try {
     const body = { ...form.value, schedule: buildScheduleJson() }
     delete (body as Record<string, unknown>).scheduleEnabled
     delete (body as Record<string, unknown>).scheduleStart
     delete (body as Record<string, unknown>).scheduleEnd
     delete (body as Record<string, unknown>).scheduleDays
-    const res = await authFetch(`/api/detect-rules/${editingRuleId.value}`, {
+    const res = await authFetch(`/api/observers/${editingObserverId.value}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     if (res.ok) {
-      editingRuleId.value = null
+      editingObserverId.value = null
       form.value = { ...emptyForm }
-      loadRules()
+      loadObservers()
     } else {
       toastError(t('alert.saveFailed'))
     }
@@ -393,30 +391,30 @@ async function saveEdit() {
 }
 
 function cancelEdit() {
-  editingRuleId.value = null
+  editingObserverId.value = null
   form.value = { ...emptyForm }
 }
 
 /** 切换启用 */
-async function toggleRule(rule: DetectRule) {
+async function toggleObserver(rule: Observer) {
   try {
-    await authFetch(`/api/detect-rules/${rule.id}`, {
+    await authFetch(`/api/observers/${rule.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !rule.enabled }),
     })
-    loadRules()
+    loadObservers()
   } catch {
     toastError(t('alert.saveFailed'))
   }
 }
 
 /** 删除规则 */
-async function deleteRule(id: number) {
+async function deleteObserver(id: number) {
   if (!await confirmDialog(t('alert.confirmDelete'))) return
   try {
-    await authFetch(`/api/detect-rules/${id}`, { method: 'DELETE' })
-    loadRules()
+    await authFetch(`/api/observers/${id}`, { method: 'DELETE' })
+    loadObservers()
   } catch {
     toastError(t('alert.deleteFailed'))
   }
@@ -482,7 +480,7 @@ function autoGrowTextarea(e: Event) {
 }
 
 /** 切换摄像头源的视频片段模式 */
-function toggleClipMode(src: RuleCameraSource) {
+function toggleClipMode(src: ObserverCameraSource) {
   if (src.videoClip) {
     delete src.videoClip
   } else {
@@ -494,6 +492,94 @@ function toggleClipMode(src: RuleCameraSource) {
   }
 }
 
+/** ROI 绘制状态 */
+const roiDrawingIdx = ref(-1)
+/** 正在编辑的 ROI ID（0=新建） */
+const roiEditingId = ref(0)
+/** 正在绘制的多边形顶点（归一化坐标） */
+const roiDrawPoints = ref<Array<{ x: number; y: number }>>([])
+
+function toggleRoiDraw(idx: number) {
+  if (roiDrawingIdx.value === idx) {
+    roiDrawingIdx.value = -1
+    roiDrawPoints.value = []
+    roiEditingId.value = 0
+    return
+  }
+  roiDrawingIdx.value = idx
+  roiDrawPoints.value = []
+  /** 如果已选中 ROI，加载其顶点用于编辑 */
+  const src = form.value.cameras[idx]
+  if (src?.roiId && src.roiId > 0) {
+    roiEditingId.value = src.roiId
+    const roi = roiList.value.find(r => r.id === src.roiId)
+    if (roi?.points) {
+      try { roiDrawPoints.value = JSON.parse(roi.points) } catch { /* ignore */ }
+    }
+  } else {
+    roiEditingId.value = 0
+  }
+}
+
+function onRoiImageClick(e: MouseEvent) {
+  const img = e.currentTarget as HTMLImageElement
+  const rect = img.getBoundingClientRect()
+  const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
+  roiDrawPoints.value.push({ x, y })
+}
+
+function undoRoiPoint() {
+  roiDrawPoints.value.pop()
+}
+
+async function saveRoiDraw() {
+  if (roiDrawPoints.value.length < 3 || roiDrawingIdx.value < 0) return
+  const src = form.value.cameras[roiDrawingIdx.value]
+  if (!src?.cameraId) return
+  try {
+    if (roiEditingId.value > 0) {
+      /** 编辑已有 ROI */
+      const res = await authFetch(`/api/roi/item/${roiEditingId.value}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ points: JSON.stringify(roiDrawPoints.value) }),
+      })
+      if (res.ok) {
+        roiDrawPoints.value = []
+        roiDrawingIdx.value = -1
+        roiEditingId.value = 0
+        await loadRoiList()
+      }
+    } else {
+      /** 新建 ROI */
+      const res = await authFetch('/api/roi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cameraId: src.cameraId,
+          name: `ROI ${roiList.value.filter(r => r.cameraId === src.cameraId).length + 1}`,
+          points: JSON.stringify(roiDrawPoints.value),
+        }),
+      })
+      if (res.ok) {
+        const roi = await res.json() as { id: number }
+        src.roiId = roi.id
+        roiDrawPoints.value = []
+        roiDrawingIdx.value = -1
+        roiEditingId.value = 0
+        await loadRoiList()
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function cancelRoiDraw() {
+  roiDrawPoints.value = []
+  roiDrawingIdx.value = -1
+  roiEditingId.value = 0
+}
+
 /** 上传参考图片 */
 const refImageUploading = ref(false)
 async function uploadRefImage(e: Event) {
@@ -503,7 +589,7 @@ async function uploadRefImage(e: Event) {
   refImageUploading.value = true
   const formData = new FormData()
   formData.append('image', file)
-  const res = await authFetch('/api/detect-rules/ref-images', {
+  const res = await authFetch('/api/observers/ref-images', {
     method: 'POST',
     body: formData,
   }).catch(() => null)
@@ -520,27 +606,53 @@ async function removeRefImage(idx: number) {
   const filename = form.value.refImages[idx]
   if (!filename) return
   form.value.refImages.splice(idx, 1)
-  await authFetch(`/api/detect-rules/ref-images/${filename}`, { method: 'DELETE' }).catch(() => {})
+  await authFetch(`/api/observers/ref-images/${filename}`, { method: 'DELETE' }).catch(() => {})
 }
 
 /** 展开的记录 ID */
 const expandedRecordId = ref<number | null>(null)
 
-function toggleExpand(record: DetectRuleRecord) {
+/** 展开的详情子区域（raw response、prompt 等） */
+const expandedDetailSections = ref(new Set<string>())
+
+function toggleDetailSection(key: string) {
+  if (expandedDetailSections.value.has(key)) expandedDetailSections.value.delete(key)
+  else expandedDetailSections.value.add(key)
+}
+
+function toggleExpand(record: ObserverRecord) {
   expandedRecordId.value = expandedRecordId.value === record.id ? null : record.id
+  expandedDetailSections.value.clear()
 }
 
 /** 解析 detail JSON */
-function parseDetail(detail: string): { confidence?: number; prompt?: string; rawResponse?: string; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> } {
+interface ParsedDetail {
+  confidence?: number
+  prompt?: string
+  rawResponse?: string
+  regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }>
+  signalIds?: number[]
+  signalUpdates?: Array<{ id: number; value: string }>
+  cameras?: Array<{ cameraId: string; roiId: number; roiPoints?: Array<{ x: number; y: number }> }>
+}
+function parseDetail(detail: string): ParsedDetail {
   if (!detail) return {}
   try { return JSON.parse(detail) } catch { return {} }
 }
 
-/** 快照图片加载后叠加 regions 检测框 */
-function onSnapshotLoad(e: Event, record: DetectRuleRecord) {
+/** 快照图片加载后叠加 ROI 区域和 regions 检测框 */
+function onSnapshotLoad(e: Event, record: ObserverRecord) {
   const img = e.target as HTMLImageElement
-  const regions = parseDetail(record.detail).regions
-  if (!regions?.length) return
+  const detail = parseDetail(record.detail)
+  const regions = detail.regions
+  /** 找到当前摄像头对应的 ROI 坐标 */
+  const snapContainer = img.closest('.snapshot-item')
+  const camLabel = snapContainer?.querySelector('.snapshot-cam-label')?.textContent
+  const camId = record.snapshotUrls?.find(s => (cameraNameMap.value[s.cameraId] ?? s.cameraId) === camLabel)?.cameraId ?? record.cameraId
+  const cameraDef = detail.cameras?.find(c => c.cameraId === camId)
+  const roiPoints = cameraDef?.roiPoints
+
+  if (!regions?.length && !roiPoints?.length) return
 
   const canvas = document.createElement('canvas')
   canvas.width = img.naturalWidth
@@ -549,40 +661,69 @@ function onSnapshotLoad(e: Event, record: DetectRuleRecord) {
   if (!ctx) return
 
   ctx.drawImage(img, 0, 0)
-  for (const r of regions) {
-    const { xmin, ymin, xmax, ymax } = r.box
-    const x = xmin * canvas.width
-    const y = ymin * canvas.height
-    const w = (xmax - xmin) * canvas.width
-    const h = (ymax - ymin) * canvas.height
+  const cw = canvas.width
+  const ch = canvas.height
 
-    ctx.strokeStyle = '#FF6B6B'
+  /** 绘制 ROI 多边形区域 */
+  if (roiPoints && roiPoints.length >= 3) {
+    ctx.beginPath()
+    ctx.moveTo(roiPoints[0]!.x * cw, roiPoints[0]!.y * ch)
+    for (let i = 1; i < roiPoints.length; i++) {
+      ctx.lineTo(roiPoints[i]!.x * cw, roiPoints[i]!.y * ch)
+    }
+    ctx.closePath()
+    ctx.strokeStyle = '#FFD93D'
     ctx.lineWidth = 2
-    ctx.setLineDash([6, 3])
-    ctx.strokeRect(x, y, w, h)
+    ctx.setLineDash([8, 4])
+    ctx.stroke()
     ctx.setLineDash([])
 
-    if (r.label) {
-      ctx.font = 'bold 12px sans-serif'
-      const tw = ctx.measureText(r.label).width + 8
-      ctx.fillStyle = 'rgba(255, 107, 107, 0.85)'
-      ctx.fillRect(x, y - 16, tw, 16)
-      ctx.fillStyle = '#fff'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(r.label, x + 4, y - 8)
+    /** ROI 标签 */
+    ctx.font = 'bold 11px sans-serif'
+    ctx.fillStyle = 'rgba(255, 217, 61, 0.9)'
+    const labelY = Math.min(...roiPoints.map(p => p.y)) * ch - 4
+    ctx.textBaseline = 'bottom'
+    ctx.fillText('ROI', roiPoints[0]!.x * cw + 2, labelY > 12 ? labelY : 12)
+  }
+
+  /** 绘制检测 regions 框 */
+  if (regions) {
+    for (const r of regions) {
+      const { xmin, ymin, xmax, ymax } = r.box
+      const x = xmin * cw
+      const y = ymin * ch
+      const w = (xmax - xmin) * cw
+      const h = (ymax - ymin) * ch
+
+      ctx.strokeStyle = '#FF6B6B'
+      ctx.lineWidth = 2
+      ctx.setLineDash([6, 3])
+      ctx.strokeRect(x, y, w, h)
+      ctx.setLineDash([])
+
+      if (r.label) {
+        ctx.font = 'bold 12px sans-serif'
+        const tw = ctx.measureText(r.label).width + 8
+        ctx.fillStyle = 'rgba(255, 107, 107, 0.85)'
+        ctx.fillRect(x, y - 16, tw, 16)
+        ctx.fillStyle = '#fff'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(r.label, x + 4, y - 8)
+      }
     }
   }
+
   img.src = canvas.toDataURL('image/jpeg', 0.9)
 }
 
 /** 实时追加记录 */
-function addRecord(payload: { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number; detail?: string; snapshotUrl?: string | null }) {
+function addRecord(payload: { observerId: number; observerName: string; cameraId: string; timestamp: number; result: string; confidence: number; detail?: string; snapshotUrl?: string | null }) {
   if (filterCamera.value && filterCamera.value !== payload.cameraId) return
   if (filterMatched.value) return
-  const record: DetectRuleRecord = {
+  const record: ObserverRecord = {
     id: -(Date.now()),
-    ruleId: payload.ruleId,
-    ruleName: payload.ruleName,
+    observerId: payload.observerId,
+    observerName: payload.observerName,
     cameraId: payload.cameraId,
     timestamp: payload.timestamp,
     result: payload.result,
@@ -613,12 +754,12 @@ async function exportCsv() {
     params.set('since', String(since))
     params.set('until', String(since + 86_400_000))
   }
-  const res = await authFetch(`/api/detect-rules/history?${params}`)
+  const res = await authFetch(`/api/observers/history?${params}`)
   if (!res.ok) return
-  const { records: rows } = await res.json() as { records: DetectRuleRecord[] }
+  const { records: rows } = await res.json() as { records: ObserverRecord[] }
   const header = 'ID,Rule,Camera,Time,Matched,Result'
   const csvRows = rows.map(r =>
-    `${r.id},"${r.ruleName}","${cameraNameMap.value[r.cameraId] ?? r.cameraId}","${new Date(r.timestamp).toLocaleString(locale.value)}",${r.matched ? 'Yes' : 'No'},"${(r.result ?? '').replace(/"/g, '""')}"`
+    `${r.id},"${r.observerName}","${cameraNameMap.value[r.cameraId] ?? r.cameraId}","${new Date(r.timestamp).toLocaleString(locale.value)}",${r.matched ? 'Yes' : 'No'},"${(r.result ?? '').replace(/"/g, '""')}"`
   )
   const csv = [header, ...csvRows].join('\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -631,10 +772,10 @@ async function exportCsv() {
 }
 
 onMounted(() => {
-  loadRules()
+  loadObservers()
   loadRecords()
   loadRoiList()
-  loadStateList()
+  loadSignalList()
   loadModels()
 })
 
@@ -650,8 +791,8 @@ function switchToHistory() {
   <div class="detect-rule-panel">
     <div class="panel-header">
       <span>{{ t('detectRule.title') }}</span>
-      <button class="refresh-btn" @click="loadRules(); loadRecords()" :disabled="loading">{{ t('alert.refresh') }}</button>
-      <button class="add-btn" @click="showAddForm = !showAddForm">{{ showAddForm ? t('alert.cancel') : t('alert.addRuleShort') }}</button>
+      <button class="refresh-btn" @click="loadObservers(); loadRecords()" :disabled="loading">{{ t('alert.refresh') }}</button>
+      <button class="add-btn" @click="showAddForm = !showAddForm">{{ showAddForm ? t('alert.cancel') : t('alert.addObserverShort') }}</button>
     </div>
 
     <!-- 添加表单 -->
@@ -669,10 +810,11 @@ function switchToHistory() {
               <option value="" disabled>{{ t('detectRule.cameraPlaceholder') }}</option>
               <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
             </select>
-            <select v-if="getRoiOptionsForCamera(src.cameraId).length > 0 && !src.videoClip" v-model.number="src.roiId" class="input cam-roi-select">
-              <option :value="0">{{ t('detectRule.allRegions') }}</option>
+            <select v-if="!src.videoClip" v-model.number="src.roiId" class="input cam-roi-select" :disabled="getRoiOptionsForCamera(src.cameraId).length === 0">
+              <option :value="0">{{ getRoiOptionsForCamera(src.cameraId).length > 0 ? t('detectRule.allRegions') : t('detectRule.noRoiHint', '无区域') }}</option>
               <option v-for="roi in getRoiOptionsForCamera(src.cameraId)" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
             </select>
+            <button v-if="!src.videoClip && src.cameraId" class="roi-draw-btn" :class="{ active: roiDrawingIdx === idx }" @click="toggleRoiDraw(idx)" :title="src.roiId > 0 ? '编辑 ROI 区域' : '绘制 ROI 区域'">{{ src.roiId > 0 ? '✎' : '◇' }}</button>
             <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" placeholder="秒前" title="取多少秒前的帧，0=当前帧" />
             <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" title="切换视频片段模式">▶</button>
             <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" title="移除">&#x2715;</button>
@@ -694,6 +836,24 @@ function switchToHistory() {
               <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" placeholder="帧数" />
               <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" placeholder="帧/秒" />
               <span class="clip-hint">从录制文件抽帧</span>
+            </div>
+          </div>
+          <!-- ROI 绘制面板 -->
+          <div v-if="roiDrawingIdx === idx && src.cameraId" class="roi-draw-panel">
+            <div class="roi-draw-toolbar">
+              <span class="roi-draw-hint">{{ roiEditingId > 0 ? `编辑 ROI #${roiEditingId} — ` : '' }}{{ roiDrawPoints.length < 3 ? `点击画面添加顶点 (${roiDrawPoints.length}/3)` : `${roiDrawPoints.length} 个顶点` }}</span>
+              <button class="roi-draw-undo" :disabled="roiDrawPoints.length === 0" @click="undoRoiPoint">↩</button>
+              <button class="roi-draw-save" :disabled="roiDrawPoints.length < 3" @click="saveRoiDraw">{{ t('roi.save') }}</button>
+              <button class="roi-draw-cancel" @click="cancelRoiDraw">{{ t('settings.cancel') }}</button>
+            </div>
+            <div class="roi-draw-image-container">
+              <img :src="authUrl(`/api/snapshot/${src.cameraId}`)" class="roi-draw-img" @click="onRoiImageClick" />
+              <svg class="roi-draw-overlay" viewBox="0 0 1 1" preserveAspectRatio="none">
+                <polygon v-if="roiDrawPoints.length >= 3" :points="roiDrawPoints.map(p => `${p.x},${p.y}`).join(' ')" class="roi-draw-polygon" />
+                <template v-for="(p, i) in roiDrawPoints" :key="i">
+                  <circle :cx="p.x" :cy="p.y" r="0.015" class="roi-draw-vertex" />
+                </template>
+              </svg>
             </div>
           </div>
         </div>
@@ -729,22 +889,22 @@ function switchToHistory() {
       </div>
       <!-- 关联状态 -->
       <div class="form-field">
-        <label>{{ t('detectRule.linkedStates') }}</label>
-        <div v-if="availableStates.length > 0" class="chip-group">
+        <label>{{ t('detectRule.linkedSignals') }}</label>
+        <div v-if="availableSignals.length > 0" class="chip-group">
           <button
-            v-for="st in availableStates" :key="st.id"
-            :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
-            @click="toggleStateId(st.id)"
+            v-for="st in availableSignals" :key="st.id"
+            :class="['signal-chip', { selected: form.signalIds.includes(st.id) }]"
+            @click="toggleSignalId(st.id)"
           >{{ st.name }}</button>
         </div>
         <div v-else class="chip-group">
-          <span class="hint-inline">{{ t('detectRule.noStatesYet') }}</span>
+          <span class="hint-inline">{{ t('detectRule.noSignalsYet') }}</span>
         </div>
         <div class="quick-state-row">
-          <input v-model="quickStateName" class="input quick-state-input" :placeholder="t('detectRule.quickStatePlaceholder')" @keyup.enter="quickCreateState" />
-          <button class="quick-state-btn" @click="quickCreateState" :disabled="!quickStateName.trim()">{{ t('detectRule.quickCreate') }}</button>
+          <input v-model="quickSignalName" class="input quick-state-input" :placeholder="t('detectRule.quickSignalPlaceholder')" @keyup.enter="quickCreateSignal" />
+          <button class="quick-state-btn" @click="quickCreateSignal" :disabled="!quickSignalName.trim()">{{ t('detectRule.quickCreate') }}</button>
         </div>
-        <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
+        <span class="hint">{{ t('detectRule.linkedSignalsHint') }}</span>
       </div>
       <!-- 高级设置 -->
       <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
@@ -784,7 +944,7 @@ function switchToHistory() {
           <span class="hint-inline">随每次检测一起发送给 AI（如目标人物/物体照片）</span>
           <div class="ref-images-grid">
             <div v-for="(img, idx) in form.refImages" :key="img" class="ref-image-item">
-              <img :src="authUrl(`/api/detect-rules/ref-images/${img}`)" class="ref-thumb" />
+              <img :src="authUrl(`/api/observers/ref-images/${img}`)" class="ref-thumb" />
               <button class="ref-remove-btn" @click="removeRefImage(idx)" title="删除">&#x2715;</button>
             </div>
             <label class="ref-upload-btn" :class="{ disabled: refImageUploading }">
@@ -814,21 +974,21 @@ function switchToHistory() {
           </template>
         </div>
       </div>
-      <button class="submit-btn" @click="addRule">{{ t('alert.confirmAdd') }}</button>
+      <button class="submit-btn" @click="addObserver">{{ t('alert.confirmAdd') }}</button>
     </div>
 
     <!-- 视图切换 -->
     <div class="view-tabs">
-      <button :class="['view-btn', { active: activeView === 'rules' }]" @click="activeView = 'rules'">{{ t('detectRule.rulesTab') }} ({{ rules.length }})</button>
+      <button :class="['view-btn', { active: activeView === 'rules' }]" @click="activeView = 'rules'">{{ t('detectRule.rulesTab') }} ({{ observers.length }})</button>
       <button :class="['view-btn', { active: activeView === 'history' }]" @click="activeView = 'history'; loadRecords()">{{ t('detectRule.historyTab') }} ({{ records.length }})</button>
     </div>
 
     <!-- 规则列表 -->
     <div v-if="activeView === 'rules'" class="rule-list">
-      <div v-if="rules.length === 0" class="empty">{{ loading ? t('alert.loading') : t('detectRule.noRules') }}</div>
-      <div v-for="rule in rules" :key="rule.id" class="rule-item">
+      <div v-if="observers.length === 0" class="empty">{{ loading ? t('alert.loading') : t('detectRule.noRules') }}</div>
+      <div v-for="rule in observers" :key="rule.id" class="rule-item">
         <!-- 编辑模式 -->
-        <template v-if="editingRuleId === rule.id">
+        <template v-if="editingObserverId === rule.id">
           <div class="edit-form">
             <div class="form-field">
               <label>{{ t('detectRule.name') }}</label>
@@ -843,10 +1003,11 @@ function switchToHistory() {
                     <option value="" disabled>{{ t('detectRule.cameraPlaceholder') }}</option>
                     <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
                   </select>
-                  <select v-if="getRoiOptionsForCamera(src.cameraId).length > 0 && !src.videoClip" v-model.number="src.roiId" class="input cam-roi-select">
-                    <option :value="0">{{ t('detectRule.allRegions') }}</option>
+                  <select v-if="!src.videoClip" v-model.number="src.roiId" class="input cam-roi-select" :disabled="getRoiOptionsForCamera(src.cameraId).length === 0">
+                    <option :value="0">{{ getRoiOptionsForCamera(src.cameraId).length > 0 ? t('detectRule.allRegions') : t('detectRule.noRoiHint', '无区域') }}</option>
                     <option v-for="roi in getRoiOptionsForCamera(src.cameraId)" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
                   </select>
+                  <button v-if="!src.videoClip && src.cameraId" class="roi-draw-btn" :class="{ active: roiDrawingIdx === idx }" @click="toggleRoiDraw(idx)" :title="src.roiId > 0 ? '编辑 ROI 区域' : '绘制 ROI 区域'">{{ src.roiId > 0 ? '✎' : '◇' }}</button>
                   <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" placeholder="秒前" title="取多少秒前的帧，0=当前帧" />
                   <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" title="切换视频片段模式">▶</button>
                   <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" title="移除">&#x2715;</button>
@@ -867,6 +1028,24 @@ function switchToHistory() {
                     <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" placeholder="帧数" />
                     <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" placeholder="帧/秒" />
                     <span class="clip-hint">从录制文件抽帧</span>
+                  </div>
+                </div>
+                <!-- ROI 绘制面板（编辑） -->
+                <div v-if="roiDrawingIdx === idx && src.cameraId" class="roi-draw-panel">
+                  <div class="roi-draw-toolbar">
+                    <span class="roi-draw-hint">{{ roiDrawPoints.length < 3 ? `点击画面添加顶点 (${roiDrawPoints.length}/3)` : `${roiDrawPoints.length} 个顶点` }}</span>
+                    <button class="roi-draw-undo" :disabled="roiDrawPoints.length === 0" @click="undoRoiPoint">↩</button>
+                    <button class="roi-draw-save" :disabled="roiDrawPoints.length < 3" @click="saveRoiDraw">{{ t('roi.save') }}</button>
+                    <button class="roi-draw-cancel" @click="cancelRoiDraw">{{ t('settings.cancel') }}</button>
+                  </div>
+                  <div class="roi-draw-image-container">
+                    <img :src="authUrl(`/api/snapshot/${src.cameraId}`)" class="roi-draw-img" @click="onRoiImageClick" />
+                    <svg class="roi-draw-overlay" viewBox="0 0 1 1" preserveAspectRatio="none">
+                      <polygon v-if="roiDrawPoints.length >= 3" :points="roiDrawPoints.map(p => `${p.x},${p.y}`).join(' ')" class="roi-draw-polygon" />
+                      <template v-for="(p, i) in roiDrawPoints" :key="i">
+                        <circle :cx="p.x" :cy="p.y" r="0.015" class="roi-draw-vertex" />
+                      </template>
+                    </svg>
                   </div>
                 </div>
               </div>
@@ -893,22 +1072,22 @@ function switchToHistory() {
             </div>
             <!-- 关联状态（编辑） -->
             <div class="form-field">
-              <label>{{ t('detectRule.linkedStates') }}</label>
-              <div v-if="availableStates.length > 0" class="chip-group">
+              <label>{{ t('detectRule.linkedSignals') }}</label>
+              <div v-if="availableSignals.length > 0" class="chip-group">
                 <button
-                  v-for="st in availableStates" :key="st.id"
-                  :class="['state-chip', { selected: form.stateIds.includes(st.id) }]"
-                  @click="toggleStateId(st.id)"
+                  v-for="st in availableSignals" :key="st.id"
+                  :class="['signal-chip', { selected: form.signalIds.includes(st.id) }]"
+                  @click="toggleSignalId(st.id)"
                 >{{ st.name }}</button>
               </div>
               <div v-else class="chip-group">
-                <span class="hint-inline">{{ t('detectRule.noStatesYet') }}</span>
+                <span class="hint-inline">{{ t('detectRule.noSignalsYet') }}</span>
               </div>
               <div class="quick-state-row">
-                <input v-model="quickStateName" class="input quick-state-input" :placeholder="t('detectRule.quickStatePlaceholder')" @keyup.enter="quickCreateState" />
-                <button class="quick-state-btn" @click="quickCreateState" :disabled="!quickStateName.trim()">{{ t('detectRule.quickCreate') }}</button>
+                <input v-model="quickSignalName" class="input quick-state-input" :placeholder="t('detectRule.quickSignalPlaceholder')" @keyup.enter="quickCreateSignal" />
+                <button class="quick-state-btn" @click="quickCreateSignal" :disabled="!quickSignalName.trim()">{{ t('detectRule.quickCreate') }}</button>
               </div>
-              <span class="hint">{{ t('detectRule.linkedStatesHint') }}</span>
+              <span class="hint">{{ t('detectRule.linkedSignalsHint') }}</span>
             </div>
             <!-- 高级设置（编辑） -->
             <button class="advanced-toggle" @click="showAdvanced = !showAdvanced">
@@ -948,7 +1127,7 @@ function switchToHistory() {
                 <span class="hint-inline">随每次检测一起发送给 AI</span>
                 <div class="ref-images-grid">
                   <div v-for="(img, idx) in form.refImages" :key="img" class="ref-image-item">
-                    <img :src="authUrl(`/api/detect-rules/ref-images/${img}`)" class="ref-thumb" />
+                    <img :src="authUrl(`/api/observers/ref-images/${img}`)" class="ref-thumb" />
                     <button class="ref-remove-btn" @click="removeRefImage(idx)" title="删除">&#x2715;</button>
                   </div>
                   <label class="ref-upload-btn" :class="{ disabled: refImageUploading }">
@@ -986,13 +1165,13 @@ function switchToHistory() {
         <!-- 显示模式 -->
         <template v-else>
           <div class="rule-header">
-            <label class="toggle-switch" @click.prevent="toggleRule(rule)">
+            <label class="toggle-switch" @click.prevent="toggleObserver(rule)">
               <input type="checkbox" :checked="rule.enabled" />
               <span class="toggle-slider"></span>
             </label>
             <span class="rule-name" :class="{ disabled: !rule.enabled }">{{ rule.name }}</span>
             <button class="edit-btn" @click="startEdit(rule)">{{ t('alert.edit') }}</button>
-            <button class="delete-btn" @click="deleteRule(rule.id)">{{ t('alert.delete') }}</button>
+            <button class="delete-btn" @click="deleteObserver(rule.id)">{{ t('alert.delete') }}</button>
           </div>
           <div class="rule-meta">
             <template v-for="(cam, idx) in rule.cameras" :key="idx">
@@ -1002,8 +1181,8 @@ function switchToHistory() {
             <span v-if="rule.refImages?.length > 0" class="meta-tag ref">📷 x{{ rule.refImages.length }}</span>
             <span v-if="rule.modelId" class="meta-tag model">{{ availableModels.find(m => m.id === rule.modelId)?.name ?? rule.modelId }}</span>
             <span class="meta-info">{{ rule.intervalMs / 1000 }}{{ t('detectRule.secondsUnit') }} · {{ t('detectRule.cooldownLabel') }}{{ rule.cooldownMs / 1000 }}{{ t('detectRule.secondsUnit') }}</span>
-            <template v-if="rule.stateIds?.length > 0">
-              <span v-for="sid in rule.stateIds" :key="sid" class="meta-tag state">{{ stateNameMap[sid] ?? `#${sid}` }}</span>
+            <template v-if="rule.signalIds?.length > 0">
+              <span v-for="sid in rule.signalIds" :key="sid" class="meta-tag signal">{{ signalNameMap[sid] ?? `#${sid}` }}</span>
             </template>
             <span class="meta-prompt">{{ rule.prompt.slice(0, 60) }}{{ rule.prompt.length > 60 ? '...' : '' }}</span>
           </div>
@@ -1029,7 +1208,7 @@ function switchToHistory() {
           <div class="record-info">
             <div class="record-time">{{ formatTime(record.timestamp) }}</div>
             <div class="record-body">
-              <span class="record-rule">{{ record.ruleName }}</span>
+              <span class="record-rule">{{ record.observerName }}</span>
               <span class="record-cam">{{ cameraNameMap[record.cameraId] ?? record.cameraId }}</span>
               <span v-if="record.matched" class="record-matched">{{ t('detectRule.matched') }}</span>
               <span v-else class="record-unmatched">{{ t('detectRule.unmatched') }}</span>
@@ -1040,26 +1219,81 @@ function switchToHistory() {
         </div>
         <div v-if="expandedRecordId === record.id" class="record-detail">
           <div class="detail-section">
-            <div class="detail-label">AI Response</div>
-            <div class="detail-text">{{ record.result || '(empty)' }}</div>
-          </div>
-          <template v-if="parseDetail(record.detail).confidence !== undefined || parseDetail(record.detail).prompt || parseDetail(record.detail).rawResponse">
             <div class="detail-row">
+              <div class="detail-label" style="margin:0">AI Response</div>
               <span v-if="parseDetail(record.detail).confidence !== undefined" class="detail-tag confidence">
                 Confidence: {{ (parseDetail(record.detail).confidence! * 100).toFixed(1) }}%
               </span>
+              <span v-if="record.matched" class="detail-tag matched-tag">{{ t('detectRule.matched') }}</span>
+              <span v-else class="detail-tag unmatched-tag">{{ t('detectRule.unmatched') }}</span>
             </div>
-            <div v-if="parseDetail(record.detail).rawResponse" class="detail-section">
-              <div class="detail-label">Raw Response</div>
+            <div class="detail-text">{{ record.result || '(empty)' }}</div>
+          </div>
+          <!-- 完整响应：默认收起，可展开 -->
+          <template v-if="parseDetail(record.detail).rawResponse">
+            <button class="detail-collapse-toggle" @click="toggleDetailSection(`raw-${record.id}`)">
+              {{ expandedDetailSections.has(`raw-${record.id}`) ? '▾' : '▸' }} Raw Response
+            </button>
+            <div v-if="expandedDetailSections.has(`raw-${record.id}`)" class="detail-section">
               <pre class="detail-code">{{ parseDetail(record.detail).rawResponse }}</pre>
             </div>
-            <div v-if="parseDetail(record.detail).prompt" class="detail-section">
-              <div class="detail-label">Prompt</div>
+          </template>
+          <!-- Prompt：默认收起 -->
+          <template v-if="parseDetail(record.detail).prompt">
+            <button class="detail-collapse-toggle" @click="toggleDetailSection(`prompt-${record.id}`)">
+              {{ expandedDetailSections.has(`prompt-${record.id}`) ? '▾' : '▸' }} Prompt
+            </button>
+            <div v-if="expandedDetailSections.has(`prompt-${record.id}`)" class="detail-section">
               <div class="detail-text detail-prompt">{{ parseDetail(record.detail).prompt }}</div>
             </div>
           </template>
-          <div v-if="record.snapshotUrl" class="detail-snapshot">
-            <img :src="authUrl(record.snapshotUrl)" class="snapshot-img" crossorigin="anonymous" loading="lazy" @load="onSnapshotLoad($event, record)" />
+          <!-- 信号关联信息 -->
+          <template v-if="(() => { const d = parseDetail(record.detail); return (d.signalIds?.length ?? 0) > 0 || (d.signalUpdates?.length ?? 0) > 0 })()">
+            <div class="detail-section">
+              <div class="detail-label">{{ t('detectRule.linkedSignals') }}</div>
+              <div class="detail-signal-info">
+                <template v-if="(parseDetail(record.detail).signalIds?.length ?? 0) > 0">
+                  <div class="signal-info-row">
+                    <span class="signal-info-label">📖 {{ t('detectRule.linkedSignals') }}</span>
+                    <span v-for="sid in parseDetail(record.detail).signalIds!" :key="sid" class="signal-info-chip context">{{ signalNameMap[sid] ?? `#${sid}` }}</span>
+                  </div>
+                </template>
+                <template v-if="(parseDetail(record.detail).signalUpdates?.length ?? 0) > 0">
+                  <div class="signal-info-row">
+                    <span class="signal-info-label">🔄 {{ t('detectRule.signalUpdates', '信号更新') }}</span>
+                    <span v-for="su in parseDetail(record.detail).signalUpdates!" :key="su.id" class="signal-info-chip updated">
+                      {{ signalNameMap[su.id] ?? `#${su.id}` }} → {{ su.value }}
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <!-- 输入图片 -->
+          <div v-if="record.snapshotUrls?.length || record.snapshotUrl" class="detail-section">
+            <!-- 原图（叠加 ROI 虚线框） -->
+            <div class="detail-label">📷 原图</div>
+            <div class="detail-snapshot">
+              <template v-if="record.snapshotUrls?.length">
+                <div v-for="snap in record.snapshotUrls" :key="'orig-' + snap.cameraId" class="snapshot-item">
+                  <img :src="authUrl(snap.url)" class="snapshot-img" crossorigin="anonymous" loading="lazy" @load="onSnapshotLoad($event, record)" />
+                  <span v-if="record.snapshotUrls.length > 1" class="snapshot-cam-label">{{ cameraNameMap[snap.cameraId] ?? snap.cameraId }}</span>
+                </div>
+              </template>
+              <template v-else-if="record.snapshotUrl">
+                <img :src="authUrl(record.snapshotUrl)" class="snapshot-img" crossorigin="anonymous" loading="lazy" @load="onSnapshotLoad($event, record)" />
+              </template>
+            </div>
+            <!-- ROI 裁剪后的图片（发给 AI 的实际输入） -->
+            <template v-if="record.snapshotUrls?.some(s => s.roiUrl)">
+              <div class="detail-label" style="margin-top: 10px">✂️ ROI 裁剪（发给 AI）</div>
+              <div class="detail-snapshot">
+                <div v-for="snap in record.snapshotUrls.filter(s => s.roiUrl)" :key="'roi-' + snap.cameraId" class="snapshot-item">
+                  <img :src="authUrl(snap.roiUrl!)" class="snapshot-img" crossorigin="anonymous" loading="lazy" />
+                  <span v-if="record.snapshotUrls.length > 1" class="snapshot-cam-label">{{ cameraNameMap[snap.cameraId] ?? snap.cameraId }}</span>
+                </div>
+              </div>
+            </template>
           </div>
           <div class="detail-actions">
             <button class="action-btn recording-btn" @click="emit('jumpToRecording', record.cameraId, record.timestamp)">{{ t('detectRule.viewRecording') }}</button>
@@ -1144,32 +1378,32 @@ function switchToHistory() {
 }
 
 .add-form {
-  padding: 10px 12px;
+  padding: 12px;
   border-bottom: 1px solid #2a2a4a;
   background: #16213e;
 }
 
 .form-field {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
 }
 
 .form-field label {
   font-size: 12px;
   color: #888;
-  min-width: 80px;
   flex-shrink: 0;
 }
 
 .form-row {
   display: flex;
-  gap: 8px;
+  gap: 12px;
 }
 
 .form-field.half {
   flex: 1;
+  min-width: 0;
 }
 
 .input {
@@ -1561,6 +1795,28 @@ select.input {
   margin-bottom: 2px;
 }
 
+.detail-collapse-toggle {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 6px;
+  display: block;
+  transition: color 0.15s;
+}
+.detail-collapse-toggle:hover { color: #aaa; }
+
+.detail-tag.matched-tag {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+.detail-tag.unmatched-tag {
+  background: rgba(102, 102, 102, 0.15);
+  color: #666;
+}
+
 .detail-text {
   font-size: 12px;
   color: #ccc;
@@ -1610,7 +1866,72 @@ select.input {
 }
 
 .detail-snapshot {
-  margin-top: 8px;
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-signal-info {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.signal-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.signal-info-label {
+  font-size: 10px;
+  color: #888;
+  min-width: 70px;
+}
+
+.signal-info-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.signal-info-chip.context {
+  border-color: #3498db;
+  color: #5dade2;
+  background: rgba(52, 152, 219, 0.1);
+}
+
+.signal-info-chip.eval {
+  border-color: #f39c12;
+  color: #f5b041;
+  background: rgba(243, 156, 18, 0.1);
+}
+
+.signal-info-chip.updated {
+  border-color: #4ECDC4;
+  color: #4ECDC4;
+  background: rgba(78, 205, 196, 0.15);
+}
+
+.snapshot-item {
+  position: relative;
+  flex: 1 1 200px;
+  max-width: calc(50% - 4px);
+}
+
+.snapshot-cam-label {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #e0e0e0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 .snapshot-img {
@@ -1778,10 +2099,9 @@ select.input {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  flex: 1;
 }
 
-.state-chip {
+.signal-chip {
   padding: 2px 8px;
   border: 1px solid #3a3a5a;
   border-radius: 10px;
@@ -1792,13 +2112,13 @@ select.input {
   transition: all 0.15s;
 }
 
-.state-chip.selected {
+.signal-chip.selected {
   border-color: #4ECDC4;
   background: rgba(78, 205, 196, 0.15);
   color: #4ECDC4;
 }
 
-.state-chip:hover {
+.signal-chip:hover {
   border-color: #4ECDC4;
 }
 
@@ -1838,7 +2158,7 @@ select.input {
   background: rgba(78, 205, 196, 0.1);
 }
 
-.meta-tag.state {
+.meta-tag.signal {
   border-color: #9C27B0;
   color: #CE93D8;
 }
@@ -1855,19 +2175,17 @@ select.input {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 .cameras-section > label {
   font-size: 12px;
   color: #888;
-  min-width: 80px;
   flex-shrink: 0;
 }
 .cam-row {
   display: flex;
   gap: 4px;
   align-items: center;
-  margin-left: 80px;
 }
 .cam-select {
   flex: 1;
@@ -1899,7 +2217,6 @@ select.input {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-left: 80px;
   margin-bottom: 4px;
   padding: 4px 8px;
   background: rgba(52, 152, 219, 0.06);
@@ -2062,5 +2379,112 @@ select.input {
 
 .day-chip:hover {
   border-color: #4ECDC4;
+}
+
+/** ROI 绘制按钮 */
+.roi-draw-btn {
+  background: none;
+  border: 1px solid #3a3a5a;
+  border-radius: 3px;
+  color: #666;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+.roi-draw-btn:hover { border-color: #FFD93D; color: #FFD93D; }
+.roi-draw-btn.active { border-color: #FFD93D; background: rgba(255, 217, 61, 0.15); color: #FFD93D; }
+
+/** ROI 绘制面板 */
+.roi-draw-panel {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: rgba(255, 217, 61, 0.05);
+  border: 1px solid rgba(255, 217, 61, 0.2);
+  border-radius: 4px;
+}
+
+.roi-draw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.roi-draw-hint {
+  font-size: 11px;
+  color: #888;
+  flex: 1;
+}
+
+.roi-draw-undo {
+  background: none;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.roi-draw-undo:disabled { opacity: 0.3; }
+.roi-draw-undo:hover:not(:disabled) { color: #e0e0e0; border-color: #888; }
+
+.roi-draw-save {
+  background: #4ECDC4;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.roi-draw-save:disabled { opacity: 0.4; }
+
+.roi-draw-cancel {
+  background: none;
+  border: 1px solid #555;
+  color: #888;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.roi-draw-image-container {
+  position: relative;
+  background: #0a0a1a;
+  border-radius: 4px;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.roi-draw-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  cursor: crosshair;
+}
+
+.roi-draw-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.roi-draw-polygon {
+  fill: rgba(255, 217, 61, 0.2);
+  stroke: #FFD93D;
+  stroke-width: 0.005;
+}
+
+.roi-draw-vertex {
+  fill: #FFD93D;
+  stroke: #1a1a2e;
+  stroke-width: 0.003;
 }
 </style>

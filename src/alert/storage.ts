@@ -1,37 +1,32 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { type EventSubscription } from "@/alert/matcher";
+import { type AlertAction } from "@/alert/action";
 
-/** 告警规则 */
+/** 告警规则（重构后） */
 export interface AlertRule {
   id: number;
   /** 规则名称 */
   name: string;
-  /** 事件源类型：detect:rule / state:changed */
-  eventType: string;
-  /** 限定摄像头 ID，空字符串表示所有 */
-  cameraId: string;
+  /** 事件订阅 */
+  subscription: EventSubscription;
+  /** 条件表达式 JSON（空=无条件） */
+  condition: string;
   /** 时间窗口（秒） */
   windowSeconds: number;
   /** 窗口内触发次数阈值 */
   threshold: number;
-  /** 冷却时间（秒）：告警触发后的最小间隔 */
+  /** 冷却时间（秒） */
   cooldownSeconds: number;
+  /** 触发后执行的动作列表 */
+  actions: AlertAction[];
   /** 是否启用 */
   enabled: boolean;
-  /** 静默时段开始（HH:MM 格式，如 "22:00"），空表示无静默 */
+  /** 静默时段开始（HH:MM） */
   silentStart: string;
-  /** 静默时段结束（HH:MM 格式，如 "06:00"） */
+  /** 静默时段结束（HH:MM） */
   silentEnd: string;
-  /** 检测规则 ID（仅 detect:rule 事件源，0=任意规则） */
-  sourceRuleId: number;
-  /** 状态 ID（仅 state:changed 事件源，0=任意状态） */
-  sourceStateId: number;
-  /** 匹配条件 JSON：
-   * detect:rule → {"resultContains": "文本"}
-   * state:changed → {"valueEquals": "true"} / {"valueNotEquals": "false"}
-   * 空字符串 = 无条件 */
-  condition: string;
 }
 
 /** 告警记录 */
@@ -49,11 +44,27 @@ export interface AlertRecord {
   detail: string;
 }
 
+/** 数据库原始行 */
+interface DbRow {
+  id: number;
+  name: string;
+  subscriptionJson: string;
+  condition: string;
+  windowSeconds: number;
+  threshold: number;
+  cooldownSeconds: number;
+  actionsJson: string;
+  enabled: number;
+  silentStart: string;
+  silentEnd: string;
+}
+
 /**
- * 告警规则与记录存储
+ * 告警规则与记录存储（重构后）
  */
 export class AlertStorage {
   private db: Database;
+  private stmtGetEnabled: ReturnType<Database["prepare"]>;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -67,47 +78,17 @@ export class AlertStorage {
       CREATE TABLE IF NOT EXISTS alert_rules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        camera_id TEXT NOT NULL DEFAULT '',
+        subscription TEXT NOT NULL DEFAULT '{}',
+        condition TEXT NOT NULL DEFAULT '',
         window_seconds INTEGER NOT NULL DEFAULT 60,
         threshold INTEGER NOT NULL DEFAULT 3,
         cooldown_seconds INTEGER NOT NULL DEFAULT 300,
+        actions TEXT NOT NULL DEFAULT '[]',
         enabled INTEGER NOT NULL DEFAULT 1,
         silent_start TEXT NOT NULL DEFAULT '',
-        silent_end TEXT NOT NULL DEFAULT '',
-        source_rule_id INTEGER NOT NULL DEFAULT 0,
-        source_state_id INTEGER NOT NULL DEFAULT 0,
-        condition TEXT NOT NULL DEFAULT ''
+        silent_end TEXT NOT NULL DEFAULT ''
       )
     `);
-
-    /** 迁移：为已有表添加缺失列 */
-    const cols = this.db.query("PRAGMA table_info(alert_rules)").all() as Array<{ name: string }>;
-    if (!cols.some(c => c.name === "source_rule_id")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN source_rule_id INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!cols.some(c => c.name === "source_state_id")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN source_state_id INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!cols.some(c => c.name === "condition")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN condition TEXT NOT NULL DEFAULT ''");
-    }
-    /** 旧字段迁移（保留列以兼容旧数据） */
-    if (!cols.some(c => c.name === "min_count")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN min_count INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!cols.some(c => c.name === "track_names")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN track_names TEXT NOT NULL DEFAULT ''");
-    }
-    if (!cols.some(c => c.name === "roi_id")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN roi_id INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!cols.some(c => c.name === "min_speed")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN min_speed REAL NOT NULL DEFAULT 0");
-    }
-    if (!cols.some(c => c.name === "labels")) {
-      this.db.run("ALTER TABLE alert_rules ADD COLUMN labels TEXT NOT NULL DEFAULT ''");
-    }
 
     this.db.run(`
       CREATE TABLE IF NOT EXISTS alert_records (
@@ -124,56 +105,117 @@ export class AlertStorage {
     this.db.run("CREATE INDEX IF NOT EXISTS idx_alert_records_timestamp ON alert_records(timestamp)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_alert_records_rule ON alert_records(rule_id)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_alert_records_camera_time ON alert_records(camera_id, timestamp)");
+
+    /** 从旧 alert_rules 表迁移 */
+    this.migrateFromLegacy();
+
+    this.stmtGetEnabled = this.db.prepare(
+      `SELECT id, name, subscription as subscriptionJson, condition,
+        window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds,
+        actions as actionsJson, enabled, silent_start as silentStart, silent_end as silentEnd
+      FROM alert_rules WHERE enabled = 1`
+    );
   }
 
-  private readonly RULE_COLUMNS = `id, name, event_type as eventType, camera_id as cameraId, window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds, enabled, silent_start as silentStart, silent_end as silentEnd, source_rule_id as sourceRuleId, source_state_id as sourceStateId, condition`;
+  /** 从旧 alert_rules 表迁移（旧表有不同列结构） */
+  private migrateFromLegacy(): void {
+    const cols = this.db.query("PRAGMA table_info(alert_rules)").all() as Array<{ name: string }>;
+    const colNames = new Set(cols.map(c => c.name));
+
+    /** 如果新列不存在，添加 */
+    if (!colNames.has("subscription")) {
+      this.db.run("ALTER TABLE alert_rules ADD COLUMN subscription TEXT NOT NULL DEFAULT '{}'");
+    }
+    if (!colNames.has("actions")) {
+      this.db.run("ALTER TABLE alert_rules ADD COLUMN actions TEXT NOT NULL DEFAULT '[]'");
+    }
+
+    /** 迁移旧格式数据：从 eventType/sourceRuleId/sourceStateId 构建 subscription JSON */
+    if (colNames.has("event_type") && colNames.has("source_rule_id")) {
+      const legacyRules = this.db.query(
+        `SELECT id, event_type, source_rule_id, source_state_id, camera_id, condition FROM alert_rules WHERE subscription = '{}'`
+      ).all() as Array<{ id: number; event_type: string; source_rule_id: number; source_state_id: number; camera_id: string; condition: string }>;
+
+      for (const row of legacyRules) {
+        /** 映射旧事件类型名到新名 */
+        let eventType = row.event_type;
+        if (eventType === "detect:rule") eventType = "observation";
+        if (eventType === "state:changed") eventType = "signal:changed";
+
+        /** 确定 sourceId */
+        const sourceId = row.event_type === "detect:rule" ? row.source_rule_id : row.source_state_id;
+
+        const subscription = JSON.stringify({
+          eventType,
+          sourceId: sourceId ?? 0,
+          cameraId: row.camera_id ?? "",
+        });
+
+        this.db.run(
+          "UPDATE alert_rules SET subscription = ? WHERE id = ?",
+          [subscription, row.id],
+        );
+      }
+
+      if (legacyRules.length > 0) {
+        console.log(`[AlertStorage] 从旧格式迁移了 ${legacyRules.length} 条告警规则`);
+      }
+    }
+  }
 
   /** 获取所有规则 */
   listRules(): AlertRule[] {
-    return this.db.query(
-      `SELECT ${this.RULE_COLUMNS} FROM alert_rules ORDER BY id`
-    ).all() as AlertRule[];
+    return (this.db.query(
+      `SELECT id, name, subscription as subscriptionJson, condition,
+        window_seconds as windowSeconds, threshold, cooldown_seconds as cooldownSeconds,
+        actions as actionsJson, enabled, silent_start as silentStart, silent_end as silentEnd
+      FROM alert_rules ORDER BY id`
+    ).all() as DbRow[]).map(this.mapRow);
   }
 
   /** 获取启用的规则 */
   getEnabledRules(): AlertRule[] {
-    return this.db.query(
-      `SELECT ${this.RULE_COLUMNS} FROM alert_rules WHERE enabled = 1`
-    ).all() as AlertRule[];
+    return (this.stmtGetEnabled.all() as DbRow[]).map(this.mapRow);
   }
 
   /** 添加规则 */
   addRule(rule: Omit<AlertRule, "id" | "enabled">): number {
-    const result = this.db.query(
-      "INSERT INTO alert_rules (name, event_type, camera_id, window_seconds, threshold, cooldown_seconds, enabled, silent_start, silent_end, source_rule_id, source_state_id, condition) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?) RETURNING id"
-    ).get(rule.name, rule.eventType, rule.cameraId, rule.windowSeconds, rule.threshold, rule.cooldownSeconds, rule.silentStart ?? "", rule.silentEnd ?? "", rule.sourceRuleId ?? 0, rule.sourceStateId ?? 0, rule.condition ?? "");
-    return (result as { id: number }).id;
+    const row = this.db.query(
+      `INSERT INTO alert_rules (name, subscription, condition, window_seconds, threshold, cooldown_seconds, actions, enabled, silent_start, silent_end)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?) RETURNING id`
+    ).get(
+      rule.name,
+      JSON.stringify(rule.subscription),
+      rule.condition ?? "",
+      rule.windowSeconds, rule.threshold, rule.cooldownSeconds,
+      JSON.stringify(rule.actions ?? []),
+      rule.silentStart ?? "", rule.silentEnd ?? "",
+    );
+    return (row as { id: number }).id;
   }
 
   /** 更新规则 */
-  updateRule(id: number, updates: Partial<Pick<AlertRule, "name" | "eventType" | "cameraId" | "windowSeconds" | "threshold" | "cooldownSeconds" | "enabled" | "silentStart" | "silentEnd" | "sourceRuleId" | "sourceStateId" | "condition">>): boolean {
+  updateRule(id: number, updates: Partial<Omit<AlertRule, "id">>): boolean {
     const sets: string[] = [];
     const params: (string | number)[] = [];
 
     if (updates.name !== undefined) { sets.push("name = ?"); params.push(updates.name); }
-    if (updates.eventType !== undefined) { sets.push("event_type = ?"); params.push(updates.eventType); }
-    if (updates.cameraId !== undefined) { sets.push("camera_id = ?"); params.push(updates.cameraId); }
+    if (updates.subscription !== undefined) { sets.push("subscription = ?"); params.push(JSON.stringify(updates.subscription)); }
+    if (updates.condition !== undefined) { sets.push("condition = ?"); params.push(updates.condition); }
     if (updates.windowSeconds !== undefined) { sets.push("window_seconds = ?"); params.push(updates.windowSeconds); }
     if (updates.threshold !== undefined) { sets.push("threshold = ?"); params.push(updates.threshold); }
     if (updates.cooldownSeconds !== undefined) { sets.push("cooldown_seconds = ?"); params.push(updates.cooldownSeconds); }
+    if (updates.actions !== undefined) { sets.push("actions = ?"); params.push(JSON.stringify(updates.actions)); }
     if (updates.enabled !== undefined) { sets.push("enabled = ?"); params.push(updates.enabled ? 1 : 0); }
     if (updates.silentStart !== undefined) { sets.push("silent_start = ?"); params.push(updates.silentStart); }
     if (updates.silentEnd !== undefined) { sets.push("silent_end = ?"); params.push(updates.silentEnd); }
-    if (updates.sourceRuleId !== undefined) { sets.push("source_rule_id = ?"); params.push(updates.sourceRuleId); }
-    if (updates.sourceStateId !== undefined) { sets.push("source_state_id = ?"); params.push(updates.sourceStateId); }
-    if (updates.condition !== undefined) { sets.push("condition = ?"); params.push(updates.condition); }
 
     if (sets.length === 0) return false;
     params.push(id);
 
     const result = this.db.run(
       `UPDATE alert_rules SET ${sets.join(", ")} WHERE id = ?`,
-      params
+      params,
     );
     return result.changes > 0;
   }
@@ -186,10 +228,10 @@ export class AlertStorage {
 
   /** 记录告警 */
   insertAlert(ruleId: number, ruleName: string, cameraId: string, timestamp: number, detail: string): number {
-    const result = this.db.query(
+    const row = this.db.query(
       "INSERT INTO alert_records (rule_id, rule_name, camera_id, timestamp, detail) VALUES (?, ?, ?, ?, ?) RETURNING id"
     ).get(ruleId, ruleName, cameraId, timestamp, detail);
-    return (result as { id: number }).id;
+    return (row as { id: number }).id;
   }
 
   /** 查询告警历史 */
@@ -219,7 +261,7 @@ export class AlertStorage {
     return { records, total };
   }
 
-  /** 删除所有告警记录，返回删除的行数 */
+  /** 删除所有告警记录 */
   purgeAll(): number {
     const count = (this.db.query("SELECT COUNT(*) as cnt FROM alert_records").get() as { cnt: number }).cnt;
     this.db.run("DELETE FROM alert_records");
@@ -232,7 +274,35 @@ export class AlertStorage {
     return result.changes;
   }
 
-  /** 关闭数据库 */
+  /** 数据库行映射 */
+  private mapRow(row: DbRow): AlertRule {
+    let subscription: EventSubscription;
+    try {
+      subscription = JSON.parse(row.subscriptionJson) as EventSubscription;
+    } catch {
+      subscription = { eventType: "observation", sourceId: 0, cameraId: "" };
+    }
+
+    let actions: AlertAction[] = [];
+    try {
+      actions = JSON.parse(row.actionsJson ?? "[]") as AlertAction[];
+    } catch { /* ignore */ }
+
+    return {
+      id: row.id,
+      name: row.name,
+      subscription,
+      condition: row.condition ?? "",
+      windowSeconds: row.windowSeconds,
+      threshold: row.threshold,
+      cooldownSeconds: row.cooldownSeconds,
+      actions,
+      enabled: !!row.enabled,
+      silentStart: row.silentStart ?? "",
+      silentEnd: row.silentEnd ?? "",
+    };
+  }
+
   close(): void {
     this.db.close();
   }

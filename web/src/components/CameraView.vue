@@ -48,8 +48,6 @@ const props = defineProps<{
   dualStream?: boolean
   /** 检测流帧率 */
   detectFps?: number
-  /** ROI 区域列表（归一化坐标多边形） */
-  roiRegions?: Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>
   /** 越线检测线段列表（归一化坐标） */
   crossLines?: Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>
   /** 当前是否全屏显示（用于注册缩放快捷键） */
@@ -134,7 +132,7 @@ watch(rootEl, (el, oldEl) => {
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
 /** 缓存的动态层 canvas 2d context（避免每帧 getContext 调用） */
 let overlayCtx: CanvasRenderingContext2D | null = null
-/** 静态叠加层 canvas（OSD + ROI + 越线 + 热力图 + 区域计数，只在数据变化时重绘） */
+/** 静态叠加层 canvas（OSD + 越线 + 热力图，只在数据变化时重绘） */
 const staticCanvasRef = ref<HTMLCanvasElement | null>(null)
 /** 缓存的静态层 canvas 2d context */
 let staticCtx: CanvasRenderingContext2D | null = null
@@ -169,7 +167,7 @@ let staticLayerDirty = true
 /** 静态层上次绘制的 canvas 尺寸 */
 let staticLayerLastW = 0
 let staticLayerLastH = 0
-/** 静态层缓存 key（ROI/越线/热力图数据变化时改变） */
+/** 静态层缓存 key（越线/热力图数据变化时改变） */
 let staticLayerLastKey = ''
 
 /** MSE overlay 渲染：优先使用 requestVideoFrameCallback 与视频帧同步 */
@@ -202,13 +200,12 @@ function startOverlayLoop() {
 
 /** 静态层的缓存 key（computed 自动缓存，只在依赖变化时重算） */
 const staticLayerKey = computed(() => {
-  const roiKey = (props.roiRegions ?? []).map(r => `${r.id}:${r.name}`).join(';')
   const lineKey = (props.crossLines ?? []).map(l => `${l.id}:${l.name}`).join(';')
   const hmKey = `${showHeatmap.value}:${heatmapGrid.value.length}:${heatmapMaxCount.value}`
-  return `${roiKey}|${lineKey}|${hmKey}`
+  return `${lineKey}|${hmKey}`
 })
 
-/** 绘制静态层（OSD + ROI + 越线 + 热力图 + 区域计数） */
+/** 绘制静态层（OSD + 越线 + 热力图） */
 function drawStaticLayer(cssW: number, cssH: number) {
   const sCanvas = staticCanvasRef.value
   if (!sCanvas) return
@@ -236,7 +233,7 @@ function drawStaticLayer(cssW: number, cssH: number) {
   /** 静态 OSD（摄像头名称） */
   drawStaticOSD(ctx, cssW, cssH)
 
-  /** 静态元素（ROI + 越线，使用离屏缓存） */
+  /** 静态元素（越线，使用离屏缓存） */
   const staticCache = drawStaticCache(cssW, cssH)
   ctx.drawImage(staticCache, 0, 0)
 
@@ -244,38 +241,6 @@ function drawStaticLayer(cssW: number, cssH: number) {
   if (showHeatmap.value && heatmapGrid.value.length > 0 && heatmapMaxCount.value > 0) {
     const hmCache = drawHeatmapCache(cssW, cssH)
     if (hmCache) ctx.drawImage(hmCache, 0, 0)
-  }
-
-  /** ROI 区域内目标计数徽章 */
-  if (props.roiRegions && props.roiRegions.length > 0) {
-    const sorted = localDetections.length > 0 ? getSortedDetections() : []
-    if (sorted.length > 0) {
-      ctx.font = 'bold 11px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      for (const roi of props.roiRegions) {
-        if (roi.points.length < 3) continue
-        let count = 0
-        for (const d of sorted) {
-          const cx = (d.box.xmin + d.box.xmax) / 2
-          const cy = (d.box.ymin + d.box.ymax) / 2
-          if (pointInPoly(cx, cy, roi.points)) count++
-        }
-        if (count === 0) continue
-        const rcx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * cssW
-        const rcy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * cssH
-        const badgeX = rcx + (roi.name ? ctx.measureText(roi.name).width / 2 + 14 : 0)
-        const badgeY = rcy
-        ctx.fillStyle = 'rgba(233, 30, 99, 0.9)'
-        ctx.beginPath()
-        ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = '#fff'
-        ctx.fillText(String(count), badgeX, badgeY + 1)
-      }
-      ctx.textAlign = 'start'
-      ctx.textBaseline = 'bottom'
-    }
   }
 }
 
@@ -303,8 +268,6 @@ function drawOverlayOnce() {
   /** poll 检测结果 */
   const detectResult = takeDetections(props.cameraId, consumedDetectVersion)
   if (detectResult) {
-    /** 仅在有 ROI 区域时才需要更新静态层（区域计数徽标依赖检测结果） */
-    if (props.roiRegions && props.roiRegions.length > 0) staticLayerDirty = true
     consumedDetectVersion = detectResult.version
     localDetections = detectResult.detections
     updateSmoothedBoxes(localDetections)
@@ -312,7 +275,7 @@ function drawOverlayOnce() {
     updateDetectionSummary()
   }
 
-  /** 绘制静态层（OSD + ROI + 越线 + 热力图 + 区域计数） */
+  /** 绘制静态层（OSD + 越线 + 热力图） */
   drawStaticLayer(cssW, cssH)
 
   /** 绘制动态层（时钟 + FPS/延迟/AI指标 + 检测框 + 轨迹 + 通知） */
@@ -1064,7 +1027,7 @@ function drawDynamicOSD(ctx: CanvasRenderingContext2D, width: number, height: nu
   ctx.restore()
 }
 
-/** 静态元素（ROI + 越线）离屏缓存 */
+/** 静态元素（越线）离屏缓存 */
 let staticCacheCanvas: OffscreenCanvas | null = null
 let staticCacheW = 0
 let staticCacheH = 0
@@ -1078,9 +1041,8 @@ let heatmapCacheKey = ''
 
 /** 计算静态元素的缓存 key（props 变化时 key 改变触发重绘） */
 function computeStaticCacheKey(): string {
-  const roiKey = (props.roiRegions ?? []).map(r => `${r.id}:${r.name}:${r.points.map(p => `${p.x},${p.y}`).join('|')}`).join(';')
   const lineKey = (props.crossLines ?? []).map(l => `${l.id}:${l.name}:${l.start.x},${l.start.y}-${l.end.x},${l.end.y}`).join(';')
-  return `${roiKey}|${lineKey}`
+  return lineKey
 }
 
 /** 绘制静态元素到离屏 Canvas */
@@ -1091,36 +1053,6 @@ function drawStaticCache(width: number, height: number): OffscreenCanvas {
   }
   const oc = new OffscreenCanvas(width, height)
   const sctx = oc.getContext('2d')!
-  /** 绘制 ROI 区域 */
-  if (props.roiRegions && props.roiRegions.length > 0) {
-    sctx.lineWidth = 1.5
-    sctx.setLineDash([6, 4])
-    for (const roi of props.roiRegions) {
-      if (roi.points.length < 3) continue
-      sctx.strokeStyle = 'rgba(156, 39, 176, 0.7)'
-      sctx.fillStyle = 'rgba(156, 39, 176, 0.08)'
-      sctx.beginPath()
-      sctx.moveTo(roi.points[0]!.x * width, roi.points[0]!.y * height)
-      for (let i = 1; i < roi.points.length; i++) {
-        sctx.lineTo(roi.points[i]!.x * width, roi.points[i]!.y * height)
-      }
-      sctx.closePath()
-      sctx.fill()
-      sctx.stroke()
-      if (roi.name) {
-        const cx = roi.points.reduce((s, p) => s + p.x, 0) / roi.points.length * width
-        const cy = roi.points.reduce((s, p) => s + p.y, 0) / roi.points.length * height
-        sctx.setLineDash([])
-        sctx.font = 'bold 10px sans-serif'
-        sctx.fillStyle = 'rgba(156, 39, 176, 0.9)'
-        sctx.textAlign = 'center'
-        sctx.fillText(roi.name, cx, cy)
-        sctx.textAlign = 'start'
-        sctx.setLineDash([6, 4])
-      }
-    }
-    sctx.setLineDash([])
-  }
   /** 绘制越线检测线段 */
   if (props.crossLines && props.crossLines.length > 0) {
     sctx.lineWidth = 2
@@ -1736,19 +1668,6 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
   ctx.restore()
 }
 
-/** 点是否在多边形内（射线法） */
-function pointInPoly(x: number, y: number, poly: Array<{ x: number; y: number }>): boolean {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i]!.x, yi = poly[i]!.y
-    const xj = poly[j]!.x, yj = poly[j]!.y
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
-      inside = !inside
-    }
-  }
-  return inside
-}
-
 const namingBox = ref<{ trackId: number; label: string; x: number; y: number } | null>(null)
 const namingName = ref('')
 const namingInput = ref<HTMLInputElement | null>(null)
@@ -1967,7 +1886,7 @@ watch(() => props.recording, (on) => {
   else { recordingDuration.value = '' }
 }, { immediate: true })
 
-/** 截图下载当前画面（从 video + overlay canvas 合成，包含检测框+轨迹+ROI+OSD） */
+/** 截图下载当前画面（从 video + overlay canvas 合成，包含检测框+轨迹+越线+OSD） */
 /** 按需 AI 分析当前帧 */
 async function analyzeFrame() {
   if (aiAnalyzing.value) return

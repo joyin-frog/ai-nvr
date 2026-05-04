@@ -483,36 +483,14 @@ onMounted(() => {
       <section class="section">
         <h3>{{ t('settings.ai', 'AI 视觉分析') }}</h3>
         <p class="section-desc">使用视觉语言模型（VLM）分析摄像头画面，检测目标并生成语义描述。</p>
-        <label class="field">
-          <span class="field-label">{{ t('settings.llmApiUrl', 'VLM API 端点') }}</span>
-          <input type="url" v-model="settings.ai.llm.apiUrl" placeholder="http://localhost:1234/v1/chat/completions" class="input" />
-          <span class="field-hint">OpenAI 兼容格式（LM Studio / Ollama / vLLM）</span>
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.llmModel', '模型名称') }}</span>
-          <input type="text" v-model="settings.ai.llm.model" placeholder="qwen3.5-0.8b" class="input" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.llmMaxTokens', '最大 Token') }}</span>
-          <input type="number" v-model.number="settings.ai.llm.maxTokens" step="10" min="30" max="1000" class="input" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.llmImageWidth', '推理图片宽度') }}</span>
-          <input type="number" v-model.number="settings.ai.llm.imageWidth" step="64" min="0" max="1920" class="input" />
-          <span class="field-hint">0=原始分辨率，建议 640</span>
-        </label>
-        <label class="field">
-          <span class="field-label">{{ t('settings.llmSystemPrompt', '系统提示词') }}</span>
-          <textarea v-model="settings.ai.llm.systemPrompt" class="input textarea" rows="3" :placeholder="'留空使用默认提示词'"></textarea>
-        </label>
 
-        <!-- 多模型管理（始终可见，不受 AI enabled 限制） -->
+        <!-- 多模型管理 -->
         <div class="models-section">
           <div class="models-header">
             <span class="field-label">模型列表</span>
             <button class="add-btn compact" @click="addModel">+ 添加模型</button>
           </div>
-          <p class="field-hint">列表中第一个模型为默认模型，检测规则可通过 modelId 指定使用哪个模型。</p>
+          <p class="field-hint">列表中第一个模型为默认模型，观测器可通过 modelId 指定使用哪个模型。</p>
           <div v-if="settings.ai.models && settings.ai.models.length > 0" class="model-list">
             <div v-for="(m, i) in settings.ai.models" :key="m.id" class="model-card">
               <div class="model-card-header">

@@ -105,6 +105,10 @@ bun --hot ./index.ts
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
 
+
+## 项目开发准则
+- 绝对不能降低用户监看的分辨率和帧率
+
 ## 浏览器测试（vite-plugin-pilot）
 需要在 web 目录下执行 npx pilot 相关指令
 已安装。`npx pilot run '代码'` 执行 JS（返回结果+日志+快照）、`npx pilot page` 页面状态

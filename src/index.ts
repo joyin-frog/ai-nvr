@@ -16,9 +16,9 @@ import { SnapshotStorage } from "@/storage/snapshots";
 import { RoiStorage } from "@/storage/roi";
 import { AlertStorage } from "@/alert/storage";
 import { AlertEngine } from "@/alert/engine";
-import { DetectRuleStorage } from "@/detect-rule/storage";
-import { DetectRuleEngine } from "@/detect-rule/engine";
-import { StateStorage } from "@/state/storage";
+import { ObserverStorage } from "@/observer/storage";
+import { ObserverEngine } from "@/observer/engine";
+import { SignalStore } from "@/signal/store";
 import { ThumbnailGenerator } from "@/storage/thumbnails";
 import { StorageCleaner } from "@/storage/cleaner";
 import { DiskUsage } from "@/storage/disk-usage";
@@ -161,18 +161,17 @@ const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
 const alertEngine = new AlertEngine(eventBus, alertStorage);
 alertEngine.start();
 
-/** 检测规则引擎 */
-const detectRuleStorage = new DetectRuleStorage(join(dataDir, "detect-rules.db"));
-const stateStorage = new StateStorage(join(dataDir, "state.db"));
-const detectRuleEngine = new DetectRuleEngine(eventBus, detectRuleStorage, cameraManager, runtimeConfig, roiStorage, stateStorage);
-detectRuleEngine.setRecorder(recorder);
-detectRuleEngine.setFfmpegPath(config.ffmpegPath);
-detectRuleEngine.setRefImagesDir(join(dataDir, "ref-images"));
-detectRuleEngine.setTrackStores(trajectoryStorage, trackStorage);
-detectRuleEngine.setSaveSnapshot((cameraId, timestamp, jpeg) => {
+/** 观测器引擎（原检测规则引擎） */
+const observerStorage = new ObserverStorage(join(dataDir, "detect-rules.db"));
+const signalStore = new SignalStore(join(dataDir, "state.db"));
+const observerEngine = new ObserverEngine(eventBus, observerStorage, cameraManager, runtimeConfig, roiStorage, signalStore);
+observerEngine.setRecorder(recorder);
+observerEngine.setFfmpegPath(config.ffmpegPath);
+observerEngine.setRefImagesDir(join(dataDir, "ref-images"));
+observerEngine.setSaveSnapshot((cameraId: string, timestamp: number, jpeg: Buffer) => {
   alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
 });
-detectRuleEngine.start();
+observerEngine.start();
 
 
 /** 目标活动档案收集器（追踪目标全生命周期，消失时 AI 摘要） */
@@ -210,7 +209,7 @@ const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs, eventStorage);
 
 /** 统一存储清理管理器 */
-const cleaner = new StorageCleaner(runtimeConfig, eventStorage, detectRuleStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, observerStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
 cleaner.start();
 
 /** AI 事件摘要器（定期用 LLM 汇总事件流） */
@@ -259,7 +258,7 @@ void Promise.allSettled(ptzRegistrations);
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, eventStorage, recorder, monitor, runtimeConfig, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, detectRuleStorage, detectRuleEngine, stateStorage, patrolScanner);
+startServer(config.server.port, cameraManager, eventBus, eventStorage, recorder, monitor, runtimeConfig, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, observerStorage, observerEngine, signalStore, patrolScanner);
 
 /** 自动记录事件到 SQLite */
 /** 事件收集缓冲区（同一微任务周期内的事件批量写入） */
@@ -274,9 +273,9 @@ function flushPendingEvents() {
 }
 
 /** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
-const RECORDED_EVENTS = ["camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "state:changed"] as const;
+const RECORDED_EVENTS: string[] = ["camera:online", "camera:offline", "detect:rule", "observation", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "state:changed", "signal:changed"];
 for (const eventType of RECORDED_EVENTS) {
-  eventBus.on(eventType, (payload) => {
+  eventBus.on(eventType as import("@/event-bus").EventName, (payload: unknown) => {
     /** dwell 事件只在停留超过 30 秒时持久化（减少高频写入） */
     if (eventType === "track:dwell") {
       const p = payload as { dwellMs: number };
@@ -289,9 +288,10 @@ for (const eventType of RECORDED_EVENTS) {
     } else if (eventType === "llm:scene") {
       const p = payload as { description: string; trigger: string; inferMs: number };
       detail = JSON.stringify({ description: p.description, trigger: p.trigger, inferMs: p.inferMs });
-    } else if (eventType === "state:changed") {
-      const p = payload as { stateName: string; oldValue: string; newValue: string; source: string; notify: boolean };
-      detail = JSON.stringify({ stateName: p.stateName, oldValue: p.oldValue, newValue: p.newValue, source: p.source, notify: p.notify });
+    } else if (eventType === "signal:changed" || eventType === "state:changed") {
+      const p = payload as Record<string, unknown>;
+      const name = (p.signalName ?? p.stateName) as string;
+      detail = JSON.stringify({ signalName: name, oldValue: p.oldValue, newValue: p.newValue, source: p.source, notify: p.notify });
     } else if (eventType.startsWith("track:")) {
       const p = payload as Record<string, unknown>;
       const obj: Record<string, unknown> = { trackId: p.trackId, label: p.label };
@@ -343,13 +343,13 @@ async function gracefulShutdown(signal: string): Promise<void> {
   clipService.dispose();
   cleaner.stop();
   alertEngine.stop();
-  detectRuleEngine.stop();
+  observerEngine.stop();
   eventStorage.close();
   roiStorage.close();
   crossLineStorage.close();
   alertStorage.close();
-  detectRuleStorage.close();
-  stateStorage.close();
+  observerStorage.close();
+  signalStore.close();
   preferencesStorage.close();
   diskUsage.close();
   trajectoryStorage.close();

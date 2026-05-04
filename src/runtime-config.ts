@@ -1,5 +1,7 @@
-import { type AppConfig, type MotionConfig } from "@/config";
+import { type AppConfig, type MotionConfig, saveRuntimeToYaml, getConfigPath } from "@/config";
 import { type AiConfig } from "@/ai/types";
+import yaml from "js-yaml";
+import { readFileSync } from "node:fs";
 
 /** 每个摄像头的灵敏度覆盖 */
 export interface CameraOverride {
@@ -136,57 +138,185 @@ export interface RuntimeSettings {
 /**
  * 运行时配置管理器
  * 允许通过 API 修改灵敏度、AI 参数等，无需重启
+ * 配置变更会自动持久化回 YAML 文件
  */
 export class RuntimeConfig {
   private settings: RuntimeSettings;
 
   constructor(config: AppConfig) {
+    /** 尝试从 YAML 文件加载持久化的运行时配置 */
+    const persisted = this.loadPersistedSettings();
+
     this.settings = {
-      language: "zh-CN",
-      motion: { ...config.motion },
-      ai: { ...config.ai, llm: { ...config.ai.llm }, models: config.ai.models.map(m => ({ ...m })), clip: { ...config.ai.clip } },
-      cameraOverrides: {},
+      language: persisted.language ?? "zh-CN",
+      motion: { ...config.motion, ...persisted.motion },
+      ai: {
+        ...config.ai,
+        llm: { ...config.ai.llm, ...persisted.ai?.llm },
+        models: persisted.ai?.models ?? config.ai.models.map(m => ({ ...m })),
+        clip: { ...config.ai.clip, ...persisted.ai?.clip },
+      },
+      cameraOverrides: persisted.cameraOverrides ?? {},
       recording: {
-        mode: "motion",
-        postMotionDuration: 5000,
-        retentionDays: 7,
-        segmentDuration: 300,
-        encoder: "auto",
-        vaapiDevice: "/dev/dri/renderD128",
+        mode: persisted.recording?.mode ?? "motion",
+        postMotionDuration: persisted.recording?.postMotionDuration ?? 5000,
+        retentionDays: persisted.recording?.retentionDays ?? 7,
+        segmentDuration: persisted.recording?.segmentDuration ?? 300,
+        encoder: persisted.recording?.encoder ?? "auto",
+        vaapiDevice: persisted.recording?.vaapiDevice ?? "/dev/dri/renderD128",
         watermark: {
-          enabled: true,
-          namePosition: "top-left",
-          timePosition: "bottom-left",
-          fontSize: 24,
+          enabled: persisted.recording?.watermark?.enabled ?? true,
+          namePosition: persisted.recording?.watermark?.namePosition ?? "top-left",
+          timePosition: persisted.recording?.watermark?.timePosition ?? "bottom-left",
+          fontSize: persisted.recording?.watermark?.fontSize ?? 24,
         },
-        eventPreMs: 15000,
-        eventPostMs: 30000,
-        bufferDurationMs: 30000,
-        eventTriggers: ["detect:rule", "alert"],
+        eventPreMs: persisted.recording?.eventPreMs ?? 15000,
+        eventPostMs: persisted.recording?.eventPostMs ?? 30000,
+        bufferDurationMs: persisted.recording?.bufferDurationMs ?? 30000,
+        eventTriggers: persisted.recording?.eventTriggers ?? ["alert"],
       },
-      webhook: {
-        urls: [],
-      },
+      webhook: persisted.webhook ?? { urls: [] },
       notify: {
         dingtalk: {
-          enabled: false,
-          webhookUrl: "",
-          secret: "",
+          enabled: persisted.notify?.dingtalk?.enabled ?? false,
+          webhookUrl: persisted.notify?.dingtalk?.webhookUrl ?? "",
+          secret: persisted.notify?.dingtalk?.secret ?? "",
         },
         email: {
-          enabled: false,
-          smtp: null,
-          from: "",
-          to: "",
+          enabled: persisted.notify?.email?.enabled ?? false,
+          smtp: persisted.notify?.email?.smtp ?? null,
+          from: persisted.notify?.email?.from ?? "",
+          to: persisted.notify?.email?.to ?? "",
         },
       },
       cleanup: {
-        eventsRetentionDays: 30,
-        alertsRetentionDays: 90,
-        snapshotsRetentionDays: 30,
-        thumbnailsRetentionDays: 7,
+        eventsRetentionDays: persisted.cleanup?.eventsRetentionDays ?? 30,
+        alertsRetentionDays: persisted.cleanup?.alertsRetentionDays ?? 90,
+        snapshotsRetentionDays: persisted.cleanup?.snapshotsRetentionDays ?? 30,
+        thumbnailsRetentionDays: persisted.cleanup?.thumbnailsRetentionDays ?? 7,
       },
     };
+  }
+
+  /** 从 YAML 文件加载已持久化的运行时配置 */
+  private loadPersistedSettings(): Partial<RuntimeSettings> {
+    const configPath = getConfigPath();
+    const raw = readFileSync(configPath, "utf-8");
+    const doc = yaml.load(raw) as Record<string, unknown>;
+
+    const result: Partial<RuntimeSettings> = {};
+
+    if (typeof doc.language === "string") result.language = doc.language;
+
+    if (doc.motion && typeof doc.motion === "object") {
+      const m = doc.motion as Record<string, unknown>;
+      result.motion = {
+        threshold: m.threshold as number,
+        cooldown: m.cooldown as number,
+        compareWidth: m.compare_width as number,
+        compareHeight: m.compare_height as number,
+      };
+    }
+
+    if (doc.ai && typeof doc.ai === "object") {
+      const a = doc.ai as Record<string, unknown>;
+      result.ai = {} as RuntimeSettings["ai"];
+
+      if (a.llm && typeof a.llm === "object") {
+        const l = a.llm as Record<string, unknown>;
+        result.ai.llm = {
+          enabled: l.enabled as boolean,
+          apiUrl: (l.api_url as string) ?? "",
+          model: (l.model as string) ?? "",
+          maxTokens: (l.max_tokens as number) ?? 150,
+          interval: (l.interval as number) ?? 10000,
+          imageWidth: (l.image_width as number) ?? 640,
+          systemPrompt: (l.system_prompt as string) ?? "",
+          contextIntervalMs: (l.context_interval_ms as number) ?? 2000,
+        };
+      }
+
+      if (Array.isArray(a.models)) {
+        result.ai.models = (a.models as Array<Record<string, unknown>>).map((m, i) => ({
+          id: (m.id as string) ?? `model_${i}`,
+          name: (m.name as string) ?? `Model ${i + 1}`,
+          apiUrl: (m.api_url as string) ?? (m.apiUrl as string) ?? "",
+          model: (m.model as string) ?? "",
+          maxTokens: (m.max_tokens as number) ?? 150,
+        }));
+      }
+
+      if (a.clip && typeof a.clip === "object") {
+        const c = a.clip as Record<string, unknown>;
+        result.ai.clip = {
+          enabled: (c.enabled as boolean) ?? false,
+          model: (c.model as string) ?? "jinaai/jina-clip-v2",
+          embeddingDim: (c.embedding_dim as number) ?? 512,
+        };
+      }
+    }
+
+    if (doc.recording && typeof doc.recording === "object") {
+      const r = doc.recording as Record<string, unknown>;
+      result.recording = {
+        mode: r.mode as RuntimeSettings["recording"]["mode"],
+        postMotionDuration: (r.post_motion_duration as number) ?? 5000,
+        retentionDays: (r.retention_days as number) ?? 7,
+        segmentDuration: (r.segment_duration as number) ?? 300,
+        encoder: (r.encoder as string) ?? "auto",
+        vaapiDevice: (r.vaapi_device as string) ?? "/dev/dri/renderD128",
+        watermark: {
+          enabled: (r.watermark as Record<string, unknown>)?.enabled as boolean ?? true,
+          namePosition: (r.watermark as Record<string, unknown>)?.name_position as WatermarkPosition ?? "top-left",
+          timePosition: (r.watermark as Record<string, unknown>)?.time_position as WatermarkPosition ?? "bottom-left",
+          fontSize: (r.watermark as Record<string, unknown>)?.font_size as number ?? 24,
+        },
+        eventPreMs: (r.event_pre_ms as number) ?? 15000,
+        eventPostMs: (r.event_post_ms as number) ?? 30000,
+        bufferDurationMs: (r.buffer_duration_ms as number) ?? 30000,
+        eventTriggers: (r.event_triggers as string[]) ?? ["alert"],
+      };
+    }
+
+    if (doc.camera_overrides && typeof doc.camera_overrides === "object") {
+      result.cameraOverrides = doc.camera_overrides as Record<string, CameraOverride>;
+    }
+
+    if (doc.webhook && typeof doc.webhook === "object") {
+      const w = doc.webhook as Record<string, unknown>;
+      result.webhook = {
+        urls: Array.isArray(w.urls) ? w.urls as string[] : [],
+      };
+    }
+
+    if (doc.notify && typeof doc.notify === "object") {
+      const n = doc.notify as Record<string, unknown>;
+      result.notify = {
+        dingtalk: {
+          enabled: (n.dingtalk as Record<string, unknown>)?.enabled as boolean ?? false,
+          webhookUrl: ((n.dingtalk as Record<string, unknown>)?.webhook_url as string) ?? "",
+          secret: ((n.dingtalk as Record<string, unknown>)?.secret as string) ?? "",
+        },
+        email: {
+          enabled: (n.email as Record<string, unknown>)?.enabled as boolean ?? false,
+          smtp: (n.email as Record<string, unknown>)?.smtp as EmailSmtpConfig | null ?? null,
+          from: ((n.email as Record<string, unknown>)?.from as string) ?? "",
+          to: ((n.email as Record<string, unknown>)?.to as string) ?? "",
+        },
+      };
+    }
+
+    if (doc.cleanup && typeof doc.cleanup === "object") {
+      const c = doc.cleanup as Record<string, unknown>;
+      result.cleanup = {
+        eventsRetentionDays: (c.events_retention_days as number) ?? 30,
+        alertsRetentionDays: (c.alerts_retention_days as number) ?? 90,
+        snapshotsRetentionDays: (c.snapshots_retention_days as number) ?? 30,
+        thumbnailsRetentionDays: (c.thumbnails_retention_days as number) ?? 7,
+      };
+    }
+
+    return result;
   }
 
   /** 获取当前设置 */
@@ -319,6 +449,11 @@ export class RuntimeConfig {
       if (typeof c.snapshotsRetentionDays === "number") this.settings.cleanup.snapshotsRetentionDays = c.snapshotsRetentionDays;
       if (typeof c.thumbnailsRetentionDays === "number") this.settings.cleanup.thumbnailsRetentionDays = c.thumbnailsRetentionDays;
     }
+
+    /** 持久化到 YAML 文件（后台执行，不阻塞响应） */
+    saveRuntimeToYaml(this.settings as unknown as Record<string, unknown>).catch(err => {
+      console.error("[RuntimeConfig] 持久化配置失败:", err);
+    });
 
     return this.settings;
   }

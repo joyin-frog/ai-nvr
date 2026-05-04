@@ -21,11 +21,11 @@ const CameraStatusPanel = defineAsyncComponent(() => import('./components/Camera
 const CameraManagePanel = defineAsyncComponent(() => import('./components/CameraManagePanel.vue'))
 const DetectRulePanel = defineAsyncComponent(() => import('./components/DetectRulePanel.vue'))
 const AlertPanel = defineAsyncComponent(() => import('./components/AlertPanel.vue'))
-const StatePanel = defineAsyncComponent(() => import('./components/StatePanel.vue'))
+const SignalPanel = defineAsyncComponent(() => import('./components/SignalPanel.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
 
 const { t, locale } = useI18n()
-const { toasts: toastToasts, dismiss: toastDismiss, error: toastError, warning: toastWarning } = useToast()
+const { toasts: toastToasts, dismiss: toastDismiss, error: toastError } = useToast()
 const { getPref, setPref } = usePreferences()
 
 /** 切换语言 */
@@ -220,28 +220,14 @@ const trackLabelsMap = shallowReactive<Record<string, Record<number, string>>>({
 const frameLatencyMap = new Map<string, number>()
 /** 帧延迟的 reactive 副本（shallowReactive：差量更新，只有变化的 key 触发重渲染） */
 const frameLatency = shallowReactive<Record<string, number>>({})
-/** ROI 区域数据（按摄像头分组） */
-const roiDataMap = ref<Record<string, Array<{ id: number; name: string; points: string }>>>({})
 /** 越线检测线段数据（按摄像头分组） */
 const crossLineDataMap = ref<Record<string, Array<{ id: number; name: string; start: { x: number; y: number }; end: { x: number; y: number } }>>>({})
-/** 摄像头 ID → 解析后的 ROI 列表（归一化坐标） */
-const parsedRoiMap = computed(() => {
-  const result: Record<string, Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }>> = {}
-  for (const [camId, regions] of Object.entries(roiDataMap.value)) {
-    result[camId] = regions.map(r => ({
-      id: r.id,
-      name: r.name,
-      points: JSON.parse(r.points) as Array<{ x: number; y: number }>,
-    }))
-  }
-  return result
-})
 const eventPanel = ref<InstanceType<typeof EventPanel> | null>(null)
 const recordingsPanel = ref<any>(null)
 const cameraManagePanel = ref<any>(null)
 const alertPanel = ref<any>(null)
 const detectRulePanel = ref<any>(null)
-const statePanel = ref<any>(null)
+const signalPanel = ref<any>(null)
 const showShortcuts = ref(false)
 
 /** 认证状态 */
@@ -431,23 +417,10 @@ async function loadCameras() {
   }
 }
 
-/** 加载 ROI 区域数据 */
+/** 加载 ROI 区域数据（供子组件 ROI 编辑器刷新） */
 async function loadRoiData() {
-  try {
-    const res = await authFetch('/api/roi')
-    if (!res.ok) return
-    const allRois = await res.json() as Array<{ id: number; cameraId: string; name: string; points: string }>
-    const grouped: Record<string, Array<{ id: number; name: string; points: string }>> = {}
-    for (const r of allRois) {
-      if (!grouped[r.cameraId]) grouped[r.cameraId] = []
-      grouped[r.cameraId]!.push({ id: r.id, name: r.name, points: r.points })
-    }
-    roiDataMap.value = grouped
-    /** 同时加载越线检测线段 */
-    loadCrossLineData()
-  } catch {
-    toastWarning('ROI ' + t('app.loadFailed'))
-  }
+  /** 同时加载越线检测线段 */
+  loadCrossLineData()
 }
 
 /** 提供 ROI 和越线数据刷新函数给子组件 */
@@ -479,8 +452,8 @@ async function onPlayRecording(cameraId: string, timestamp: number) {
   await recordingsPanel.value?.playAtTime(cameraId, timestamp)
 }
 
-/** 从状态面板跳转到检测规则历史 */
-function onJumpToDetectHistory() {
+/** 从信号面板跳转到观测器历史 */
+function onJumpToObserverHistory() {
   activeTab.value = 'alerts'
   alertSubTab.value = 'detect'
   setTimeout(() => {
@@ -822,6 +795,34 @@ function setupEventListeners() {
     flashTitle(`${t('detectRule.title')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 
+  client.on('observation', (payload) => {
+    eventPanel.value?.addEvent('observation', payload.cameraId, `${t('observer.title', '观测器')}: ${payload.observerName}`)
+    detectRulePanel.value?.addRecord({
+      observerId: payload.observerId,
+      observerName: payload.observerName,
+      cameraId: payload.cameraId,
+      timestamp: payload.timestamp,
+      result: payload.result,
+      confidence: payload.confidence,
+      detail: payload.detail,
+      snapshotUrl: payload.snapshotUrl,
+    })
+    if (payload.regions?.length) {
+      putRuleRegions(payload.cameraId, payload.regions.map((r: { label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }) => ({ ...r, ruleName: payload.observerName })))
+    }
+    if (payload.matched !== false) {
+      pushRuleMatch(payload.cameraId, {
+        ruleName: payload.observerName,
+        result: payload.result ?? '',
+        confidence: payload.confidence ?? 0,
+        timestamp: payload.timestamp ?? Date.now(),
+        snapshotUrl: payload.snapshotUrl,
+      })
+    }
+    notify(t('notify.alert', { ruleName: payload.observerName }), payload.cameraId, payload.cameraId, 'observation')
+    flashTitle(`${t('observer.title', '观测器')}: ${payload.observerName} - ${payload.cameraId}`, 10000)
+  })
+
   client.on('track:appeared', (payload) => {
     const displayName = buildTrackDisplayName(payload, payload.cameraId)
     const customName = payload.trackName || trackLabelsMap[payload.cameraId]?.[payload.trackId]
@@ -1157,7 +1158,6 @@ onUnmounted(() => {
                 :track-labels="trackLabelsMap[cam.id]"
                 :dual-stream="cam.dualStream"
                 :detect-fps="cam.detectFps"
-                :roi-regions="parsedRoiMap[cam.id]"
                 :cross-lines="crossLineDataMap[cam.id]"
                 :is-fullscreen="fullscreenCamera === cam.id"
                 @fullscreen="enterFullscreen"
@@ -1227,7 +1227,7 @@ onUnmounted(() => {
             <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
             <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           </template>
-          <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" @jump-to-detect-history="onJumpToDetectHistory" />
+          <SignalPanel v-if="activeTab === 'states'" ref="signalPanel" :cameras="cameras" @jump-to-observer-history="onJumpToObserverHistory" />
           <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
@@ -1289,7 +1289,7 @@ onUnmounted(() => {
           <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
         </template>
-        <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" @jump-to-detect-history="onJumpToDetectHistory" />
+        <SignalPanel v-if="activeTab === 'states'" ref="signalPanel" :cameras="cameras" @jump-to-observer-history="onJumpToObserverHistory" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>
