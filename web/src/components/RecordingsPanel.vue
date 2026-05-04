@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, onUnmounted, computed, watch, nextTick, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch, authUrl } from '../services/auth'
 import { takeFrame } from '../services/ws-frame-cache'
@@ -7,6 +7,7 @@ import RecordingsTimeline from './RecordingsTimeline.vue'
 import MultiTimeline from './MultiTimeline.vue'
 import { confirmDialog } from '../composables/useConfirm'
 import { usePreferences } from '../composables/usePreferences'
+import { useCameraNameMap } from '../composables/useCameraNameMap'
 
 const { t, locale } = useI18n()
 
@@ -330,15 +331,15 @@ async function loadPlaybackDetections(rec: Recording) {
 }
 
 /** 行为事件类型样式 */
-const BEHAVIOR_EVENT_STYLE: Record<string, { label: string; bg: string }> = {
-  'track:enter-zone': { label: '进入', bg: '#26A69A' },
-  'track:leave-zone': { label: '离开', bg: '#7E57C2' },
-  'track:dwell': { label: '停留', bg: '#FF7043' },
-  'track:speed': { label: '高速', bg: '#E91E63' },
-  'track:line-cross': { label: '越线', bg: '#FF6F00' },
-  'track:loiter': { label: '徘徊', bg: '#795548' },
-  'track:appeared': { label: '出现', bg: '#66BB6A' },
-  'track:disappeared': { label: '消失', bg: '#EF5350' },
+const BEHAVIOR_EVENT_STYLE: Record<string, { labelKey: string; bg: string; color: string }> = {
+  'track:enter-zone': { labelKey: 'event.trackEnterZone', bg: '#26A69A', color: '#fff' },
+  'track:leave-zone': { labelKey: 'event.trackLeaveZone', bg: '#7E57C2', color: '#fff' },
+  'track:dwell': { labelKey: 'event.trackDwell', bg: '#FF7043', color: '#fff' },
+  'track:speed': { labelKey: 'event.trackSpeed', bg: '#E91E63', color: '#fff' },
+  'track:line-cross': { labelKey: 'event.trackLineCross', bg: '#FF6F00', color: '#fff' },
+  'track:loiter': { labelKey: 'event.trackLoiter', bg: '#795548', color: '#fff' },
+  'track:appeared': { labelKey: 'event.trackAppeared', bg: '#66BB6A', color: '#fff' },
+  'track:disappeared': { labelKey: 'event.trackDisappeared', bg: '#EF5350', color: '#fff' },
 }
 
 /** 根据 currentAbsTime 更新当前检测框和轨迹 */
@@ -782,13 +783,7 @@ const exportDurationText = computed(() => {
 })
 
 /** 摄像头 ID → 名称映射 */
-const cameraNameMap = computed(() => {
-  const map: Record<string, string> = {}
-  for (const cam of props.cameras) {
-    map[cam.id] = cam.name
-  }
-  return map
-})
+const { cameraNameMap } = useCameraNameMap(toRef(props, 'cameras'))
 
 /** 排序模式 */
 type SortMode = 'newest' | 'oldest' | 'largest'
@@ -813,20 +808,22 @@ async function searchByLabel() {
     return
   }
   isSearching.value = true
-  const params = new URLSearchParams(semanticSearchMode.value ? { q: label } : { label })
-  if (filterCamera.value) params.set('cameraId', filterCamera.value)
-  if (filterDate.value) {
-    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
-    params.set('since', String(since))
-    params.set('until', String(since + 86_400_000))
-  }
-  const endpoint = semanticSearchMode.value ? '/api/recordings/semantic-search' : '/api/recordings/search'
-  const res = await authFetch(`${endpoint}?${params}`)
-  if (res.ok) {
-    const data = await res.json()
-    /** 语义搜索返回 { results: [...] }，精确搜索直接返回数组 */
-    searchResults.value = semanticSearchMode.value ? data.results : data
-  }
+  try {
+    const params = new URLSearchParams(semanticSearchMode.value ? { q: label } : { label })
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      params.set('since', String(since))
+      params.set('until', String(since + 86_400_000))
+    }
+    const endpoint = semanticSearchMode.value ? '/api/recordings/semantic-search' : '/api/recordings/search'
+    const res = await authFetch(`${endpoint}?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      /** 语义搜索返回 { results: [...] }，精确搜索直接返回数组 */
+      searchResults.value = semanticSearchMode.value ? data.results : data
+    }
+  } catch { /* ignore */ }
   isSearching.value = false
 }
 
@@ -836,16 +833,54 @@ function clearSearch() {
   searchResults.value = null
 }
 
+/** 按 cameraId 分组的事件索引（避免 O(R*E) 全量扫描） */
+const eventsByCamera = computed(() => {
+  const map = new Map<string, TimelineEvent[]>()
+  const globalEvents: TimelineEvent[] = []
+  for (const evt of timelineEvents.value) {
+    if (evt.cameraId) {
+      let list = map.get(evt.cameraId)
+      if (!list) { list = []; map.set(evt.cameraId, list) }
+      list.push(evt)
+    } else {
+      globalEvents.push(evt)
+    }
+  }
+  /** 将全局事件合并到每个摄像头的列表中 */
+  if (globalEvents.length > 0) {
+    for (const list of map.values()) {
+      list.push(...globalEvents)
+      list.sort((a, b) => a.timestamp - b.timestamp)
+    }
+    /** 无任何摄像头专属事件的录像也需要匹配全局事件 */
+    map.set('', [...globalEvents].sort((a, b) => a.timestamp - b.timestamp))
+  }
+  return map
+})
+
+/** 二分查找：在已排序事件列表中找到 >= startTime 的起始索引 */
+function bisectStart(events: TimelineEvent[], startTime: number): number {
+  let lo = 0, hi = events.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (events[mid].timestamp < startTime) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 /** 有事件的录像文件名集合（独立于 filteredRecordings，避免循环依赖） */
 const recordingsWithEvents = computed(() => {
   if (timelineEvents.value.length === 0) return new Set<string>()
+  const idx = eventsByCamera.value
   const set = new Set<string>()
   for (const rec of recordings.value) {
-    for (const evt of timelineEvents.value) {
-      if (evt.timestamp >= rec.startTime && evt.timestamp <= rec.endTime && (!evt.cameraId || evt.cameraId === rec.cameraId)) {
-        set.add(rec.filename)
-        break
-      }
+    const events = idx.get(rec.cameraId) ?? idx.get('') ?? []
+    const start = bisectStart(events, rec.startTime)
+    for (let i = start; i < events.length; i++) {
+      if (events[i].timestamp > rec.endTime) break
+      set.add(rec.filename)
+      break
     }
   }
   return set
@@ -882,16 +917,18 @@ interface RecEventStats {
 }
 const recordingEventStats = computed(() => {
   if (timelineEvents.value.length === 0) return new Map<string, RecEventStats>()
+  const idx = eventsByCamera.value
   const stats = new Map<string, RecEventStats>()
   for (const rec of filteredRecordings.value) {
+    const events = idx.get(rec.cameraId) ?? idx.get('') ?? []
+    const start = bisectStart(events, rec.startTime)
     let count = 0
     const labelSet = new Set<string>()
-    for (const evt of timelineEvents.value) {
-      if (evt.timestamp >= rec.startTime && evt.timestamp <= rec.endTime && (!evt.cameraId || evt.cameraId === rec.cameraId)) {
-        count++
-        if (evt.label) {
-          for (const l of evt.label.split(', ')) labelSet.add(l)
-        }
+    for (let i = start; i < events.length; i++) {
+      if (events[i].timestamp > rec.endTime) break
+      count++
+      if (events[i].label) {
+        for (const l of events[i].label!.split(', ')) labelSet.add(l)
       }
     }
     if (count > 0) stats.set(rec.filename, { count, labels: [...labelSet].slice(0, 3) })
@@ -1308,7 +1345,7 @@ async function batchDelete() {
 
 /** 删除某个录像之前的所有录像 */
 async function deleteBefore(rec: Recording) {
-  const dateStr = new Date(rec.startTime).toLocaleString()
+  const dateStr = new Date(rec.startTime).toLocaleString(locale.value)
   if (!await confirmDialog(t('recording.confirmDeleteBefore', { time: dateStr }))) return
   try {
     const body: Record<string, unknown> = { before: rec.startTime }
@@ -1681,6 +1718,9 @@ function onPipWheel(e: WheelEvent) {
   pipSize.value = Math.max(160, Math.min(480, pipSize.value + delta))
 }
 
+/** PiP 拖拽中的全局事件处理器（用于卸载时清理） */
+let activeDragHandlers: { onMove: (ev: MouseEvent) => void; onUp: () => void } | null = null
+
 /** PiP 拖拽开始 */
 function onPipDragStart(e: MouseEvent) {
   e.preventDefault()
@@ -1701,7 +1741,9 @@ function onPipDragStart(e: MouseEvent) {
     pipDragging = false
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
+    activeDragHandlers = null
   }
+  activeDragHandlers = { onMove, onUp }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
 }
@@ -1725,6 +1767,13 @@ watch(() => props.active, (isActive) => {
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (highlightTimer) clearTimeout(highlightTimer)
+  if (hoverThumbDebounce) { clearTimeout(hoverThumbDebounce); hoverThumbDebounce = null }
+  if (activeDragHandlers) {
+    document.removeEventListener('mousemove', activeDragHandlers.onMove)
+    document.removeEventListener('mouseup', activeDragHandlers.onUp)
+    activeDragHandlers = null
+  }
   stopPipLoop()
 })
 
@@ -1737,7 +1786,7 @@ defineExpose({ loadRecordings, playAtTime })
     <div v-if="selectedRecording" class="player-overlay" @click.self="closePlayer">
       <div ref="playerModalEl" class="player-modal" tabindex="-1" @keydown="onPlayerKeydown">
         <div class="player-header">
-          <span>{{ cameraNameMap[selectedRecording.cameraId] ?? selectedRecording.cameraId }}</span>
+          <span>{{ cameraNameMap.get(selectedRecording.cameraId) ?? selectedRecording.cameraId }}</span>
           <span class="player-time">{{ formatTime(selectedRecording.startTime) }}</span>
           <button class="export-toggle-btn" @click="openExport" :title="t('recording.export')">{{ t('recording.export') }}</button>
           <select :value="playbackSpeed" @change="changeSpeed(Number(($event.target as HTMLSelectElement).value)); smartSpeed = false" class="speed-select" :title="t('recording.speed')">
@@ -1748,7 +1797,7 @@ defineExpose({ loadRecordings, playAtTime })
             <option :value="4">4x</option>
             <option :value="8">8x</option>
           </select>
-          <button v-if="playbackEvents.length > 0" :class="['ctrl-btn', 'smart-speed-btn', { active: smartSpeed }]" @click="smartSpeed = !smartSpeed" :title="t('recording.smartSpeed', '智能倍速：事件密集降速，稀疏加速')">⚡</button>
+          <button v-if="playbackEvents.length > 0" :class="['ctrl-btn', 'smart-speed-btn', { active: smartSpeed }]" @click="smartSpeed = !smartSpeed" :title="t('recording.smartSpeed')">⚡</button>
           <button
             :class="['autoplay-btn', { active: autoPlayNext }]"
             @click="toggleAutoPlay"
@@ -1757,10 +1806,10 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="fullscreen-btn" @click="togglePlayerFullscreen" :title="t('camera.fullscreen')">&#x26F6;</button>
           <button class="screenshot-btn" @click="takePlayerScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
           <button :class="['detect-toggle-btn', { active: showPlaybackBoxes }]" @click="showPlaybackBoxes = !showPlaybackBoxes" :title="t('recording.toggleDetect')">&#x1F50D;</button>
-          <button v-if="showPlaybackBoxes && playbackEvents.length > 0" :class="['trail-toggle-btn', { active: showPlaybackTrail }]" @click="showPlaybackTrail = !showPlaybackTrail" title="Trail">&#x2728;</button>
+          <button v-if="showPlaybackBoxes && playbackEvents.length > 0" :class="['trail-toggle-btn', { active: showPlaybackTrail }]" @click="showPlaybackTrail = !showPlaybackTrail" :title="t('recording.trail')">&#x2728;</button>
           <button v-if="playbackEvents.length > 0" :class="['event-list-btn', { active: showPlaybackEventList }]" @click="showPlaybackEventList = !showPlaybackEventList" :title="t('recording.toggleDetect')">&#x2630; {{ playbackEvents.length }}</button>
           <button class="download-raw-btn" @click="downloadRecording()" :title="t('recording.download')">&#x2B07;</button>
-          <button :class="['pip-toggle-btn', { active: showPip }]" @click="togglePip" :title="t('recording.pip', '画中画')">&#x1F4FA;</button>
+          <button :class="['pip-toggle-btn', { active: showPip }]" @click="togglePip" :title="t('recording.pip')">&#x1F4FA;</button>
           <button class="player-help-btn" @click="showPlayerHelp = !showPlayerHelp" :title="t('header.help')">?</button>
           <button class="close-btn" @click="closePlayer">&times;</button>
         </div>
@@ -1774,10 +1823,10 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="help-row"><kbd>[</kbd> A <kbd>]</kbd> B <kbd>\</kbd> {{ t('recording.helpLoop') }}</div>
             <div class="help-row"><kbd>M</kbd> {{ t('recording.helpMute') }}</div>
             <div class="help-row"><kbd>F</kbd> {{ t('recording.helpFullscreen') }}</div>
-            <div class="help-row"><kbd>+</kbd><kbd>-</kbd> {{ t('recording.helpSpeed', '倍速') }}</div>
-            <div class="help-row"><kbd>P</kbd> {{ t('recording.helpPip', '画中画') }}</div>
-            <div class="help-row"><kbd>N</kbd> {{ t('recording.helpNextEvent', '下一个事件') }}</div>
-            <div class="help-row"><kbd>B</kbd> {{ t('recording.helpPrevEvent', '上一个事件') }}</div>
+            <div class="help-row"><kbd>+</kbd><kbd>-</kbd> {{ t('recording.helpSpeed') }}</div>
+            <div class="help-row"><kbd>P</kbd> {{ t('recording.helpPip') }}</div>
+            <div class="help-row"><kbd>N</kbd> {{ t('recording.helpNextEvent') }}</div>
+            <div class="help-row"><kbd>B</kbd> {{ t('recording.helpPrevEvent') }}</div>
           </div>
         </div>
         <div class="player-video-wrapper">
@@ -1833,7 +1882,7 @@ defineExpose({ loadRecordings, playAtTime })
             <div class="pip-header" @mousedown="onPipDragStart">
               <span class="pip-label">LIVE</span>
               <select v-model="pipCameraId" class="pip-camera-select" @mousedown.stop>
-                <option :value="selectedRecording!.cameraId">{{ cameraNameMap[selectedRecording!.cameraId] ?? selectedRecording!.cameraId }}</option>
+                <option :value="selectedRecording!.cameraId">{{ cameraNameMap.get(selectedRecording!.cameraId) ?? selectedRecording!.cameraId }}</option>
                 <option v-for="cam in pipCameras" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
               </select>
               <button class="pip-close" @click="showPip = false; stopPipLoop()">&times;</button>
@@ -1846,14 +1895,14 @@ defineExpose({ loadRecordings, playAtTime })
           <button class="ctrl-btn play-pause" @click="isPlaying ? playerRef?.pause() : playerRef?.play()">
             {{ isPlaying ? '&#10074;&#10074;' : '&#9654;' }}
           </button>
-          <button class="ctrl-btn frame-btn" @click="stepFrame(-1)" title="◀ 1帧 (,)">◂</button>
-          <button class="ctrl-btn frame-btn" @click="stepFrame(1)" title="1帧 ▸ (.)">▸</button>
-          <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(-1)" title="上一个事件">⏮</button>
-          <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(1)" title="下一个事件">⏭</button>
-          <button class="ctrl-btn frame-btn" @click="playPrevRecording" title="上一个录像">⏪</button>
-          <button class="ctrl-btn frame-btn" @click="playNextRecording" title="下一个录像">⏩</button>
-          <button :class="['ctrl-btn', 'loop-btn', { active: loopStart >= 0 }]" @click="loopStart >= 0 ? clearLoop() : setLoopPoint('a')" :title="loopStart >= 0 ? '清除循环 (\\)' : '设A点 ([)'">A</button>
-          <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" title="设B点 (])">B</button>
+          <button class="ctrl-btn frame-btn" @click="stepFrame(-1)" :title="t('recording.frameBack')">◂</button>
+          <button class="ctrl-btn frame-btn" @click="stepFrame(1)" :title="t('recording.frameForward')">▸</button>
+          <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(-1)" :title="t('recording.prevEvent')">⏮</button>
+          <button v-if="playbackEvents.length > 0" class="ctrl-btn frame-btn" @click="seekNextEvent(1)" :title="t('recording.nextEvent')">⏭</button>
+          <button class="ctrl-btn frame-btn" @click="playPrevRecording" :title="t('recording.prevRecording')">⏪</button>
+          <button class="ctrl-btn frame-btn" @click="playNextRecording" :title="t('recording.nextRecording')">⏩</button>
+          <button :class="['ctrl-btn', 'loop-btn', { active: loopStart >= 0 }]" @click="loopStart >= 0 ? clearLoop() : setLoopPoint('a')" :title="loopStart >= 0 ? t('recording.clearLoop') : t('recording.setAPoint')">A</button>
+          <button v-if="loopStart >= 0" :class="['ctrl-btn', 'loop-btn', { active: loopEnd > loopStart }]" @click="setLoopPoint('b')" :title="t('recording.setBPoint')">B</button>
           <div ref="progressEl" class="progress-bar" @mousedown="onProgressDragStart" @mousemove="onProgressHover" @mouseleave="onProgressLeave">
             <div v-if="loopStart >= 0 && loopEnd > loopStart && playerRef" class="loop-region" :style="{ left: (loopStart / playerRef.duration * 100) + '%', width: ((loopEnd - loopStart) / playerRef.duration * 100) + '%' }" />
             <!-- 检测事件标记（按目标类别着色） -->
@@ -1862,7 +1911,7 @@ defineExpose({ loadRecordings, playAtTime })
             </template>
             <!-- 行为事件标记（菱形，与检测标记区分） -->
             <template v-for="m in behaviorEventMarkers" :key="m.key">
-              <div class="progress-behavior-marker" :style="{ left: m.position + '%', borderColor: BEHAVIOR_EVENT_STYLE[m.type]?.bg ?? '#666' }" :title="`${BEHAVIOR_EVENT_STYLE[m.type]?.label ?? m.type}: ${m.summary}`" @click.stop="seekToMarker(m.position)" />
+              <div class="progress-behavior-marker" :style="{ left: m.position + '%', borderColor: BEHAVIOR_EVENT_STYLE[m.type]?.bg ?? '#666' }" :title="`${BEHAVIOR_EVENT_STYLE[m.type] ? t(BEHAVIOR_EVENT_STYLE[m.type].labelKey) : m.type}: ${m.summary}`" @click.stop="seekToMarker(m.position)" />
             </template>
             <div class="progress-fill" :style="{ width: playProgress + '%' }" />
             <div class="progress-thumb" :style="{ left: playProgress + '%' }" />
@@ -1885,7 +1934,7 @@ defineExpose({ loadRecordings, playAtTime })
         </div>
         <!-- 检测事件列表 -->
         <div v-if="showPlaybackEventList && playbackEvents.length > 0 && selectedRecording" class="playback-event-list">
-          <div class="playback-event-header">{{ playbackEvents.length }} {{ t('event.detect', '检测事件') }}</div>
+          <div class="playback-event-header">{{ playbackEvents.length }} {{ t('recording.detectEvents') }}</div>
           <div class="playback-event-items">
             <div
               v-for="(ev, idx) in playbackEvents"
@@ -1901,7 +1950,7 @@ defineExpose({ loadRecordings, playAtTime })
           </div>
           <!-- 行为事件列表 -->
           <div v-if="playbackBehaviorEvents.length > 0" class="playback-behavior-list">
-            <div class="playback-event-header">{{ playbackBehaviorEvents.length }} 行为事件</div>
+            <div class="playback-event-header">{{ playbackBehaviorEvents.length }} {{ t('recording.behaviorEvents') }}</div>
             <div class="playback-event-items">
               <div
                 v-for="(ev, idx) in playbackBehaviorEvents"
@@ -1909,7 +1958,7 @@ defineExpose({ loadRecordings, playAtTime })
                 class="playback-event-item behavior-event"
                 @click="seekToPlaybackEvent(ev.timestamp)"
               >
-                <span v-if="BEHAVIOR_EVENT_STYLE[ev.type]" class="behavior-tag" :style="{ background: BEHAVIOR_EVENT_STYLE[ev.type].bg }">{{ BEHAVIOR_EVENT_STYLE[ev.type].label }}</span>
+                <span v-if="BEHAVIOR_EVENT_STYLE[ev.type]" class="behavior-tag" :style="{ background: BEHAVIOR_EVENT_STYLE[ev.type].bg }">{{ t(BEHAVIOR_EVENT_STYLE[ev.type].labelKey) }}</span>
                 <span class="pev-time">{{ formatAbsTime(ev.timestamp) }}</span>
                 <span class="pev-labels">{{ ev.summary }}</span>
               </div>
@@ -1949,7 +1998,7 @@ defineExpose({ loadRecordings, playAtTime })
             </button>
             <div v-if="aiSummaryText" class="ai-summary-result">
               <div class="ai-summary-header">
-                <span>AI {{ t('recording.summary', '摘要') }}</span>
+                <span>AI {{ t('recording.summary') }}</span>
                 <button class="ai-summary-close" @click="aiSummaryText = ''">✕</button>
               </div>
               <p>{{ aiSummaryText }}</p>
@@ -1974,10 +2023,10 @@ defineExpose({ loadRecordings, playAtTime })
         <button class="time-search-btn" @click="jumpToTime" :title="t('recording.jumpToTime')">&#x2315;</button>
       </div>
       <div class="ai-search">
-        <button :class="['semantic-toggle-btn', { active: semanticSearchMode }]" @click="semanticSearchMode = !semanticSearchMode" :title="semanticSearchMode ? '语义搜索（CLIP）' : '精确标签搜索'" :aria-label="semanticSearchMode ? '语义搜索' : '标签搜索'">{{ semanticSearchMode ? '🧠' : '🏷️' }}</button>
-        <input v-model="searchLabel" :placeholder="semanticSearchMode ? '描述目标（如：穿红衣服的人）' : t('recording.searchLabel', '搜索目标...')" class="ai-search-input" @keydown.enter="searchByLabel" />
-        <button v-if="searchLabel" class="ai-search-clear" @click="clearSearch" title="清除">✕</button>
-        <button class="ai-search-btn" @click="searchByLabel" :disabled="isSearching || !searchLabel.trim()" :title="semanticSearchMode ? '语义搜索' : t('recording.searchLabel', '搜索目标')">&#x1F50D;</button>
+        <button :class="['semantic-toggle-btn', { active: semanticSearchMode }]" @click="semanticSearchMode = !semanticSearchMode" :title="semanticSearchMode ? t('recording.semanticSearchClip') : t('recording.exactLabelSearch')" :aria-label="semanticSearchMode ? t('recording.semanticSearch') : t('recording.labelSearch')">{{ semanticSearchMode ? '🧠' : '🏷️' }}</button>
+        <input v-model="searchLabel" :placeholder="semanticSearchMode ? t('recording.describeTarget') : t('recording.searchLabel')" class="ai-search-input" @keydown.enter="searchByLabel" />
+        <button v-if="searchLabel" class="ai-search-clear" @click="clearSearch" :title="t('recording.clear')">✕</button>
+        <button class="ai-search-btn" @click="searchByLabel" :disabled="isSearching || !searchLabel.trim()" :title="semanticSearchMode ? t('recording.semanticSearch') : t('recording.searchLabel')">&#x1F50D;</button>
       </div>
       <button class="refresh-btn" @click="loadRecordings" :disabled="loading">{{ t('event.refresh') }}</button>
       <button class="sort-btn" @click="setSortMode(sortMode === 'newest' ? 'oldest' : sortMode === 'oldest' ? 'largest' : 'newest')" :title="sortMode === 'newest' ? '↓ Newest' : sortMode === 'oldest' ? '↑ Oldest' : '◎ Size'">
@@ -1987,18 +2036,18 @@ defineExpose({ loadRecordings, playAtTime })
       <button :class="['star-filter-btn', { active: filterStarred }]" @click="filterStarred = !filterStarred" :title="t('recording.filterStarred')">
         {{ filterStarred ? '★' : '☆' }}
       </button>
-      <button :class="['events-filter-btn', { active: filterEventsOnly }]" @click="filterEventsOnly = !filterEventsOnly" :title="t('recording.filterEvents', '仅显示有事件')">
+      <button :class="['events-filter-btn', { active: filterEventsOnly }]" @click="filterEventsOnly = !filterEventsOnly" :title="t('recording.filterEvents')">
         {{ filterEventsOnly ? '◆' : '◇' }}
       </button>
     </div>
 
     <!-- 搜索结果指示 -->
     <div v-if="searchResults" class="search-indicator">
-      {{ semanticSearchMode ? '🧠 语义搜索' : t('recording.searchResult', '搜索结果') }}: "{{ searchLabel }}" — {{ searchResults.length }} {{ t('recording.segments', '段') }}
+      {{ semanticSearchMode ? t('recording.brainSemanticSearch') : t('recording.searchResult') }}: "{{ searchLabel }}" — {{ searchResults.length }} {{ t('recording.segments') }}
       <template v-if="semanticSearchMode && searchResults.length > 0">
         <span class="semantic-matches">
           <template v-for="(m, idx) in [...new Map(searchResults.flatMap(r => r.matches ?? []).map(m => [m.trackId, m])).values()]" :key="m.trackId">
-            <span v-if="idx < 5" class="semantic-match-chip" :title="`相似度 ${(m.similarity * 100).toFixed(0)}%`">{{ m.customName || m.semanticLabel || m.label }} {{ (m.similarity * 100).toFixed(0) }}%</span>
+            <span v-if="idx < 5" class="semantic-match-chip" :title="t('recording.similarityPercent', { pct: (m.similarity * 100).toFixed(0) })">{{ m.customName || m.semanticLabel || m.label }} {{ (m.similarity * 100).toFixed(0) }}%</span>
           </template>
         </span>
       </template>
@@ -2058,7 +2107,7 @@ defineExpose({ loadRecordings, playAtTime })
           <span v-else class="thumb-icon">&#9654;</span>
         </div>
         <div class="rec-info">
-          <div class="rec-cam">{{ cameraNameMap[rec.cameraId] ?? rec.cameraId }}</div>
+          <div class="rec-cam">{{ cameraNameMap.get(rec.cameraId) ?? rec.cameraId }}</div>
           <div class="rec-time">{{ formatAbsTime(rec.startTime) }} - {{ formatAbsTime(rec.endTime) }}</div>
         </div>
         <div class="rec-meta">
@@ -2174,24 +2223,6 @@ defineExpose({ loadRecordings, playAtTime })
   font-size: 11px;
   font-weight: 400;
   margin-left: 4px;
-}
-
-.filter-select {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-
-.filter-date {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
 }
 
 .filter-date::-webkit-calendar-picker-indicator {
@@ -2372,13 +2403,6 @@ defineExpose({ loadRecordings, playAtTime })
   flex: 1;
   overflow-y: auto;
   padding: 4px;
-}
-
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
 }
 
 .recording-item {

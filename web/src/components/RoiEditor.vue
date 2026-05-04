@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 
@@ -225,6 +225,13 @@ function parsePoints(pointsStr: string): Array<{ x: number; y: number }> {
   }
 }
 
+/** 区域 ID → 解析后的顶点（避免模板中重复 parsePoints） */
+const regionPointsMap = computed(() => {
+  const map = new Map<number, Array<{ x: number; y: number }>>()
+  for (const r of regions.value) map.set(r.id, parsePoints(r.points))
+  return map
+})
+
 /** 线段方向箭头标记 SVG 路径 */
 function lineArrowPath(line: CrossLine): string {
   const dx = line.end.x - line.start.x
@@ -300,8 +307,8 @@ onUnmounted(() => {
           <!-- 已保存的多边形区域 -->
           <template v-for="region in regions" :key="'r' + region.id">
             <polygon
-              v-if="parsePoints(region.points).length >= 3"
-              :points="parsePoints(region.points).map(p => `${p.x},${p.y}`).join(' ')"
+              v-if="(regionPointsMap.get(region.id)?.length ?? 0) >= 3"
+              :points="regionPointsMap.get(region.id)!.map(p => `${p.x},${p.y}`).join(' ')"
               :class="['roi-polygon', { disabled: !region.enabled }]"
             />
           </template>
@@ -345,7 +352,7 @@ onUnmounted(() => {
         </button>
         <span class="region-icon region">◇</span>
         <span class="region-name">{{ region.name }}</span>
-        <span class="region-vertices">{{ parsePoints(region.points).length }} {{ t('roi.vertices') }}</span>
+        <span class="region-vertices">{{ (regionPointsMap.get(region.id)?.length ?? 0) }} {{ t('roi.vertices') }}</span>
         <button class="delete-btn" @click="deleteRegion(region.id)">{{ t('roi.delete') }}</button>
       </div>
       <div v-for="line in crossLines" :key="'l' + line.id" class="region-item">

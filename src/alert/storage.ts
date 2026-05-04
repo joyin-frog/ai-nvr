@@ -279,14 +279,17 @@ export class AlertStorage {
     let subscription: EventSubscription;
     try {
       subscription = JSON.parse(row.subscriptionJson) as EventSubscription;
-    } catch {
+    } catch (e) {
+      console.warn("[AlertStorage] JSON parse failed for subscription, ruleId:", row.id, e);
       subscription = { eventType: "observation", sourceId: 0, cameraId: "" };
     }
 
     let actions: AlertAction[] = [];
     try {
       actions = JSON.parse(row.actionsJson ?? "[]") as AlertAction[];
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.warn("[AlertStorage] JSON parse failed for actions, ruleId:", row.id, e);
+    }
 
     return {
       id: row.id,

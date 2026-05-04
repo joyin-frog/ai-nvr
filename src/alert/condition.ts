@@ -31,6 +31,9 @@ function getField(payload: Record<string, unknown>, field: string): unknown {
   return current;
 }
 
+/** RegExp 编译缓存（pattern → compiled） */
+const regexCache = new Map<string, RegExp | null>();
+
 /** 递归求值条件表达式 */
 export function evaluate(expr: ConditionExpr, payload: Record<string, unknown>): boolean {
   switch (expr.op) {
@@ -62,11 +65,16 @@ export function evaluate(expr: ConditionExpr, payload: Record<string, unknown>):
     }
     case "matches": {
       const val = String(getField(payload, expr.field) ?? "");
-      try {
-        return new RegExp(expr.pattern).test(val);
-      } catch {
-        return false;
+      let re = regexCache.get(expr.pattern);
+      if (re === undefined) {
+        try {
+          re = new RegExp(expr.pattern);
+        } catch {
+          re = null;
+        }
+        regexCache.set(expr.pattern, re);
       }
+      return re ? re.test(val) : false;
     }
     case "exists": {
       return getField(payload, expr.field) !== undefined;

@@ -315,8 +315,8 @@ export class TrackActivityCollector {
       };
 
       this.eventBus.emit("track:activity-summary" as keyof import("@/event-bus").EventPayloads, summary as never);
-    } catch {
-      /** 静默失败，不影响主流程 */
+    } catch (err) {
+      console.warn("[TrackActivityAnalyzer] 摘要生成失败:", err instanceof Error ? err.message : String(err));
     }
   }
 }

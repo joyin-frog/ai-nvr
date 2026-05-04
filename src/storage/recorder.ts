@@ -74,6 +74,7 @@ export class MotionRecorder {
   private unsubEvents: (() => void)[] = [];
   /** 过期录像清理定时器 */
   private purgeTimer: ReturnType<typeof setInterval> | null = null;
+  private continuousStartTimer: ReturnType<typeof setTimeout> | null = null;
   /** 存储文件系统 */
   private storageFs: StorageFs;
   /** 每路摄像头的 fMP4 环形缓冲区 */
@@ -153,7 +154,8 @@ export class MotionRecorder {
   /** 根据模式启动对应的订阅 */
   private startMode(mode: string): void {
     if (mode === "continuous") {
-      setTimeout(() => {
+      this.continuousStartTimer = setTimeout(() => {
+        this.continuousStartTimer = null;
         for (const [cameraId] of this.cameraNames) {
           this.startContinuous(cameraId);
         }
@@ -187,6 +189,10 @@ export class MotionRecorder {
       this.unsubDetectFrame = null;
     }
     this.cleanupModeSubscriptions();
+    if (this.continuousStartTimer) {
+      clearTimeout(this.continuousStartTimer);
+      this.continuousStartTimer = null;
+    }
     if (this.purgeTimer) {
       clearInterval(this.purgeTimer);
       this.purgeTimer = null;
@@ -272,7 +278,7 @@ export class MotionRecorder {
     const state = this.getOrCreateState(cameraId);
 
     if (state.recording) {
-      console.log(`[Recorder] ${cameraId} 事件 ${eventType} 延长录像`);
+      console.debug(`[Recorder] ${cameraId} 事件 ${eventType} 延长录像`);
       this.scheduleEventStop(cameraId);
     } else {
       const config = this.runtimeConfig.get().recording;
@@ -282,13 +288,15 @@ export class MotionRecorder {
 
       const preBuffer = buf.snapshotFrom(preTime);
       if (!preBuffer || preBuffer.segments.length === 0) {
-        console.log(`[Recorder] ${cameraId} 事件 ${eventType} 无预缓冲数据，跳过`);
+        console.debug(`[Recorder] ${cameraId} 事件 ${eventType} 无预缓冲数据，跳过`);
         return;
       }
 
       const recordingStart = preBuffer.segments[0]!.timestamp;
-      console.log(`[Recorder] ${cameraId} 事件 ${eventType} 触发录像, 预缓冲段: ${preBuffer.segments.length}`);
-      this.startRecordingInternal(cameraId, recordingStart, preBuffer);
+      console.debug(`[Recorder] ${cameraId} 事件 ${eventType} 触发录像, 预缓冲段: ${preBuffer.segments.length}`);
+      this.startRecordingInternal(cameraId, recordingStart, preBuffer).catch((err) => {
+        console.error(`[Recorder] ${cameraId} 启动事件触发录像失败:`, err instanceof Error ? err.message : String(err));
+      });
       this.scheduleEventStop(cameraId);
     }
   }
@@ -366,7 +374,9 @@ export class MotionRecorder {
           try {
             const ex = JSON.parse(e.extra) as { durationMs?: number };
             if (ex.durationMs) endTime = parsed.startTime + ex.durationMs;
-          } catch { /* */ }
+          } catch {
+            console.warn("[Recorder] extra JSON 解析失败:", file);
+          }
         }
         if (!endTime) endTime = e.mtimeMs;
       }
@@ -416,13 +426,18 @@ export class MotionRecorder {
     const buf = this.ringBuffers.get(cameraId);
     if (!buf || !buf.initSegment) {
       console.warn(`[Recorder] ${cameraId} 无 fMP4 缓冲数据，延迟 3 秒重试持续录制`);
-      setTimeout(() => this.startContinuous(cameraId), 3000);
+      state.continuousTimer = setTimeout(() => {
+        state.continuousTimer = null;
+        this.startContinuous(cameraId);
+      }, 3000);
       return;
     }
 
     /** 持续录制从当前缓冲的最早帧开始 */
     const allData = buf.snapshotFrom(0);
-    this.startRecordingInternal(cameraId, now, allData);
+    this.startRecordingInternal(cameraId, now, allData).catch((err) => {
+      console.error(`[Recorder] ${cameraId} 启动持续录像失败:`, err instanceof Error ? err.message : String(err));
+    });
 
     state.continuousTimer = setTimeout(() => {
       this.finishRecording(cameraId);
@@ -437,12 +452,14 @@ export class MotionRecorder {
 
     const preBuffer = buf.drain();
     if (!preBuffer || preBuffer.segments.length === 0) {
-      console.log(`[Recorder] ${cameraId} 无预缓冲数据，跳过录像`);
+      console.debug(`[Recorder] ${cameraId} 无预缓冲数据，跳过录像`);
       return;
     }
 
     const recordingStart = preBuffer.segments[0]!.timestamp;
-    this.startRecordingInternal(cameraId, recordingStart, preBuffer);
+    this.startRecordingInternal(cameraId, recordingStart, preBuffer).catch((err) => {
+      console.error(`[Recorder] ${cameraId} 启动事件录像失败:`, err instanceof Error ? err.message : String(err));
+    });
   }
 
   /**
@@ -488,7 +505,7 @@ export class MotionRecorder {
       state.writer = await Fmp4Writer.createDirect(outputPath);
     }
 
-    console.log(`[Recorder] ${cameraId} 开始录像 (fMP4): ${filename}${wm.enabled ? " (带水印)" : ""}`);
+    console.debug(`[Recorder] ${cameraId} 开始录像 (fMP4): ${filename}${wm.enabled ? " (带水印)" : ""}`);
 
     /** 写入 init segment */
     if (preBuffer?.initSegment) {
@@ -500,7 +517,7 @@ export class MotionRecorder {
       for (const seg of preBuffer.segments) {
         await state.writer.appendSegment(seg.moofData, seg.mdatData);
       }
-      console.log(`[Recorder] ${cameraId} 写入预缓冲段: ${preBuffer.segments.length}`);
+      console.debug(`[Recorder] ${cameraId} 写入预缓冲段: ${preBuffer.segments.length}`);
     }
 
     state.recording = true;
@@ -523,9 +540,17 @@ export class MotionRecorder {
     const writer = state.writer;
     state.writer = null;
 
-    await writer.close();
+    /** 关闭 writer（超时 15 秒兜底，防止 ffmpeg 进程挂起导致永久阻塞） */
+    const closeOk = await Promise.race([
+      writer.close().then(() => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 15_000)),
+    ]);
+    if (!closeOk) {
+      console.warn(`[Recorder] ${cameraId} writer.close() 超时，强制关闭`);
+      writer.forceClose();
+    }
 
-    console.log(`[Recorder] ${cameraId} 录像结束: ${filename}, ${state.segmentCount} segments`);
+    console.debug(`[Recorder] ${cameraId} 录像结束: ${filename}, ${state.segmentCount} segments`);
 
     /** 异步注册文件索引 */
     this.handleRecordingExit(cameraId, filename, startTime).catch(err => {
@@ -588,7 +613,7 @@ export class MotionRecorder {
     state.stopTimer = setTimeout(() => {
       this.finishRecording(cameraId);
       state.stopTimer = null;
-      console.log(`[Recorder] ${cameraId} 停止录像（无运动超时）`);
+      console.debug(`[Recorder] ${cameraId} 停止录像（无运动超时）`);
     }, postDuration);
   }
 

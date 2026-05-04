@@ -372,20 +372,36 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   function ensureSourceBuffer(codec: string, audioCodec: string): boolean {
     if (!mediaSource || mediaSource.readyState !== 'open') return false
 
-    /** 移除旧的 SourceBuffer */
+    /** 移除旧的 SourceBuffer（updating 中时等待 updateend 后异步移除） */
     if (sourceBuffer) {
-      sourceBuffer.removeEventListener('updateend', onUpdateEnd)
-      if (!sourceBuffer.updating) {
-        mediaSource.removeSourceBuffer(sourceBuffer)
-      }
+      const oldSb = sourceBuffer
       sourceBuffer = null
+      oldSb.removeEventListener('updateend', onUpdateEnd)
+      const removeOld = (sb: SourceBuffer) => {
+        if (mediaSource && mediaSource.readyState === 'open' && !sb.updating) {
+          try { mediaSource.removeSourceBuffer(sb) } catch { /* already removed */ }
+        }
+      }
+      if (!oldSb.updating) {
+        removeOld(oldSb)
+      } else {
+        oldSb.addEventListener('updateend', () => removeOld(oldSb), { once: true })
+      }
     }
     if (audioSourceBuffer) {
-      audioSourceBuffer.removeEventListener('updateend', onUpdateEnd)
-      if (!audioSourceBuffer.updating) {
-        mediaSource.removeSourceBuffer(audioSourceBuffer)
-      }
+      const oldAsb = audioSourceBuffer
       audioSourceBuffer = null
+      oldAsb.removeEventListener('updateend', onUpdateEnd)
+      const removeOld = (sb: SourceBuffer) => {
+        if (mediaSource && mediaSource.readyState === 'open' && !sb.updating) {
+          try { mediaSource.removeSourceBuffer(sb) } catch { /* already removed */ }
+        }
+      }
+      if (!oldAsb.updating) {
+        removeOld(oldAsb)
+      } else {
+        oldAsb.addEventListener('updateend', () => removeOld(oldAsb), { once: true })
+      }
     }
 
     /** 优先使用服务器提供的 codec，失败则回退 */
@@ -616,17 +632,15 @@ export function useFmp4Stream(cameraId: Ref<string>) {
         }
       }
       /** 如果 currentTime 不在任何 range 中，清理到最新 range 的起点 */
-      if (activeIdx <= 0) {
+      if (activeIdx < 0) {
         const latestStart = buffered.start(buffered.length - 1)
-        if (currentTime < latestStart) {
-          pruning = true
-          try {
-            sourceBuffer.remove(buffered.start(0), latestStart)
-          } catch {
-            pruning = false
-          }
-          return
+        pruning = true
+        try {
+          sourceBuffer.remove(buffered.start(0), latestStart)
+        } catch {
+          pruning = false
         }
+        return
       }
       /** 清理 activeIdx 之前的所有旧 range */
       if (activeIdx > 0) {

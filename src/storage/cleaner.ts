@@ -1,6 +1,8 @@
 import { type RuntimeConfig } from "@/runtime-config";
 import { type EventStorage } from "@/storage/events";
 import { type ObserverStorage } from "@/observer/storage";
+import { type AlertStorage } from "@/alert/storage";
+import { type SignalStore } from "@/signal/store";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type RecordingExporter } from "@/storage/export";
@@ -20,6 +22,8 @@ type DiskPressure = "normal" | "warning" | "critical";
  */
 export class StorageCleaner {
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** 防止清理重叠执行的锁 */
+  private running = false;
 
   constructor(
     private runtimeConfig: RuntimeConfig,
@@ -33,18 +37,23 @@ export class StorageCleaner {
     private alertSnapshotStorage?: SnapshotStorage,
     private trajectoryStorage?: TrackTrajectoryStorage,
     private trackLabelStorage?: TrackLabelStorage,
+    private alertStorage?: AlertStorage,
+    private signalStore?: SignalStore,
   ) {}
+
+  private initialTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 启动定时清理（每小时执行一次） */
   start(): void {
     /** 首次延迟 5 分钟执行，避免启动时 IO 压力 */
-    setTimeout(() => this.runCleanup(), 300_000);
+    this.initialTimer = setTimeout(() => { this.initialTimer = null; this.runCleanup(); }, 300_000);
     this.timer = setInterval(() => this.runCleanup(), 3600_000);
     console.log("[Cleaner] 存储清理管理器已启动");
   }
 
   /** 停止定时清理 */
   stop(): void {
+    if (this.initialTimer) { clearTimeout(this.initialTimer); this.initialTimer = null; }
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -76,6 +85,16 @@ export class StorageCleaner {
 
   /** 执行一次全量清理（磁盘感知） */
   async runCleanup(): Promise<CleanupReport> {
+    if (this.running) return { events: 0, alerts: 0, snapshots: 0, thumbnails: 0, exports: 0, tracks: 0, trackLabels: 0 };
+    this.running = true;
+    try {
+      return await this.doCleanup();
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async doCleanup(): Promise<CleanupReport> {
     const cleanup = this.runtimeConfig.get().cleanup;
     const { pressure, usedPercent } = this.getDiskPressure();
     const now = Date.now();
@@ -99,6 +118,16 @@ export class StorageCleaner {
     /** 清理检测规则记录 */
     const alertsCutoff = now - alertsDays * 86_400_000;
     report.alerts = this.observerStorage.purge(alertsCutoff);
+
+    /** 清理告警记录 */
+    if (this.alertStorage) {
+      this.alertStorage.purge(alertsCutoff);
+    }
+
+    /** 清理信号变更历史（复用告警保留天数） */
+    if (this.signalStore) {
+      this.signalStore.purge(alertsCutoff);
+    }
 
 
     /** 清理告警快照（复用快照保留天数配置） */
@@ -130,7 +159,7 @@ export class StorageCleaner {
     /** 磁盘压力时触发录像加速清理 */
     if (pressure !== "normal") {
       const recordingsDays = this.effectiveRetention(this.runtimeConfig.get().recording.retentionDays, pressure, usedPercent);
-      this.recorder.purgeOldRecordings(recordingsDays);
+      await this.recorder.purgeOldRecordings(recordingsDays);
     }
 
     const total = report.events + report.alerts + report.snapshots + report.exports + report.tracks + report.trackLabels;

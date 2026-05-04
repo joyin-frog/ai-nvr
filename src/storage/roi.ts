@@ -23,6 +23,9 @@ export interface RegionOfInterest {
  */
 export class RoiStorage {
   private db: Database;
+  /** getEnabledPolygons 的 TTL 缓存（30 秒） */
+  private polygonCache = new Map<string, { data: ReturnType<RoiStorage["getEnabledPolygons"]>; expiry: number }>();
+  private static readonly POLYGON_CACHE_TTL = 30_000;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -69,6 +72,7 @@ export class RoiStorage {
     const result = this.db.query(
       "INSERT INTO roi (camera_id, name, points, enabled) VALUES (?, ?, ?, 1) RETURNING id"
     ).get(cameraId, name, points);
+    this.invalidateCache(cameraId);
     return (result as { id: number }).id;
   }
 
@@ -88,26 +92,40 @@ export class RoiStorage {
       `UPDATE roi SET ${sets.join(", ")} WHERE id = ?`,
       params
     );
+    if (result.changes > 0) this.invalidateCache();
     return result.changes > 0;
   }
 
   /** 删除 ROI */
   remove(id: number): boolean {
     const result = this.db.run("DELETE FROM roi WHERE id = ?", [id]);
+    if (result.changes > 0) this.invalidateCache();
     return result.changes > 0;
   }
 
-  /** 获取某个摄像头所有启用的 ROI（解析后的多边形） */
+  /** 获取某个摄像头所有启用的 ROI（解析后的多边形，带 TTL 缓存） */
   getEnabledPolygons(cameraId: string): Array<{ id: number; name: string; points: Array<{ x: number; y: number }> }> {
+    const cached = this.polygonCache.get(cameraId);
+    if (cached && cached.expiry > Date.now()) return cached.data;
+
     const rows = this.db.query(
       "SELECT id, name, points FROM roi WHERE camera_id = ? AND enabled = 1"
     ).all(cameraId) as Array<{ id: number; name: string; points: string }>;
 
-    return rows.map(row => ({
+    const data = rows.map(row => ({
       id: row.id,
       name: row.name,
       points: JSON.parse(row.points) as Array<{ x: number; y: number }>,
     }));
+
+    this.polygonCache.set(cameraId, { data, expiry: Date.now() + RoiStorage.POLYGON_CACHE_TTL });
+    return data;
+  }
+
+  /** 使缓存失效（ROI 增删改时调用） */
+  invalidateCache(cameraId?: string): void {
+    if (cameraId) this.polygonCache.delete(cameraId);
+    else this.polygonCache.clear();
   }
 
   /** 关闭数据库 */

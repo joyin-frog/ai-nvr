@@ -2,20 +2,25 @@ import nodemailer from "nodemailer";
 import { type EventBus, type EventName } from "@/event-bus";
 import { type RuntimeConfig, type EmailConfig } from "@/runtime-config";
 
+/** HTML 实体转义（防止 XSS） */
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 /** 事件类型中文映射 */
 const EVENT_LABELS: Record<string, string> = {
   motion: "画面变动",
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
-  "detect:rule": "规则检测",
+  observation: "观测器检测",
   "track:appeared": "目标出现",
   "track:disappeared": "目标消失",
   "track:enter-zone": "进入区域",
   "track:leave-zone": "离开区域",
   "track:dwell": "区域停留",
   "track:speed": "高速移动",
-  "state:changed": "状态变更",
+  "signal:changed": "信号变更",
   "llm:patrol": "AI 巡逻报告",
 };
 
@@ -25,18 +30,19 @@ const EVENT_COLORS: Record<string, string> = {
   "camera:online": "#5cb85c",
   "camera:offline": "#d9534f",
   alert: "#d9534f",
+  observation: "#26A69A",
   "track:appeared": "#5cb85c",
   "track:disappeared": "#777",
   "track:enter-zone": "#26A69A",
   "track:leave-zone": "#7E57C2",
   "track:dwell": "#FF7043",
   "track:speed": "#E91E63",
-  "state:changed": "#9C27B0",
+  "signal:changed": "#9C27B0",
   "llm:patrol": "#7E57C2",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
+const PUSH_EVENTS: EventName[] = ["motion", "camera:offline", "alert", "observation", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "signal:changed", "llm:patrol"];
 
 /**
  * 邮件告警通知
@@ -60,8 +66,8 @@ export class EmailNotifier {
 
   /** 处理事件 */
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
-    /** state:changed 事件只在 notify=true 时推送 */
-    if (event === "state:changed" && !payload.notify) return;
+    /** signal:changed 事件只在 notify=true 时推送 */
+    if (event === "signal:changed" && !payload.notify) return;
     const config = this.runtimeConfig.get().notify?.email;
     if (!config?.enabled || !config.smtp) return;
 
@@ -84,35 +90,35 @@ export class EmailNotifier {
       detailHtml = ratio !== undefined
         ? `<tr><td>变动比例</td><td><strong>${(ratio * 100).toFixed(1)}%</strong></td></tr>`
         : "";
-    } else if (event === "detect:rule") {
-      const ruleName = payload.ruleName as string | undefined;
+    } else if (event === "observation") {
+      const observerName = payload.observerName as string | undefined;
       const prompt = payload.prompt as string | undefined;
       const result = payload.result as string | undefined;
       const confidence = payload.confidence as number | undefined;
-      detailHtml = `<tr><td>检测规则</td><td>${ruleName ?? ""}</td></tr>`;
-      if (prompt) detailHtml += `<tr><td>提示词</td><td>${prompt}</td></tr>`;
-      if (result) detailHtml += `<tr><td>AI 结果</td><td>${result}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}</td></tr>`;
+      detailHtml = `<tr><td>观测器</td><td>${esc(observerName ?? "")}</td></tr>`;
+      if (prompt) detailHtml += `<tr><td>提示词</td><td>${esc(prompt)}</td></tr>`;
+      if (result) detailHtml += `<tr><td>AI 结果</td><td>${esc(result)}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}</td></tr>`;
     } else if (event === "camera:offline") {
       detailHtml = `<tr><td>状态</td><td style="color:#d9534f">已断开连接</td></tr>`;
     } else if (event === "alert") {
       const ruleName = payload.ruleName as string | undefined;
       const triggerDetail = payload.detail as string | undefined;
-      detailHtml = `<tr><td>告警规则</td><td><strong>${ruleName ?? ""}</strong></td></tr>`;
-      if (triggerDetail) detailHtml += `<tr><td>触发详情</td><td>${triggerDetail}</td></tr>`;
+      detailHtml = `<tr><td>告警规则</td><td><strong>${esc(ruleName ?? "")}</strong></td></tr>`;
+      if (triggerDetail) detailHtml += `<tr><td>触发详情</td><td>${esc(triggerDetail)}</td></tr>`;
     } else if (event === "track:appeared") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
       const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const score = payload.score as number | undefined;
-      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "未知";
+      const displayName = esc(trackName ?? semanticLabel ?? trackLabel ?? "未知");
       detailHtml = `<tr><td>目标</td><td><strong>${displayName} #${trackId ?? "?"}</strong>${score ? ` (${(score * 100).toFixed(0)}%)` : ""}</td></tr>`;
     } else if (event === "track:disappeared") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
       const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
-      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "未知";
+      const displayName = esc(trackName ?? semanticLabel ?? trackLabel ?? "未知");
       detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"}</td></tr>`;
     } else if (event === "track:enter-zone" || event === "track:leave-zone") {
       const trackLabel = payload.label as string | undefined;
@@ -120,9 +126,9 @@ export class EmailNotifier {
       const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const zoneName = payload.zoneName as string | undefined;
-      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "未知";
+      const displayName = esc(trackName ?? semanticLabel ?? trackLabel ?? "未知");
       const arrow = event === "track:enter-zone" ? "→" : "←";
-      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} ${arrow} ${zoneName ?? "?"}</td></tr>`;
+      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} ${arrow} ${esc(zoneName ?? "?")}</td></tr>`;
     } else if (event === "track:dwell") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
@@ -130,22 +136,22 @@ export class EmailNotifier {
       const trackId = payload.trackId as number | undefined;
       const zoneName = payload.zoneName as string | undefined;
       const dwellMs = payload.dwellMs as number | undefined;
-      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "未知";
-      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} 在 ${zoneName ?? "?"} 停留 ${dwellMs ? `${(dwellMs / 1000).toFixed(0)}s` : "?"}</td></tr>`;
+      const displayName = esc(trackName ?? semanticLabel ?? trackLabel ?? "未知");
+      detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} 在 ${esc(zoneName ?? "?")} 停留 ${dwellMs ? `${(dwellMs / 1000).toFixed(0)}s` : "?"}</td></tr>`;
     } else if (event === "track:speed") {
       const trackLabel = payload.label as string | undefined;
       const trackName = payload.trackName as string | undefined;
       const semanticLabel = payload.semanticLabel as string | undefined;
       const trackId = payload.trackId as number | undefined;
       const speed = payload.speed as number | undefined;
-      const displayName = trackName ?? semanticLabel ?? trackLabel ?? "未知";
+      const displayName = esc(trackName ?? semanticLabel ?? trackLabel ?? "未知");
       detailHtml = `<tr><td>目标</td><td>${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)</td></tr>`;
-    } else if (event === "state:changed") {
-      const stateName = payload.stateName as string | undefined;
+    } else if (event === "signal:changed") {
+      const signalName = payload.signalName as string | undefined;
       const oldValue = payload.oldValue as string | undefined;
       const newValue = payload.newValue as string | undefined;
-      detailHtml = `<tr><td>状态名称</td><td><strong>${stateName ?? ""}</strong></td></tr>`;
-      detailHtml += `<tr><td>变更</td><td>${oldValue ?? ""} → ${newValue ?? ""}</td></tr>`;
+      detailHtml = `<tr><td>信号名称</td><td><strong>${esc(signalName ?? "")}</strong></td></tr>`;
+      detailHtml += `<tr><td>变更</td><td>${esc(oldValue ?? "")} → ${esc(newValue ?? "")}</td></tr>`;
     }
 
     const subject = `[JK NVR] ${label} - ${cameraId}`;

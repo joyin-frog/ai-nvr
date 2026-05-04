@@ -2,9 +2,9 @@
 import { ref, computed, onUnmounted, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Detection } from '../services/events'
-import { authFetch } from '../services/auth'
+import { authFetch, authUrl } from '../services/auth'
 import { useFmp4Stream } from '../composables/useFmp4Stream'
-import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, takePatrolStatus, takeRuleMatch, type ZoneNotification } from '../services/ws-detect-cache'
+import { takeDetections, getInferMs, takeZoneNotifications, takeMatchSuggestions, getMatchSuggestionForTrack, takeLlmDescription, getTrackFirstSeen, takeRuleRegions, takePatrolStatus, takeRuleMatch } from '../services/ws-detect-cache'
 import PtzControl from './PtzControl.vue'
 import { usePreferences } from '../composables/usePreferences'
 import { registerShortcut } from '../composables/useKeyboard'
@@ -343,8 +343,8 @@ function drawOverlayOnce() {
   /** AI 巡逻计数标签（右上角，显示人数/车辆数） */
   if (patrol?.count) {
     const parts: string[] = []
-    if (patrol.count.person) parts.push(`${patrol.count.person}人`)
-    if (patrol.count.vehicle) parts.push(`${patrol.count.vehicle}车`)
+    if (patrol.count.person) parts.push(t('camera.patrolPerson', { count: patrol.count.person }))
+    if (patrol.count.vehicle) parts.push(t('camera.patrolVehicle', { count: patrol.count.vehicle }))
     if (parts.length > 0) {
       ctx.save()
       ctx.font = 'bold 12px system-ui, sans-serif'
@@ -541,7 +541,7 @@ function loadTrackSnapshot(trackId: number) {
     trackSnapshotCache.set(trackId, null)
     snapshotLoading.delete(trackId)
   }
-  img.src = `/api/tracks/${trackId}/snapshot`
+  img.src = authUrl(`/api/tracks/${trackId}/snapshot`)
 }
 
 /**
@@ -1301,6 +1301,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       }
     }
 
+    const isHovered = tid != null && hoveredTrackId.value === tid
     /** 根据停留时间混合边框颜色：正常 → 橙色(#e67e22) → 红色(#e74c3c) */
     let effectiveStroke = stroke
     let effectiveFill = fill
@@ -1324,7 +1325,6 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
     const h = (box.ymax - box.ymin) * height
 
     /** 已命名目标：粗边框 + 实线；未命名目标：细边框 + 虚线 + 脉冲透明度 */
-    const isHovered = tid != null && hoveredTrackId.value === tid
     ctx.setLineDash(isNamed ? [] : [8, 4])
     ctx.lineWidth = effectiveLineWidth
     if (dwellColorShift === 0) {
@@ -1413,14 +1413,14 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       ctx.font = FONT_SMALL
       const lines: string[] = []
       lines.push(`${d.label} #${tid}`)
-      if (d.semanticLabel) lines.push(`语义: ${d.semanticLabel}`)
-      if (customName) lines.push(`名称: ${customName}`)
-      lines.push(`置信度: ${(d.score * 100).toFixed(0)}%`)
+      if (d.semanticLabel) lines.push(`${t('camera.semantic')}: ${d.semanticLabel}`)
+      if (customName) lines.push(`${t('camera.name')}: ${customName}`)
+      lines.push(`${t('camera.confidence')}: ${(d.score * 100).toFixed(0)}%`)
       if (d.dominantColor) lines.push(`\0color:${d.dominantColor}`)
-      if (d.pose) lines.push(`姿态: ${d.pose}`)
+      if (d.pose) lines.push(`${t('camera.pose')}: ${d.pose}`)
       if (d.velocity) {
         const speed = Math.sqrt(d.velocity.dx * d.velocity.dx + d.velocity.dy * d.velocity.dy)
-        if (speed > 0.001) lines.push(`速度: ${(speed * 1000).toFixed(1)}/ks`)
+        if (speed > 0.001) lines.push(`${t('camera.speed')}: ${(speed * 1000).toFixed(1)}/ks`)
       }
       /** 停留时间 */
       if (tid) {
@@ -1428,7 +1428,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
         if (firstSeen) {
           const dwellSec = (now - firstSeen) / 1000
           if (dwellSec >= 3) {
-            lines.push(`停留: ${dwellSec < 60 ? Math.round(dwellSec) + 's' : `${Math.floor(dwellSec / 60)}m${Math.round(dwellSec % 60)}s`}`)
+            lines.push(`${t('camera.dwell')}: ${dwellSec < 60 ? t('camera.dwellSec', { s: Math.round(dwellSec) }) : t('camera.dwellMin', { m: Math.floor(dwellSec / 60), s: Math.round(dwellSec % 60) })}`)
           }
         }
       }
@@ -1436,7 +1436,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
       if (!isNamed && tid) {
         const suggest = suggestMap.get(tid)
         if (suggest) lines.push(`≈ ${suggest}`)
-        lines.push(t('camera.doubleClickToName', '双击命名'))
+        lines.push(t('camera.doubleClickToName'))
       }
       const tipX = x + w + 4
       const tipY = y
@@ -1935,6 +1935,10 @@ async function askAi() {
     if (resp.ok) {
       const data = await resp.json()
       aiChatHistory.value.push({ role: 'assistant', content: data.answer || 'No answer' })
+      /** 限制历史长度，只保留最近 20 条 */
+      if (aiChatHistory.value.length > 20) {
+        aiChatHistory.value = aiChatHistory.value.slice(-20)
+      }
     }
   } catch {
     // ignore
@@ -2223,11 +2227,11 @@ watch(() => props.isFullscreen, (fs) => {
   unregZoomReset?.()
   unregZoomIn = unregZoomOut = unregZoomReset = null
   if (fs) {
-    unregZoomIn = registerShortcut({ key: '+', description: t('camera.zoomIn', '放大'), handler: () => { zoomLevel.value = Math.min(5, zoomLevel.value + 0.5) } })
+    unregZoomIn = registerShortcut({ key: '+', description: t('camera.zoomIn'), handler: () => { zoomLevel.value = Math.min(5, zoomLevel.value + 0.5) } })
     /** = 键也用于放大（和 + 同键位） */
-    const unregEq = registerShortcut({ key: '=', description: t('camera.zoomIn', '放大'), handler: () => { zoomLevel.value = Math.min(5, zoomLevel.value + 0.5) } })
-    unregZoomOut = registerShortcut({ key: '-', description: t('camera.zoomOut', '缩小'), handler: () => { zoomLevel.value = Math.max(1, zoomLevel.value - 0.5); if (zoomLevel.value <= 1) resetZoom() } })
-    unregZoomReset = registerShortcut({ key: '0', description: t('camera.resetZoom', '重置缩放'), handler: resetZoom })
+    const unregEq = registerShortcut({ key: '=', description: t('camera.zoomIn'), handler: () => { zoomLevel.value = Math.min(5, zoomLevel.value + 0.5) } })
+    unregZoomOut = registerShortcut({ key: '-', description: t('camera.zoomOut'), handler: () => { zoomLevel.value = Math.max(1, zoomLevel.value - 0.5); if (zoomLevel.value <= 1) resetZoom() } })
+    unregZoomReset = registerShortcut({ key: '0', description: t('camera.resetZoom'), handler: resetZoom })
     /** 把 = 的清理函数也绑定到 unregZoomIn 上 */
     const origUnreg = unregZoomIn
     unregZoomIn = () => { origUnreg?.(); unregEq?.() }
@@ -2281,30 +2285,30 @@ onUnmounted(() => {
       </span>
       <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
       <span v-if="!online" class="offline-badge">{{ t('camera.offline') }}</span>
-      <span v-else-if="fmp4.connected.value && !fmp4.playing.value && hasFrame" class="reconnect-badge">{{ t('camera.buffering', '缓冲中...') }}</span>
+      <span v-else-if="fmp4.connected.value && !fmp4.playing.value && hasFrame" class="reconnect-badge">{{ t('camera.buffering') }}</span>
       <span v-else-if="frozen" class="frozen-badge">{{ t('camera.frozen') }}</span>
       <button class="fullscreen-btn" @click="emit('fullscreen', cameraId)" :title="t('camera.fullscreen')">&#x26F6;</button>
       <button v-if="online" class="screenshot-btn" @click="takeScreenshot" :title="t('camera.screenshot')">&#x1F4F7;</button>
-      <button v-if="online" :class="['ai-btn', { loading: aiAnalyzing }]" @click="analyzeFrame" :title="t('camera.aiAnalyze', 'AI 分析')" :disabled="aiAnalyzing">{{ aiAnalyzing ? '&#x23F3;' : '&#x1F916;' }}</button>
+      <button v-if="online" :class="['ai-btn', { loading: aiAnalyzing }]" @click="analyzeFrame" :title="t('camera.aiAnalyze')" :disabled="aiAnalyzing">{{ aiAnalyzing ? '&#x23F3;' : '&#x1F916;' }}</button>
       <div v-if="online" class="ai-ask-wrapper">
-        <button class="ai-ask-btn" @click="showAiAsk = !showAiAsk" :title="t('camera.aiAsk', 'AI 问答')">&#x2753;</button>
+        <button class="ai-ask-btn" @click="showAiAsk = !showAiAsk" :title="t('camera.aiAsk')">&#x2753;</button>
         <div v-if="showAiAsk" class="ai-ask-panel">
           <div class="ai-chat-history" v-if="aiChatHistory.length > 0" ref="aiChatScrollRef">
             <div v-for="(msg, idx) in aiChatHistory" :key="idx" :class="['ai-chat-msg', msg.role]">{{ msg.content }}</div>
           </div>
           <div v-if="aiChatHistory.length === 0" class="ai-ask-suggestions">
-            <button class="ai-suggest-chip" @click="aiQuestion = '描述当前画面'; askAi()">{{ t('camera.aiSuggestDescribe', '描述当前画面') }}</button>
-            <button class="ai-suggest-chip" @click="aiQuestion = '有多少人？他们在做什么？'; askAi()">{{ t('camera.aiSuggestCount', '有多少人？') }}</button>
-            <button class="ai-suggest-chip" @click="aiQuestion = '有什么异常或值得注意的情况？'; askAi()">{{ t('camera.aiSuggestAnomaly', '有异常吗？') }}</button>
-            <button class="ai-suggest-chip" @click="aiQuestion = '最近发生了什么事件？'; askAi()">{{ t('camera.aiSuggestRecent', '最近的事件') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '描述当前画面'; askAi()">{{ t('camera.aiSuggestDescribe') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '有多少人？他们在做什么？'; askAi()">{{ t('camera.aiSuggestCount') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '有什么异常或值得注意的情况？'; askAi()">{{ t('camera.aiSuggestAnomaly') }}</button>
+            <button class="ai-suggest-chip" @click="aiQuestion = '最近发生了什么事件？'; askAi()">{{ t('camera.aiSuggestRecent') }}</button>
           </div>
           <div style="display:flex;gap:6px">
-            <input v-model="aiQuestion" class="ai-ask-input" :placeholder="t('camera.aiAskPlaceholder', '输入关于画面的问题...')" @keydown.enter="askAi" />
+            <input v-model="aiQuestion" class="ai-ask-input" :placeholder="t('camera.aiAskPlaceholder')" @keydown.enter="askAi" />
             <button class="ai-ask-submit" @click="askAi" :disabled="aiAsking">{{ aiAsking ? '...' : '&#x27A4;' }}</button>
           </div>
         </div>
       </div>
-      <button v-if="online" :class="['mute-btn', { active: !isMuted }]" @click="isMuted = !isMuted" :title="isMuted ? t('camera.unmute', '取消静音') : t('camera.mute', '静音')">{{ isMuted ? '&#x1F507;' : '&#x1F50A;' }}</button>
+      <button v-if="online" :class="['mute-btn', { active: !isMuted }]" @click="isMuted = !isMuted" :title="isMuted ? t('camera.unmute') : t('camera.mute')">{{ isMuted ? '&#x1F507;' : '&#x1F50A;' }}</button>
       <button v-if="online" :class="['heatmap-btn', { active: showHeatmap }]" @click="showHeatmap = !showHeatmap" :title="t('camera.heatmap')">&#x1F321;</button>
       <button v-if="online" :class="['pip-btn', { active: isPip }]" @click="togglePip" :title="t('camera.pip')">&#x1F4BB;</button>
       <button v-if="online" class="recording-btn" @click="emit('jumpToRecording', cameraId, Date.now())" :title="t('camera.jumpToRecording')">&#x25B6;</button>
@@ -2389,7 +2393,7 @@ onUnmounted(() => {
             class="naming-preset"
             @change="namingName = ($event.target as HTMLSelectElement).value"
           >
-            <option value="">关联...</option>
+            <option value="">{{ t('camera.linkTrack') }}</option>
             <option v-for="name in existingTrackNames" :key="name" :value="name">{{ name }}</option>
           </select>
           <div class="naming-actions">
@@ -2398,10 +2402,10 @@ onUnmounted(() => {
               v-if="props.trackLabels?.[namingBox.trackId]"
               class="naming-clear"
               @click="clearNaming"
-            >{{ t('camera.clearName', '清除') }}</button>
+            >{{ t('camera.clearName') }}</button>
             <button class="naming-cancel" @click="cancelNaming">{{ t('manage.cancel') }}</button>
             <button class="naming-recording" @click="jumpToRecordingFromNaming" :title="t('camera.jumpToRecording')">&#x25B6;</button>
-            <button class="naming-track" @click="jumpToTrackFromNaming" title="查看追踪目标">&#x1F3AF;</button>
+            <button class="naming-track" @click="jumpToTrackFromNaming" :title="t('camera.viewTrack')">&#x1F3AF;</button>
           </div>
           <div v-if="namingError" class="naming-error">{{ namingError }}</div>
         </div>

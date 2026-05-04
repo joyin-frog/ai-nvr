@@ -1,6 +1,5 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { authUrl } from '../services/auth'
 import { usePreferences } from './usePreferences'
 
 /** 声音提醒配置 */
@@ -14,7 +13,7 @@ const SOUND_EVENT_OPTIONS = [
   { key: 'camera:offline', labelKey: 'settings.soundEventCameraOffline' },
   { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
   { key: 'alert', labelKey: 'settings.soundEventAlert' },
-  { key: 'detect:rule', labelKey: 'settings.soundEventDetectRule' },
+  { key: 'observation', labelKey: 'settings.soundEventDetectRule' },
   { key: 'detect', labelKey: 'settings.soundEventDetect' },
   { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
   { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
@@ -49,7 +48,10 @@ export function useNotification() {
   /** 从后端恢复声音配置 */
   getPref<boolean>('nvr-sound-alert', true).then(v => { soundEnabled.value = v })
   getPref<number>('nvr-sound-volume', 80).then(v => { soundVolume.value = v / 100 })
-  getPref<string[]>('nvr-sound-events', []).then(v => { soundEvents.value = v })
+  getPref<string[]>('nvr-sound-events', []).then(v => {
+    /** 迁移旧事件名 */
+    soundEvents.value = v.map(e => e === 'detect:rule' ? 'observation' : e)
+  })
 
   /** 切换声音开关 */
   function toggleSound(on: boolean) {

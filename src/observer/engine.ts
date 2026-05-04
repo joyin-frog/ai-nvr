@@ -70,7 +70,6 @@ export class ObserverEngine {
   }
 
   private async executeObserver(obs: Observer, frame: Buffer, timestamp: number): Promise<void> {
-    this.scheduler.takeSlot();
     const t0 = performance.now();
 
     try {
@@ -101,13 +100,12 @@ export class ObserverEngine {
 
       /** 处理结果 */
       this.resultProcessor.process(vlmResult, obs, prepared, timestamp, vlmResult.rawContent ?? vlmResult.description, performance.now() - t0);
-
-      /** 更新冷却 */
-      this.scheduler.updateCooldown(obs.id, timestamp);
     } catch (err) {
       aiMetrics.record({ source: "rule", inferMs: performance.now() - t0, ok: false });
       console.warn(`[ObserverEngine] "${obs.name}" 执行失败:`, err instanceof Error ? err.message : String(err));
     } finally {
+      /** 无论成功失败都更新冷却（防止异常时重复触发同一帧） */
+      this.scheduler.updateCooldown(obs.id, timestamp);
       this.scheduler.onSlotFreed();
     }
   }

@@ -94,7 +94,8 @@ export class MotionDetector {
         .resize(config.compareWidth, config.compareHeight, { fit: "fill" })
         .raw()
         .toBuffer({ resolveWithObject: true });
-    } catch {
+    } catch (e) {
+      console.warn("[MotionDetector] 图像处理失败:", e);
       state.processing = false;
       return;
     }

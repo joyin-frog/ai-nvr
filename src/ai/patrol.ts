@@ -3,7 +3,7 @@ import { type RuntimeConfig } from "@/runtime-config";
 import { aiMetrics } from "./metrics";
 import { type EventStorage } from "@/storage/events";
 import { resolveModel } from "./multimodal-analyzer";
-import sharp from "sharp";
+import { resizeToDataUrl } from "./image-utils";
 
 /** 摄像头信息接口 */
 interface CameraInfo {
@@ -129,7 +129,9 @@ export class AiPatrolScanner {
     if (this.patrolling) {
       return { triggered: false, message: "Patrol already in progress" };
     }
-    this.patrol().catch(() => {});
+    this.patrol().catch((err) => {
+      console.warn("[AiPatrolScanner] patrol failed:", err instanceof Error ? err.message : String(err));
+    });
     return { triggered: true, message: "Patrol started" };
   }
 
@@ -201,16 +203,7 @@ export class AiPatrolScanner {
     const t0 = performance.now();
 
     /** 缩放图片辅助函数 */
-    const resizeImage = async (img: Buffer): Promise<string> => {
-      if (llmConfig.imageWidth > 0) {
-        const resized = await sharp(img, { failOn: "none" })
-          .resize(llmConfig.imageWidth)
-          .jpeg({ quality: 75 })
-          .toBuffer();
-        return `data:image/jpeg;base64,${resized.toString("base64")}`;
-      }
-      return `data:image/jpeg;base64,${img.toString("base64")}`;
-    };
+    const resizeImage = (img: Buffer) => resizeToDataUrl(img, llmConfig.imageWidth, 75);
 
     /** 获取上下文帧 */
     const contextIntervalMs = llmConfig.contextIntervalMs ?? 0;

@@ -156,14 +156,16 @@ emailNotifier.start();
 /** 告警快照存储（独立的目录，不监听 detect 事件） */
 const alertSnapshotStorage = new SnapshotStorage(storageFs, "alert-snapshots", "alert-snapshots");
 
+/** 信号存储（需在告警引擎之前创建，因为告警动作 setSignal 依赖它） */
+const signalStore = new SignalStore(join(dataDir, "state.db"));
+
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
-const alertEngine = new AlertEngine(eventBus, alertStorage);
+const alertEngine = new AlertEngine(eventBus, alertStorage, signalStore);
 alertEngine.start();
 
 /** 观测器引擎（原检测规则引擎） */
 const observerStorage = new ObserverStorage(join(dataDir, "detect-rules.db"));
-const signalStore = new SignalStore(join(dataDir, "state.db"));
 const observerEngine = new ObserverEngine(eventBus, observerStorage, cameraManager, runtimeConfig, roiStorage, signalStore);
 observerEngine.setRecorder(recorder);
 observerEngine.setFfmpegPath(config.ffmpegPath);
@@ -193,9 +195,13 @@ const preferencesStorage = new PreferencesStorage(join(dataDir, "preferences.db"
 {
   const saved = preferencesStorage.get("clip-candidates");
   if (saved) {
-    const candidates = JSON.parse(saved.value) as Record<string, string[]>;
-    setCustomCandidates(candidates);
-    console.log(`[App] 已恢复 ${Object.keys(candidates).length} 个 CLIP 自定义候选标签`);
+    try {
+      const candidates = JSON.parse(saved.value) as Record<string, string[]>;
+      setCustomCandidates(candidates);
+      console.log(`[App] 已恢复 ${Object.keys(candidates).length} 个 CLIP 自定义候选标签`);
+    } catch {
+      console.warn("[App] clip-candidates 数据损坏，已跳过恢复");
+    }
   }
 }
 
@@ -209,7 +215,7 @@ const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs, eventStorage);
 
 /** 统一存储清理管理器 */
-const cleaner = new StorageCleaner(runtimeConfig, eventStorage, observerStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, observerStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage, alertStorage, signalStore);
 cleaner.start();
 
 /** AI 事件摘要器（定期用 LLM 汇总事件流） */
@@ -273,7 +279,7 @@ function flushPendingEvents() {
 }
 
 /** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
-const RECORDED_EVENTS: string[] = ["camera:online", "camera:offline", "detect:rule", "observation", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "state:changed", "signal:changed"];
+const RECORDED_EVENTS: string[] = ["camera:online", "camera:offline", "observation", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "signal:changed"];
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType as import("@/event-bus").EventName, (payload: unknown) => {
     /** dwell 事件只在停留超过 30 秒时持久化（减少高频写入） */
@@ -344,6 +350,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
   cleaner.stop();
   alertEngine.stop();
   observerEngine.stop();
+  /** 刷写待写入事件 */
+  eventFlushTimer = null;
+  flushPendingEvents();
+  /** 清理统计日志定时器 */
+  clearInterval(fpsLogTimer);
   eventStorage.close();
   roiStorage.close();
   crossLineStorage.close();
@@ -354,6 +365,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   diskUsage.close();
   trajectoryStorage.close();
   trackLabelStorage.close();
+  trackStorage.close();
   eventBus.clear();
   /** 给异步清理操作 500ms 完成（ffmpeg 进程终止、SQLite WAL 刷盘） */
   await new Promise<void>(r => setTimeout(r, 500));
@@ -381,7 +393,7 @@ eventBus.on("fmp4:segment", ({ cameraId, moofData, mdatData }) => {
   fmp4Counts.set(cameraId, (fmp4Counts.get(cameraId) ?? 0) + 1);
   fmp4Bytes.set(cameraId, (fmp4Bytes.get(cameraId) ?? 0) + moofData.length + mdatData.length);
 });
-setInterval(() => {
+const fpsLogTimer = setInterval(() => {
   for (const [id, count] of frameCounts) {
     const fmp4Count = fmp4Counts.get(id) ?? 0;
     const bytes = fmp4Bytes.get(id) ?? 0;

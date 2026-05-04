@@ -210,11 +210,13 @@ const logLoading = ref(false)
 
 async function loadLogs() {
   logLoading.value = true
-  const params = new URLSearchParams()
-  if (logLevel.value) params.set('level', logLevel.value)
-  params.set('limit', '50')
-  const res = await authFetch(`/api/logs?${params}`)
-  if (res.ok) logEntries.value = await res.json()
+  try {
+    const params = new URLSearchParams()
+    if (logLevel.value) params.set('level', logLevel.value)
+    params.set('limit', '50')
+    const res = await authFetch(`/api/logs?${params}`)
+    if (res.ok) logEntries.value = await res.json()
+  } catch { /* ignore */ }
   logLoading.value = false
 }
 
@@ -251,12 +253,12 @@ function formatBytes(bytes: number): string {
 }
 
 /** 磁盘用量百分比 */
-function diskUsagePercent(): number {
+const diskUsagePercent = computed(() => {
   if (!metrics.value?.storage) return 0
   const { diskTotalBytes, diskFreeBytes } = metrics.value.storage
   if (diskTotalBytes === 0) return 0
   return Math.round(((diskTotalBytes - diskFreeBytes) / diskTotalBytes) * 100)
-}
+})
 
 /** 目录名称到 i18n key 的映射 */
 const dirNameKeys: Record<string, string> = {
@@ -377,7 +379,7 @@ onUnmounted(() => {
       </div>
       <div v-if="metrics.ffmpegProcessCount > 0" class="stat-row">
         <span class="stat-label">ffmpeg</span>
-        <span class="stat-value">{{ metrics.ffmpegProcessCount }} 进程 / {{ metrics.ffmpegTotalRssMb }} MB</span>
+        <span class="stat-value">{{ t('status.ffmpegUsage', { processes: metrics.ffmpegProcessCount, memory: metrics.ffmpegTotalRssMb }) }}</span>
       </div>
       <div class="stat-row">
         <span class="stat-label">{{ t('status.cameras') }}</span>
@@ -525,12 +527,12 @@ onUnmounted(() => {
         <div class="disk-bar">
           <div
             class="disk-used"
-            :style="{ width: diskUsagePercent() + '%' }"
-            :class="{ warn: diskUsagePercent() > 80, critical: diskUsagePercent() > 95 }"
+            :style="{ width: diskUsagePercent + '%' }"
+            :class="{ warn: diskUsagePercent > 80, critical: diskUsagePercent > 95 }"
           />
         </div>
         <div class="disk-info">
-          <span>{{ t('status.used') }} {{ diskUsagePercent() }}%</span>
+          <span>{{ t('status.used') }} {{ diskUsagePercent }}%</span>
           <span class="dim">{{ t('status.remaining') }} {{ formatBytes(metrics.storage.diskFreeBytes) }}</span>
         </div>
       </div>
@@ -809,13 +811,6 @@ onUnmounted(() => {
 .metric-unit {
   font-size: 11px;
   color: #888;
-}
-
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
 }
 
 /* 今日统计 */

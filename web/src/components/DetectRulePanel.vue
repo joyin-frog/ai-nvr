@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useCameraNameMap } from '../composables/useCameraNameMap'
 import { authFetch, authUrl } from '../services/auth'
 import { useToast } from '../composables/useToast'
 import { confirmDialog } from '../composables/useConfirm'
+
+let isNewTimer: ReturnType<typeof setTimeout> | null = null
 
 /** ROI 区域 */
 interface RoiItem {
@@ -96,13 +99,7 @@ const emit = defineEmits<{
 }>()
 
 /** 摄像头 ID → 名称映射 */
-const cameraNameMap = computed(() => {
-  const map: Record<string, string> = {}
-  for (const cam of (props.cameras ?? [])) {
-    map[cam.id] = cam.name
-  }
-  return map
-})
+const { cameraNameMap } = useCameraNameMap(computed(() => props.cameras ?? []))
 
 /** 可选的状态列表 */
 interface StateItem { id: number; name: string; cameraId: string; valueType: string; currentValue: string }
@@ -145,11 +142,13 @@ const form = ref({
   modelId: '',
 })
 
-const emptyForm = {
-  name: '', cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as ObserverCameraSource[], prompt: '', intervalMs: 5000, cooldownMs: 30000,
-  imageWidth: 0, signalIds: [] as number[], scheduleEnabled: false,
-  scheduleStart: '08:00', scheduleEnd: '18:00', scheduleDays: [1, 2, 3, 4, 5] as number[],
-  saveOriginal: true, outputRegions: false, refImages: [] as string[], modelId: '',
+function createEmptyForm() {
+  return {
+    name: '', cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as ObserverCameraSource[], prompt: '', intervalMs: 5000, cooldownMs: 30000,
+    imageWidth: 0, signalIds: [] as number[], scheduleEnabled: false,
+    scheduleStart: '08:00', scheduleEnd: '18:00', scheduleDays: [1, 2, 3, 4, 5] as number[],
+    saveOriginal: true, outputRegions: false, refImages: [] as string[], modelId: '',
+  }
 }
 
 /** 星期选项 */
@@ -330,7 +329,7 @@ async function addObserver() {
     })
     if (res.ok) {
       showAddForm.value = false
-      form.value = { ...emptyForm }
+      form.value = createEmptyForm()
       loadObservers()
     } else {
       toastError(t('alert.saveFailed'))
@@ -380,7 +379,7 @@ async function saveEdit() {
     })
     if (res.ok) {
       editingObserverId.value = null
-      form.value = { ...emptyForm }
+      form.value = createEmptyForm()
       loadObservers()
     } else {
       toastError(t('alert.saveFailed'))
@@ -392,18 +391,19 @@ async function saveEdit() {
 
 function cancelEdit() {
   editingObserverId.value = null
-  form.value = { ...emptyForm }
+  form.value = createEmptyForm()
 }
 
 /** 切换启用 */
 async function toggleObserver(rule: Observer) {
   try {
-    await authFetch(`/api/observers/${rule.id}`, {
+    const res = await authFetch(`/api/observers/${rule.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !rule.enabled }),
     })
-    loadObservers()
+    if (res.ok) loadObservers()
+    else toastError(t('alert.saveFailed'))
   } catch {
     toastError(t('alert.saveFailed'))
   }
@@ -413,8 +413,9 @@ async function toggleObserver(rule: Observer) {
 async function deleteObserver(id: number) {
   if (!await confirmDialog(t('alert.confirmDelete'))) return
   try {
-    await authFetch(`/api/observers/${id}`, { method: 'DELETE' })
-    loadObservers()
+    const res = await authFetch(`/api/observers/${id}`, { method: 'DELETE' })
+    if (res.ok) loadObservers()
+    else toastError(t('alert.deleteFailed'))
   } catch {
     toastError(t('alert.deleteFailed'))
   }
@@ -426,12 +427,12 @@ function formatTime(ts: number): string {
 
 /** 提示词快速模板 */
 const promptTemplates = computed(() => [
-  { label: t('detectRule.tplSceneGuard', '场景守护'), prompt: t('detectRule.tplSceneGuardPrompt', 'Is there any abnormal activity, intruder, or unauthorized person/vehicle in the scene?') },
-  { label: t('detectRule.tplPersonSafety', '人员安全'), prompt: t('detectRule.tplPersonSafetyPrompt', 'Is any person in danger, fallen, showing distress, or in a restricted/dangerous area?') },
-  { label: t('detectRule.tplVehicle', '车辆异常'), prompt: t('detectRule.tplVehiclePrompt', 'Are there any vehicles parked illegally, staying too long, or in no-parking zones?') },
-  { label: t('detectRule.tplFire', '消防安全'), prompt: t('detectRule.tplFirePrompt', 'Is there any sign of fire, smoke, or dangerous situation visible in the scene?') },
-  { label: t('detectRule.tplCrowd', '人群聚集'), prompt: t('detectRule.tplCrowdPrompt', 'Is there an unusual crowd gathering or abnormal grouping of people?') },
-  { label: t('detectRule.tplAnimal', '动物检测'), prompt: t('detectRule.tplAnimalPrompt', 'Are there any animals (dogs, cats, birds, etc.) visible in the scene?') },
+  { label: t('detectRule.tplSceneGuard'), prompt: t('detectRule.tplSceneGuardPrompt') },
+  { label: t('detectRule.tplPersonSafety'), prompt: t('detectRule.tplPersonSafetyPrompt') },
+  { label: t('detectRule.tplVehicle'), prompt: t('detectRule.tplVehiclePrompt') },
+  { label: t('detectRule.tplFire'), prompt: t('detectRule.tplFirePrompt') },
+  { label: t('detectRule.tplCrowd'), prompt: t('detectRule.tplCrowdPrompt') },
+  { label: t('detectRule.tplAnimal'), prompt: t('detectRule.tplAnimalPrompt') },
 ])
 
 function applyTemplate(prompt: string) {
@@ -612,6 +613,13 @@ async function removeRefImage(idx: number) {
 /** 展开的记录 ID */
 const expandedRecordId = ref<number | null>(null)
 
+/** 当前展开记录的解析后详情（缓存，避免模板中重复 JSON.parse） */
+const expandedDetail = computed(() => {
+  if (!expandedRecordId.value) return {} as ParsedDetail
+  const rec = records.value.find((r: ObserverRecord) => r.id === expandedRecordId.value)
+  return rec ? parseDetail(rec.detail) : {} as ParsedDetail
+})
+
 /** 展开的详情子区域（raw response、prompt 等） */
 const expandedDetailSections = ref(new Set<string>())
 
@@ -648,7 +656,7 @@ function onSnapshotLoad(e: Event, record: ObserverRecord) {
   /** 找到当前摄像头对应的 ROI 坐标 */
   const snapContainer = img.closest('.snapshot-item')
   const camLabel = snapContainer?.querySelector('.snapshot-cam-label')?.textContent
-  const camId = record.snapshotUrls?.find(s => (cameraNameMap.value[s.cameraId] ?? s.cameraId) === camLabel)?.cameraId ?? record.cameraId
+  const camId = record.snapshotUrls?.find(s => (cameraNameMap.value.get(s.cameraId) ?? s.cameraId) === camLabel)?.cameraId ?? record.cameraId
   const cameraDef = detail.cameras?.find(c => c.cameraId === camId)
   const roiPoints = cameraDef?.roiPoints
 
@@ -714,6 +722,9 @@ function onSnapshotLoad(e: Event, record: ObserverRecord) {
   }
 
   img.src = canvas.toDataURL('image/jpeg', 0.9)
+  /** 释放 Canvas GPU 资源 */
+  canvas.width = 0
+  canvas.height = 0
 }
 
 /** 实时追加记录 */
@@ -735,7 +746,8 @@ function addRecord(payload: { observerId: number; observerName: string; cameraId
   records.value.unshift(record)
   recordTotal.value++
   const recordId = record.id
-  setTimeout(() => {
+  if (isNewTimer) clearTimeout(isNewTimer)
+  isNewTimer = setTimeout(() => {
     const r = records.value.find(a => a.id === recordId)
     if (r) r.isNew = false
   }, 1000)
@@ -757,16 +769,16 @@ async function exportCsv() {
   const res = await authFetch(`/api/observers/history?${params}`)
   if (!res.ok) return
   const { records: rows } = await res.json() as { records: ObserverRecord[] }
-  const header = 'ID,Rule,Camera,Time,Matched,Result'
+  const header = 'ID,Observer,Camera,Time,Matched,Result'
   const csvRows = rows.map(r =>
-    `${r.id},"${r.observerName}","${cameraNameMap.value[r.cameraId] ?? r.cameraId}","${new Date(r.timestamp).toLocaleString(locale.value)}",${r.matched ? 'Yes' : 'No'},"${(r.result ?? '').replace(/"/g, '""')}"`
+    `${r.id},"${r.observerName}","${cameraNameMap.value.get(r.cameraId) ?? r.cameraId}","${new Date(r.timestamp).toLocaleString(locale.value)}",${r.matched ? 'Yes' : 'No'},"${(r.result ?? '').replace(/"/g, '""')}"`
   )
   const csv = [header, ...csvRows].join('\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
   const link = document.createElement('a')
   const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
   link.href = URL.createObjectURL(blob)
-  link.download = `detect_rules_${dateStr}.csv`
+  link.download = `observer_history_${dateStr}.csv`
   link.click()
   URL.revokeObjectURL(link.href)
 }
@@ -777,6 +789,10 @@ onMounted(() => {
   loadRoiList()
   loadSignalList()
   loadModels()
+})
+
+onUnmounted(() => {
+  if (isNewTimer) clearTimeout(isNewTimer)
 })
 
 defineExpose({ loadRecords, addRecord, switchToHistory })
@@ -811,37 +827,37 @@ function switchToHistory() {
               <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
             </select>
             <select v-if="!src.videoClip" v-model.number="src.roiId" class="input cam-roi-select" :disabled="getRoiOptionsForCamera(src.cameraId).length === 0">
-              <option :value="0">{{ getRoiOptionsForCamera(src.cameraId).length > 0 ? t('detectRule.allRegions') : t('detectRule.noRoiHint', '无区域') }}</option>
+              <option :value="0">{{ getRoiOptionsForCamera(src.cameraId).length > 0 ? t('detectRule.allRegions') : t('detectRule.noRoiHint') }}</option>
               <option v-for="roi in getRoiOptionsForCamera(src.cameraId)" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
             </select>
-            <button v-if="!src.videoClip && src.cameraId" class="roi-draw-btn" :class="{ active: roiDrawingIdx === idx }" @click="toggleRoiDraw(idx)" :title="src.roiId > 0 ? '编辑 ROI 区域' : '绘制 ROI 区域'">{{ src.roiId > 0 ? '✎' : '◇' }}</button>
-            <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" placeholder="秒前" title="取多少秒前的帧，0=当前帧" />
-            <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" title="切换视频片段模式">▶</button>
-            <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" title="移除">&#x2715;</button>
+            <button v-if="!src.videoClip && src.cameraId" class="roi-draw-btn" :class="{ active: roiDrawingIdx === idx }" @click="toggleRoiDraw(idx)" :title="src.roiId > 0 ? t('detectRule.editRoi') : t('detectRule.drawRoi')">{{ src.roiId > 0 ? '✎' : '◇' }}</button>
+            <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" :placeholder="t('detectRule.offsetPlaceholder')" :title="t('detectRule.offsetTitle')" />
+            <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" :title="t('detectRule.toggleClipMode')">▶</button>
+            <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" :title="t('detectRule.remove')">&#x2715;</button>
           </div>
           <!-- 视频片段配置 -->
           <div v-if="src.videoClip" class="clip-config">
             <div class="clip-time-row">
-              <span class="clip-label">回溯</span>
+              <span class="clip-label">{{ t('detectRule.clipRewind') }}</span>
               <input v-model.number="src.videoClip.startOffsetSec" type="number" min="1" max="300" step="1" class="input clip-num" />
               <span class="clip-sep">~</span>
               <input v-model.number="src.videoClip.endOffsetSec" type="number" min="0" max="300" step="1" class="input clip-num" />
-              <span class="clip-label">秒前</span>
+              <span class="clip-label">{{ t('detectRule.clipSecondsAgo') }}</span>
             </div>
             <div class="clip-extract-row">
               <select v-model="src.videoClip.extraction.mode" class="input clip-mode-select">
-                <option value="total">均匀抽帧</option>
-                <option value="fps">按帧率</option>
+                <option value="total">{{ t('detectRule.clipEvenlySample') }}</option>
+                <option value="fps">{{ t('detectRule.clipByFps') }}</option>
               </select>
-              <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" placeholder="帧数" />
-              <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" placeholder="帧/秒" />
-              <span class="clip-hint">从录制文件抽帧</span>
+              <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" :placeholder="t('detectRule.clipFrameCount')" />
+              <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" :placeholder="t('detectRule.clipFps')" />
+              <span class="clip-hint">{{ t('detectRule.clipHint') }}</span>
             </div>
           </div>
           <!-- ROI 绘制面板 -->
           <div v-if="roiDrawingIdx === idx && src.cameraId" class="roi-draw-panel">
             <div class="roi-draw-toolbar">
-              <span class="roi-draw-hint">{{ roiEditingId > 0 ? `编辑 ROI #${roiEditingId} — ` : '' }}{{ roiDrawPoints.length < 3 ? `点击画面添加顶点 (${roiDrawPoints.length}/3)` : `${roiDrawPoints.length} 个顶点` }}</span>
+              <span class="roi-draw-hint">{{ roiEditingId > 0 ? t('detectRule.editRoiPrefix', { id: roiEditingId }) : '' }}{{ roiDrawPoints.length < 3 ? t('detectRule.roiAddVertex', { n: roiDrawPoints.length }) : t('detectRule.roiVertexCount', { n: roiDrawPoints.length }) }}</span>
               <button class="roi-draw-undo" :disabled="roiDrawPoints.length === 0" @click="undoRoiPoint">↩</button>
               <button class="roi-draw-save" :disabled="roiDrawPoints.length < 3" @click="saveRoiDraw">{{ t('roi.save') }}</button>
               <button class="roi-draw-cancel" @click="cancelRoiDraw">{{ t('settings.cancel') }}</button>
@@ -857,7 +873,7 @@ function switchToHistory() {
             </div>
           </div>
         </div>
-        <button class="add-extra-cam-btn" @click="form.cameras.push({ cameraId: '', roiId: 0, offsetSec: 0 })">{{ t('detectRule.addExtraCamera', '+ 添加摄像头画面') }}</button>
+        <button class="add-extra-cam-btn" @click="form.cameras.push({ cameraId: '', roiId: 0, offsetSec: 0 })">{{ t('detectRule.addExtraCamera') }}</button>
       </div>
       <div class="form-field">
         <label>{{ t('detectRule.prompt') }}</label>
@@ -866,9 +882,9 @@ function switchToHistory() {
       <div class="prompt-templates">
         <div class="template-chips">
           <button v-for="tpl in promptTemplates" :key="tpl.label" :class="['tpl-chip', { active: form.prompt === tpl.prompt }]" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
-          <button class="tpl-chip ai-suggest-btn" @click="fetchAiSuggestions" :disabled="aiSuggestLoading || !primaryCamId" :title="!primaryCamId ? '请先选择摄像头' : 'AI 分析当前画面并建议规则'">✨ AI 建议</button>
+          <button class="tpl-chip ai-suggest-btn" @click="fetchAiSuggestions" :disabled="aiSuggestLoading || !primaryCamId" :title="!primaryCamId ? t('detectRule.selectCameraFirst') : t('detectRule.aiSuggestTitle')">{{ t('detectRule.aiSuggest') }}</button>
         </div>
-        <div v-if="aiSuggestLoading" class="ai-suggest-loading">AI 正在分析画面...</div>
+        <div v-if="aiSuggestLoading" class="ai-suggest-loading">{{ t('detectRule.aiAnalyzing') }}</div>
         <div v-if="aiSuggestions.length > 0" class="ai-suggestions">
           <div v-for="(s, i) in aiSuggestions" :key="i" class="ai-suggest-item" @click="applySuggestion(s)">
             <div class="ai-suggest-name">{{ s.name }}</div>
@@ -932,24 +948,24 @@ function switchToHistory() {
           </div>
         </div>
         <div v-if="availableModels.length > 0" class="form-field">
-          <label>AI 模型</label>
+          <label>{{ t('detectRule.aiModel') }}</label>
           <select v-model="form.modelId" class="input">
-            <option value="">默认模型</option>
+            <option value="">{{ t('detectRule.defaultModel') }}</option>
             <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }} ({{ m.model }})</option>
           </select>
         </div>
         <!-- 参考图片 -->
         <div class="ref-images-section">
-          <label>参考图片</label>
-          <span class="hint-inline">随每次检测一起发送给 AI（如目标人物/物体照片）</span>
+          <label>{{ t('detectRule.refImages') }}</label>
+          <span class="hint-inline">{{ t('detectRule.refImagesHint') }}</span>
           <div class="ref-images-grid">
             <div v-for="(img, idx) in form.refImages" :key="img" class="ref-image-item">
               <img :src="authUrl(`/api/observers/ref-images/${img}`)" class="ref-thumb" />
-              <button class="ref-remove-btn" @click="removeRefImage(idx)" title="删除">&#x2715;</button>
+              <button class="ref-remove-btn" @click="removeRefImage(idx)" :title="t('detectRule.deleteTitle')">&#x2715;</button>
             </div>
             <label class="ref-upload-btn" :class="{ disabled: refImageUploading }">
               <input type="file" accept="image/*" @change="uploadRefImage" :disabled="refImageUploading" hidden />
-              {{ refImageUploading ? '上传中...' : '+ 上传' }}
+              {{ refImageUploading ? t('detectRule.uploading') : t('detectRule.upload') }}
             </label>
           </div>
         </div>
@@ -1004,36 +1020,36 @@ function switchToHistory() {
                     <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
                   </select>
                   <select v-if="!src.videoClip" v-model.number="src.roiId" class="input cam-roi-select" :disabled="getRoiOptionsForCamera(src.cameraId).length === 0">
-                    <option :value="0">{{ getRoiOptionsForCamera(src.cameraId).length > 0 ? t('detectRule.allRegions') : t('detectRule.noRoiHint', '无区域') }}</option>
+                    <option :value="0">{{ getRoiOptionsForCamera(src.cameraId).length > 0 ? t('detectRule.allRegions') : t('detectRule.noRoiHint') }}</option>
                     <option v-for="roi in getRoiOptionsForCamera(src.cameraId)" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
                   </select>
-                  <button v-if="!src.videoClip && src.cameraId" class="roi-draw-btn" :class="{ active: roiDrawingIdx === idx }" @click="toggleRoiDraw(idx)" :title="src.roiId > 0 ? '编辑 ROI 区域' : '绘制 ROI 区域'">{{ src.roiId > 0 ? '✎' : '◇' }}</button>
-                  <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" placeholder="秒前" title="取多少秒前的帧，0=当前帧" />
-                  <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" title="切换视频片段模式">▶</button>
-                  <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" title="移除">&#x2715;</button>
+                  <button v-if="!src.videoClip && src.cameraId" class="roi-draw-btn" :class="{ active: roiDrawingIdx === idx }" @click="toggleRoiDraw(idx)" :title="src.roiId > 0 ? t('detectRule.editRoi') : t('detectRule.drawRoi')">{{ src.roiId > 0 ? '✎' : '◇' }}</button>
+                  <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" :placeholder="t('detectRule.offsetPlaceholder')" :title="t('detectRule.offsetTitle')" />
+                  <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" :title="t('detectRule.toggleClipMode')">▶</button>
+                  <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" :title="t('detectRule.remove')">&#x2715;</button>
                 </div>
                 <div v-if="src.videoClip" class="clip-config">
                   <div class="clip-time-row">
-                    <span class="clip-label">回溯</span>
+                    <span class="clip-label">{{ t('detectRule.clipRewind') }}</span>
                     <input v-model.number="src.videoClip.startOffsetSec" type="number" min="1" max="300" step="1" class="input clip-num" />
                     <span class="clip-sep">~</span>
                     <input v-model.number="src.videoClip.endOffsetSec" type="number" min="0" max="300" step="1" class="input clip-num" />
-                    <span class="clip-label">秒前</span>
+                    <span class="clip-label">{{ t('detectRule.clipSecondsAgo') }}</span>
                   </div>
                   <div class="clip-extract-row">
                     <select v-model="src.videoClip.extraction.mode" class="input clip-mode-select">
-                      <option value="total">均匀抽帧</option>
-                      <option value="fps">按帧率</option>
+                      <option value="total">{{ t('detectRule.clipEvenlySample') }}</option>
+                      <option value="fps">{{ t('detectRule.clipByFps') }}</option>
                     </select>
-                    <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" placeholder="帧数" />
-                    <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" placeholder="帧/秒" />
-                    <span class="clip-hint">从录制文件抽帧</span>
+                    <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" :placeholder="t('detectRule.clipFrameCount')" />
+                    <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" :placeholder="t('detectRule.clipFps')" />
+                    <span class="clip-hint">{{ t('detectRule.clipHint') }}</span>
                   </div>
                 </div>
                 <!-- ROI 绘制面板（编辑） -->
                 <div v-if="roiDrawingIdx === idx && src.cameraId" class="roi-draw-panel">
                   <div class="roi-draw-toolbar">
-                    <span class="roi-draw-hint">{{ roiDrawPoints.length < 3 ? `点击画面添加顶点 (${roiDrawPoints.length}/3)` : `${roiDrawPoints.length} 个顶点` }}</span>
+                    <span class="roi-draw-hint">{{ roiDrawPoints.length < 3 ? t('detectRule.roiAddVertex', { n: roiDrawPoints.length }) : t('detectRule.roiVertexCount', { n: roiDrawPoints.length }) }}</span>
                     <button class="roi-draw-undo" :disabled="roiDrawPoints.length === 0" @click="undoRoiPoint">↩</button>
                     <button class="roi-draw-save" :disabled="roiDrawPoints.length < 3" @click="saveRoiDraw">{{ t('roi.save') }}</button>
                     <button class="roi-draw-cancel" @click="cancelRoiDraw">{{ t('settings.cancel') }}</button>
@@ -1049,7 +1065,7 @@ function switchToHistory() {
                   </div>
                 </div>
               </div>
-              <button class="add-extra-cam-btn" @click="form.cameras.push({ cameraId: '', roiId: 0, offsetSec: 0 })">{{ t('detectRule.addExtraCamera', '+ 添加摄像头画面') }}</button>
+              <button class="add-extra-cam-btn" @click="form.cameras.push({ cameraId: '', roiId: 0, offsetSec: 0 })">{{ t('detectRule.addExtraCamera') }}</button>
             </div>
             <div class="form-field">
               <label>{{ t('detectRule.prompt') }}</label>
@@ -1115,24 +1131,24 @@ function switchToHistory() {
                 </div>
               </div>
               <div v-if="availableModels.length > 0" class="form-field">
-                <label>AI 模型</label>
+                <label>{{ t('detectRule.aiModel') }}</label>
                 <select v-model="form.modelId" class="input">
-                  <option value="">默认模型</option>
+                  <option value="">{{ t('detectRule.defaultModel') }}</option>
                   <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }} ({{ m.model }})</option>
                 </select>
               </div>
               <!-- 参考图片（编辑） -->
               <div class="ref-images-section">
-                <label>参考图片</label>
-                <span class="hint-inline">随每次检测一起发送给 AI</span>
+                <label>{{ t('detectRule.refImages') }}</label>
+                <span class="hint-inline">{{ t('detectRule.refImagesHintShort') }}</span>
                 <div class="ref-images-grid">
                   <div v-for="(img, idx) in form.refImages" :key="img" class="ref-image-item">
                     <img :src="authUrl(`/api/observers/ref-images/${img}`)" class="ref-thumb" />
-                    <button class="ref-remove-btn" @click="removeRefImage(idx)" title="删除">&#x2715;</button>
+                    <button class="ref-remove-btn" @click="removeRefImage(idx)" :title="t('detectRule.deleteTitle')">&#x2715;</button>
                   </div>
                   <label class="ref-upload-btn" :class="{ disabled: refImageUploading }">
                     <input type="file" accept="image/*" @change="uploadRefImage" :disabled="refImageUploading" hidden />
-                    {{ refImageUploading ? '上传中...' : '+ 上传' }}
+                    {{ refImageUploading ? t('detectRule.uploading') : t('detectRule.upload') }}
                   </label>
                 </div>
               </div>
@@ -1175,7 +1191,7 @@ function switchToHistory() {
           </div>
           <div class="rule-meta">
             <template v-for="(cam, idx) in rule.cameras" :key="idx">
-              <span class="meta-tag cam">{{ cameraNameMap[cam.cameraId] ?? cam.cameraId }}<template v-if="cam.videoClip"> (片段 {{ cam.videoClip.startOffsetSec }}s~{{ cam.videoClip.endOffsetSec }}s)</template><template v-else-if="cam.offsetSec > 0"> (-{{ cam.offsetSec }}s)</template></span>
+              <span class="meta-tag cam">{{ cameraNameMap.get(cam.cameraId) ?? cam.cameraId }}<template v-if="cam.videoClip"> ({{ t('detectRule.clipTag') }} {{ cam.videoClip.startOffsetSec }}s~{{ cam.videoClip.endOffsetSec }}s)</template><template v-else-if="cam.offsetSec > 0"> (-{{ cam.offsetSec }}s)</template></span>
               <span v-if="!cam.videoClip && cam.roiId > 0" class="meta-tag roi">ROI #{{ cam.roiId }}</span>
             </template>
             <span v-if="rule.refImages?.length > 0" class="meta-tag ref">📷 x{{ rule.refImages.length }}</span>
@@ -1209,7 +1225,7 @@ function switchToHistory() {
             <div class="record-time">{{ formatTime(record.timestamp) }}</div>
             <div class="record-body">
               <span class="record-rule">{{ record.observerName }}</span>
-              <span class="record-cam">{{ cameraNameMap[record.cameraId] ?? record.cameraId }}</span>
+              <span class="record-cam">{{ cameraNameMap.get(record.cameraId) ?? record.cameraId }}</span>
               <span v-if="record.matched" class="record-matched">{{ t('detectRule.matched') }}</span>
               <span v-else class="record-unmatched">{{ t('detectRule.unmatched') }}</span>
             </div>
@@ -1221,8 +1237,8 @@ function switchToHistory() {
           <div class="detail-section">
             <div class="detail-row">
               <div class="detail-label" style="margin:0">AI Response</div>
-              <span v-if="parseDetail(record.detail).confidence !== undefined" class="detail-tag confidence">
-                Confidence: {{ (parseDetail(record.detail).confidence! * 100).toFixed(1) }}%
+              <span v-if="expandedDetail.confidence !== undefined" class="detail-tag confidence">
+                Confidence: {{ (expandedDetail.confidence! * 100).toFixed(1) }}%
               </span>
               <span v-if="record.matched" class="detail-tag matched-tag">{{ t('detectRule.matched') }}</span>
               <span v-else class="detail-tag unmatched-tag">{{ t('detectRule.unmatched') }}</span>
@@ -1230,38 +1246,38 @@ function switchToHistory() {
             <div class="detail-text">{{ record.result || '(empty)' }}</div>
           </div>
           <!-- 完整响应：默认收起，可展开 -->
-          <template v-if="parseDetail(record.detail).rawResponse">
+          <template v-if="expandedDetail.rawResponse">
             <button class="detail-collapse-toggle" @click="toggleDetailSection(`raw-${record.id}`)">
               {{ expandedDetailSections.has(`raw-${record.id}`) ? '▾' : '▸' }} Raw Response
             </button>
             <div v-if="expandedDetailSections.has(`raw-${record.id}`)" class="detail-section">
-              <pre class="detail-code">{{ parseDetail(record.detail).rawResponse }}</pre>
+              <pre class="detail-code">{{ expandedDetail.rawResponse }}</pre>
             </div>
           </template>
           <!-- Prompt：默认收起 -->
-          <template v-if="parseDetail(record.detail).prompt">
+          <template v-if="expandedDetail.prompt">
             <button class="detail-collapse-toggle" @click="toggleDetailSection(`prompt-${record.id}`)">
               {{ expandedDetailSections.has(`prompt-${record.id}`) ? '▾' : '▸' }} Prompt
             </button>
             <div v-if="expandedDetailSections.has(`prompt-${record.id}`)" class="detail-section">
-              <div class="detail-text detail-prompt">{{ parseDetail(record.detail).prompt }}</div>
+              <div class="detail-text detail-prompt">{{ expandedDetail.prompt }}</div>
             </div>
           </template>
           <!-- 信号关联信息 -->
-          <template v-if="(() => { const d = parseDetail(record.detail); return (d.signalIds?.length ?? 0) > 0 || (d.signalUpdates?.length ?? 0) > 0 })()">
+          <template v-if="(expandedDetail.signalIds?.length ?? 0) > 0 || (expandedDetail.signalUpdates?.length ?? 0) > 0">
             <div class="detail-section">
               <div class="detail-label">{{ t('detectRule.linkedSignals') }}</div>
               <div class="detail-signal-info">
-                <template v-if="(parseDetail(record.detail).signalIds?.length ?? 0) > 0">
+                <template v-if="(expandedDetail.signalIds?.length ?? 0) > 0">
                   <div class="signal-info-row">
                     <span class="signal-info-label">📖 {{ t('detectRule.linkedSignals') }}</span>
-                    <span v-for="sid in parseDetail(record.detail).signalIds!" :key="sid" class="signal-info-chip context">{{ signalNameMap[sid] ?? `#${sid}` }}</span>
+                    <span v-for="sid in expandedDetail.signalIds!" :key="sid" class="signal-info-chip context">{{ signalNameMap[sid] ?? `#${sid}` }}</span>
                   </div>
                 </template>
-                <template v-if="(parseDetail(record.detail).signalUpdates?.length ?? 0) > 0">
+                <template v-if="(expandedDetail.signalUpdates?.length ?? 0) > 0">
                   <div class="signal-info-row">
-                    <span class="signal-info-label">🔄 {{ t('detectRule.signalUpdates', '信号更新') }}</span>
-                    <span v-for="su in parseDetail(record.detail).signalUpdates!" :key="su.id" class="signal-info-chip updated">
+                    <span class="signal-info-label">🔄 {{ t('detectRule.signalUpdates') }}</span>
+                    <span v-for="su in expandedDetail.signalUpdates!" :key="su.id" class="signal-info-chip updated">
                       {{ signalNameMap[su.id] ?? `#${su.id}` }} → {{ su.value }}
                     </span>
                   </div>
@@ -1272,12 +1288,12 @@ function switchToHistory() {
           <!-- 输入图片 -->
           <div v-if="record.snapshotUrls?.length || record.snapshotUrl" class="detail-section">
             <!-- 原图（叠加 ROI 虚线框） -->
-            <div class="detail-label">📷 原图</div>
+            <div class="detail-label">{{ t('detectRule.originalImage') }}</div>
             <div class="detail-snapshot">
               <template v-if="record.snapshotUrls?.length">
                 <div v-for="snap in record.snapshotUrls" :key="'orig-' + snap.cameraId" class="snapshot-item">
                   <img :src="authUrl(snap.url)" class="snapshot-img" crossorigin="anonymous" loading="lazy" @load="onSnapshotLoad($event, record)" />
-                  <span v-if="record.snapshotUrls.length > 1" class="snapshot-cam-label">{{ cameraNameMap[snap.cameraId] ?? snap.cameraId }}</span>
+                  <span v-if="record.snapshotUrls.length > 1" class="snapshot-cam-label">{{ cameraNameMap.get(snap.cameraId) ?? snap.cameraId }}</span>
                 </div>
               </template>
               <template v-else-if="record.snapshotUrl">
@@ -1286,11 +1302,11 @@ function switchToHistory() {
             </div>
             <!-- ROI 裁剪后的图片（发给 AI 的实际输入） -->
             <template v-if="record.snapshotUrls?.some(s => s.roiUrl)">
-              <div class="detail-label" style="margin-top: 10px">✂️ ROI 裁剪（发给 AI）</div>
+              <div class="detail-label" style="margin-top: 10px">{{ t('detectRule.roiCropLabel') }}</div>
               <div class="detail-snapshot">
                 <div v-for="snap in record.snapshotUrls.filter(s => s.roiUrl)" :key="'roi-' + snap.cameraId" class="snapshot-item">
                   <img :src="authUrl(snap.roiUrl!)" class="snapshot-img" crossorigin="anonymous" loading="lazy" />
-                  <span v-if="record.snapshotUrls.length > 1" class="snapshot-cam-label">{{ cameraNameMap[snap.cameraId] ?? snap.cameraId }}</span>
+                  <span v-if="record.snapshotUrls.length > 1" class="snapshot-cam-label">{{ cameraNameMap.get(snap.cameraId) ?? snap.cameraId }}</span>
                 </div>
               </div>
             </template>
@@ -1315,45 +1331,6 @@ function switchToHistory() {
   flex-direction: column;
   height: 100%;
 }
-
-.panel-header {
-  padding: 10px 12px;
-  background: #1a1a2e;
-  border-bottom: 1px solid #2a2a4a;
-  color: #e0e0e0;
-  font-weight: 600;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.refresh-btn {
-  margin-left: auto;
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.refresh-btn:hover { background: #3a3a5a; }
-.refresh-btn:disabled { opacity: 0.5; }
-
-.add-btn {
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.add-btn:hover { background: #3ad4c8; }
 
 .view-tabs {
   display: flex;
@@ -1406,19 +1383,6 @@ function switchToHistory() {
   min-width: 0;
 }
 
-.input {
-  flex: 1;
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.input:focus { outline: none; border-color: #4ECDC4; }
-.input::placeholder { color: #444; }
-
 select.input {
   appearance: none;
   cursor: pointer;
@@ -1430,32 +1394,10 @@ select.input {
   font-family: inherit;
 }
 
-.submit-btn {
-  width: 100%;
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-top: 4px;
-}
-
-.submit-btn:hover { background: #3ad4c8; }
-
 .rule-list, .record-list {
   flex: 1;
   overflow-y: auto;
   padding: 4px;
-}
-
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
 }
 
 .rule-item {
@@ -1465,12 +1407,6 @@ select.input {
 }
 
 .rule-item:hover { background: #2a2a4a; }
-
-.rule-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
 .toggle-switch {
   position: relative;
@@ -1516,25 +1452,6 @@ select.input {
   background: #4ECDC4;
 }
 
-.rule-name {
-  font-size: 13px;
-  color: #e0e0e0;
-  font-weight: 500;
-  flex: 1;
-}
-
-.rule-name.disabled { color: #666; }
-
-.delete-btn {
-  background: none;
-  border: none;
-  color: #e74c3c;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.delete-btn:hover { color: #ff6b6b; }
-
 .edit-btn {
   background: none;
   border: none;
@@ -1544,44 +1461,6 @@ select.input {
 }
 
 .edit-btn:hover { color: #4ECDC4; }
-
-.edit-form {
-  padding: 8px;
-  background: #0a0a1a;
-  border-radius: 4px;
-}
-
-.edit-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.save-btn {
-  flex: 1;
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.save-btn:hover { background: #3ad4c8; }
-
-.cancel-btn {
-  background: #2a2a4a;
-  color: #888;
-  border: none;
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover { color: #e0e0e0; }
 
 .rule-meta {
   display: flex;
@@ -1618,25 +1497,6 @@ select.input {
   white-space: nowrap;
 }
 
-/* 历史记录 */
-.history-filters {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid #2a2a4a;
-  background: #16213e;
-}
-
-.filter-select, .filter-date {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-
 .filter-date::-webkit-calendar-picker-indicator { filter: invert(0.7); }
 
 .filter-match-btn {
@@ -1669,21 +1529,6 @@ select.input {
 }
 
 .csv-btn:hover { background: #3a3a5a; }
-
-.load-more-btn {
-  display: block;
-  width: 100%;
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  margin-top: 4px;
-}
-
-.load-more-btn:hover { background: #3a3a5a; }
 
 .record-item {
   border-radius: 4px;

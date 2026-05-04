@@ -42,11 +42,10 @@ export interface EventMap {
   'llm:patrol': { cameraId: string; cameraName: string; timestamp: number; analysis: string; hasAnomaly: boolean; anomalyDetail: string; inferMs: number; count?: Record<string, number>; movement?: string }
   'track:activity-summary': { cameraId: string; trackId: number; label: string; trackName?: string; summary: string; lifespanMs: number; zoneCount: number; eventCount: number }
   'detect:rule': { ruleId: number; ruleName: string; cameraId: string; timestamp: number; result: string; confidence: number; matched?: boolean; snapshotUrl?: string | null; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> }
-  observation: { observerId: number; observerName: string; cameraId: string; timestamp: number; result: string; confidence: number; matched?: boolean; snapshotUrl?: string | null; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> }
+  observation: { observerId: number; observerName: string; cameraId: string; timestamp: number; result: string; confidence: number; detail?: string; matched?: boolean; snapshotUrl?: string | null; regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }> }
   'signal:changed': { signalId: number; signalName: string; cameraId: string; oldValue: string; newValue: string; source: string; sourceId: number; timestamp: number; notify: boolean }
   'track:approach': { cameraId: string; timestamp: number; trackId: number; label: string; trackName?: string; semanticLabel?: string; targetTrackId: number; targetLabel: string; targetTrackName?: string; targetSemanticLabel?: string; distance: number }
   'track:crowd': { cameraId: string; timestamp: number; count: number; trackIds: number[]; zoneId: number; zoneName: string; avgDistance: number }
-  'state:changed': { stateId: number; stateName: string; cameraId: string; oldValue: string; newValue: string; source: string; sourceRuleId: number; timestamp: number; notify: boolean }
 }
 
 /** 内部存储用通用回调类型 */
@@ -109,6 +108,16 @@ export class EventClient {
 
   /** 连接 */
   connect(): void {
+    /** 关闭旧连接（防止快速重连时泄漏） */
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.onmessage = null
+      this.ws.onopen = null
+      this.ws.close()
+      this.ws = null
+    }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
     this.setState('connecting')
     this.ws = new WebSocket(this.url)
     /** 使用二进制模式 */

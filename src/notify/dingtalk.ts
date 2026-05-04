@@ -20,20 +20,20 @@ const EVENT_LABELS: Record<string, string> = {
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
-  "detect:rule": "规则检测",
+  observation: "观测器检测",
   "track:appeared": "目标出现",
   "track:disappeared": "目标消失",
   "track:enter-zone": "进入区域",
   "track:leave-zone": "离开区域",
   "track:dwell": "区域停留",
   "track:speed": "高速移动",
-  "state:changed": "状态变更",
+  "signal:changed": "信号变更",
   "llm:scene": "AI 场景分析",
   "llm:patrol": "AI 巡逻报告",
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
+const PUSH_EVENTS: EventName[] = ["motion", "camera:offline", "alert", "observation", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "signal:changed", "llm:patrol"];
 
 /**
  * 钉钉机器人通知推送
@@ -57,8 +57,8 @@ export class DingTalkNotifier {
 
   /** 处理事件 */
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
-    /** state:changed 事件只在 notify=true 时推送 */
-    if (event === "state:changed" && !payload.notify) return;
+    /** signal:changed 事件只在 notify=true 时推送 */
+    if (event === "signal:changed" && !payload.notify) return;
     const config = this.runtimeConfig.get().notify?.dingtalk;
     if (!config?.enabled || !config.webhookUrl) return;
 
@@ -78,12 +78,12 @@ export class DingTalkNotifier {
     if (event === "motion") {
       const ratio = payload.ratio as number | undefined;
       body = ratio !== undefined ? `变动比例: ${(ratio * 100).toFixed(1)}%` : "";
-    } else if (event === "detect:rule") {
-      const ruleName = payload.ruleName as string | undefined;
+    } else if (event === "observation") {
+      const observerName = payload.observerName as string | undefined;
       const prompt = payload.prompt as string | undefined;
       const result = payload.result as string | undefined;
       const confidence = payload.confidence as number | undefined;
-      body = `规则: ${ruleName ?? ""}\n提示词: ${prompt ?? ""}\n结果: ${result ?? ""}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}`;
+      body = `观测器: ${observerName ?? ""}\n提示词: ${prompt ?? ""}\n结果: ${result ?? ""}${confidence !== undefined ? ` (${(confidence * 100).toFixed(0)}%)` : ""}`;
     } else if (event === "camera:offline") {
       body = "摄像头已断开连接";
     } else if (event === "alert") {
@@ -131,11 +131,11 @@ export class DingTalkNotifier {
       const speed = payload.speed as number | undefined;
       const displayName = trackName ?? semanticLabel ?? trackLabel ?? "目标";
       body = `${displayName} #${trackId ?? "?"} 高速移动 (${speed?.toFixed(3) ?? "?"}/帧)`;
-    } else if (event === "state:changed") {
-      const stateName = payload.stateName as string | undefined;
+    } else if (event === "signal:changed") {
+      const signalName = payload.signalName as string | undefined;
       const oldValue = payload.oldValue as string | undefined;
       const newValue = payload.newValue as string | undefined;
-      body = `状态: ${stateName ?? ""}\n${oldValue ?? ""} → ${newValue ?? ""}`;
+      body = `信号: ${signalName ?? ""}\n${oldValue ?? ""} → ${newValue ?? ""}`;
     } else if (event === "llm:patrol") {
       const analysis = payload.analysis as string | undefined;
       const hasAnomaly = payload.hasAnomaly as boolean | undefined;

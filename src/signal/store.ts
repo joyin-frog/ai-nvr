@@ -218,20 +218,36 @@ export class SignalStore {
     if (signal.currentValue === newValue) return null;
 
     const ts = Date.now();
+    const oldValue = signal.currentValue;
     this.db.run("BEGIN");
-    this.db.run(`UPDATE signals SET current_value = ? WHERE id = ?`, [newValue, signalId]);
-    const result = this.db.run(`
-      INSERT INTO signal_changes (signal_id, signal_name, camera_id, old_value, new_value, source, source_id, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [signalId, signal.name, signal.cameraId, signal.currentValue, newValue, source, sourceId, ts]);
-    this.db.run("COMMIT");
+    let result: ReturnType<typeof this.db.run>;
+    try {
+      /** 乐观锁：仅当 current_value 仍为预期旧值时才更新 */
+      const updateResult = this.db.run(
+        `UPDATE signals SET current_value = ? WHERE id = ? AND current_value = ?`,
+        [newValue, signalId, oldValue],
+      );
+      if (updateResult.changes === 0) {
+        /** 值已被并发修改，放弃本次更新 */
+        this.db.run("ROLLBACK");
+        return null;
+      }
+      result = this.db.run(`
+        INSERT INTO signal_changes (signal_id, signal_name, camera_id, old_value, new_value, source, source_id, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [signalId, signal.name, signal.cameraId, oldValue, newValue, source, sourceId, ts]);
+      this.db.run("COMMIT");
+    } catch (err) {
+      this.db.run("ROLLBACK");
+      throw err;
+    }
 
     return {
       id: Number(result.lastInsertRowid),
       signalId,
       signalName: signal.name,
       cameraId: signal.cameraId,
-      oldValue: signal.currentValue,
+      oldValue,
       newValue,
       source,
       sourceId,

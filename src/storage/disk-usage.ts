@@ -41,6 +41,7 @@ export class DiskUsage {
   private diskSpaceCache: { total: number; free: number } | null = null;
   /** 后台刷新定时器 */
   private diskSpaceTimer: ReturnType<typeof setInterval> | null = null;
+  private initialRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(dataRoot: string) {
     this.dataRoot = dataRoot;
@@ -117,7 +118,7 @@ export class DiskUsage {
    */
   startBackgroundRefresh(): void {
     /** 首次延迟 10 秒执行，避免启动 IO 压力 */
-    setTimeout(() => this.refreshDiskSpace(), 10_000);
+    this.initialRefreshTimer = setTimeout(() => { this.initialRefreshTimer = null; this.refreshDiskSpace(); }, 10_000);
     this.diskSpaceTimer = setInterval(() => this.refreshDiskSpace(), 60_000);
   }
 
@@ -224,6 +225,7 @@ export class DiskUsage {
 
   /** 关闭数据库 + 停止后台刷新 */
   close(): void {
+    if (this.initialRefreshTimer) { clearTimeout(this.initialRefreshTimer); this.initialRefreshTimer = null; }
     if (this.diskSpaceTimer) {
       clearInterval(this.diskSpaceTimer);
       this.diskSpaceTimer = null;

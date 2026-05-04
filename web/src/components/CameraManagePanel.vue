@@ -43,15 +43,17 @@ async function testConnection() {
   if (!url) return
   testing.value = true
   testResult.value = null
-  const res = await authFetch('/api/cameras/test', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  })
+  try {
+    const res = await authFetch('/api/cameras/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+    if (res.ok) {
+      testResult.value = await res.json()
+    }
+  } catch { /* ignore */ }
   testing.value = false
-  if (res.ok) {
-    testResult.value = await res.json()
-  }
 }
 
 /** 加载摄像头列表 */
@@ -260,56 +262,10 @@ defineExpose({ loadCameras })
   height: 100%;
 }
 
-.panel-header {
-  padding: 10px 12px;
-  background: #1a1a2e;
-  border-bottom: 1px solid #2a2a4a;
-  color: #e0e0e0;
-  font-weight: 600;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.refresh-btn {
-  margin-left: auto;
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.refresh-btn:hover { background: #3a3a5a; }
-.refresh-btn:disabled { opacity: 0.5; }
-
-.add-btn {
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.add-btn:hover { background: #3ad4c8; }
-
 .camera-list {
   flex: 1;
   overflow-y: auto;
   padding: 4px;
-}
-
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
 }
 
 .camera-item {
@@ -417,13 +373,6 @@ defineExpose({ loadCameras })
   background: #FFD93D30;
 }
 
-/* 添加表单 */
-.add-form {
-  padding: 10px 12px;
-  border-bottom: 1px solid #2a2a4a;
-  background: #16213e;
-}
-
 .form-field {
   display: flex;
   align-items: center;
@@ -437,41 +386,6 @@ defineExpose({ loadCameras })
   min-width: 70px;
   flex-shrink: 0;
 }
-
-.input {
-  flex: 1;
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.input:focus {
-  outline: none;
-  border-color: #4ECDC4;
-}
-
-.input::placeholder {
-  color: #444;
-}
-
-.submit-btn {
-  width: 100%;
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-top: 4px;
-}
-
-.submit-btn:hover { background: #3ad4c8; }
-.submit-btn:disabled { opacity: 0.5; }
 
 /* 编辑表单 */
 .edit-form {

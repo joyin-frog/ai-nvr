@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 import { confirmDialog } from '../composables/useConfirm'
 import { useToast } from '../composables/useToast'
+import { useCameraNameMap } from '../composables/useCameraNameMap'
 
 const { t } = useI18n()
 const { error: toastError } = useToast()
@@ -67,10 +68,7 @@ const PAGE_SIZE = 50
 const signalCount = computed(() => signals.value.length)
 const recordCount = computed(() => recordTotal.value)
 
-function cameraName(id: string): string {
-  if (!id) return t('alert.allCameras')
-  return props.cameras.find(c => c.id === id)?.name ?? id
-}
+const { cameraName } = useCameraNameMap(toRef(props, 'cameras'))
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleString()
@@ -107,27 +105,31 @@ async function loadObserverNames() {
 }
 
 async function loadSignals() {
-  const res = await authFetch('/api/signals')
-  if (res.ok) signals.value = await res.json()
+  try {
+    const res = await authFetch('/api/signals')
+    if (res.ok) signals.value = await res.json()
+  } catch { /* ignore */ }
 }
 
 async function loadRecords(append = false) {
-  const params = new URLSearchParams()
-  if (filterCamera.value) params.set('cameraId', filterCamera.value)
-  if (filterDate.value) {
-    const d = new Date(filterDate.value)
-    params.set('since', String(d.getTime()))
-    params.set('until', String(d.getTime() + 86400000))
-  }
-  if (!append) params.set('offset', '0')
-  else params.set('offset', String(records.value.length))
-  params.set('limit', String(PAGE_SIZE))
-  const res = await authFetch(`/api/signals/history?${params}`)
-  if (res.ok) {
-    const data = await res.json()
-    records.value = append ? [...records.value, ...data.records] : data.records
-    recordTotal.value = data.total
-  }
+  try {
+    const params = new URLSearchParams()
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const d = new Date(filterDate.value)
+      params.set('since', String(d.getTime()))
+      params.set('until', String(d.getTime() + 86400000))
+    }
+    if (!append) params.set('offset', '0')
+    else params.set('offset', String(records.value.length))
+    params.set('limit', String(PAGE_SIZE))
+    const res = await authFetch(`/api/signals/history?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      records.value = append ? [...records.value, ...data.records] : data.records
+      recordTotal.value = data.total
+    }
+  } catch { /* ignore */ }
 }
 
 function resetForm() {
@@ -159,86 +161,97 @@ function startAdd() {
 async function addSignal() {
   if (!formName.value.trim() || saving.value) return
   saving.value = true
-  const res = await authFetch('/api/signals', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: formName.value,
-      description: formDescription.value,
-      cameraId: formCameraId.value,
-      valueType: formValueType.value,
-      initialValue: formInitialValue.value || undefined,
-      notifyOnChange: formNotify.value,
-    }),
-  })
-  saving.value = false
-  if (!res.ok) {
-    toastError(t('alert.saveFailed'))
-    return
+  try {
+    const res = await authFetch('/api/signals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: formName.value,
+        description: formDescription.value,
+        cameraId: formCameraId.value,
+        valueType: formValueType.value,
+        initialValue: formInitialValue.value || undefined,
+        notifyOnChange: formNotify.value,
+      }),
+    })
+    if (!res.ok) {
+      toastError(t('alert.saveFailed'))
+      return
+    }
+    showAdd.value = false
+    resetForm()
+    await loadSignals()
+  } catch { /* ignore */ } finally {
+    saving.value = false
   }
-  showAdd.value = false
-  resetForm()
-  await loadSignals()
 }
 
 async function saveEdit() {
   if (!editingId.value) return
-  const res = await authFetch(`/api/signals/${editingId.value}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: formName.value,
-      description: formDescription.value,
-      cameraId: formCameraId.value,
-      valueType: formValueType.value,
-      initialValue: formInitialValue.value,
-      notifyOnChange: formNotify.value,
-    }),
-  })
-  if (!res.ok) {
-    toastError(t('alert.saveFailed'))
-    return
-  }
-  editingId.value = null
-  resetForm()
-  await loadSignals()
+  try {
+    const res = await authFetch(`/api/signals/${editingId.value}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: formName.value,
+        description: formDescription.value,
+        cameraId: formCameraId.value,
+        valueType: formValueType.value,
+        initialValue: formInitialValue.value,
+        notifyOnChange: formNotify.value,
+      }),
+    })
+    if (!res.ok) {
+      toastError(t('alert.saveFailed'))
+      return
+    }
+    editingId.value = null
+    resetForm()
+    await loadSignals()
+  } catch { /* ignore */ }
 }
 
 async function toggleSignal(signal: Signal) {
-  const res = await authFetch(`/api/signals/${signal.id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: !signal.enabled }),
-  })
-  if (!res.ok) {
-    toastError(t('alert.saveFailed'))
-    return
-  }
-  await loadSignals()
+  try {
+    const res = await authFetch(`/api/signals/${signal.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !signal.enabled }),
+    })
+    if (!res.ok) {
+      toastError(t('alert.saveFailed'))
+      return
+    }
+    await loadSignals()
+  } catch { /* ignore */ }
 }
 
 async function toggleBoolValue(signal: Signal) {
   const newVal = signal.currentValue === 'true' ? 'false' : 'true'
-  const res = await authFetch(`/api/signals/${signal.id}/value`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ value: newVal }),
-  })
-  if (!res.ok) {
-    toastError(t('alert.saveFailed'))
-    return
-  }
-  await loadSignals()
+  try {
+    const res = await authFetch(`/api/signals/${signal.id}/value`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: newVal }),
+    })
+    if (!res.ok) {
+      toastError(t('alert.saveFailed'))
+      return
+    }
+    await loadSignals()
+  } catch { /* ignore */ }
 }
 
 async function deleteSignal(id: number) {
   if (!await confirmDialog(t('alert.confirmDelete'))) return
-  const res = await authFetch(`/api/signals/${id}`, { method: 'DELETE' })
-  if (!res.ok) {
-    toastError(t('alert.deleteFailed'))
-    return
-  }
-  await loadSignals()
+  try {
+    const res = await authFetch(`/api/signals/${id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      toastError(t('alert.deleteFailed'))
+      return
+    }
+    await loadSignals()
+  } catch { /* ignore */ }
 }
 
 function cancelEdit() {

@@ -1,6 +1,6 @@
 import { type EventBus } from "@/event-bus";
 import { aiMetrics } from "./metrics";
-import sharp from "sharp";
+import { resizeToDataUrl } from "./image-utils";
 
 /** 多模态 LLM 配置 */
 export interface LlmConfig {
@@ -171,12 +171,12 @@ export class MultimodalAnalyzer {
       });
     });
 
-    /** 订阅检测规则触发的事件 */
-    const unsubRule = this.eventBus.on("detect:rule" as keyof import("@/event-bus").EventPayloads, (payload) => {
+    /** 订阅观测器触发的事件 */
+    const unsubRule = this.eventBus.on("observation" as keyof import("@/event-bus").EventPayloads, (payload) => {
       const camId = (payload as Record<string, unknown>).cameraId as string;
       const ts = (payload as Record<string, unknown>).timestamp as number | undefined;
       if (!camId) return;
-      this.scheduleAnalysis(camId, "detect:rule", ts ?? Date.now());
+      this.scheduleAnalysis(camId, "observation", ts ?? Date.now());
     });
     this.unsubs.push(unsubRule);
 
@@ -252,16 +252,7 @@ export class MultimodalAnalyzer {
     const t0 = performance.now();
 
     /** 图片缩放辅助函数 */
-    const resizeImage = async (img: Buffer): Promise<string> => {
-      if (this.config.imageWidth > 0) {
-        const resized = await sharp(img)
-          .resize(this.config.imageWidth)
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        return `data:image/jpeg;base64,${resized.toString("base64")}`;
-      }
-      return `data:image/jpeg;base64,${img.toString("base64")}`;
-    };
+    const resizeImage = (img: Buffer) => resizeToDataUrl(img, this.config.imageWidth);
 
     /** 获取上下文帧（与检测器共享 contextIntervalMs 配置） */
     let contextFrames: Array<{ data: Buffer; timestamp: number }> = [];

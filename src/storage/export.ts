@@ -87,7 +87,10 @@ export class RecordingExporter {
     /** 清理临时 SRT */
     if (srtPath) { try { unlinkSync(srtPath); } catch { /* ignore */ } }
 
-    if (!ok) return null;
+    if (!ok) {
+      console.warn(`[Exporter] ffmpeg 导出失败: ${cameraId} ${filename}`);
+      return null;
+    }
 
     const fileInfo = await this.storageFs.stat(`${RecordingExporter.CATEGORY}/${filename}`);
     if (!fileInfo) return null;
@@ -131,9 +134,9 @@ export class RecordingExporter {
         text = `${name} ${action}`;
         if (detail.zoneName) text += ` → ${detail.zoneName}`;
         if (detail.dwellMs) text += ` (${Math.round(Number(detail.dwellMs) / 1000)}s)`;
-      } else if (ev.type === "detect:rule") {
+      } else if (ev.type === "detect:rule" || ev.type === "observation") {
         const detail = ev.detail ? JSON.parse(ev.detail) as Record<string, unknown> : {};
-        text = `规则: ${(detail.ruleName || ev.detail?.slice(0, 30)) as string}`;
+        text = `观测: ${(detail.observerName || detail.ruleName || ev.detail?.slice(0, 30)) as string}`;
       } else if (ev.type === "alert") {
         text = `告警: ${ev.detail?.slice(0, 50) ?? ""}`;
       } else if (ev.type === "llm:scene") {
@@ -221,11 +224,10 @@ export class RecordingExporter {
     const concatListPath = join(this.exportDir, `_concat_${dateStr}_${timeStr}.txt`);
 
     const lines = sourcePaths.map(p => `file '${p}'`);
-    await this.storageFs.writeFile(`${RecordingExporter.CATEGORY}/../_concat_${dateStr}_${timeStr}.txt`, lines.join("\n"));
 
     /** 写 concat 文件（临时，不用索引） */
-    const { writeFile: writeFileSync, unlink: unlinkAsync } = await import("node:fs/promises");
-    await writeFileSync(concatListPath, lines.join("\n"));
+    const { writeFile: writeFs, unlink: unlinkAsync } = await import("node:fs/promises");
+    await writeFs(concatListPath, lines.join("\n"));
 
     const args = [
       "-f", "concat",

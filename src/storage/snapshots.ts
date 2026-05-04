@@ -117,13 +117,19 @@ export class SnapshotStorage {
       cameraId: cameraId ?? undefined,
     });
 
-    return entries.map(e => ({
-      filename: `${e.relativePath}.jpg`,
-      cameraId: e.cameraId ?? "",
-      timestamp: e.createdAt ?? 0,
-      size: e.size,
-      detectionLabels: e.extra ? (JSON.parse(e.extra) as { labels?: string }).labels : undefined,
-    })).sort((a, b) => b.timestamp - a.timestamp);
+    return entries.map(e => {
+      let labels: string | undefined;
+      if (e.extra) {
+        try { labels = (JSON.parse(e.extra) as { labels?: string }).labels; } catch { /* corrupt extra */ }
+      }
+      return {
+        filename: `${e.relativePath}.jpg`,
+        cameraId: e.cameraId ?? "",
+        timestamp: e.createdAt ?? 0,
+        size: e.size,
+        detectionLabels: labels,
+      };
+    }).sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /** 获取某摄像头最新的快照相对路径 */
@@ -160,7 +166,8 @@ export class SnapshotStorage {
         if (firstKey != null) this.metaCache.delete(firstKey);
       }
       return meta;
-    } catch {
+    } catch (e) {
+      console.warn("[Snapshots] 快照存储失败:", e);
       this.metaCache.set(relativePath, null);
       return null;
     }

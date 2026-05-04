@@ -53,7 +53,9 @@ export class EventStorage {
     /** 表达式索引：加速 json_extract(detail, '$.trackId') 查询 */
     try {
       this.db.run("CREATE INDEX IF NOT EXISTS idx_events_track_id ON events(json_extract(detail, '$.trackId')) WHERE json_extract(detail, '$.trackId') IS NOT NULL");
-    } catch { /* 旧版 SQLite 可能不支持表达式索引 */ }
+    } catch (e) { /* 旧版 SQLite 可能不支持表达式索引 */
+      console.warn("[EventStorage] 创建索引失败:", e);
+    }
 
     /** 预编译高频 SQL 语句（避免每次调用重新解析 SQL） */
     this.stmtInsert = this.db.prepare("INSERT INTO events (type, camera_id, timestamp, detail) VALUES (?, ?, ?, ?) RETURNING id");
@@ -196,7 +198,8 @@ export class EventStorage {
       return this.db.query(
         `SELECT json_extract(j.value, '$.label') as label, COUNT(*) as count FROM events, json_each(json_extract(detail, '$.detections')) AS j ${where} GROUP BY label ORDER BY count DESC LIMIT 20`
       ).all(...params) as Array<{ label: string; count: number }>;
-    } catch {
+    } catch (e) {
+      console.warn("[EventStorage] 事件存储失败:", e);
       return [];
     }
   }
@@ -353,7 +356,9 @@ export class EventStorage {
     }
     if (options.search) {
       conditions.push("detail LIKE ?");
-      params.push(`%${options.search}%`);
+      /** 转义 LIKE 通配符，防止用户输入的 % 和 _ 被当作通配符 */
+      const escaped = options.search.replace(/%/g, "\\%").replace(/_/g, "\\_");
+      params.push(`%${escaped}%`);
     }
     if (options.starred) {
       conditions.push("starred = 1");
@@ -368,30 +373,43 @@ export class EventStorage {
   }
 
   /**
-   * 计算事件异常评分
+   * 计算事件异常评分（单次 SQL 查询，7 个时间窗口合并）
    * 比较当前窗口的事件数与过去 N 个同窗口的历史平均
    * 返回 0-1 的异常分数（越高越异常）
    */
   getAnomalyScore(options: { type: string; cameraId?: string; windowMs?: number }): { score: number; current: number; baseline: number } {
     const windowMs = options.windowMs ?? 300_000;
     const now = Date.now();
-    const currentStart = now - windowMs;
-
-    /** 当前窗口事件数 */
-    const current = this.count({ type: options.type, cameraId: options.cameraId, since: currentStart, until: now });
-
-    /** 过去 24 小时内同类型同窗口的平均事件数（取 6 个窗口样本） */
     const samples = 6;
-    let totalHistorical = 0;
-    let validSamples = 0;
+    /** 最远的时间边界 */
+    const earliest = now - windowMs * (samples + 1);
+
+    /** 用 CASE WHEN 在单次扫描中完成 7 个窗口的计数 */
+    const conditions: string[] = ["type = ?"];
+    const params: (string | number)[] = [options.type];
+    if (options.cameraId) { conditions.push("camera_id = ?"); params.push(options.cameraId); }
+    conditions.push("timestamp >= ?");
+    params.push(earliest);
+
+    const where = `WHERE ${conditions.join(" AND ")}`;
+
+    /** 构建每个样本窗口的 CASE WHEN 计数 */
+    const currentStart = now - windowMs;
+    const whens: string[] = [`COUNT(CASE WHEN timestamp >= ${currentStart} THEN 1 END) as c0`];
     for (let i = 1; i <= samples; i++) {
-      const sampleStart = now - windowMs * (i + 1);
-      const sampleEnd = now - windowMs * i;
-      const count = this.count({ type: options.type, cameraId: options.cameraId, since: sampleStart, until: sampleEnd });
-      totalHistorical += count;
-      validSamples++;
+      const sStart = now - windowMs * (i + 1);
+      const sEnd = now - windowMs * i;
+      whens.push(`COUNT(CASE WHEN timestamp >= ${sStart} AND timestamp < ${sEnd} THEN 1 END) as s${i}`);
     }
-    const baseline = validSamples > 0 ? totalHistorical / validSamples : 0;
+
+    const row = this.db.query(`SELECT ${whens.join(", ")} FROM events ${where}`).get(...params) as Record<string, number>;
+
+    const current = row["c0"] ?? 0;
+    let totalHistorical = 0;
+    for (let i = 1; i <= samples; i++) {
+      totalHistorical += row[`s${i}`] ?? 0;
+    }
+    const baseline = samples > 0 ? totalHistorical / samples : 0;
 
     /** 异常评分：当前值超过平均 2 倍时开始计分，最高 1.0 */
     if (baseline === 0) return { score: current > 0 ? 0.5 : 0, current, baseline };

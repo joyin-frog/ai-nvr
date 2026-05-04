@@ -37,6 +37,9 @@ interface CrossLineRow {
  */
 export class CrossLineStorage {
   private db: Database;
+  /** getEnabledLines 的 TTL 缓存（30 秒） */
+  private linesCache = new Map<string, { data: ReturnType<CrossLineStorage["getEnabledLines"]>; expiry: number }>();
+  private static readonly LINES_CACHE_TTL = 30_000;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -84,22 +87,33 @@ export class CrossLineStorage {
     return row ? this.rowToCrossLine(row) : undefined;
   }
 
-  /** 获取某个摄像头所有启用的线段（解析后） */
+  /** 获取某个摄像头所有启用的线段（带 TTL 缓存） */
   getEnabledLines(cameraId: string): Array<{
     id: number;
     name: string;
     start: { x: number; y: number };
     end: { x: number; y: number };
   }> {
+    const cached = this.linesCache.get(cameraId);
+    if (cached && cached.expiry > Date.now()) return cached.data;
+
     const rows = this.db.query(
       "SELECT * FROM cross_lines WHERE camera_id = ? AND enabled = 1"
     ).all(cameraId) as CrossLineRow[];
-    return rows.map(r => ({
+    const data = rows.map(r => ({
       id: r.id,
       name: r.name,
       start: { x: r.start_x, y: r.start_y },
       end: { x: r.end_x, y: r.end_y },
     }));
+
+    this.linesCache.set(cameraId, { data, expiry: Date.now() + CrossLineStorage.LINES_CACHE_TTL });
+    return data;
+  }
+
+  /** 使缓存失效 */
+  private invalidateCache(): void {
+    this.linesCache.clear();
   }
 
   /** 添加检测线段 */
@@ -107,6 +121,7 @@ export class CrossLineStorage {
     const result = this.db.query(
       "INSERT INTO cross_lines (camera_id, name, start_x, start_y, end_x, end_y, enabled) VALUES (?, ?, ?, ?, ?, ?, 1) RETURNING id"
     ).get(cameraId, name, start.x, start.y, end.x, end.y);
+    this.invalidateCache();
     return (result as { id: number }).id;
   }
 
@@ -132,12 +147,14 @@ export class CrossLineStorage {
       `UPDATE cross_lines SET ${sets.join(", ")} WHERE id = ?`,
       params
     );
+    if (result.changes > 0) this.invalidateCache();
     return result.changes > 0;
   }
 
   /** 删除检测线段 */
   remove(id: number): boolean {
     const result = this.db.run("DELETE FROM cross_lines WHERE id = ?", [id]);
+    if (result.changes > 0) this.invalidateCache();
     return result.changes > 0;
   }
 

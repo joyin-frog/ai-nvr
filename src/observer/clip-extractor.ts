@@ -90,6 +90,13 @@ function captureFrame(
   ffmpegPath: string, filePath: string, seekSec: number, targetWidth: number,
 ): Promise<Buffer | null> {
   return new Promise((resolve) => {
+    let resolved = false;
+    const safeResolve = (value: Buffer | null) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+
     const args: string[] = [
       "-ss", String(Math.max(0, seekSec)),
       "-i", filePath,
@@ -112,19 +119,19 @@ function captureFrame(
       proc.stdout?.destroy();
       proc.kill("SIGKILL");
       proc.unref();
-      resolve(null);
+      safeResolve(null);
     }, SINGLE_FRAME_TIMEOUT_MS);
 
     proc.on("exit", () => {
       clearTimeout(timer);
       proc.unref();
       const buf = Buffer.concat(chunks);
-      resolve(buf.length > 100 ? buf : null);
+      safeResolve(buf.length > 100 ? buf : null);
     });
     proc.on("error", () => {
       clearTimeout(timer);
       proc.unref();
-      resolve(null);
+      safeResolve(null);
     });
   });
 }
@@ -143,7 +150,8 @@ export async function extractClipFrames(
   const frames: Array<{ data: Buffer; timestamp: number }> = [];
   let incomplete = false;
 
-  for (const targetTs of targetTimestamps) {
+  /** 并行抽取帧（并发受 MAX_CONCURRENT 控制） */
+  const tasks = targetTimestamps.map(async (targetTs) => {
     /** 找到覆盖此时间点的录制文件 */
     let foundIdx = -1;
     for (let i = 0; i < params.recordingPaths.length; i++) {
@@ -155,10 +163,7 @@ export async function extractClipFrames(
       }
     }
 
-    if (foundIdx < 0) {
-      incomplete = true;
-      continue;
-    }
+    if (foundIdx < 0) return { found: false as const };
 
     const filePath = params.recordingPaths[foundIdx]!;
     const fileStartMs = params.recordingStartTimes[foundIdx]!;
@@ -167,15 +172,23 @@ export async function extractClipFrames(
     await acquire();
     try {
       const jpeg = await captureFrame(params.ffmpegPath, filePath, seekSec, params.targetWidth);
-      if (jpeg) {
-        frames.push({ data: jpeg, timestamp: targetTs });
-      } else {
-        incomplete = true;
-      }
+      return jpeg ? { found: true as const, data: jpeg, timestamp: targetTs } : { found: false as const };
     } finally {
       release();
     }
+  });
+
+  const results = await Promise.all(tasks);
+  for (const r of results) {
+    if (r.found && "data" in r) {
+      frames.push({ data: r.data, timestamp: r.timestamp });
+    } else {
+      incomplete = true;
+    }
   }
+
+  /** 按时间排序（并行抽取可能乱序） */
+  frames.sort((a, b) => a.timestamp - b.timestamp);
 
   return { frames, incomplete };
 }

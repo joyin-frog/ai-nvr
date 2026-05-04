@@ -1,5 +1,6 @@
 import { type EventBus } from "@/event-bus";
 import { type AlertStorage, type AlertRule } from "@/alert/storage";
+import { type SignalStore } from "@/signal/store";
 import { matchEvent } from "@/alert/matcher";
 import { WindowAggregator } from "@/alert/window";
 import { ActionExecutor } from "@/alert/action";
@@ -17,6 +18,8 @@ export class AlertEngine {
   private unsubscribers: Array<() => void> = [];
   /** 已订阅的事件类型集合 */
   private subscribedEventTypes = new Set<string>();
+  /** 上一轮规则 ID 集合（用于清理已删除规则的窗口） */
+  private previousRuleIds = new Set<number>();
   /** 滑动窗口聚合器 */
   private windowAggregator = new WindowAggregator();
   /** 动作执行器 */
@@ -25,8 +28,10 @@ export class AlertEngine {
   constructor(
     private eventBus: EventBus,
     private storage: AlertStorage,
+    signalStore?: SignalStore,
   ) {
     this.actionExecutor = new ActionExecutor(eventBus);
+    if (signalStore) this.actionExecutor.setSignalStore(signalStore);
   }
 
   /** 启动引擎 */
@@ -53,9 +58,10 @@ export class AlertEngine {
 
     /** 清理已删除规则的窗口：当前活跃的规则 ID 集合之外的都删除 */
     const activeIds = new Set(this.rules.map(r => r.id));
-    for (const rule of this.rules) {
-      if (!activeIds.has(rule.id)) this.windowAggregator.removeRule(rule.id);
+    for (const ruleId of this.previousRuleIds) {
+      if (!activeIds.has(ruleId)) this.windowAggregator.removeRule(ruleId);
     }
+    this.previousRuleIds = activeIds;
 
     /** 动态订阅新出现的事件类型 */
     this.updateDynamicSubscriptions();
@@ -88,6 +94,7 @@ export class AlertEngine {
       const detail = this.buildDetail(rule, payload);
 
       if (this.windowAggregator.check(rule, timestamp)) {
+        console.log(`[AlertEngine] 规则 "${rule.name}" 触发 (event=${eventType}, camera=${(payload.cameraId as string) ?? "*"})`);
         this.storage.insertAlert(
           rule.id, rule.name,
           (payload.cameraId as string) ?? "",
@@ -102,6 +109,8 @@ export class AlertEngine {
           timestamp,
           detail,
           eventPayload: payload,
+        }).catch((err) => {
+          console.warn(`[AlertEngine] action failed for rule ${rule.id}:`, err instanceof Error ? err.message : String(err));
         });
       }
     }

@@ -4,6 +4,7 @@ import { type RoiStorage } from "@/storage/roi";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
+import { resizeToDataUrl, resizeToBuffer as sharedResizeToBuffer } from "@/ai/image-utils";
 
 /** Recorder 接口（用于获取上下文帧和录制文件查询） */
 export interface Recorder {
@@ -113,27 +114,10 @@ export class FramePrep {
   }
 
   /** 缩放图片并返回 Buffer（用于后续 ROI 裁剪） */
-  private async resizeToBuffer(img: Buffer, imageWidth: number): Promise<Buffer> {
-    if (imageWidth > 0) {
-      return sharp(img, { failOn: "none" })
-        .resize(imageWidth)
-        .jpeg({ quality: 80 })
-        .toBuffer();
-    }
-    return img;
-  }
+  private resizeToBuffer = sharedResizeToBuffer;
 
   createResizer(imageWidth: number): (img: Buffer) => Promise<string> {
-    return async (img: Buffer): Promise<string> => {
-      if (imageWidth > 0) {
-        const resized = await sharp(img, { failOn: "none" })
-          .resize(imageWidth)
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        return `data:image/jpeg;base64,${resized.toString("base64")}`;
-      }
-      return `data:image/jpeg;base64,${img.toString("base64")}`;
-    };
+    return (img: Buffer) => resizeToDataUrl(img, imageWidth);
   }
 
   async cropToRoi(frame: Buffer, roiId: number): Promise<Buffer | undefined> {
@@ -141,7 +125,13 @@ export class FramePrep {
     const roi = this.roiStorage.getById(roiId);
     if (!roi?.points) return undefined;
 
-    const polygon = JSON.parse(roi.points) as Array<{ x: number; y: number }>;
+    let polygon: Array<{ x: number; y: number }>;
+    try {
+      polygon = JSON.parse(roi.points) as Array<{ x: number; y: number }>;
+    } catch (e) {
+      console.warn("[FramePrep] 帧准备失败:", e);
+      return undefined;
+    }
     if (polygon.length < 3) return undefined;
 
     const meta = await sharp(frame).metadata();
@@ -164,8 +154,8 @@ export class FramePrep {
     const cropY = Math.max(0, minY - padY);
     const cropR = Math.min(1, maxX + padX);
     const cropB = Math.min(1, maxY + padY);
-    const cropW = Math.round((cropR - cropX) * w);
-    const cropH = Math.round((cropB - cropY) * h);
+    const cropW = Math.max(1, Math.round((cropR - cropX) * w));
+    const cropH = Math.max(1, Math.round((cropB - cropY) * h));
     const cropLeft = Math.round(cropX * w);
     const cropTop = Math.round(cropY * h);
 

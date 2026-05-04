@@ -153,9 +153,12 @@ export class ResultProcessor {
       }
     }
 
-    /** 回退 */
+    /** 回退：无帧数据时跳过快照保存 */
     if (frames.cameraFrames.size === 0) {
-      this.saveSnapshotFn(obs.cameras[0]?.cameraId ?? "", timestamp, Buffer.alloc(0));
+      const fallbackCameraId = obs.cameras[0]?.cameraId ?? "";
+      if (fallbackCameraId) {
+        console.warn(`[ResultProcessor] ${fallbackCameraId} 无可用帧，跳过快照保存`);
+      }
     }
   }
 
@@ -178,7 +181,6 @@ export class ResultProcessor {
 
     /** 同时发出新旧事件名，确保兼容 */
     this.deps.eventBus.emit("observation", event as never);
-    this.deps.eventBus.emit("detect:rule", event as never);
   }
 
   /** 快照摄像头源配置（包含 ROI 坐标快照，避免后续修改影响历史数据） */
@@ -214,7 +216,6 @@ export class ResultProcessor {
         detail: JSON.stringify({ confidence, trend: true }),
       };
       this.deps.eventBus.emit("observation", trendEvent as never);
-      this.deps.eventBus.emit("detect:rule", trendEvent as never);
       console.log(`[Observer] "${obs.name}" 近匹配趋势: ${newCount}次上升, 置信度 ${(confidence * 100).toFixed(0)}%`);
     }
   }

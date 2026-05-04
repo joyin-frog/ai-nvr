@@ -40,7 +40,9 @@ export class RecordingSummarizer {
 
   start(): void {
     this.unsub = this.eventBus.on("recording:completed", (payload) => {
-      this.generateSummary(payload.cameraId, payload.filename, payload.startTime, payload.endTime);
+      this.generateSummary(payload.cameraId, payload.filename, payload.startTime, payload.endTime).catch((err) => {
+        console.warn("[RecordingSummarizer] generateSummary failed:", err instanceof Error ? err.message : String(err));
+      });
     });
   }
 
@@ -141,8 +143,8 @@ export class RecordingSummarizer {
       this.eventStorage.insert("llm:recording-summary", cameraId, Date.now(), JSON.stringify(summary));
 
       console.log(`[RecordingSummarizer] ${cameraId} 录像摘要 (${durationSec}s, ${filtered.length}事件, ${Math.round(inferMs)}ms): ${summaryText.slice(0, 60)}...`);
-    } catch {
-      /** 静默失败 */
+    } catch (err) {
+      console.warn("[RecordingSummarizer] 摘要生成失败:", err instanceof Error ? err.message : String(err));
     } finally {
       this.generating.delete(key);
     }

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import EventTimeline from './EventTimeline.vue'
 import { authFetch, authUrl } from '../services/auth'
 import { usePreferences } from '../composables/usePreferences'
+import { useCameraNameMap } from '../composables/useCameraNameMap'
 
 /** 检测结果 */
 interface Detection {
@@ -188,18 +189,24 @@ const previewUrl = ref('')
  * 从事件 detail 中提取 trackId，按需从后端加载快照
  */
 const trackSnapshotMap = new Map<number, string>()
+/** 快照缓存上限，超出时淘汰最旧条目 */
+const TRACK_SNAPSHOT_MAX = 200
 const trackSnapshotLoading = new Set<number>()
 
 /** 按 trackId 加载快照缩略图 URL */
 async function loadTrackSnapshotUrl(trackId: number) {
   if (trackSnapshotMap.has(trackId) || trackSnapshotLoading.has(trackId)) return
   trackSnapshotLoading.add(trackId)
-  const url = `/api/tracks/${trackId}/snapshot`
+  const url = authUrl(`/api/tracks/${trackId}/snapshot`)
   const res = await fetch(url).catch(() => null)
   if (res?.ok) {
     trackSnapshotMap.set(trackId, url)
   } else {
     trackSnapshotMap.set(trackId, '')
+  }
+  if (trackSnapshotMap.size > TRACK_SNAPSHOT_MAX) {
+    const oldest = trackSnapshotMap.keys().next().value
+    if (oldest !== undefined) trackSnapshotMap.delete(oldest)
   }
   trackSnapshotLoading.delete(trackId)
 }
@@ -321,16 +328,7 @@ const emit = defineEmits<{
 }>()
 
 /** 摄像头 ID → 名称映射（O(1) 查找，替代模板中 find） */
-const cameraNameMap = computed(() => {
-  const map = new Map<string, string>()
-  for (const c of props.cameras ?? []) map.set(c.id, c.name)
-  return map
-})
-
-/** 获取摄像头友好名称 */
-function cameraName(id: string): string {
-  return cameraNameMap.value.get(id) ?? id
-}
+const { cameraName } = useCameraNameMap(computed(() => props.cameras ?? []))
 
 /** 事件类型标签样式 */
 const typeConfig: Record<string, { labelKey: string; bg: string; color: string }> = {
@@ -353,6 +351,8 @@ const typeConfig: Record<string, { labelKey: string; bg: string; color: string }
   'llm:summary': { labelKey: 'event.llmSummary', bg: '#5C6BC0', color: '#fff' },
   'llm:patrol': { labelKey: 'event.llmPatrol', bg: '#26A69A', color: '#fff' },
   'track:activity-summary': { labelKey: 'event.trackActivity', bg: '#7E57C2', color: '#fff' },
+  observation: { labelKey: 'event.detectRule', bg: '#FF6B6B', color: '#fff' },
+  'signal:changed': { labelKey: 'event.stateChanged', bg: '#FF9800', color: '#fff' },
   'detect:rule': { labelKey: 'event.detectRule', bg: '#FF6B6B', color: '#fff' },
   'state:changed': { labelKey: 'event.stateChanged', bg: '#FF9800', color: '#fff' },
 }
@@ -623,6 +623,9 @@ onMounted(() => {
 onUnmounted(() => {
   loadMoreObserver?.disconnect()
   loadMoreObserver = null
+  if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null }
+  trackSnapshotMap.clear()
+  trackSnapshotLoading.clear()
 })
 
 /** 哨兵元素挂载时开始观察 */
@@ -719,15 +722,17 @@ function parseExpandedDetail(e: EventItem): Array<{ label: string; value: string
       if (obj.trackId !== undefined) items.push({ label: 'trackId', value: String(obj.trackId), trackId: obj.trackId as number })
     }
     /** 用户检测规则事件 */
-    if (e.type === 'detect:rule') {
-      if (obj.ruleName) items.push({ label: t('event.rule', '规则'), value: String(obj.ruleName) })
+    if (e.type === 'detect:rule' || e.type === 'observation') {
+      const name = obj.observerName ?? obj.ruleName
+      if (name) items.push({ label: t('event.rule', '规则'), value: String(name) })
       if (obj.prompt) items.push({ label: t('event.prompt', '提示词'), value: String(obj.prompt) })
       if (obj.result) items.push({ label: t('event.result', '结果'), value: String(obj.result) })
       if (obj.confidence !== undefined) items.push({ label: t('event.confidence', '置信度'), value: `${(obj.confidence * 100).toFixed(0)}%` })
     }
-    /** 状态变更事件 */
-    if (e.type === 'state:changed') {
-      if (obj.stateName) items.push({ label: t('event.name'), value: String(obj.stateName) })
+    /** 信号变更事件 */
+    if (e.type === 'state:changed' || e.type === 'signal:changed') {
+      const name = obj.signalName ?? obj.stateName
+      if (name) items.push({ label: t('event.name'), value: String(name) })
       if (obj.oldValue !== undefined) items.push({ label: '→', value: `${obj.oldValue} → ${obj.newValue}` })
       if (obj.source) items.push({ label: t('event.detail'), value: obj.source.startsWith('rule:') ? t('state.sourceRule') : t('state.sourceManual') })
     }
@@ -827,14 +832,14 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
     <!-- AI 状态条（仅事件视图，有 AI 数据时显示） -->
     <div v-if="subView === 'events' && aiStats" class="ai-stats-bar">
       <span class="ai-stat" :title="'VLM: ' + aiStats.vlm.model">{{ aiStats.vlm.enabled ? '🟢' : '🔴' }} VLM</span>
-      <span v-if="aiStats.stats5m" class="ai-stat">检测 {{ aiStats.stats5m.detectCount }} | 告警 {{ aiStats.stats5m.alertCount }} | AI {{ aiStats.stats5m.llmCount }}</span>
-      <span v-if="aiStats.tracks" class="ai-stat" :title="`活跃 ${aiStats.tracks.active} / 已命名 ${aiStats.tracks.named}`">追踪 {{ aiStats.tracks.total }} ({{ aiStats.tracks.active }} 活跃)</span>
-      <span v-if="aiStats.trajectories" class="ai-stat">轨迹 {{ aiStats.trajectories.pointCount }} 点</span>
+      <span v-if="aiStats.stats5m" class="ai-stat">{{ t('event.aiStatsDetect') }} {{ aiStats.stats5m.detectCount }} | {{ t('event.aiStatsAlert') }} {{ aiStats.stats5m.alertCount }} | AI {{ aiStats.stats5m.llmCount }}</span>
+      <span v-if="aiStats.tracks" class="ai-stat" :title="t('event.aiStatsActiveNamed', { active: aiStats.tracks.active, named: aiStats.tracks.named })">{{ t('event.aiStatsTrack') }} {{ aiStats.tracks.total }} ({{ aiStats.tracks.active }} {{ t('event.aiStatsTrackActive') }})</span>
+      <span v-if="aiStats.trajectories" class="ai-stat">{{ t('event.aiStatsTrajectory') }} {{ aiStats.trajectories.pointCount }} {{ t('event.aiStatsPoints') }}</span>
       <span v-if="aiStats.clip?.enabled" class="ai-stat">🟢 CLIP</span>
-      <span v-if="aiStats.metrics && aiStats.metrics.totalCalls5m > 0" class="ai-stat" :title="`推理: ${aiStats.metrics.totalOk5m}/${aiStats.metrics.totalCalls5m} 成功, 平均 ${aiStats.metrics.avgMs5m}ms, P95 ${Math.max(...aiStats.metrics.modules.map(m => m.p95Ms5m))}ms`">⚡ {{ aiStats.metrics.avgMs5m }}ms ({{ aiStats.metrics.totalCalls5m }}次)</span>
-      <span v-if="aiStats.metrics && aiStats.metrics.vlmMaxConcurrency > 0" class="ai-stat" :title="`VLM 并发: ${aiStats.metrics.vlmConcurrency}/${aiStats.metrics.vlmMaxConcurrency}`">🔀 {{ aiStats.metrics.vlmConcurrency }}/{{ aiStats.metrics.vlmMaxConcurrency }}</span>
-      <span v-if="(aiStats.anomaly?.score ?? 0) > 0" :class="['ai-stat', 'anomaly-badge', aiStats.anomaly!.score > 0.3 ? 'high' : 'low']" :title="`异常评分: ${Math.round(aiStats.anomaly!.score * 100)}%`">{{ Math.round(aiStats.anomaly!.score * 100) }}% 异常</span>
-      <span v-if="aiStats.vlm.contextIntervalMs" class="ai-stat" title="多帧分析间隔">📐 {{ (aiStats.vlm.contextIntervalMs / 1000).toFixed(0) }}s</span>
+      <span v-if="aiStats.metrics && aiStats.metrics.totalCalls5m > 0" class="ai-stat" :title="t('event.aiStatsInferTitle', { ok: aiStats.metrics.totalOk5m, total: aiStats.metrics.totalCalls5m, avg: aiStats.metrics.avgMs5m, p95: Math.max(...aiStats.metrics.modules.map(m => m.p95Ms5m)) })">⚡ {{ t('event.aiStatsInferMs', { ms: aiStats.metrics.avgMs5m, count: aiStats.metrics.totalCalls5m }) }}</span>
+      <span v-if="aiStats.metrics && aiStats.metrics.vlmMaxConcurrency > 0" class="ai-stat" :title="`${t('event.aiStatsConcurrency')}: ${aiStats.metrics.vlmConcurrency}/${aiStats.metrics.vlmMaxConcurrency}`">🔀 {{ aiStats.metrics.vlmConcurrency }}/{{ aiStats.metrics.vlmMaxConcurrency }}</span>
+      <span v-if="(aiStats.anomaly?.score ?? 0) > 0" :class="['ai-stat', 'anomaly-badge', aiStats.anomaly!.score > 0.3 ? 'high' : 'low']" :title="t('event.aiStatsAnomalyTitle', { score: Math.round(aiStats.anomaly!.score * 100) })">{{ Math.round(aiStats.anomaly!.score * 100) }}% {{ t('event.aiStatsAnomaly') }}</span>
+      <span v-if="aiStats.vlm.contextIntervalMs" class="ai-stat" :title="t('event.aiStatsMultiFrame')">📐 {{ (aiStats.vlm.contextIntervalMs / 1000).toFixed(0) }}s</span>
       <div v-if="aiStats.labelDistribution && Object.keys(aiStats.labelDistribution).length > 0" class="ai-label-dist">
         <span v-for="(count, label) in aiStats.labelDistribution" :key="label" class="label-chip" :style="{ opacity: 0.4 + 0.6 * (count / Math.max(...Object.values(aiStats.labelDistribution as Record<string, number>))) }">{{ label }} {{ count }}</span>
       </div>
@@ -851,14 +856,14 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
         </select>
       </div>
       <input type="text" v-model="filterSearch" @input="onSearchInput" class="filter-search" :placeholder="t('event.searchPlaceholder')" @keydown.enter="semanticSearch" />
-      <button v-if="aiStats?.vlm?.enabled && filterSearch.trim()" :class="['ai-action-btn', { loading: semanticSearching }]" @click="semanticSearch" :disabled="semanticSearching" title="AI 语义搜索">{{ semanticSearching ? '⏳' : '✨' }}</button>
+      <button v-if="aiStats?.vlm?.enabled && filterSearch.trim()" :class="['ai-action-btn', { loading: semanticSearching }]" @click="semanticSearch" :disabled="semanticSearching" :title="t('event.aiStatsSemanticSearch')">{{ semanticSearching ? '⏳' : '✨' }}</button>
       <div class="type-chips">
         <button :class="['type-chip', { active: !filterType }]" @click="filterType = ''; onFilterChange('type')">{{ t('event.allTypes') }}</button>
         <button :class="['type-chip', 'motion', { active: filterType === 'motion' }]" @click="filterType = 'motion'; onFilterChange('type')">{{ t('event.motion') }}</button>
         <button :class="['type-chip', 'detect', { active: filterType === 'detect' }]" @click="filterType = 'detect'; onFilterChange('type')">{{ t('event.detect') }}</button>
         <button :class="['type-chip', 'offline', { active: filterType === 'camera:offline' }]" @click="filterType = 'camera:offline'; onFilterChange('type')">{{ t('event.offline') }}</button>
         <button :class="['type-chip', { active: filterType === 'alert' }]" @click="filterType = 'alert'; onFilterChange('type')">{{ t('event.alert') }}</button>
-        <button :class="['type-chip', { active: filterType === 'detect:rule' }]" @click="filterType = 'detect:rule'; onFilterChange('type')">{{ t('event.detectRule') }}</button>
+        <button :class="['type-chip', { active: filterType === 'detect:rule' || filterType === 'observation' }]" @click="filterType = 'observation'; onFilterChange('type')">{{ t('event.detectRule') }}</button>
         <template v-if="showAllTypes">
           <button :class="['type-chip', 'lowfps', { active: filterType === 'camera:lowfps' }]" @click="filterType = 'camera:lowfps'; onFilterChange('type')">{{ t('event.lowfps') }}</button>
           <button :class="['type-chip', { active: filterType === 'track:appeared' }]" @click="filterType = 'track:appeared'; onFilterChange('type')">{{ t('event.trackAppeared') }}</button>
@@ -872,7 +877,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
           <button :class="['type-chip', { active: filterType === 'llm:scene' }]" @click="filterType = 'llm:scene'; onFilterChange('type')">{{ t('event.llmScene') }}</button>
           <button :class="['type-chip', { active: filterType === 'llm:summary' }]" @click="filterType = 'llm:summary'; onFilterChange('type')">{{ t('event.llmSummary', 'AI摘要') }}</button>
           <button :class="['type-chip', { active: filterType === 'llm:patrol' }]" @click="filterType = 'llm:patrol'; onFilterChange('type')">{{ t('event.llmPatrol', 'AI巡逻') }}</button>
-          <button :class="['type-chip', { active: filterType === 'state:changed' }]" @click="filterType = 'state:changed'; onFilterChange('type')">{{ t('event.stateChanged') }}</button>
+          <button :class="['type-chip', { active: filterType === 'state:changed' || filterType === 'signal:changed' }]" @click="filterType = 'signal:changed'; onFilterChange('type')">{{ t('event.stateChanged') }}</button>
         </template>
         <button class="type-chip more-chip" @click="showAllTypes = !showAllTypes">{{ showAllTypes ? '▲' : '…' }}</button>
       </div>
@@ -901,13 +906,14 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
           >{{ t(typeConfig[e.type].labelKey) }}</span>
           <span class="event-cam">{{ cameraName(e.cameraId) }}</span>
           <div v-if="getCachedTrackSnapshot(e)" class="thumb-wrap track-thumb">
-            <img :src="getCachedTrackSnapshot(e)!" class="event-thumb" alt="" />
+            <img :src="getCachedTrackSnapshot(e)!" class="event-thumb" alt="" loading="lazy" />
           </div>
-          <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'llm:scene') && e.snapshotUrl" class="thumb-wrap">
+          <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'observation' || e.type === 'llm:scene') && e.snapshotUrl" class="thumb-wrap">
             <img
               :src="authUrl(e.snapshotUrl)"
               class="event-thumb"
               alt=""
+              loading="lazy"
             />
             <div v-if="(e.type === 'detect' || e.type === 'alert') && showDetectionBoxes && e.snapshotDetections?.length" class="thumb-boxes">
               <div
@@ -932,7 +938,7 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
           <div v-if="getCachedTrackSnapshot(e)" class="expand-snap-wrap">
             <img :src="getCachedTrackSnapshot(e)!" class="expand-snapshot" alt="" />
           </div>
-          <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'llm:scene') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
+          <div v-else-if="(e.type === 'detect' || e.type === 'alert' || e.type === 'detect:rule' || e.type === 'observation' || e.type === 'llm:scene') && (e.snapshotUrl || snapshotMapByCamera.get(e.cameraId))" class="expand-snap-wrap">
             <img
               :src="e.snapshotUrl ? authUrl(e.snapshotUrl) : snapshotMapByCamera.get(e.cameraId)"
               class="expand-snapshot"
@@ -1111,19 +1117,6 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
   max-width: 100px;
 }
 
-.filter-date {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-
-.filter-date::-webkit-calendar-picker-indicator {
-  filter: invert(0.7);
-}
-
 .filter-search {
   background: #0a0a1a;
   color: #e0e0e0;
@@ -1297,13 +1290,6 @@ defineExpose({ addEvent, addDetectEvent, loadHistory, filterByTrack })
   flex: 1;
   overflow-y: auto;
   padding: 4px;
-}
-
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
 }
 
 .event-item {

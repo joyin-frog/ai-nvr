@@ -56,8 +56,3 @@ export function matchEvent(rule: MatchableRule, eventType: string, payload: Reco
   if (!expr) return true;
   return evaluate(expr, payload);
 }
-
-/** 清除条件缓存（规则更新时调用） */
-export function clearConditionCache(): void {
-  /** WeakMap 会随 rule 对象 GC 自动清理，此处预留扩展点 */
-}

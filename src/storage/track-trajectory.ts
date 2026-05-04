@@ -137,7 +137,7 @@ export class TrackTrajectoryStorage {
     const sinceTime = since ?? Date.now() - 120_000;
     const rows = this.db
       .prepare(
-        "SELECT track_id, ts, x, y, w, h FROM trajectory_points WHERE camera_id = ? AND ts >= ? ORDER BY ts ASC"
+        "SELECT track_id, ts, x, y, w, h FROM trajectory_points WHERE camera_id = ? AND ts >= ? ORDER BY ts ASC LIMIT 10000"
       )
       .all(cameraId, sinceTime) as Array<{
       track_id: number;

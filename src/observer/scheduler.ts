@@ -146,7 +146,11 @@ export class Scheduler {
       return;
     }
 
-    this.onExecute(obs, frame, Date.now());
+    /** 原子递增并发计数（在 onExecute 之前，保证 check-increment 不可分割） */
+    this.concurrent++;
+    this.onExecute(obs, frame, Date.now()).catch((err) => {
+      console.warn(`[Scheduler] onExecute failed for observer ${obs.id}:`, err instanceof Error ? err.message : String(err));
+    });
   }
 
   private processQueue(): void {
@@ -155,7 +159,10 @@ export class Scheduler {
       if (!this.isInSchedule(item.observer)) continue;
       const frame = this.getFrame(item.observer.cameras[0]?.cameraId ?? "");
       if (frame) {
-        this.onExecute(item.observer, frame, item.timestamp);
+        this.concurrent++;
+        this.onExecute(item.observer, frame, item.timestamp).catch((err) => {
+          console.warn(`[Scheduler] onExecute failed for observer ${item.observer.id}:`, err instanceof Error ? err.message : String(err));
+        });
       }
     }
   }
@@ -175,7 +182,8 @@ export class Scheduler {
           startMinutes: (sH ?? 0) * 60 + (sM ?? 0),
           endMinutes: (eH ?? 23) * 60 + (eM ?? 59),
         };
-      } catch {
+      } catch (e) {
+        console.warn("[Scheduler] 观测器配置解析失败:", e);
         config = null;
       }
       this.scheduleCache.set(obs.schedule, config);

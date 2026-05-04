@@ -19,7 +19,7 @@ interface WebhookPayload {
  */
 export class WebhookNotifier {
   /** 要推送的事件类型 */
-  private static readonly EVENTS: EventName[] = ["motion", "camera:online", "camera:offline", "detect:rule", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:scene", "llm:patrol"];
+  private static readonly EVENTS: EventName[] = ["motion", "camera:online", "camera:offline", "observation", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "signal:changed", "llm:scene", "llm:patrol"];
 
   /** 去抖：同一事件+摄像头在窗口内只推送一次 */
   private recentKeys = new Map<string, number>();
@@ -42,8 +42,8 @@ export class WebhookNotifier {
 
   /** 处理事件：构建载荷并推送到所有 Webhook URL */
   private handleEvent(event: EventName, payload: Record<string, unknown>): void {
-    /** state:changed 事件只在 notify=true 时推送 */
-    if (event === "state:changed" && !payload.notify) return;
+    /** signal:changed 事件只在 notify=true 时推送 */
+    if (event === "signal:changed" && !payload.notify) return;
 
     /** 去抖：高频事件（track:*、detect）同一摄像头 60s 内只推一次 */
     const cameraId = (payload.cameraId as string) ?? "";
@@ -81,9 +81,9 @@ export class WebhookNotifier {
 
     if (event === "motion") {
       detail.ratio = payload.ratio;
-    } else if (event === "detect:rule") {
-      detail.ruleId = payload.ruleId;
-      detail.ruleName = payload.ruleName;
+    } else if (event === "observation") {
+      detail.observerId = payload.observerId;
+      detail.observerName = payload.observerName;
       detail.prompt = payload.prompt;
       detail.result = payload.result;
       detail.confidence = payload.confidence;
@@ -124,13 +124,13 @@ export class WebhookNotifier {
       detail.trackName = payload.trackName;
       if (payload.semanticLabel) detail.semanticLabel = payload.semanticLabel;
       detail.speed = payload.speed;
-    } else if (event === "state:changed") {
-      detail.stateId = payload.stateId;
-      detail.stateName = payload.stateName;
+    } else if (event === "signal:changed") {
+      detail.signalId = payload.signalId;
+      detail.signalName = payload.signalName;
       detail.oldValue = payload.oldValue;
       detail.newValue = payload.newValue;
       detail.source = payload.source;
-      if (payload.sourceRuleId) detail.sourceRuleId = payload.sourceRuleId;
+      if (payload.sourceId) detail.sourceId = payload.sourceId;
     } else if (event === "llm:scene") {
       detail.description = payload.description;
       detail.trigger = payload.trigger;
@@ -151,6 +151,7 @@ export class WebhookNotifier {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
     }).catch((err) => {
       console.error(`[Webhook] 推送失败 ${url}:`, (err as Error).message);
     });

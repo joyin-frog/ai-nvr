@@ -81,19 +81,19 @@ const trackActivity = ref<Record<number, Array<{ hour: number; count: number }>>
 const trackZoneStats = ref<Record<number, Array<{ zoneName: string; totalDwellMs: number; visits: number }>>>({})
 
 /** 事件类型标签样式 */
-const EVENT_TYPE_STYLE: Record<string, { label: string; bg: string; color: string }> = {
-  'track:appeared': { label: '出现', bg: '#81C784', color: '#fff' },
-  'track:disappeared': { label: '消失', bg: '#E57373', color: '#fff' },
-  'track:enter-zone': { label: '进入', bg: '#26A69A', color: '#fff' },
-  'track:leave-zone': { label: '离开', bg: '#AB47BC', color: '#fff' },
-  'track:dwell': { label: '停留', bg: '#FF9800', color: '#fff' },
-  'track:speed': { label: '速度', bg: '#42A5F5', color: '#fff' },
-  'track:line-cross': { label: '越线', bg: '#FF6F00', color: '#fff' },
-  'track:loiter': { label: '徘徊', bg: '#795548', color: '#fff' },
-  'track:approach': { label: '接近', bg: '#E91E63', color: '#fff' },
-  'track:match-suggest': { label: '匹配', bg: '#CE93D8', color: '#fff' },
-  'detect': { label: '检测', bg: '#4ECDC4', color: '#fff' },
-  'motion': { label: '变动', bg: '#FFC107', color: '#333' },
+const EVENT_TYPE_STYLE: Record<string, { labelKey: string; bg: string; color: string }> = {
+  'track:appeared': { labelKey: 'event.trackAppeared', bg: '#81C784', color: '#fff' },
+  'track:disappeared': { labelKey: 'event.trackDisappeared', bg: '#E57373', color: '#fff' },
+  'track:enter-zone': { labelKey: 'event.trackEnterZone', bg: '#26A69A', color: '#fff' },
+  'track:leave-zone': { labelKey: 'event.trackLeaveZone', bg: '#AB47BC', color: '#fff' },
+  'track:dwell': { labelKey: 'event.trackDwell', bg: '#FF9800', color: '#fff' },
+  'track:speed': { labelKey: 'event.trackSpeed', bg: '#42A5F5', color: '#fff' },
+  'track:line-cross': { labelKey: 'event.trackLineCross', bg: '#FF6F00', color: '#fff' },
+  'track:loiter': { labelKey: 'event.trackLoiter', bg: '#795548', color: '#fff' },
+  'track:approach': { labelKey: 'event.trackApproach', bg: '#E91E63', color: '#fff' },
+  'track:match-suggest': { labelKey: 'event.trackMatchSuggest', bg: '#CE93D8', color: '#fff' },
+  'detect': { labelKey: 'event.detect', bg: '#4ECDC4', color: '#fff' },
+  'motion': { labelKey: 'event.motion', bg: '#FFC107', color: '#333' },
 }
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -105,21 +105,26 @@ const emit = defineEmits<{
 /** 加载追踪目标列表 */
 async function loadTracks() {
   loading.value = true
-  const res = await authFetch('/api/tracks')
-  if (res.ok) {
-    tracks.value = await res.json()
-  }
-  /** 加载 dHash 匹配建议 */
-  const sugRes = await authFetch('/api/tracks/suggestions')
-  if (sugRes.ok) {
-    const data = await sugRes.json() as Array<{ trackId: number; suggestedName: string; distance: number }>
-    const map = new Map<number, { name: string; distance: number }>()
-    for (const s of data) {
-      map.set(s.trackId, { name: s.suggestedName, distance: s.distance })
+  try {
+    const res = await authFetch('/api/tracks')
+    if (res.ok) {
+      tracks.value = await res.json()
     }
-    suggestions.value = map
+    /** 加载 dHash 匹配建议 */
+    const sugRes = await authFetch('/api/tracks/suggestions')
+    if (sugRes.ok) {
+      const data = await sugRes.json() as Array<{ trackId: number; suggestedName: string; distance: number }>
+      const map = new Map<number, { name: string; distance: number }>()
+      for (const s of data) {
+        map.set(s.trackId, { name: s.suggestedName, distance: s.distance })
+      }
+      suggestions.value = map
+    }
+  } catch (err) {
+    console.warn('[TrackGallery] loadTracks failed:', err)
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 /** 快照图片 URL */
@@ -177,35 +182,43 @@ async function saveName(trackId: number) {
 
 /** 仅命名（不合并） */
 async function doSaveName(trackId: number, name: string) {
-  await authFetch(`/api/tracks/${trackId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customName: name }),
-  })
-  editingId.value = null
-  mergeConfirm.value = null
-  await loadTracks()
+  try {
+    const res = await authFetch(`/api/tracks/${trackId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customName: name }),
+    })
+    if (!res.ok) return
+    editingId.value = null
+    mergeConfirm.value = null
+    await loadTracks()
+  } catch { /* ignore */ }
 }
 
 /** 确认合并 */
 async function confirmMerge() {
   if (!mergeConfirm.value) return
   const { sourceId, targetId, name } = mergeConfirm.value
-  /** 先合并，再给目标设置名称 */
-  await authFetch('/api/tracks/merge', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceId, targetId }),
-  })
-  /** 确保目标名称正确 */
-  await authFetch(`/api/tracks/${targetId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customName: name }),
-  })
-  editingId.value = null
-  mergeConfirm.value = null
-  await loadTracks()
+  try {
+    /** 先合并，再给目标设置名称 */
+    const mergeRes = await authFetch('/api/tracks/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId, targetId }),
+    })
+    if (!mergeRes.ok) return
+    /** 确保目标名称正确 */
+    await authFetch(`/api/tracks/${targetId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customName: name }),
+    })
+    editingId.value = null
+    mergeConfirm.value = null
+    await loadTracks()
+  } catch (err) {
+    console.warn('[TrackGallery] merge failed:', err)
+  }
 }
 
 /** 取消合并，改为仅命名 */
@@ -222,7 +235,8 @@ function cancelEdit() {
 /** 删除追踪目标 */
 const confirmDelete = ref<number | null>(null)
 async function deleteTrack(trackId: number) {
-  await authFetch(`/api/tracks/${trackId}`, { method: 'DELETE' })
+  const res = await authFetch(`/api/tracks/${trackId}`, { method: 'DELETE' })
+  if (!res.ok) return
   confirmDelete.value = null
   await loadTracks()
 }
@@ -493,6 +507,10 @@ onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (activeTickTimer) clearInterval(activeTickTimer)
   if (semanticDebounce) clearTimeout(semanticDebounce)
+  trackEvents.value = {}
+  trackTrajectories.value = {}
+  trackActivity.value = {}
+  trackZoneStats.value = {}
 })
 
 /** 选中并滚动到指定追踪目标 */
@@ -518,7 +536,7 @@ defineExpose({ loadTracks, selectTrack })
         class="search-input"
         :placeholder="t('tracks.search', '搜索名称/标签...')"
       />
-      <span v-if="semanticSearching" class="semantic-hint" title="CLIP 语义搜索中...">...</span>
+      <span v-if="semanticSearching" class="semantic-hint" :title="t('tracks.clipSearching')">...</span>
       <button class="image-search-btn" @click="triggerImageSearch" :disabled="semanticSearching" :title="t('tracks.imageSearch', '以图搜图')">{{ semanticSearching ? '⏳' : '📷' }}</button>
       <input ref="imageSearchInput" type="file" accept="image/*" style="display:none" @change="onImageSearchFile" />
       <select v-if="allLabels.length > 1" v-model="filterLabel" class="label-filter">
@@ -662,9 +680,9 @@ defineExpose({ loadTracks, selectTrack })
               :title="track.dominantColor"
             ></span>
             <span v-if="isTrackActive(track)" class="track-active" :title="t('tracks.active', '活跃中')">●</span>
-            <span class="track-count">{{ track.hitCount }}次</span>
+            <span class="track-count">{{ t('tracks.hitCount', { count: track.hitCount }) }}</span>
             <span v-if="track.eventCount" class="track-event-count" :title="t('tracks.eventCount', '行为事件')">{{ track.eventCount }}evt</span>
-            <span class="track-first-seen" :title="`首次出现: ${formatTime(track.firstSeen)}`">⏚ {{ relativeTime(track.firstSeen) }}</span>
+            <span class="track-first-seen" :title="t('tracks.firstSeen', { time: formatTime(track.firstSeen) })">⏚ {{ relativeTime(track.firstSeen) }}</span>
             <span class="track-time" :title="formatTime(track.lastSeen)">{{ relativeTime(track.lastSeen) }}</span>
           </div>
           <div class="track-cameras">
@@ -709,7 +727,7 @@ defineExpose({ loadTracks, selectTrack })
           <!-- 活跃时段分布（24小时条形图） -->
           <div v-if="expandedTrackId === track.trackId && trackActivity[track.trackId]" class="activity-section">
             <div class="activity-chart">
-              <div v-for="h in trackActivity[track.trackId]" :key="h.hour" class="activity-bar-wrap" :title="`${h.hour}:00 — ${h.count} 次`">
+              <div v-for="h in trackActivity[track.trackId]" :key="h.hour" class="activity-bar-wrap" :title="t('tracks.hourActivity', { hour: h.hour, count: h.count })">
                 <div class="activity-bar">
                   <div class="activity-fill" :style="{ height: activityHeight(track.trackId, h.count) + '%' }" />
                 </div>
@@ -721,7 +739,7 @@ defineExpose({ loadTracks, selectTrack })
           <div v-if="expandedTrackId === track.trackId && trackZoneStats[track.trackId]?.length" class="zone-stats">
             <div v-for="zs in trackZoneStats[track.trackId]" :key="zs.zoneName" class="zone-stat-row">
               <span class="zone-stat-name">{{ zs.zoneName }}</span>
-              <span class="zone-stat-detail">{{ formatDuration(zs.totalDwellMs) }} / {{ zs.visits }}次</span>
+              <span class="zone-stat-detail">{{ t('tracks.zoneVisits', { duration: formatDuration(zs.totalDwellMs), visits: zs.visits }) }}</span>
               <div class="zone-stat-bar">
                 <div class="zone-stat-fill" :style="{ width: zoneBarWidth(track.trackId, zs.totalDwellMs) + '%' }" />
               </div>
@@ -734,7 +752,7 @@ defineExpose({ loadTracks, selectTrack })
             </div>
             <div v-for="ev in trackEvents[track.trackId]" :key="ev.id" class="event-item"
               @click="emit('jumpToRecording', ev.camera_id, ev.timestamp)">
-              <span v-if="EVENT_TYPE_STYLE[ev.type]" class="event-type-tag" :style="{ background: EVENT_TYPE_STYLE[ev.type].bg, color: EVENT_TYPE_STYLE[ev.type].color }">{{ EVENT_TYPE_STYLE[ev.type].label }}</span>
+              <span v-if="EVENT_TYPE_STYLE[ev.type]" class="event-type-tag" :style="{ background: EVENT_TYPE_STYLE[ev.type].bg, color: EVENT_TYPE_STYLE[ev.type].color }">{{ t(EVENT_TYPE_STYLE[ev.type].labelKey) }}</span>
               <span class="event-time">{{ new Date(ev.timestamp).toLocaleString() }}</span>
               <span class="event-cam">{{ ev.camera_id }}</span>
               <button class="event-play" @click.stop="emit('jumpToRecording', ev.camera_id, ev.timestamp)">▶</button>

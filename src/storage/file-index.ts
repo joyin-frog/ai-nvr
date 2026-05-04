@@ -253,7 +253,8 @@ export class FileIndex {
       let entries;
       try {
         entries = await readdir(dir, { withFileTypes: true });
-      } catch {
+      } catch (e) {
+        console.warn("[FileIndex] 操作失败:", e);
         return;
       }
       const batch: FileEntry[] = [];
@@ -292,7 +293,8 @@ export class FileIndex {
               registered += batch.length;
               batch.length = 0;
             }
-          } catch {
+          } catch (e) {
+            console.warn("[FileIndex] 操作失败:", e);
             /* 文件可能正在写入 */
           }
         }

@@ -1,4 +1,5 @@
 import { mkdir, writeFile, readFile, unlink, readdir } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
 import { type Detection } from "@/ai/types";
@@ -957,7 +958,28 @@ export class TrackStorage {
       this.saveTimer = null;
     }
     const data = [...this.tracks.values()];
-    writeFile(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data)).catch(() => {});
+    writeFile(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data)).catch((err) => {
+      console.error("[TrackStorage] 保存元数据失败:", err instanceof Error ? err.message : String(err));
+      this.dirty = true;
+    });
+  }
+
+  /** 清理定时器并保存未写入的数据 */
+  close(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    if (this.dirty) {
+      this.dirty = false;
+      try {
+        const data = [...this.tracks.values()];
+        writeFileSync(join(this.storagePath, TRACKS_META_FILE), JSON.stringify(data));
+      } catch (err) {
+        console.warn("[TrackStorage] close 时保存失败:", err instanceof Error ? err.message : String(err));
+        this.dirty = true;
+      }
+    }
   }
 
   /** 从磁盘加载 */

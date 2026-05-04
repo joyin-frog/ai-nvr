@@ -110,19 +110,19 @@ export class ObserverStorage {
       let signalIds: number[] = [];
       try {
         signalIds = JSON.parse(String(row.state_ids ?? "[]"));
-      } catch { /* ignore */ }
+      } catch (e) { console.warn("[ObserverStorage] JSON parse failed for state_ids (legacy migration):", e); }
 
       let cameras: CameraSource[] = [];
       const camerasJson = String(row.cameras_json ?? "[]");
       if (camerasJson && camerasJson !== "[]") {
-        try { cameras = JSON.parse(camerasJson); } catch { /* ignore */ }
+        try { cameras = JSON.parse(camerasJson); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for cameras_json (legacy migration):", e); }
       }
       if (cameras.length === 0 && row.camera_id) {
         cameras = [{ cameraId: String(row.camera_id), roiId: Number(row.roi_id ?? 0), offsetSec: 0 }];
       }
 
       let refImages: string[] = [];
-      try { refImages = JSON.parse(String(row.ref_images ?? "[]")); } catch { /* ignore */ }
+      try { refImages = JSON.parse(String(row.ref_images ?? "[]")); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for ref_images (legacy migration):", e); }
 
       this.db.run(
         `INSERT OR IGNORE INTO observers (id, name, prompt, interval_ms, cooldown_ms, enabled, image_width, signal_ids, schedule, save_original, output_regions, cameras_json, ref_images, model_id)
@@ -167,8 +167,8 @@ export class ObserverStorage {
     for (const row of rows) {
       let signalIds: number[] = [];
       let evalIds: number[] = [];
-      try { signalIds = JSON.parse(row.signal_ids); } catch { /* ignore */ }
-      try { evalIds = JSON.parse(row.eval_signal_ids); } catch { /* ignore */ }
+      try { signalIds = JSON.parse(row.signal_ids); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for signal_ids (mergeEvalSignalIds):", e); }
+      try { evalIds = JSON.parse(row.eval_signal_ids); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for eval_signal_ids (mergeEvalSignalIds):", e); }
       const merged = [...new Set([...signalIds, ...evalIds])];
       if (merged.length !== signalIds.length || evalIds.length > 0) {
         this.db.run("UPDATE observers SET signal_ids = ? WHERE id = ?", [JSON.stringify(merged), row.id]);
@@ -310,13 +310,13 @@ export class ObserverStorage {
   /** 数据库行映射 */
   private mapRow(row: DbRow): Observer {
     let signalIds: number[] = [];
-    try { signalIds = JSON.parse(row.signalIdsJson); } catch { /* ignore */ }
+    try { signalIds = JSON.parse(row.signalIdsJson); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for signalIdsJson:", e); }
 
     let cameras: CameraSource[] = [];
-    try { cameras = JSON.parse(row.camerasJson); } catch { /* ignore */ }
+    try { cameras = JSON.parse(row.camerasJson); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for camerasJson:", e); }
 
     let refImages: string[] = [];
-    try { refImages = JSON.parse(row.refImagesJson ?? "[]"); } catch { /* ignore */ }
+    try { refImages = JSON.parse(row.refImagesJson ?? "[]"); } catch (e) { console.warn("[ObserverStorage] JSON parse failed for refImagesJson:", e); }
 
     return {
       id: row.id,

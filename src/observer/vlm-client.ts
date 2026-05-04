@@ -87,28 +87,40 @@ export class VlmClient {
   }
 
   private doParse(content: string): ObservationResult {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const obj = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-        const signalUpdates = Array.isArray(obj.states)
-          ? (obj.states as Array<Record<string, unknown>>).map(s => ({
-            id: typeof s.id === "number" ? s.id : 0,
-            value: typeof s.value === "string" ? s.value : String(s.value),
-          })).filter(s => s.id > 0)
-          : undefined;
+    /** 从第一个 { 开始匹配括号平衡，避免贪婪匹配跨 JSON 合并 */
+    const startIdx = content.indexOf("{");
+    if (startIdx >= 0) {
+      let depth = 0;
+      let endIdx = -1;
+      for (let i = startIdx; i < content.length; i++) {
+        if (content[i] === "{") depth++;
+        else if (content[i] === "}") depth--;
+        if (depth === 0) { endIdx = i; break; }
+      }
+      if (endIdx >= 0) {
+        const jsonStr = content.slice(startIdx, endIdx + 1);
+        try {
+          const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+          const signalUpdates = Array.isArray(obj.states)
+            ? (obj.states as Array<Record<string, unknown>>).map(s => ({
+              id: typeof s.id === "number" ? s.id : 0,
+              value: typeof s.value === "string" ? s.value : String(s.value),
+            })).filter(s => s.id > 0)
+            : undefined;
 
-        const regions = this.parseRegions(obj.regions);
+          const regions = this.parseRegions(obj.regions);
 
-        return {
-          matched: obj.matched === true,
-          confidence: typeof obj.confidence === "number" ? obj.confidence : 0.5,
-          description: typeof obj.description === "string" ? obj.description : content,
-          signalUpdates,
-          regions: regions.length > 0 ? regions : undefined,
-        };
-      } catch {
-        // JSON 解析失败，走 fallback
+          return {
+            matched: obj.matched === true,
+            confidence: typeof obj.confidence === "number" ? obj.confidence : 0.5,
+            description: typeof obj.description === "string" ? obj.description : content,
+            signalUpdates,
+            regions: regions.length > 0 ? regions : undefined,
+          };
+        } catch (e) {
+          console.warn("[VLM] 响应解析失败:", e);
+          /** JSON 解析失败，走 fallback */
+        }
       }
     }
 

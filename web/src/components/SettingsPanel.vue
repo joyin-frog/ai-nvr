@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { getBackendUrl, setBackendUrl } from '../services/backend'
 import { useI18n } from 'vue-i18n'
 
@@ -13,6 +13,7 @@ import { useToast } from '../composables/useToast'
 const { t } = useI18n()
 const { setPref, getPref } = usePreferences()
 const toast = useToast()
+let successTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 后端地址 */
 const backendUrlInput = ref(getBackendUrl())
@@ -32,7 +33,7 @@ const SOUND_EVENT_OPTIONS = [
   { key: 'camera:offline', labelKey: 'settings.soundEventCameraOffline' },
   { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
   { key: 'alert', labelKey: 'settings.soundEventAlert' },
-  { key: 'detect:rule', labelKey: 'settings.soundEventDetectRule' },
+  { key: 'observation', labelKey: 'settings.soundEventDetectRule' },
   { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
   { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
   { key: 'motion', labelKey: 'settings.soundEventMotion' },
@@ -189,7 +190,8 @@ async function saveSettings() {
       settings.value = await res.json()
       success.value = true
       emit('saved')
-      setTimeout(() => { success.value = false }, 2000)
+      if (successTimer) clearTimeout(successTimer)
+      successTimer = setTimeout(() => { success.value = false }, 2000)
     }
   } catch {
     // ignore
@@ -378,10 +380,16 @@ const hasPurgeSelection = computed(() => Object.values(purgeOpts).some(v => v))
 async function purgeData() {
   if (!hasPurgeSelection.value) return
   const labels = Object.entries(purgeOpts).filter(([, v]) => v).map(([k]) => {
-    const map: Record<string, string> = { events: '事件', alerts: '告警', snapshots: '检测快照', alertSnapshots: '告警快照', tracks: '追踪目标', trajectories: '轨迹', thumbnails: '缩略图', exports: '导出文件', recordings: '录像' }
+    const map: Record<string, string> = {
+      events: t('settings.purgeEvents'), alerts: t('settings.purgeAlerts'),
+      snapshots: t('settings.purgeDetectSnapshots'), alertSnapshots: t('settings.purgeAlertSnapshots'),
+      tracks: t('settings.purgeTracks'), trajectories: t('settings.purgeTrajectories'),
+      thumbnails: t('settings.purgeThumbnails'), exports: t('settings.purgeExports'),
+      recordings: t('settings.purgeRecordings'),
+    }
     return map[k]
   })
-  if (!confirm(`确定要删除：${labels.join('、')}？此操作不可恢复！`)) return
+  if (!confirm(t('settings.purgeConfirm', { items: labels.join('、') }))) return
 
   purgeBusy.value = true
   purgeResult.value = ''
@@ -398,7 +406,7 @@ async function purgeData() {
       loadCleanupStats()
     }
   } catch {
-    purgeResult.value = '清除失败'
+    purgeResult.value = t('settings.purgeFailed')
   } finally {
     purgeBusy.value = false
   }
@@ -409,6 +417,10 @@ onMounted(() => {
   loadCameras()
   loadCleanupStats()
   loadClipCandidates()
+})
+
+onUnmounted(() => {
+  if (successTimer) clearTimeout(successTimer)
 })
 </script>
 
@@ -435,7 +447,7 @@ onMounted(() => {
         <label class="field">
           <span class="field-label">{{ t('settings.language') }}</span>
           <select v-model="settings.language" class="input">
-            <option value="zh-CN">中文</option>
+            <option value="zh-CN">{{ t('settings.langZh') }}</option>
             <option value="en">English</option>
           </select>
         </label>
@@ -482,20 +494,20 @@ onMounted(() => {
       <!-- AI 视觉分析 -->
       <section class="section">
         <h3>{{ t('settings.ai', 'AI 视觉分析') }}</h3>
-        <p class="section-desc">使用视觉语言模型（VLM）分析摄像头画面，检测目标并生成语义描述。</p>
+        <p class="section-desc">{{ t('settings.vlmDesc') }}</p>
 
         <!-- 多模型管理 -->
         <div class="models-section">
           <div class="models-header">
-            <span class="field-label">模型列表</span>
-            <button class="add-btn compact" @click="addModel">+ 添加模型</button>
+            <span class="field-label">{{ t('settings.modelList') }}</span>
+            <button class="add-btn compact" @click="addModel">{{ t('settings.addModel') }}</button>
           </div>
-          <p class="field-hint">列表中第一个模型为默认模型，观测器可通过 modelId 指定使用哪个模型。</p>
+          <p class="field-hint">{{ t('settings.modelListHint') }}</p>
           <div v-if="settings.ai.models && settings.ai.models.length > 0" class="model-list">
             <div v-for="(m, i) in settings.ai.models" :key="m.id" class="model-card">
               <div class="model-card-header">
                 <span class="model-card-index">#{{ i + 1 }}</span>
-                <span v-if="i === 0" class="model-default-badge">默认</span>
+                <span v-if="i === 0" class="model-default-badge">{{ t('settings.defaultModel') }}</span>
                 <button class="remove-btn" @click="removeModel(i)">✕</button>
               </div>
               <div class="model-card-fields">
@@ -504,15 +516,15 @@ onMounted(() => {
                   <input type="text" v-model="m.id" class="input" placeholder="model_0" />
                 </label>
                 <label class="field compact">
-                  <span class="field-label small">名称</span>
+                  <span class="field-label small">{{ t('settings.modelName') }}</span>
                   <input type="text" v-model="m.name" class="input" placeholder="Qwen 3.5" />
                 </label>
                 <label class="field compact">
-                  <span class="field-label small">API 端点</span>
+                  <span class="field-label small">{{ t('settings.modelApiUrl') }}</span>
                   <input type="url" v-model="m.apiUrl" class="input model-input-wide" placeholder="http://localhost:1234/v1/chat/completions" />
                 </label>
                 <label class="field compact">
-                  <span class="field-label small">模型</span>
+                  <span class="field-label small">{{ t('settings.modelModel') }}</span>
                   <input type="text" v-model="m.model" class="input" placeholder="qwen3.5-0.8b" />
                 </label>
                 <label class="field compact">
@@ -737,18 +749,18 @@ onMounted(() => {
           <h4>{{ t('settings.purgeTitle', '一键清除数据') }}</h4>
           <p class="section-desc danger">{{ t('settings.purgeWarning', '以下操作不可恢复，请谨慎使用！') }}</p>
           <div class="purge-options">
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.events" /> 事件历史</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.alerts" /> 告警记录</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.snapshots" /> 检测快照</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.alertSnapshots" /> 告警快照</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.tracks" /> 追踪目标</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.trajectories" /> 运动轨迹</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.thumbnails" /> 缩略图缓存</label>
-            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.exports" /> 导出文件</label>
-            <label class="purge-check danger"><input type="checkbox" v-model="purgeOpts.recordings" /> 录像文件</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.events" /> {{ t('settings.purgeEvents') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.alerts" /> {{ t('settings.purgeAlerts') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.snapshots" /> {{ t('settings.purgeDetectSnapshots') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.alertSnapshots" /> {{ t('settings.purgeAlertSnapshots') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.tracks" /> {{ t('settings.purgeTracks') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.trajectories" /> {{ t('settings.purgeTrajectories') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.thumbnails" /> {{ t('settings.purgeThumbnails') }}</label>
+            <label class="purge-check"><input type="checkbox" v-model="purgeOpts.exports" /> {{ t('settings.purgeExports') }}</label>
+            <label class="purge-check danger"><input type="checkbox" v-model="purgeOpts.recordings" /> {{ t('settings.purgeRecordings') }}</label>
           </div>
           <button class="purge-btn" @click="purgeData" :disabled="purgeBusy || !hasPurgeSelection">
-            {{ purgeBusy ? '清除中...' : '清除选中数据' }}
+            {{ purgeBusy ? t('settings.purgeBusy') : t('settings.purgeSelected') }}
           </button>
           <span v-if="purgeResult" class="purge-result">{{ purgeResult }}</span>
         </div>
@@ -921,13 +933,6 @@ onMounted(() => {
   width: 16px;
   height: 16px;
   accent-color: #4ECDC4;
-}
-
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
 }
 
 .input-url {

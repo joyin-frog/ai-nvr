@@ -201,8 +201,20 @@ export class RuntimeConfig {
   /** 从 YAML 文件加载已持久化的运行时配置 */
   private loadPersistedSettings(): Partial<RuntimeSettings> {
     const configPath = getConfigPath();
-    const raw = readFileSync(configPath, "utf-8");
-    const doc = yaml.load(raw) as Record<string, unknown>;
+    let raw: string;
+    try {
+      raw = readFileSync(configPath, "utf-8");
+    } catch (e) {
+      console.warn("[RuntimeConfig] 读取配置文件失败，使用默认值:", e);
+      return {};
+    }
+    let doc: Record<string, unknown>;
+    try {
+      doc = yaml.load(raw) as Record<string, unknown>;
+    } catch {
+      console.warn("[RuntimeConfig] 配置文件 YAML 解析失败，使用默认值");
+      return {};
+    }
 
     const result: Partial<RuntimeSettings> = {};
 

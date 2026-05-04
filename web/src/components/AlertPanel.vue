@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authFetch } from '../services/auth'
 import { useToast } from '../composables/useToast'
 import { confirmDialog } from '../composables/useConfirm'
+import { useCameraNameMap } from '../composables/useCameraNameMap'
+
+let isNewTimer: ReturnType<typeof setTimeout> | null = null
 
 interface AlertRule {
   id: number
@@ -58,11 +61,7 @@ const emit = defineEmits<{
   jumpToRecording: [cameraId: string, timestamp: number]
 }>()
 
-const cameraNameMap = computed(() => {
-  const map: Record<string, string> = {}
-  for (const cam of (props.cameras ?? [])) map[cam.id] = cam.name
-  return map
-})
+const { cameraNameMap } = useCameraNameMap(computed(() => props.cameras ?? []))
 
 const showAddForm = ref(false)
 const editingRuleId = ref<number | null>(null)
@@ -276,12 +275,13 @@ function cancelEdit() {
 
 async function toggleRule(rule: AlertRule) {
   try {
-    await authFetch(`/api/alerts/rules/${rule.id}`, {
+    const res = await authFetch(`/api/alerts/rules/${rule.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !rule.enabled }),
     })
-    loadRules()
+    if (res.ok) loadRules()
+    else toastError(t('alert.saveFailed'))
   } catch {
     toastError(t('alert.saveFailed'))
   }
@@ -290,8 +290,9 @@ async function toggleRule(rule: AlertRule) {
 async function deleteRule(id: number) {
   if (!await confirmDialog(t('alert.confirmDelete'))) return
   try {
-    await authFetch(`/api/alerts/rules/${id}`, { method: 'DELETE' })
-    loadRules()
+    const res = await authFetch(`/api/alerts/rules/${id}`, { method: 'DELETE' })
+    if (res.ok) loadRules()
+    else toastError(t('alert.deleteFailed'))
   } catch {
     toastError(t('alert.deleteFailed'))
   }
@@ -351,7 +352,8 @@ function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string;
   alerts.value.unshift(record)
   alertTotal.value++
   const recordId = record.id
-  setTimeout(() => {
+  if (isNewTimer) clearTimeout(isNewTimer)
+  isNewTimer = setTimeout(() => {
     const r = alerts.value.find(a => a.id === recordId)
     if (r) r.isNew = false
   }, 1000)
@@ -360,28 +362,30 @@ function addAlert(payload: { ruleId: number; ruleName: string; cameraId: string;
 const activeView = ref<'rules' | 'history'>('rules')
 
 async function exportCsv() {
-  const params = new URLSearchParams({ limit: '10000', offset: '0' })
-  if (filterCamera.value) params.set('cameraId', filterCamera.value)
-  if (filterDate.value) {
-    const since = new Date(`${filterDate.value}T00:00:00`).getTime()
-    params.set('since', String(since))
-    params.set('until', String(since + 86_400_000))
-  }
-  const res = await authFetch(`/api/alerts/history?${params}`)
-  if (!res.ok) return
-  const { records } = await res.json() as { records: AlertRecord[] }
-  const header = 'ID,Rule Name,Camera,Time,Detail'
-  const csvRows = records.map(a =>
-    `${a.id},"${a.ruleName}","${cameraNameMap.value[a.cameraId] ?? a.cameraId}","${new Date(a.timestamp).toLocaleString(locale.value)}","${(a.detail ?? '').replace(/"/g, '""')}"`
-  )
-  const csv = [header, ...csvRows].join('\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
-  const link = document.createElement('a')
-  const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
-  link.href = URL.createObjectURL(blob)
-  link.download = `alerts_${dateStr}.csv`
-  link.click()
-  URL.revokeObjectURL(link.href)
+  try {
+    const params = new URLSearchParams({ limit: '10000', offset: '0' })
+    if (filterCamera.value) params.set('cameraId', filterCamera.value)
+    if (filterDate.value) {
+      const since = new Date(`${filterDate.value}T00:00:00`).getTime()
+      params.set('since', String(since))
+      params.set('until', String(since + 86_400_000))
+    }
+    const res = await authFetch(`/api/alerts/history?${params}`)
+    if (!res.ok) return
+    const { records } = await res.json() as { records: AlertRecord[] }
+    const header = 'ID,Rule Name,Camera,Time,Detail'
+    const csvRows = records.map(a =>
+      `${a.id},"${a.ruleName}","${cameraNameMap.value.get(a.cameraId) ?? a.cameraId}","${new Date(a.timestamp).toLocaleString(locale.value)}","${(a.detail ?? '').replace(/"/g, '""')}"`
+    )
+    const csv = [header, ...csvRows].join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+    const link = document.createElement('a')
+    const dateStr = filterDate.value || new Date().toISOString().slice(0, 10)
+    link.href = URL.createObjectURL(blob)
+    link.download = `alerts_${dateStr}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch { /* ignore */ }
 }
 
 /** 根据事件类型重置条件表单 */
@@ -394,6 +398,10 @@ onMounted(() => {
   loadRules()
   loadAlerts()
   loadSourceOptions()
+})
+
+onUnmounted(() => {
+  if (isNewTimer) clearTimeout(isNewTimer)
 })
 
 defineExpose({ loadAlerts, addAlert })
@@ -598,7 +606,7 @@ defineExpose({ loadAlerts, addAlert })
           <div class="rule-meta">
             <span class="meta-tag">{{ eventTypeLabel(rule.eventType) }}</span>
             <span class="meta-tag source">{{ sourceLabel(rule) }}</span>
-            <span v-if="rule.cameraId" class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
+            <span v-if="rule.cameraId" class="meta-tag cam">{{ cameraNameMap.get(rule.cameraId) ?? rule.cameraId }}</span>
             <span v-if="rule.condition" class="meta-tag cond">{{ rule.condition }}</span>
             <span class="meta-info">{{ rule.threshold }}{{ t('alert.timesUnit') }} / {{ rule.windowSeconds }}{{ t('alert.secondsUnit') }} · {{ t('alert.cooldownLabel') }}{{ rule.cooldownSeconds }}{{ t('alert.secondsUnit') }}</span>
             <span v-if="rule.silentStart && rule.silentEnd" class="meta-tag silent">{{ t('alert.silentLabel') }} {{ rule.silentStart }}-{{ rule.silentEnd }}</span>
@@ -624,7 +632,7 @@ defineExpose({ loadAlerts, addAlert })
           <div class="alert-time">{{ formatTime(alert.timestamp) }}</div>
           <div class="alert-body">
             <span class="alert-rule">{{ alert.ruleName }}</span>
-            <span class="alert-cam">{{ cameraNameMap[alert.cameraId] ?? alert.cameraId }}</span>
+            <span class="alert-cam">{{ cameraNameMap.get(alert.cameraId) ?? alert.cameraId }}</span>
           </div>
           <div v-if="alert.detail" class="alert-detail">{{ formatDetail(alert.detail) }}</div>
         </div>
@@ -644,45 +652,6 @@ defineExpose({ loadAlerts, addAlert })
   flex-direction: column;
   height: 100%;
 }
-
-.panel-header {
-  padding: 10px 12px;
-  background: #1a1a2e;
-  border-bottom: 1px solid #2a2a4a;
-  color: #e0e0e0;
-  font-weight: 600;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.refresh-btn {
-  margin-left: auto;
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.refresh-btn:hover { background: #3a3a5a; }
-.refresh-btn:disabled { opacity: 0.5; }
-
-.add-btn {
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.add-btn:hover { background: #3ad4c8; }
 
 .view-tabs {
   display: flex;
@@ -704,12 +673,6 @@ defineExpose({ loadAlerts, addAlert })
 .view-btn.active {
   color: #FFD93D;
   border-bottom: 2px solid #FFD93D;
-}
-
-.add-form {
-  padding: 10px 12px;
-  border-bottom: 1px solid #2a2a4a;
-  background: #16213e;
 }
 
 .form-field {
@@ -734,19 +697,6 @@ defineExpose({ loadAlerts, addAlert })
 .form-field.half {
   flex: 1;
 }
-
-.input {
-  flex: 1;
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.input:focus { outline: none; border-color: #4ECDC4; }
-.input::placeholder { color: #444; }
 
 select.input {
   appearance: none;
@@ -774,13 +724,6 @@ select.input {
   padding: 4px;
 }
 
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 20px;
-  font-size: 13px;
-}
-
 .rule-item {
   padding: 8px;
   border-radius: 4px;
@@ -788,12 +731,6 @@ select.input {
 }
 
 .rule-item:hover { background: #2a2a4a; }
-
-.rule-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
 .toggle-btn {
   background: none;
@@ -804,25 +741,6 @@ select.input {
   color: #4ECDC4;
 }
 
-.rule-name {
-  font-size: 13px;
-  color: #e0e0e0;
-  font-weight: 500;
-  flex: 1;
-}
-
-.rule-name.disabled { color: #666; }
-
-.delete-btn {
-  background: none;
-  border: none;
-  color: #e74c3c;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.delete-btn:hover { color: #ff6b6b; }
-
 .edit-btn {
   background: none;
   border: none;
@@ -832,44 +750,6 @@ select.input {
 }
 
 .edit-btn:hover { color: #4ECDC4; }
-
-.edit-form {
-  padding: 8px;
-  background: #0a0a1a;
-  border-radius: 4px;
-}
-
-.edit-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.save-btn {
-  flex: 1;
-  background: #4ECDC4;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.save-btn:hover { background: #3ad4c8; }
-
-.cancel-btn {
-  background: #2a2a4a;
-  color: #888;
-  border: none;
-  border-radius: 4px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover { color: #e0e0e0; }
 
 .rule-meta {
   display: flex;
@@ -895,33 +775,6 @@ select.input {
 .meta-info {
   font-size: 11px;
   color: #555;
-}
-
-.history-filters {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-bottom: 1px solid #2a2a4a;
-  background: #16213e;
-}
-
-.filter-select {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
-}
-
-.filter-date {
-  background: #0a0a1a;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
 }
 
 .filter-date::-webkit-calendar-picker-indicator {
@@ -951,21 +804,6 @@ select.input {
 }
 
 .csv-btn:hover { background: #3a3a5a; }
-
-.load-more-btn {
-  display: block;
-  width: 100%;
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  margin-top: 4px;
-}
-
-.load-more-btn:hover { background: #3a3a5a; }
 
 .alert-item {
   display: flex;

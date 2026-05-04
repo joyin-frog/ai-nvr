@@ -63,6 +63,7 @@ export class ThumbnailGenerator {
 
     /** seek 超出视频时长时回退到开头 */
     if (timeSeconds > 0) return this.runFfmpegAsync(videoPath, 0, relativePath);
+    console.warn(`[Thumbnails] ffmpeg 截帧失败: ${videoPath}@${timeSeconds}s`);
     return null;
   }
 

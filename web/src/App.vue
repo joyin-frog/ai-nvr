@@ -95,6 +95,13 @@ function getCamera(id: string): CameraStatus | undefined {
 /** 全屏摄像头 ID（null 为网格模式） */
 const fullscreenCamera = ref<string | null>(null)
 
+/** 浏览器全屏退出时同步退出单路模式 */
+function onFullscreenChange() {
+  if (!document.fullscreenElement && fullscreenCamera.value) {
+    fullscreenCamera.value = null
+  }
+}
+
 /** PWA 更新提示 */
 const { offlineReady, needRefresh, updateServiceWorker } = useRegisterSW({
   immediate: true,
@@ -776,25 +783,6 @@ function setupEventListeners() {
     flashTitle(`${t('notify.alertPrefix')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
   })
 
-  client.on('detect:rule', (payload) => {
-    eventPanel.value?.addEvent('detect:rule', payload.cameraId, `${t('detectRule.title')}: ${payload.ruleName}`)
-    detectRulePanel.value?.addRecord(payload)
-    if (payload.regions?.length) {
-      putRuleRegions(payload.cameraId, payload.regions.map(r => ({ ...r, ruleName: payload.ruleName })))
-    }
-    if (payload.matched !== false) {
-      pushRuleMatch(payload.cameraId, {
-        ruleName: payload.ruleName,
-        result: payload.result ?? '',
-        confidence: payload.confidence ?? 0,
-        timestamp: payload.timestamp ?? Date.now(),
-        snapshotUrl: payload.snapshotUrl,
-      })
-    }
-    notify(t('notify.alert', { ruleName: payload.ruleName }), payload.cameraId, payload.cameraId, 'detect:rule')
-    flashTitle(`${t('detectRule.title')}: ${payload.ruleName} - ${payload.cameraId}`, 10000)
-  })
-
   client.on('observation', (payload) => {
     eventPanel.value?.addEvent('observation', payload.cameraId, `${t('observer.title', '观测器')}: ${payload.observerName}`)
     detectRulePanel.value?.addRecord({
@@ -895,9 +883,9 @@ function setupEventListeners() {
 
   /** 人群聚集事件 */
   client.on('track:crowd', (payload) => {
-    const zoneText = payload.zoneName ? ` ${t('event.inZone', '在')}${payload.zoneName}` : ''
-    eventPanel.value?.addEvent('track:crowd', payload.cameraId, `${payload.count}${t('event.persons', '人聚集')}${zoneText}`)
-    pushZoneNotification(payload.cameraId, { type: 'approach', name: `${payload.count}人聚集`, zoneName: payload.zoneName, timestamp: payload.timestamp, distance: payload.avgDistance })
+    const zoneText = payload.zoneName ? ` ${t('event.inZone')}${payload.zoneName}` : ''
+    eventPanel.value?.addEvent('track:crowd', payload.cameraId, `${payload.count}${t('event.persons')}${zoneText}`)
+    pushZoneNotification(payload.cameraId, { type: 'approach', name: `${payload.count}${t('event.persons')}`, zoneName: payload.zoneName, timestamp: payload.timestamp, distance: payload.avgDistance })
   })
 
   client.on('track:match-suggest', (payload) => {
@@ -964,12 +952,7 @@ onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
 
-  /** 浏览器全屏退出时同步退出单路模式 */
-  document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement && fullscreenCamera.value) {
-      fullscreenCamera.value = null
-    }
-  })
+  document.addEventListener('fullscreenchange', onFullscreenChange)
 
   /** 检查是否需要认证 */
   const enabled = await isAuthEnabled()
@@ -1047,6 +1030,7 @@ onMounted(async () => {
 onUnmounted(() => {
   client.disconnect()
   window.removeEventListener('resize', checkMobile)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
   stopPatrol()
   if (syncTimer) clearInterval(syncTimer)
   if (diskCheckTimer) clearInterval(diskCheckTimer)
@@ -1067,7 +1051,7 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
-      <span v-if="headerAiStatus" class="ai-header-badge" :title="`追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃 / ${headerAiStatus.tracks?.named ?? 0} 已命名\n异常评分: ${Math.round((headerAiStatus.anomaly?.score ?? 0) * 100)}%`">
+      <span v-if="headerAiStatus" class="ai-header-badge" :title="`${t('event.aiStatsTrack')}: ${t('event.aiStatsActiveNamed', { active: headerAiStatus.tracks?.active ?? 0, named: headerAiStatus.tracks?.named ?? 0 })}\n${t('event.aiStatsAnomalyTitle', { score: Math.round((headerAiStatus.anomaly?.score ?? 0) * 100) })}`">
         <span :class="['ai-dot', (headerAiStatus.anomaly?.score ?? 0) > 0.3 ? 'alert' : (headerAiStatus.tracks?.active ?? 0) > 0 ? 'on' : 'off']">AI</span>
         <span v-if="headerAiStatus.tracks?.active" class="ai-active-count">{{ headerAiStatus.tracks.active }}</span>
       </span>

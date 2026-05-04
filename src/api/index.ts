@@ -8,11 +8,19 @@ import { type SystemMonitor } from "@/monitor";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
-import { type AlertStorage } from "@/alert/storage";
+import { type AlertStorage, type AlertRule } from "@/alert/storage";
 import { type ObserverStorage } from "@/observer/storage";
+import { type Observer } from "@/observer/types";
 import { type ObserverEngine } from "@/observer/engine";
-import { type SignalStore } from "@/signal/store";
+import { type SignalStore, type Signal } from "@/signal/store";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
+
+/** 安全解析数值参数，NaN 时返回 undefined */
+function numParam(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const n = Number(value);
+  return Number.isNaN(n) ? undefined : n;
+}
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
@@ -27,6 +35,12 @@ import { getLogs } from "@/log-buffer";
 import { realpath } from "node:fs/promises";
 import { resolve, extname } from "node:path";
 import { spawn } from "node:child_process";
+
+/** 将用户配置的 LLM 地址规范化为 chat/completions 端点 */
+function toChatCompletionsUrl(apiUrl: string): string {
+  if (apiUrl.endsWith("/chat/completions")) return apiUrl;
+  return `${apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+}
 
 /** 异步执行 ffmpeg 并收集 stdout/stderr */
 function runFfmpegAsync(ffmpegPath: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stderr?: string }> {
@@ -88,7 +102,7 @@ function startWsHeartbeat() {
     for (const ws of wsClients) {
       const lastPong = wsLastPong.get(ws) ?? now;
       if (now - lastPong > WS_PONG_TIMEOUT) {
-        console.log(`[WS] 心跳超时，关闭连接`);
+        console.debug(`[WS] 心跳超时，关闭连接`);
         ws.close();
         wsClients.delete(ws);
         continue;
@@ -98,6 +112,11 @@ function startWsHeartbeat() {
       } catch {
         wsClients.delete(ws);
       }
+    }
+    /** 所有客户端断开后停止心跳定时器 */
+    if (wsClients.size === 0) {
+      clearInterval(wsHeartbeatTimer!);
+      wsHeartbeatTimer = null;
     }
   }, WS_PING_INTERVAL);
 }
@@ -118,7 +137,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "signal:changed"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "camera:online", "camera:offline", "camera:lowfps", "alert", "observation", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "signal:changed"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -300,7 +319,7 @@ export function startServer(
       fmp4ClientsByCamera.set(cameraId, clientSet);
     }
     clientSet.add(ws);
-    console.log(`[fMP4] 客户端连接: ${cameraId}`);
+    console.debug(`[fMP4] 客户端连接: ${cameraId}`);
   }
 
   function cleanupFmp4Connection(ws: WsClient) {
@@ -317,7 +336,7 @@ export function startServer(
         }
       }
     }
-    console.log(`[fMP4] 客户端断开`);
+    console.debug(`[fMP4] 客户端断开`);
   }
 
   /** 处理 HTTP 请求（不含 CORS 和 WebSocket 逻辑） */
@@ -366,10 +385,10 @@ export function startServer(
         return new Response("Unauthorized", { status: 401 });
       }
 
-      /** 路由别名：/api/observers/* → /api/detect-rules/*，/api/signals/* → /api/states/* */
+      /** 路由别名：旧路径兼容 /api/detect-rules/* → /api/observers/*，/api/states/* → /api/signals/* */
       const aliasPath = url.pathname
-        .replace(/^\/api\/observers(\/|$)/, "/api/detect-rules$1")
-        .replace(/^\/api\/signals(\/|$)/, "/api/states$1");
+        .replace(/^\/api\/detect-rules(\/|$)/, "/api/observers$1")
+        .replace(/^\/api\/states(\/|$)/, "/api/signals$1");
       if (aliasPath !== url.pathname) {
         url = new URL(aliasPath, url.origin);
       }
@@ -423,6 +442,7 @@ export function startServer(
           }
           const newConfig = await addCameraToConfig({ id, friendlyName, hdUrl, sdUrl, detectFps: obj.detectFps as number | undefined, group: obj.group as string | undefined });
           cameraManager.reloadConfig(newConfig);
+          console.log(`[API] 添加摄像头: ${id} (${friendlyName})`);
           return Response.json({ ok: true, cameraId: id });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
@@ -462,6 +482,7 @@ export function startServer(
               group: obj.group as string | undefined,
             });
             cameraManager.reloadConfig(newConfig);
+            console.log(`[API] 更新摄像头: ${cameraId}`);
             return Response.json({ ok: true });
           }).catch(() => new Response("Invalid JSON", { status: 400 }));
         }
@@ -469,6 +490,7 @@ export function startServer(
         if (req.method === "DELETE") {
           const newConfig = await removeCameraFromConfig(cameraId);
           cameraManager.reloadConfig(newConfig);
+          console.log(`[API] 删除摄像头: ${cameraId}`);
           return Response.json({ ok: true });
         }
       }
@@ -495,7 +517,7 @@ export function startServer(
         return Response.json(getLogs({
           level: url.searchParams.get("level") ?? undefined,
           tag: url.searchParams.get("tag") ?? undefined,
-          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
+          limit: numParam(url.searchParams.get("limit")) ?? 100,
         }));
       }
 
@@ -523,6 +545,7 @@ export function startServer(
               console.error("[API] CLIP 模型重新加载失败:", err);
             });
           }
+          console.log("[API] 设置已更新");
           return Response.json(updated);
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
@@ -560,13 +583,13 @@ export function startServer(
             results.thumbnails = `已删除 ${count} 个缩略图`;
           }
           if (opts.tracks) {
-            const count = trackStorage.purgeAll();
+            const count = await trackStorage.purgeAll();
             results.tracks = `已删除 ${count} 个追踪目标`;
             trackLabelStorage.purgeAll();
             results.trackLabels = "已清除所有追踪命名";
           }
           if (opts.trajectories && trajectoryStorage) {
-            const count = trajectoryStorage.purgeAll();
+            const count = await trajectoryStorage.purgeAll();
             results.trajectories = `已删除 ${count} 条轨迹`;
           }
           if (opts.exports) {
@@ -589,22 +612,22 @@ export function startServer(
           type: url.searchParams.get("type") ?? undefined,
           typeLike: url.searchParams.get("typeLike") ?? undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
-          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
-          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
+          limit: numParam(url.searchParams.get("limit")) ?? 100,
+          offset: numParam(url.searchParams.get("offset")) ?? 0,
           search: url.searchParams.get("search") ?? undefined,
           starred: url.searchParams.get("starred") === "true" ? true : undefined,
-          trackId: url.searchParams.has("trackId") ? Number(url.searchParams.get("trackId")) : undefined,
+          trackId: numParam(url.searchParams.get("trackId")) ?? undefined,
         };
         const { rows: rawEvents, total } = eventStorage.queryWithTotal(queryOpts);
 
         /**
          * 批量预加载快照路径和元数据，避免逐条异步 I/O
-         * alert/detect:rule 用告警快照
+         * alert/observation 用告警快照
          */
         const alertEntries = rawEvents
-          .filter(ev => ev.type === "alert" || ev.type === "detect:rule")
+          .filter(ev => ev.type === "alert" || ev.type === "observation")
           .map(ev => ({ cameraId: ev.camera_id, timestamp: ev.timestamp }));
         const alertSnapPaths = alertSnapshotStorage
           ? alertSnapshotStorage.batchFindSnapshotPaths(alertEntries)
@@ -615,7 +638,7 @@ export function startServer(
           let summary: string | null = null;
           let snapshotUrl: string | null = null;
 
-          if (ev.type === "alert" || ev.type === "detect:rule") {
+          if (ev.type === "alert" || ev.type === "observation") {
             const snapPath = alertSnapPaths.get(`${ev.camera_id}:${ev.timestamp}`) ?? null;
             if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
             if (ev.detail) {
@@ -657,8 +680,8 @@ export function startServer(
         const queryOpts = {
           type: url.searchParams.get("type") ?? undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
           search: url.searchParams.get("search") ?? undefined,
           starred: url.searchParams.get("starred") === "true" ? true : undefined,
           limit: 10000,
@@ -685,7 +708,7 @@ export function startServer(
             if (d.trackName) trackName = String(d.trackName);
             if (d.label) label = String(d.label);
             if (d.zoneName) zoneName = String(d.zoneName);
-            if (d.lineName) zoneName = String(d.lineName);
+            else if (d.lineName) zoneName = String(d.lineName);
             if (d.dwellMs != null) dwellMs = String(d.dwellMs);
             if (d.speed != null) speed = String(d.speed);
             if (d.direction) direction = String(d.direction);
@@ -704,8 +727,8 @@ export function startServer(
 
       /** 事件统计（带 10 秒缓存，避免频繁轮询重复计算） */
       if (url.pathname === "/api/events/stats") {
-        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
-        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        const since = numParam(url.searchParams.get("since")) ?? undefined;
+        const until = numParam(url.searchParams.get("until")) ?? undefined;
         const cacheKey = `stats:${since ?? 0}:${until ?? 0}`;
         const cached = statsCache.get(cacheKey);
         if (cached && Date.now() - cached.ts < 10_000) return Response.json(cached.data);
@@ -772,7 +795,7 @@ export function startServer(
             function resetIdle() {
               if (idleTimer) clearTimeout(idleTimer);
               idleTimer = setTimeout(() => {
-                console.log(`[MJPEG][${cameraId}] 空闲超时，关闭流`);
+                console.debug(`[MJPEG][${cameraId}] 空闲超时，关闭流`);
                 cleanup();
                 try { controller.close(); } catch { /* */ }
               }, IDLE_TIMEOUT);
@@ -795,7 +818,7 @@ export function startServer(
                 controller.enqueue(payload.data);
                 controller.enqueue(textEncoder.encode("\r\n"));
                 if (Date.now() - lastStreamLog >= 10000) {
-                  console.log(`[Perf][MJPEG][${cameraId}] ${streamFrames}帧/10s`);
+                  console.debug(`[Perf][MJPEG][${cameraId}] ${streamFrames}帧/10s`);
                   streamFrames = 0;
                   lastStreamLog = Date.now();
                 }
@@ -807,7 +830,7 @@ export function startServer(
             /** 摄像头离线时立即关闭流 */
             offlineUnsub = eventBus.on("camera:offline", (payload) => {
               if (payload.cameraId !== cameraId) return;
-              console.log(`[MJPEG][${cameraId}] 摄像头离线，关闭流`);
+              console.debug(`[MJPEG][${cameraId}] 摄像头离线，关闭流`);
               cleanup();
               try { controller.close(); } catch { /* */ }
             });
@@ -869,9 +892,9 @@ export function startServer(
       /** 录像列表 */
       if (url.pathname === "/api/recordings") {
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
-        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
-        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
-        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : undefined;
+        const since = numParam(url.searchParams.get("since")) ?? undefined;
+        const until = numParam(url.searchParams.get("until")) ?? undefined;
+        const limit = numParam(url.searchParams.get("limit")) ?? undefined;
         const all = recorder.listRecordings(cameraId, since, until);
         return Response.json(limit && limit > 0 ? all.slice(0, limit) : all);
       }
@@ -880,8 +903,8 @@ export function startServer(
       if (url.pathname === "/api/recordings/search" && req.method === "GET") {
         const label = url.searchParams.get("label") ?? "";
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
-        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
-        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        const since = numParam(url.searchParams.get("since")) ?? undefined;
+        const until = numParam(url.searchParams.get("until")) ?? undefined;
         if (!label) return Response.json({ error: "label is required" }, { status: 400 });
 
         /** 搜索 detect 事件的 detail 中包含该 label 或 trackName 的记录 */
@@ -921,10 +944,10 @@ export function startServer(
       if (url.pathname === "/api/recordings/semantic-search" && req.method === "GET") {
         const query = url.searchParams.get("q") ?? "";
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
-        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
-        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        const since = numParam(url.searchParams.get("since")) ?? undefined;
+        const until = numParam(url.searchParams.get("until")) ?? undefined;
         /** 最大返回匹配目标数 */
-        const topK = Math.min(Number(url.searchParams.get("topK") ?? 10), 20);
+        const topK = Math.min(numParam(url.searchParams.get("topK")) ?? 10, 20);
 
         if (!query) return Response.json({ error: "q is required" }, { status: 400 });
         if (!clipService) return Response.json({ error: "CLIP service not available" }, { status: 503 });
@@ -1075,7 +1098,7 @@ export function startServer(
       const thumbMatch = url.pathname.match(/^\/api\/recordings\/thumb$/);
       if (thumbMatch && req.method === "GET") {
         const videoRelPath = url.searchParams.get("file");
-        const timeSec = url.searchParams.has("time") ? Number(url.searchParams.get("time")) : 0;
+        const timeSec = numParam(url.searchParams.get("time")) ?? 0;
         if (!videoRelPath) return new Response("Missing file param", { status: 400 });
 
         const videoPath = recorder.getRecordingPath(videoRelPath);
@@ -1134,7 +1157,7 @@ export function startServer(
             const resolved = await realpath(filePath).catch(() => "");
             if (!resolved.startsWith(storageRoot)) { failed++; continue; }
             if ((await Bun.file(filePath).size) === undefined) { failed++; continue; }
-            storageFs.deleteFile(`recordings/${relPath}`, { category: "recordings" });
+            await storageFs.deleteFile(`recordings/${relPath}`, { category: "recordings" });
             deleted++;
           }
           return Response.json({ deleted, failed });
@@ -1284,9 +1307,7 @@ Be specific and factual. ${langInstruction}`;
 
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 30_000);
-          const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
-            ? llmConfig.apiUrl
-            : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+          const apiUrl = toChatCompletionsUrl(llmConfig.apiUrl);
 
           const response = await fetch(apiUrl, {
             method: "POST",
@@ -1429,7 +1450,7 @@ Be specific and factual. ${langInstruction}`;
       /** 告警快照列表 */
       if (url.pathname === "/api/alert-snapshots" && alertSnapshotStorage) {
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
-        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
+        const limit = numParam(url.searchParams.get("limit")) ?? 50;
         const snapshots = alertSnapshotStorage.listSnapshots(cameraId);
         return Response.json(snapshots.slice(0, limit));
       }
@@ -1465,8 +1486,8 @@ Be specific and factual. ${langInstruction}`;
       const roiStatsMatch = url.pathname.match(/^\/api\/roi\/stats\/([^/]+)$/);
       if (roiStatsMatch && req.method === "GET") {
         const cameraId = roiStatsMatch[1]!;
-        const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined;
-        const until = url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined;
+        const since = numParam(url.searchParams.get("since")) ?? undefined;
+        const until = numParam(url.searchParams.get("until")) ?? undefined;
         return Response.json(eventStorage.zoneStats({ cameraId, since, until }));
       }
 
@@ -1556,24 +1577,28 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 检测规则列表 */
-      if (url.pathname === "/api/detect-rules" && req.method === "GET" && observerStorage) {
+      if (url.pathname === "/api/observers" && req.method === "GET" && observerStorage) {
         return Response.json(observerStorage.listObservers());
       }
 
       /** 添加检测规则 */
-      if (url.pathname === "/api/detect-rules" && req.method === "POST" && observerStorage) {
+      if (url.pathname === "/api/observers" && req.method === "POST" && observerStorage) {
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
           const prompt = obj.prompt as string | undefined;
           const cameras = (obj.cameras as Array<{ cameraId: string; roiId?: number; offsetSec?: number; videoClip?: unknown }>) ?? [];
           if (!name || !prompt || cameras.length === 0) return new Response("Missing name, prompt or cameras", { status: 400 });
+          const intervalMs = Number(obj.intervalMs) || 5000;
+          const cooldownMs = Number(obj.cooldownMs) || 30000;
+          if (intervalMs < 1000) return new Response("intervalMs must be >= 1000", { status: 400 });
+          if (cooldownMs < 1000) return new Response("cooldownMs must be >= 1000", { status: 400 });
           const id = observerStorage.addObserver({
             name,
             cameras: cameras.map(c => ({ cameraId: c.cameraId, roiId: c.roiId ?? 0, offsetSec: c.offsetSec ?? 0, videoClip: c.videoClip as import("@/observer/types").CameraSource["videoClip"] })),
             prompt,
-            intervalMs: (obj.intervalMs as number) ?? 5000,
-            cooldownMs: (obj.cooldownMs as number) ?? 30000,
+            intervalMs,
+            cooldownMs,
             imageWidth: (obj.imageWidth as number) ?? 0,
             signalIds: (obj.signalIds as number[]) ?? (obj.stateIds as number[]) ?? (obj.evalSignalIds as number[]) ?? [],
             schedule: (obj.schedule as string) ?? "",
@@ -1588,31 +1613,42 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 更新检测规则 */
-      const detectRuleMatch = url.pathname.match(/^\/api\/detect-rules\/(\d+)$/);
-      if (detectRuleMatch && req.method === "PATCH" && observerStorage) {
-        const ruleId = Number(detectRuleMatch[1]!);
+      const observerMatch = url.pathname.match(/^\/api\/observers\/(\d+)$/);
+      if (observerMatch && req.method === "PATCH" && observerStorage) {
+        const ruleId = Number(observerMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
           for (const key of ["name", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "signalIds", "stateIds", "schedule", "saveOriginal", "outputRegions", "cameras", "refImages", "modelId"] as const) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
-          observerStorage.updateObserver(ruleId, updates as never);
+          /** 数值范围校验 */
+          if (updates.intervalMs !== undefined) {
+            const v = Number(updates.intervalMs);
+            if (!Number.isFinite(v) || v < 1000) return new Response("intervalMs must be >= 1000", { status: 400 });
+            updates.intervalMs = v;
+          }
+          if (updates.cooldownMs !== undefined) {
+            const v = Number(updates.cooldownMs);
+            if (!Number.isFinite(v) || v < 1000) return new Response("cooldownMs must be >= 1000", { status: 400 });
+            updates.cooldownMs = v;
+          }
+          observerStorage.updateObserver(ruleId, updates as Partial<Omit<Observer, "id">>);
           observerEngine?.reloadRules();
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** 删除检测规则 */
-      if (detectRuleMatch && req.method === "DELETE" && observerStorage) {
-        const ruleId = Number(detectRuleMatch[1]!);
+      if (observerMatch && req.method === "DELETE" && observerStorage) {
+        const ruleId = Number(observerMatch[1]!);
         observerStorage.removeObserver(ruleId);
         observerEngine?.reloadRules();
         return Response.json({ ok: true });
       }
 
       /** 上传参考图片 */
-      if (url.pathname === "/api/detect-rules/ref-images" && req.method === "POST") {
+      if (url.pathname === "/api/observers/ref-images" && req.method === "POST") {
         const formData = await req.formData().catch(() => null);
         const file = formData?.get("image") as File | null;
         if (!file) return new Response("Missing image", { status: 400 });
@@ -1624,9 +1660,12 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 删除/获取参考图片 */
-      const refImageMatch = url.pathname.match(/^\/api\/detect-rules\/ref-images\/(.+)$/);
+      const refImageMatch = url.pathname.match(/^\/api\/observers\/ref-images\/([^/]+)$/);
       if (refImageMatch) {
         const filename = refImageMatch[1]!;
+        if (filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+          return new Response("Invalid filename", { status: 400 });
+        }
         const refPath = join(storageFs.root, "ref-images", filename);
         if (req.method === "DELETE") {
           await storageFs.deleteFile(`ref-images/${filename}`).catch(() => {});
@@ -1640,19 +1679,19 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 检测规则历史记录 */
-      if (url.pathname === "/api/detect-rules/history" && observerStorage) {
+      if (url.pathname === "/api/observers/history" && observerStorage) {
         const records = observerStorage.queryRecords({
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
           matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
-          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
-          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+          limit: numParam(url.searchParams.get("limit")) ?? 50,
+          offset: numParam(url.searchParams.get("offset")) ?? 0,
         });
         const total = observerStorage.countRecords({
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
           matched: url.searchParams.has("matched") ? url.searchParams.get("matched") === "1" : undefined,
         });
         /** 关联快照路径：原图 + ROI 裁剪图 */
@@ -1760,7 +1799,7 @@ Be specific and factual. ${langInstruction}`;
             };
           }
           if (obj.actions !== undefined) updates.actions = obj.actions;
-          alertStorage.updateRule(ruleId, updates as never);
+          alertStorage.updateRule(ruleId, updates as Partial<Omit<AlertRule, "id">>);
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
@@ -1776,10 +1815,10 @@ Be specific and factual. ${langInstruction}`;
       if (url.pathname === "/api/alerts/history" && req.method === "GET") {
         const { records, total } = alertStorage.queryAlerts({
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
-          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
-          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
+          limit: numParam(url.searchParams.get("limit")) ?? 50,
+          offset: numParam(url.searchParams.get("offset")) ?? 0,
         });
         return Response.json({ records, total });
       }
@@ -1787,12 +1826,12 @@ Be specific and factual. ${langInstruction}`;
       // ===== 状态管理 API =====
 
       /** 列出所有状态 */
-      if (url.pathname === "/api/states" && req.method === "GET" && signalStore) {
+      if (url.pathname === "/api/signals" && req.method === "GET" && signalStore) {
         return Response.json(signalStore.listSignals());
       }
 
       /** 创建状态 */
-      if (url.pathname === "/api/states" && req.method === "POST" && signalStore) {
+      if (url.pathname === "/api/signals" && req.method === "POST" && signalStore) {
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
@@ -1811,27 +1850,27 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 更新状态定义 */
-      const stateMatch = url.pathname.match(/^\/api\/states\/(\d+)$/);
-      if (stateMatch && req.method === "PATCH" && signalStore) {
-        const stateId = Number(stateMatch[1]!);
+      const signalMatch = url.pathname.match(/^\/api\/signals\/(\d+)$/);
+      if (signalMatch && req.method === "PATCH" && signalStore) {
+        const stateId = Number(signalMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
-          signalStore.updateSignal(stateId, obj as never);
+          signalStore.updateSignal(stateId, obj as Partial<Pick<Signal, "name" | "description" | "cameraId" | "valueType" | "initialValue" | "notifyOnChange" | "enabled">>);
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }
 
       /** 删除状态 */
-      if (stateMatch && req.method === "DELETE" && signalStore) {
-        const stateId = Number(stateMatch[1]!);
+      if (signalMatch && req.method === "DELETE" && signalStore) {
+        const stateId = Number(signalMatch[1]!);
         signalStore.removeSignal(stateId);
         return Response.json({ ok: true });
       }
 
       /** 手动设置状态值 */
-      const stateValueMatch = url.pathname.match(/^\/api\/states\/(\d+)\/value$/);
-      if (stateValueMatch && req.method === "PATCH" && signalStore) {
-        const stateId = Number(stateValueMatch[1]!);
+      const signalValueMatch = url.pathname.match(/^\/api\/signals\/(\d+)\/value$/);
+      if (signalValueMatch && req.method === "PATCH" && signalStore) {
+        const stateId = Number(signalValueMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const newValue = obj.value as string | undefined;
@@ -1856,20 +1895,20 @@ Be specific and factual. ${langInstruction}`;
       }
 
       /** 信号变更历史 */
-      if (url.pathname === "/api/states/history" && signalStore) {
+      if (url.pathname === "/api/signals/history" && signalStore) {
         const records = signalStore.queryChanges({
-          signalId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
+          signalId: numParam(url.searchParams.get("stateId")) ?? undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
-          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50,
-          offset: url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
+          limit: numParam(url.searchParams.get("limit")) ?? 50,
+          offset: numParam(url.searchParams.get("offset")) ?? 0,
         });
         const total = signalStore.countChanges({
-          signalId: url.searchParams.has("stateId") ? Number(url.searchParams.get("stateId")) : undefined,
+          signalId: numParam(url.searchParams.get("stateId")) ?? undefined,
           cameraId: url.searchParams.get("cameraId") ?? undefined,
-          since: url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined,
-          until: url.searchParams.has("until") ? Number(url.searchParams.get("until")) : undefined,
+          since: numParam(url.searchParams.get("since")) ?? undefined,
+          until: numParam(url.searchParams.get("until")) ?? undefined,
         });
         return Response.json({ records, total });
       }
@@ -1939,9 +1978,7 @@ Be specific and factual. ${langInstruction}`;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15_000);
-        const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
-          ? llmConfig.apiUrl
-          : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+        const apiUrl = toChatCompletionsUrl(llmConfig.apiUrl);
 
         const t0 = performance.now();
         const response = await fetch(apiUrl, {
@@ -1996,9 +2033,7 @@ ${langInstruction}`;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 20_000);
         const t0 = performance.now();
-        const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
-          ? llmConfig.apiUrl
-          : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+        const apiUrl = toChatCompletionsUrl(llmConfig.apiUrl);
 
         const response = await fetch(apiUrl, {
           method: "POST",
@@ -2080,7 +2115,7 @@ ${langInstruction}`;
           } else if (e.type === "llm:patrol") {
             const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
             desc = `巡逻: ${(d.analysis as string)?.slice(0, 80) ?? ""}`;
-          } else if (e.type === "detect:rule") {
+          } else if (e.type === "observation") {
             const d = e.detail ? JSON.parse(e.detail) as Record<string, unknown> : {};
             desc = `规则: ${(d.observerName ?? "")} ${(d.result as string ?? "").slice(0, 60)}`;
           } else {
@@ -2089,9 +2124,7 @@ ${langInstruction}`;
           return `[${i}] ${time} ${e.camera_id} ${e.type} | ${desc}`;
         });
 
-        const apiUrl = llm.apiUrl.endsWith("/chat/completions")
-          ? llm.apiUrl
-          : `${llm.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+        const apiUrl = toChatCompletionsUrl(llm.apiUrl);
 
         const searchPrompt = `Given these security events, find indices matching the user's natural language query.
 Return ONLY a JSON array of matching event indices (numbers). If none match, return [].
@@ -2145,7 +2178,7 @@ User query: "${query}"`;
         const now = Date.now();
         const recentEvents = eventStorage.query({ since: now - 300_000, limit: 1000 });
         const detectCount = recentEvents.filter(e => e.type === "detect").length;
-        const alertCount = recentEvents.filter(e => e.type === "alert" || e.type === "detect:rule").length;
+        const alertCount = recentEvents.filter(e => e.type === "alert" || e.type === "observation").length;
         const llmCount = recentEvents.filter(e => e.type.startsWith("llm:")).length;
         const trackEvents = recentEvents.filter(e => e.type.startsWith("track:"));
 
@@ -2371,7 +2404,7 @@ User query: "${query}"`;
 
       /** 追踪目标列表（附带行为事件统计） */
       if (url.pathname === "/api/tracks" && req.method === "GET") {
-        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 200;
+        const limit = numParam(url.searchParams.get("limit")) ?? 200;
         const all = trackStorage.listTracks();
         const eventCounts = eventStorage.countByTrackId();
         const result = all.slice(0, limit).map(t => ({
@@ -2593,7 +2626,7 @@ User query: "${query}"`;
           const trackId = parseInt(parts[4]!);
           if (!trackId) return Response.json([]);
           /** 从 leave-zone 事件中聚合停留时长（leave-zone 事件包含 dwellMs） */
-          const since = url.searchParams.has("since") ? Number(url.searchParams.get("since")) : Date.now() - 7 * 86_400_000;
+          const since = numParam(url.searchParams.get("since")) ?? Date.now() - 7 * 86_400_000;
           const rawEvents = eventStorage.query({
             typeLike: "track:leave-zone%",
             since,
@@ -2663,7 +2696,7 @@ User query: "${query}"`;
       const trackEventsMatch = url.pathname.match(/^\/api\/tracks\/(\d+)\/events$/);
       if (trackEventsMatch && req.method === "GET") {
         const trackId = parseInt(trackEventsMatch[1]!);
-        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
+        const limit = numParam(url.searchParams.get("limit")) ?? 50;
         /** 使用 json_extract 精确匹配 trackId（替代 LIKE 搜索，性能更好） */
         const merged = eventStorage.query({ trackId, limit });
         merged.sort((a: { timestamp: number }, b: { timestamp: number }) => b.timestamp - a.timestamp);
@@ -2749,7 +2782,7 @@ User query: "${query}"`;
         wsClients.add(ws);
         wsLastPong.set(ws, Date.now());
         startWsHeartbeat();
-        console.log(`[WS] 客户端连接，当前 ${wsClients.size} 个`);
+        console.debug(`[WS] 客户端连接，当前 ${wsClients.size} 个`);
       },
       close(ws) {
         const data = (ws as unknown as { data?: { type?: string } }).data;
@@ -2762,7 +2795,7 @@ User query: "${query}"`;
         const wsData = ws as unknown as { lastPushTimeByCamera?: Map<string, number>; subscribedCameras?: Set<string> };
         wsData.lastPushTimeByCamera = undefined;
         wsData.subscribedCameras = undefined;
-        console.log(`[WS] 客户端断开，当前 ${wsClients.size} 个`);
+        console.debug(`[WS] 客户端断开，当前 ${wsClients.size} 个`);
       },
       message(ws, raw) {
         if (typeof raw !== "string") return;
@@ -2774,7 +2807,8 @@ User query: "${query}"`;
           return;
         }
         if (msg.type === "subscribe" && Array.isArray(msg.cameraIds)) {
-          (ws as unknown as { subscribedCameras: Set<string> }).subscribedCameras = new Set(msg.cameraIds);
+          const ids = msg.cameraIds.length > 64 ? msg.cameraIds.slice(0, 64) : msg.cameraIds;
+          (ws as unknown as { subscribedCameras: Set<string> }).subscribedCameras = new Set(ids);
         } else if (msg.type === "unsubscribe") {
           (ws as unknown as { subscribedCameras?: Set<string> }).subscribedCameras = undefined;
         }
@@ -2894,12 +2928,12 @@ User query: "${query}"`;
       /** 非帧事件：立即推送 */
       let header: Record<string, unknown>;
 
-      if (event === "detect:rule") {
-        /** detect:rule 事件：附加快照路径 */
-        const dr = payload as { cameraId: string; timestamp: number; [k: string]: unknown };
+      if (event === "observation") {
+        /** observation 事件：附加快照路径 */
+        const obs = payload as { cameraId: string; timestamp: number; [k: string]: unknown };
         let snapshotUrl: string | null = null;
         if (alertSnapshotStorage) {
-          const snapPath = alertSnapshotStorage.findSnapshotPath(dr.cameraId, dr.timestamp);
+          const snapPath = alertSnapshotStorage.findSnapshotPath(obs.cameraId, obs.timestamp);
           if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
         }
         header = { event, ...payload, snapshotUrl };
@@ -2918,6 +2952,8 @@ User query: "${query}"`;
       message.set(headerBuf, 4);
 
       for (const ws of wsClients) {
+        /** 背压保护：跳过缓冲区积压过大的慢客户端 */
+        if (ws.getBufferedAmount() > 1048576) continue;
         ws.send(message);
       }
     });

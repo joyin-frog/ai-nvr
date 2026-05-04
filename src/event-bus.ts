@@ -83,25 +83,16 @@ export interface EventPayloads {
     detail: string;
   };
 
-  /** 检测规则匹配事件 */
+  /** @deprecated 旧事件名，保留以兼容数据库历史记录查询 */
   "detect:rule": {
-    /** 规则 ID */
     ruleId: number;
-    /** 规则名称 */
     ruleName: string;
-    /** 摄像头 ID */
     cameraId: string;
-    /** 时间戳 */
     timestamp: number;
-    /** 用户提示词 */
     prompt: string;
-    /** AI 分析结果描述 */
     result: string;
-    /** 置信度 0-1 */
     confidence: number;
-    /** 详细信息 JSON */
     detail: string;
-    /** 目标区域坐标（可选） */
     regions?: Array<{ label: string; box: { xmin: number; ymin: number; xmax: number; ymax: number } }>;
   };
 
@@ -375,28 +366,6 @@ export interface EventPayloads {
     source: string;
     sourceId: number;
     timestamp: number;
-    notify: boolean;
-  };
-
-  /** @deprecated 使用 observation 替代 */
-  "state:changed": {
-    /** 状态 ID */
-    stateId: number;
-    /** 状态名称 */
-    stateName: string;
-    /** 摄像头 ID */
-    cameraId: string;
-    /** 旧值 */
-    oldValue: string;
-    /** 新值 */
-    newValue: string;
-    /** 来源（manual / rule:规则ID / system） */
-    source: string;
-    /** 来源规则 ID */
-    sourceRuleId: number;
-    /** 时间戳 */
-    timestamp: number;
-    /** 是否需要通知用户 */
     notify: boolean;
   };
 
