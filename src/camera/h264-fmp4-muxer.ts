@@ -677,7 +677,7 @@ export class H264Fmp4Extractor {
       "-i", this.rtspUrl,
     ];
 
-    /** GOP 1 + frag_keyframe = 每帧 I 帧，每帧独立 fragment，MSE 即时解码 */
+    /** 注意：fMP4 输出必须保持原始分辨率和帧率，不得降低，我们要提供最好的体验给用户 */
     const gopSize = 1;
     /** movflags: frag_keyframe 在每个关键帧处切 fragment，配合 -g 1 即每帧一个 fragment */
     const movflags = "frag_keyframe+empty_moov+default_base_moof";
