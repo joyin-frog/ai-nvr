@@ -556,6 +556,11 @@ export default {
     sourceObserver: 'Observer',
     viewObserver: 'View Observation',
     saveOriginal: 'Save Original',
+    on: 'ON',
+    off: 'OFF',
+    typeBoolean: 'Boolean',
+    typeString: 'String',
+    typeNumber: 'Number',
   },
   state: {
     title: 'State Management',

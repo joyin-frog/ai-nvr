@@ -297,9 +297,9 @@ defineExpose({ loadSignals, loadRecords })
       <div class="form-row">
         <label>{{ t('signal.valueType') }}</label>
         <select v-model="formValueType">
-          <option value="boolean">Boolean</option>
-          <option value="string">String</option>
-          <option value="number">Number</option>
+          <option value="boolean">{{ t('signal.typeBoolean') }}</option>
+          <option value="string">{{ t('signal.typeString') }}</option>
+          <option value="number">{{ t('signal.typeNumber') }}</option>
         </select>
       </div>
       <div class="form-row" v-if="formValueType !== 'boolean'">
@@ -348,7 +348,7 @@ defineExpose({ loadSignals, loadRecords })
                 <button
                   :class="['bool-btn', signal.currentValue === 'true' ? 'on' : 'off']"
                   @click="toggleBoolValue(signal)"
-                >{{ signal.currentValue === 'true' ? '✓ ON' : '✗ OFF' }}</button>
+                >{{ signal.currentValue === 'true' ? `✓ ${t('signal.on')}` : `✗ ${t('signal.off')}` }}</button>
               </template>
               <template v-else>{{ signal.currentValue || '—' }}</template>
             </span>

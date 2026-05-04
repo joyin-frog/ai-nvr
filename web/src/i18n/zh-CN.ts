@@ -558,6 +558,11 @@ export default {
     sourceObserver: '观测器',
     viewObserver: '查看观测记录',
     saveOriginal: '保存原图',
+    on: '开',
+    off: '关',
+    typeBoolean: '布尔',
+    typeString: '字符串',
+    typeNumber: '数字',
   },
   state: {
     title: '状态管理',

@@ -36,13 +36,13 @@ export class ActionExecutor {
   /** 执行告警动作 */
   async execute(actions: AlertAction[], ctx: ActionContext): Promise<void> {
     /** 标准动作：始终发出 alert 事件 */
-    this.eventBus.emit("alert" as never, {
+    this.eventBus.emit("alert", {
       ruleId: ctx.ruleId,
       ruleName: ctx.ruleName,
       cameraId: ctx.cameraId,
       timestamp: ctx.timestamp,
       detail: ctx.detail,
-    } as never);
+    });
 
     /** 扩展动作 */
     for (const action of actions) {

@@ -132,11 +132,11 @@ export class StorageCleaner {
 
     /** 清理告警快照（复用快照保留天数配置） */
     if (this.alertSnapshotStorage) {
-      await this.alertSnapshotStorage.purge(snapshotsDays);
+      report.snapshots = await this.alertSnapshotStorage.purge(snapshotsDays);
     }
 
     /** 清理缩略图缓存 */
-    await this.thumbnailGenerator.purge(thumbnailsDays);
+    report.thumbnails = await this.thumbnailGenerator.purge(thumbnailsDays);
 
     /** 清理导出临时文件（24小时后过期，磁盘紧张时立即清理） */
     report.exports = await this.exporter.purge(pressure === "critical" ? 0 : 24);

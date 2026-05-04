@@ -180,7 +180,7 @@ export class ResultProcessor {
     };
 
     /** 同时发出新旧事件名，确保兼容 */
-    this.deps.eventBus.emit("observation", event as never);
+    this.deps.eventBus.emit("observation", event);
   }
 
   /** 快照摄像头源配置（包含 ROI 坐标快照，避免后续修改影响历史数据） */
@@ -215,7 +215,7 @@ export class ResultProcessor {
         confidence,
         detail: JSON.stringify({ confidence, trend: true }),
       };
-      this.deps.eventBus.emit("observation", trendEvent as never);
+      this.deps.eventBus.emit("observation", trendEvent);
       console.log(`[Observer] "${obs.name}" 近匹配趋势: ${newCount}次上升, 置信度 ${(confidence * 100).toFixed(0)}%`);
     }
   }

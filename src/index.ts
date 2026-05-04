@@ -379,6 +379,7 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("beforeExit", () => {
   cameraManager.stop();
   recorder.stop();
+  eventBus.clear();
 });
 
 /** 控制台日志：打印帧接收情况（每 5 秒一次统计） */
