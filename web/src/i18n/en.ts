@@ -165,6 +165,7 @@ export default {
     aiStatsActiveNamed: 'Active {active} / Named {named}',
     persons: 'people gathered',
     inZone: 'in ',
+    matchSuggest: '{label} #{trackId} may be "{name}" ({dist}% similar)',
   },
   recording: {
     title: 'Recordings',

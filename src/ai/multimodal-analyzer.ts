@@ -345,7 +345,7 @@ export class MultimodalAnalyzer {
     }
     this.lastDescription.set(cameraId, description);
 
-    this.eventBus.emit("llm:scene" as keyof import("@/event-bus").EventPayloads, sceneResult as never);
+    this.eventBus.emit("llm:scene", sceneResult);
     console.debug(`[MultimodalAnalyzer] ${cameraId}: "${description.slice(0, 80)}" (${Math.round(inferMs)}ms)`);
   }
 }

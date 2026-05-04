@@ -165,6 +165,7 @@ export default {
     aiStatsActiveNamed: '活跃 {active} / 已命名 {named}',
     persons: '人聚集',
     inZone: '在',
+    matchSuggest: '{label} #{trackId} 可能是 "{name}" ({dist}% 相似)',
   },
   recording: {
     title: '录像',

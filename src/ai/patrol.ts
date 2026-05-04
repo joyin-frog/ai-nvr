@@ -312,7 +312,7 @@ export class AiPatrolScanner {
       }
     }
 
-    this.eventBus.emit("llm:patrol" as keyof import("@/event-bus").EventPayloads, patrolResult as never);
+    this.eventBus.emit("llm:patrol", patrolResult);
 
     /** 异常时额外记录日志 */
     if (patrolResult.hasAnomaly) {

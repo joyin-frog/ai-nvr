@@ -439,8 +439,8 @@ export class MotionRecorder {
       console.error(`[Recorder] ${cameraId} 启动持续录像失败:`, err instanceof Error ? err.message : String(err));
     });
 
-    state.continuousTimer = setTimeout(() => {
-      this.finishRecording(cameraId);
+    state.continuousTimer = setTimeout(async () => {
+      await this.finishRecording(cameraId);
       this.startContinuous(cameraId);
     }, segmentSec * 1000);
   }
@@ -584,13 +584,13 @@ export class MotionRecorder {
 
       /** 通知录像完成（供 AI 摘要等下游使用） */
       if (this.eventBus) {
-        this.eventBus.emit("recording:completed" as keyof import("@/event-bus").EventPayloads, {
+        this.eventBus.emit("recording:completed", {
           cameraId,
           filename,
           startTime,
           endTime: Date.now(),
           size: fileInfo.size,
-        } as never);
+        });
       }
     }
 

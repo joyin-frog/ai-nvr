@@ -892,7 +892,7 @@ function setupEventListeners() {
     const best = payload.matches[0]
     if (!best) return
     const dist = ((1 - best.distance) * 100).toFixed(0)
-    eventPanel.value?.addEvent('track:match-suggest', payload.cameraId, `${payload.label} #${payload.trackId} 可能是 "${best.customName}" (${dist}% 相似)`)
+    eventPanel.value?.addEvent('track:match-suggest', payload.cameraId, t('event.matchSuggest', { label: payload.label, trackId: payload.trackId, name: best.customName, dist }))
     pushMatchSuggestion(payload.cameraId, { trackId: payload.trackId, label: payload.label, matches: payload.matches, timestamp: payload.timestamp })
   })
 

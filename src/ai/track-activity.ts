@@ -314,7 +314,7 @@ export class TrackActivityCollector {
         eventCount: profile.events.length,
       };
 
-      this.eventBus.emit("track:activity-summary" as keyof import("@/event-bus").EventPayloads, summary as never);
+      this.eventBus.emit("track:activity-summary", summary);
     } catch (err) {
       console.warn("[TrackActivityAnalyzer] 摘要生成失败:", err instanceof Error ? err.message : String(err));
     }

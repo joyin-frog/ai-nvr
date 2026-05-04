@@ -180,7 +180,7 @@ export class EventSummarizer {
       const detailJson = JSON.stringify(summary);
       this.eventStorage.insert("llm:summary", "", now, detailJson);
 
-      this.eventBus.emit("llm:summary" as keyof import("@/event-bus").EventPayloads, summary as never);
+      this.eventBus.emit("llm:summary", summary);
       console.log(`[EventSummarizer] 摘要生成 (${filtered.length} 事件, ${Math.round(inferMs)}ms): ${text.slice(0, 60)}...`);
     } catch (err) {
       console.warn("[EventSummarizer] 摘要生成失败:", err instanceof Error ? err.message : String(err));

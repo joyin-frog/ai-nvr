@@ -71,6 +71,22 @@ export class AlertEngine {
   private updateDynamicSubscriptions(): void {
     const neededTypes = new Set(this.rules.map(r => r.subscription.eventType));
 
+    /** 取消不再需要的事件类型订阅 */
+    for (const eventType of this.subscribedEventTypes) {
+      if (!neededTypes.has(eventType)) {
+        /** 找到对应的 unsub 函数并移除 */
+        const idx = this.unsubscribers.findIndex((_, i) => {
+          /** unsubscribers 与 subscribedEventTypes 按添加顺序对应 */
+          return [...this.subscribedEventTypes][i] === eventType;
+        });
+        if (idx >= 0) {
+          this.unsubscribers[idx]!();
+          this.unsubscribers.splice(idx, 1);
+        }
+        this.subscribedEventTypes.delete(eventType);
+      }
+    }
+
     /** 订阅新类型 */
     for (const eventType of neededTypes) {
       if (!this.subscribedEventTypes.has(eventType)) {
