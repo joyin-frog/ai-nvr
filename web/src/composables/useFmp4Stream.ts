@@ -117,10 +117,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
   let decodeCheckTimer: ReturnType<typeof setTimeout> | null = null
   /** pruneBuffer 是否正在执行中（防止 remove 和 append 竞争） */
   let pruning = false
-  /** append 计数（用于控制 pruneBuffer 频率，避免每次 append 后都 remove） */
-  let appendCount = 0
-  /** 每 N 次 append 执行一次 pruneBuffer（减少 remove 与 append 竞争） */
-  const PRUNE_EVERY_N_APPENDS = 20
 
   /** 设置 video 元素 */
   function setVideo(el: HTMLVideoElement | null) {
@@ -547,14 +543,12 @@ export function useFmp4Stream(cameraId: Ref<string>) {
       drainPending()
     }
 
-    /** append 完成后立即追赶直播 + 标记需要修剪（全局定时器执行，避免每次 append 后 remove 与下次 append 竞争） */
+    /** append 完成后立即追赶直播 + 标记需要修剪 */
     if (wasAppending) {
-      appendCount++
       catchUpToLive()
-      if (appendCount >= PRUNE_EVERY_N_APPENDS) {
-        appendCount = 0
-        streamHandle.needsPrune = true
-      }
+      /** 每次 append 都标记需要 prune，由 rAF 循环在 SourceBuffer 空闲时执行
+       *  高码率场景（16.8MB/s）下必须频繁 prune 避免 QuotaExceeded */
+      streamHandle.needsPrune = true
     }
 
     /** 自动播放 */
@@ -649,7 +643,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     /** 单 range：正常清理已播放部分 */
     const start = buffered.start(0)
     const behindDuration = currentTime - start
-    if (behindDuration > BUFFER_RETAIN_SECONDS + 1) {
+    if (behindDuration > BUFFER_RETAIN_SECONDS) {
       pruning = true
       try {
         sourceBuffer.remove(start, currentTime - BUFFER_RETAIN_SECONDS)
@@ -729,7 +723,6 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     pendingQueue = []
     appending = false
     pruning = false
-    appendCount = 0
     vfcFrameCount = 0
     lastVfcUpdateTime = 0
     segmentCount = 0
