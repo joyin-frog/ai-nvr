@@ -301,13 +301,15 @@ export class AiPatrolScanner {
         }
         /** 连续 3 次人数递增 → 人群聚集趋势 */
         if (personCounts.length >= 3 && personCounts[0]! > personCounts[1]! && personCounts[1]! > personCounts[2]!) {
-          this.eventBus.emit("track:crowd" as keyof import("@/event-bus").EventPayloads, {
+          this.eventBus.emit("track:crowd", {
             cameraId: cam.id,
             timestamp,
             count: parsed.count.person,
-            trend: "increasing",
-            message: `${cam.name}: 人数持续增长至 ${parsed.count.person} 人`,
-          } as never);
+            trackIds: [],
+            zoneId: 0,
+            zoneName: "",
+            avgDistance: 0,
+          });
         }
       }
     }

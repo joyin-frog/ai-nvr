@@ -60,6 +60,9 @@ export function useKeyboardShortcuts() {
   })
 
   onUnmounted(() => {
-    /** 只有根组件卸载时才移除 */
+    if (listenerActive) {
+      window.removeEventListener("keydown", onKeydown)
+      listenerActive = false
+    }
   })
 }

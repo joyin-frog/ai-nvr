@@ -612,6 +612,8 @@ export class H264Fmp4Extractor {
   private cachedInit: Fmp4InitSegment | null = null;
   /** JPEG 帧拆分器（从 fd3 读取） */
   private jpegSplitter = new JpegFrameSplitter();
+  /** fd3 JPEG 输出管道的 Readable 包装 */
+  private jpegReadable: Readable | null = null;
   /** 复用的帧 payload */
   private reusablePayload: { cameraId: string; data: Buffer; timestamp: number };
   /** JPEG 帧率统计 */
@@ -847,7 +849,8 @@ export class H264Fmp4Extractor {
     /** fd3 = JPEG 帧（filter_complex split 的第二个输出分支） */
     const jpegFd = this.proc.stdio[3];
     if (jpegFd) {
-      const jpegReadable = new Readable({ highWaterMark: 8192 }).wrap(jpegFd as any);
+      this.jpegReadable = new Readable({ highWaterMark: 8192 }).wrap(jpegFd as any);
+      const jpegReadable = this.jpegReadable;
       jpegReadable.on("data", (chunk: Buffer) => {
         const frames = this.jpegSplitter.feed(chunk);
         for (const frame of frames) {
@@ -896,6 +899,10 @@ export class H264Fmp4Extractor {
   }
 
   private killProcess(): void {
+    if (this.jpegReadable) {
+      this.jpegReadable.destroy();
+      this.jpegReadable = null;
+    }
     if (this.proc) {
       const proc = this.proc;
       this.proc = null;
