@@ -566,6 +566,7 @@ const hoverAbsTime = computed(() => {
 
 /** 拖拽进度条 */
 let progressDragging = false
+let progressDragHandlers: { onMove: (ev: MouseEvent) => void; onUp: () => void } | null = null
 function onProgressDragStart(e: MouseEvent) {
   progressDragging = true
   onProgressClick(e)
@@ -579,9 +580,11 @@ function onProgressDragStart(e: MouseEvent) {
     progressDragging = false
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
+    progressDragHandlers = null
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
+  progressDragHandlers = { onMove, onUp }
 }
 
 /** video play/pause 事件同步 isPlaying */
@@ -1773,6 +1776,11 @@ onUnmounted(() => {
     document.removeEventListener('mousemove', activeDragHandlers.onMove)
     document.removeEventListener('mouseup', activeDragHandlers.onUp)
     activeDragHandlers = null
+  }
+  if (progressDragHandlers) {
+    document.removeEventListener('mousemove', progressDragHandlers.onMove)
+    document.removeEventListener('mouseup', progressDragHandlers.onUp)
+    progressDragHandlers = null
   }
   stopPipLoop()
 })

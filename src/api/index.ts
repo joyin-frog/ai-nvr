@@ -1593,14 +1593,20 @@ Be specific and factual. ${langInstruction}`;
           const cooldownMs = Number(obj.cooldownMs) || 30000;
           if (intervalMs < 1000) return new Response("intervalMs must be >= 1000", { status: 400 });
           if (cooldownMs < 1000) return new Response("cooldownMs must be >= 1000", { status: 400 });
+          const imageWidth = Number(obj.imageWidth) || 0;
+          if (imageWidth < 0 || imageWidth > 4096) return new Response("imageWidth out of range", { status: 400 });
+          const rawSignalIds = obj.signalIds ?? obj.stateIds ?? obj.evalSignalIds;
+          const signalIds = Array.isArray(rawSignalIds)
+            ? rawSignalIds.filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+            : [];
           const id = observerStorage.addObserver({
             name,
             cameras: cameras.map(c => ({ cameraId: c.cameraId, roiId: c.roiId ?? 0, offsetSec: c.offsetSec ?? 0, videoClip: c.videoClip as import("@/observer/types").CameraSource["videoClip"] })),
             prompt,
             intervalMs,
             cooldownMs,
-            imageWidth: (obj.imageWidth as number) ?? 0,
-            signalIds: (obj.signalIds as number[]) ?? (obj.stateIds as number[]) ?? (obj.evalSignalIds as number[]) ?? [],
+            imageWidth,
+            signalIds,
             schedule: (obj.schedule as string) ?? "",
             saveOriginal: (obj.saveOriginal as boolean) ?? true,
             outputRegions: (obj.outputRegions as boolean) ?? false,
@@ -1632,6 +1638,15 @@ Be specific and factual. ${langInstruction}`;
             const v = Number(updates.cooldownMs);
             if (!Number.isFinite(v) || v < 1000) return new Response("cooldownMs must be >= 1000", { status: 400 });
             updates.cooldownMs = v;
+          }
+          if (updates.imageWidth !== undefined) {
+            const v = Number(updates.imageWidth);
+            if (!Number.isFinite(v) || v < 0 || v > 4096) return new Response("imageWidth out of range", { status: 400 });
+            updates.imageWidth = v;
+          }
+          if (updates.signalIds !== undefined) {
+            if (!Array.isArray(updates.signalIds)) return new Response("signalIds must be an array", { status: 400 });
+            updates.signalIds = (updates.signalIds as unknown[]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
           }
           observerStorage.updateObserver(ruleId, updates as Partial<Omit<Observer, "id">>);
           observerEngine?.reloadRules();
