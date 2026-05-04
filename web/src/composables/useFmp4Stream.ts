@@ -740,6 +740,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     vfcFrameCount = 0
     lastVfcUpdateTime = 0
     segmentCount = 0
+    retryCount = 0
     connected.value = false
     playing.value = false
     fps.value = 0

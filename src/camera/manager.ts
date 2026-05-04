@@ -29,6 +29,8 @@ export class CameraManager {
   private cameraOnlineState = new Map<string, boolean>();
   /** 取消订阅 extractor 内部事件的函数 */
   private unsubExtractors: (() => void)[] = [];
+  /** 启动时的错开定时器（reloadConfig 时需清除防止重复启动） */
+  private staggerTimers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(
     private config: AppConfig,
@@ -101,7 +103,7 @@ export class CameraManager {
       if (i === 0) {
         this.startCamera(cam);
       } else {
-        setTimeout(() => this.startCamera(cam), i * staggerMs);
+        this.staggerTimers.push(setTimeout(() => this.startCamera(cam), i * staggerMs));
       }
     }
   }
@@ -164,6 +166,10 @@ export class CameraManager {
 
   /** 热重载配置 */
   reloadConfig(newConfig: AppConfig): void {
+    /** 清除启动时的错开定时器，防止与手动启动重复 */
+    for (const t of this.staggerTimers) clearTimeout(t);
+    this.staggerTimers = [];
+
     const oldMap = new Map(this.cameraConfigs.map(c => [c.id, c]));
     const newMap = new Map(newConfig.cameras.map(c => [c.id, c]));
 

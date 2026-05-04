@@ -196,7 +196,7 @@ export class FileIndex {
     let sql = `SELECT * FROM file_index WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`;
     if (limit != null && limit > 0) {
       sql += " LIMIT ?";
-      params.push(limit);
+      params.push(Math.min(limit, 10000));
       if (offset != null && offset > 0) {
         sql += " OFFSET ?";
         params.push(offset);
@@ -247,6 +247,8 @@ export class FileIndex {
    */
   async calibrate(category: string, baseDir: string, parser?: (relativePath: string) => { cameraId?: string; createdAt?: number; extra?: string }): Promise<number> {
     if (this.calibratedCategories.has(category)) return 0;
+    /** 立即标记，防止并发调用重复扫描 */
+    this.calibratedCategories.add(category);
 
     let registered = 0;
     const scan = async (dir: string, prefix: string) => {
@@ -306,7 +308,6 @@ export class FileIndex {
     };
 
     await scan(baseDir, "");
-    this.calibratedCategories.add(category);
     return registered;
   }
 
