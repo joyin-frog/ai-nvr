@@ -27,6 +27,8 @@ export class Scheduler {
   private concurrent = 0;
   /** 排队等待的任务 */
   private queue: Array<{ observer: Observer; timestamp: number }> = [];
+  /** 队列上限，防止 API 故障时堆积过多过期帧 */
+  private static readonly MAX_QUEUE = 50;
   /** 规则缓存 */
   private observersCache: Observer[] = [];
   private cacheTime = 0;
@@ -142,7 +144,9 @@ export class Scheduler {
     if (!frame) return;
 
     if (this.concurrent >= MAX_CONCURRENT) {
-      this.queue.push({ observer: obs, timestamp: Date.now() });
+      if (this.queue.length < Scheduler.MAX_QUEUE) {
+        this.queue.push({ observer: obs, timestamp: Date.now() });
+      }
       return;
     }
 

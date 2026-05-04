@@ -82,6 +82,9 @@ export function evaluate(expr: ConditionExpr, payload: Record<string, unknown>):
   }
 }
 
+/** 合法操作符白名单 */
+const VALID_OPS = new Set(["and", "or", "not", "contains", "equals", "notEquals", "greaterThan", "lessThan", "matches", "exists"]);
+
 /**
  * 解析条件 JSON
  * 支持新格式（AST）和旧格式（resultContains/valueEquals/valueNotEquals）自动转换
@@ -93,7 +96,13 @@ export function parseCondition(json: string): ConditionExpr | null {
     if (!obj || typeof obj !== "object") return null;
 
     /** 新格式：有 op 字段 */
-    if (obj.op) return obj as unknown as ConditionExpr;
+    if (obj.op) {
+      if (!VALID_OPS.has(obj.op as string)) {
+        console.warn(`[Condition] 未知操作符: ${obj.op}`);
+        return null;
+      }
+      return obj as unknown as ConditionExpr;
+    }
 
     /** 旧格式兼容转换 */
     const children: ConditionExpr[] = [];

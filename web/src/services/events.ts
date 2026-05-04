@@ -102,7 +102,7 @@ export class EventClient {
   private setState(state: ConnectionState): void {
     this._state = state
     for (const cb of this.stateListeners) {
-      try { cb(state) } catch { /* */ }
+      try { cb(state) } catch (e) { console.warn('[EventClient] state listener error:', e) }
     }
   }
 
@@ -158,7 +158,7 @@ export class EventClient {
           return
         }
         this.dispatch(event, payload)
-      } catch { /* ignore */ }
+      } catch (e) { console.warn('[EventClient] 消息解析失败:', e) }
       return
     }
 
@@ -232,15 +232,16 @@ export class EventClient {
     const set = this.listeners.get(event)
     if (!set) return
     for (const cb of set) {
-      try { (cb as (p: unknown) => void)(payload) } catch { /* */ }
+      try { (cb as (p: unknown) => void)(payload) } catch (e) { console.warn('[EventClient] listener error:', e) }
     }
   }
 
   private scheduleReconnect(): void {
     this.reconnectAttempts++
-    /** 指数退避：1s, 2s, 4s, 8s, 16s, 30s, 30s... */
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), EventClient.MAX_BACKOFF * 1000)
-    console.warn(`[EventClient] 断开，${(delay / 1000).toFixed(0)}s 后重连 (第 ${this.reconnectAttempts} 次)`)
+    /** 指数退避 + 随机抖动：防止多客户端同时重连 */
+    const baseDelay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), EventClient.MAX_BACKOFF * 1000)
+    const delay = baseDelay * (0.5 + Math.random() * 0.5)
+    console.warn(`[EventClient] 断开，${(delay / 1000).toFixed(1)}s 后重连 (第 ${this.reconnectAttempts} 次)`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()

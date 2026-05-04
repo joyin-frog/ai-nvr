@@ -32,6 +32,17 @@ export class SnapshotStorage {
 
   /** 快照路径缓存：cameraId:timestamp → relativePath（写入时自动填充） */
   private pathCache = new Map<string, string>();
+  /** 路径缓存上限 */
+  private static readonly PATH_CACHE_MAX = 5000;
+
+  /** 向路径缓存添加条目，超限时淘汰最旧 */
+  private cachePath(key: string, value: string): void {
+    this.pathCache.set(key, value);
+    if (this.pathCache.size > SnapshotStorage.PATH_CACHE_MAX) {
+      const first = this.pathCache.keys().next().value;
+      if (first !== undefined) this.pathCache.delete(first);
+    }
+  }
   /** 元数据缓存：relativePath → parsed JSON */
   private metaCache = new Map<string, { cameraId: string; timestamp: number; detections: Detection[] } | null>();
   /** 元数据缓存上限 */
@@ -66,7 +77,7 @@ export class SnapshotStorage {
 
     /** 预填充路径缓存（写入是异步的，事件推送在写入完成前就需要查找） */
     const pathKey = `${cameraId}:${timestamp}`;
-    this.pathCache.set(pathKey, `${relativePath}.jpg`);
+    this.cachePath(pathKey, `${relativePath}.jpg`);
 
     const labels = detections && detections.length > 0
       ? [...new Set(detections.map(d => d.label))].join(", ")
@@ -207,10 +218,10 @@ export class SnapshotStorage {
     if (entries.length > 0) {
       const path = entries[0]!.relativePath;
       const fullPath = path.endsWith(".jpg") ? path : `${path}.jpg`;
-      this.pathCache.set(pathKey, fullPath);
+      this.cachePath(pathKey, fullPath);
       return fullPath;
     }
-    this.pathCache.set(pathKey, "");
+    this.cachePath(pathKey, "");
     return null;
   }
 
