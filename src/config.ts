@@ -2,7 +2,7 @@ import { readFileSync, watchFile } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import yaml from "js-yaml";
-import { type AiConfig, type DetectMode } from "@/ai/types";
+import { type AiConfig } from "@/ai/types";
 import { type ClipConfig } from "@/ai/clip-service";
 
 /** 配置文件写操作互斥锁（防止并发 TOCTOU 竞态） */
@@ -188,19 +188,8 @@ export function loadConfig(configPath?: string): AppConfig {
       compareHeight: ((doc.motion as Record<string, unknown>)?.compare_height as number) ?? 120,
     },
     ai: {
-      enabled: (aiNode?.enabled as boolean) ?? true,
-      model: (aiNode?.model as string) ?? "onnx-community/yolo26s-ONNX",
-      threshold: (aiNode?.threshold as number) ?? 0.5,
-      maxDetections: (aiNode?.max_detections as number) ?? 20,
-      inputWidth: (aiNode?.input_width as number) ?? 640,
-      showBoxes: (aiNode?.show_boxes as boolean) ?? true,
-      mode: (aiNode?.mode === "continuous" ? "continuous" : "motion") as DetectMode,
-      interval: (aiNode?.interval as number) ?? 1000,
-      importantLabels: Array.isArray(aiNode?.important_labels) ? aiNode.important_labels as string[] : ["person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat"],
-      autoMatchThreshold: (aiNode?.auto_match_threshold as number) ?? 0.25,
-      speedThreshold: (aiNode?.speed_threshold as number) ?? 0.02,
-      loiterThreshold: (aiNode?.loiter_threshold as number) ?? 0,
       llm: parseLlmConfig(aiNode?.llm as Record<string, unknown> | undefined),
+      models: parseModelsConfig(aiNode?.models as Array<Record<string, unknown>> | undefined, aiNode?.llm as Record<string, unknown> | undefined),
       clip: parseClipConfig(aiNode?.clip as Record<string, unknown> | undefined),
     },
     auth: {
@@ -227,7 +216,6 @@ function parseLlmConfig(llmNode: Record<string, unknown> | undefined): import("@
       interval: 10000,
       imageWidth: 640,
       systemPrompt: "",
-      triggers: [],
       contextIntervalMs: 2000,
     };
   }
@@ -239,9 +227,32 @@ function parseLlmConfig(llmNode: Record<string, unknown> | undefined): import("@
     interval: (llmNode.interval as number) ?? 10000,
     imageWidth: (llmNode.image_width as number) ?? 640,
     systemPrompt: (llmNode.system_prompt as string) ?? "",
-    triggers: Array.isArray(llmNode.triggers) ? llmNode.triggers.filter((t: unknown): t is string => typeof t === "string") : [],
     contextIntervalMs: (llmNode.context_interval_ms as number) ?? 2000,
   };
+}
+
+/** 解析多模型配置（从 YAML models 数组，兼容旧的单模型 llm 配置） */
+function parseModelsConfig(modelsNode: Array<Record<string, unknown>> | undefined, llmNode: Record<string, unknown> | undefined): import("@/ai/multimodal-analyzer").LlmModelConfig[] {
+  if (Array.isArray(modelsNode) && modelsNode.length > 0) {
+    return modelsNode.map((m, i) => ({
+      id: (m.id as string) ?? `model_${i}`,
+      name: (m.name as string) ?? (m.model as string) ?? `Model ${i + 1}`,
+      apiUrl: (m.api_url as string) ?? (m.apiUrl as string) ?? "",
+      model: (m.model as string) ?? "",
+      maxTokens: (m.max_tokens as number) ?? (m.maxTokens as number) ?? 150,
+    }));
+  }
+  /** 兼容旧配置：从 llm 节点构建默认模型 */
+  const apiUrl = (llmNode?.api_url as string) ?? (llmNode?.apiUrl as string) ?? "";
+  const model = (llmNode?.model as string) ?? "";
+  if (!apiUrl || !model) return [];
+  return [{
+    id: "default",
+    name: model,
+    apiUrl,
+    model,
+    maxTokens: (llmNode?.max_tokens as number) ?? 150,
+  }];
 }
 
 /** 解析 CLIP 零样本分类配置 */

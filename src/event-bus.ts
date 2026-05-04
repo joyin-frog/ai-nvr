@@ -1,4 +1,3 @@
-import { type Detection } from "@/ai/types";
 import { type Fmp4InitSegment } from "@/camera/h264-fmp4-muxer";
 import { type LlmSceneResult } from "@/ai/multimodal-analyzer";
 import { type EventSummary } from "@/ai/event-summarizer";
@@ -37,22 +36,6 @@ export interface EventPayloads {
     data: Buffer;
     /** 时间戳 */
     timestamp: number;
-  };
-
-  /** AI 检测事件：检测到目标物体时触发 */
-  detect: {
-    /** 摄像头 ID */
-    cameraId: string;
-    /** 检测时间戳 */
-    timestamp: number;
-    /** 检测结果列表 */
-    detections: Detection[];
-    /** 原始帧图片（JPEG Buffer，无标注） */
-    frameImage: Buffer;
-    /** 是否为有意义的检测结果变化（用于事件记录/通知去重） */
-    changed?: boolean;
-    /** AI 推理耗时（毫秒） */
-    inferMs?: number;
   };
 
   /** 摄像头上线（由 CameraManager 去重后统一发射） */

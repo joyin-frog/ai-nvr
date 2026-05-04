@@ -21,19 +21,6 @@ function saveBackendUrl() {
   location.reload()
 }
 
-/** 预设 AI 模型列表 */
-const PRESET_MODELS = [
-  { id: 'jinaai/jina-clip-v2', name: 'Jina CLIP v2', descKey: 'settings.modelDescJinaClipV2' },
-  { id: 'onnx-community/yolo26m-ONNX', name: 'YOLO26m', descKey: 'settings.modelDescYolo26m' },
-  { id: 'onnx-community/yolo26l-ONNX', name: 'YOLO26l', descKey: 'settings.modelDescYolo26l' },
-  { id: 'onnx-community/yolo26x-ONNX', name: 'YOLO26x', descKey: 'settings.modelDescYolo26x' },
-  { id: 'onnx-community/yolo26s-ONNX', name: 'YOLO26s', descKey: 'settings.modelDescYolo26s' },
-  { id: 'onnx-community/yolo26n-ONNX', name: 'YOLO26n', descKey: 'settings.modelDescYolo26n' },
-  { id: 'Xenova/yolos-small', name: 'YOLOS-small', descKey: 'settings.modelDescYolosSmall' },
-  { id: 'Xenova/yolos-tiny', name: 'YOLOS-tiny', descKey: 'settings.modelDescYolosTiny' },
-  { id: 'Xenova/detr-resnet-50', name: 'DETR-R50', descKey: 'settings.modelDescDetrR50' },
-]
-
 /** 声音提醒设置 */
 const soundEnabled = ref(true)
 const soundVolume = ref(80)
@@ -45,7 +32,6 @@ const SOUND_EVENT_OPTIONS = [
   { key: 'camera:offline', labelKey: 'settings.soundEventCameraOffline' },
   { key: 'camera:lowfps', labelKey: 'settings.soundEventCameraLowfps' },
   { key: 'alert', labelKey: 'settings.soundEventAlert' },
-  { key: 'detect', labelKey: 'settings.soundEventDetect' },
   { key: 'detect:rule', labelKey: 'settings.soundEventDetectRule' },
   { key: 'track:appeared', labelKey: 'settings.soundEventTrackAppeared' },
   { key: 'track:speed', labelKey: 'settings.soundEventTrackSpeed' },
@@ -85,18 +71,6 @@ interface RuntimeSettings {
     compareHeight: number
   }
   ai: {
-    enabled: boolean
-    model: string
-    threshold: number
-    maxDetections: number
-    inputWidth: number
-    showBoxes: boolean
-    mode: string
-    interval: number
-    autoMatchThreshold: number
-    speedThreshold: number
-    loiterThreshold: number
-    importantLabels: string[]
     llm: {
       enabled: boolean
       apiUrl: string
@@ -105,8 +79,14 @@ interface RuntimeSettings {
       interval: number
       imageWidth: number
       systemPrompt: string
-      triggers: string[]
     }
+    models: Array<{
+      id: string
+      name: string
+      apiUrl: string
+      model: string
+      maxTokens: number
+    }>
     clip: {
       enabled: boolean
       model: string
@@ -129,9 +109,6 @@ interface RuntimeSettings {
     motionThreshold?: number
     motionCooldown?: number
     detectFps?: number
-    inputWidth?: number
-    aiThreshold?: number
-    aiInterval?: number
   }>
   webhook: {
     urls: string[]
@@ -166,8 +143,6 @@ interface RuntimeSettings {
 const settings = ref<RuntimeSettings | null>(null)
 const saving = ref(false)
 const success = ref(false)
-const modelReloading = ref(false)
-const modelInfo = ref<{ model: string; loading: boolean; initialized: boolean } | null>(null)
 
 /** 摄像头列表（用于 per-camera 配置） */
 const cameraList = ref<Array<{ id: string; name: string }>>([])
@@ -184,45 +159,18 @@ async function loadSettings() {
         if (!data.notify.email) data.notify.email = { enabled: false, smtp: null, from: '', to: '' }
         data.notify.email.smtp = { host: '', port: 465, secure: true, user: '', pass: '' }
       }
+      /** 确保 models 数组和 llm 配置存在 */
+      if (!data.ai?.models) {
+        if (!data.ai) data.ai = {} as RuntimeSettings['ai']
+        data.ai.models = []
+      }
+      if (!data.ai.llm) {
+        data.ai.llm = { enabled: false, apiUrl: '', model: '', maxTokens: 150, interval: 5000, imageWidth: 640, systemPrompt: '' }
+      }
       settings.value = data
     }
   } catch {
     // ignore
-  }
-}
-
-/** 加载模型信息 */
-async function loadModelInfo() {
-  try {
-    const res = await authFetch('/api/ai/model')
-    if (res.ok) modelInfo.value = await res.json()
-  } catch {
-    // ignore
-  }
-}
-
-/** 重新加载 AI 模型 */
-async function reloadModel() {
-  if (!settings.value) return
-  modelReloading.value = true
-  try {
-    const res = await authFetch('/api/ai/reload-model', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: settings.value.ai.model }),
-    })
-    const result = await res.json()
-    if (result.ok) {
-      modelInfo.value = { model: result.model, loading: false, initialized: true }
-      success.value = true
-      setTimeout(() => { success.value = false }, 2000)
-    } else {
-      toast.error(t('settings.modelLoadFailed', { error: result.error ?? 'Unknown' }))
-    }
-  } catch {
-    toast.error(t('settings.modelLoadError'))
-  } finally {
-    modelReloading.value = false
   }
 }
 
@@ -260,6 +208,25 @@ function addWebhook() {
 function removeWebhook(index: number) {
   if (!settings.value) return
   settings.value.webhook.urls.splice(index, 1)
+}
+
+/** 多模型管理 */
+function addModel() {
+  if (!settings.value) return
+  if (!settings.value.ai.models) settings.value.ai.models = []
+  const idx = settings.value.ai.models.length
+  settings.value.ai.models.push({
+    id: `model_${idx}`,
+    name: '',
+    apiUrl: '',
+    model: '',
+    maxTokens: 150,
+  })
+}
+
+function removeModel(index: number) {
+  if (!settings.value) return
+  settings.value.ai.models.splice(index, 1)
 }
 
 /** CLIP 候选标签管理 */
@@ -347,7 +314,7 @@ async function loadCameras() {
 }
 
 /** 设置摄像头级别覆盖参数 */
-function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps' | 'aiThreshold' | 'aiInterval' | 'inputWidth', rawValue: string) {
+function setCameraOverride(cameraId: string, field: 'motionThreshold' | 'motionCooldown' | 'detectFps', rawValue: string) {
   if (!settings.value) return
   if (!settings.value.cameraOverrides[cameraId]) {
     settings.value.cameraOverrides[cameraId] = {}
@@ -439,7 +406,6 @@ async function purgeData() {
 
 onMounted(() => {
   loadSettings()
-  loadModelInfo()
   loadCameras()
   loadCleanupStats()
   loadClipCandidates()
@@ -509,18 +475,6 @@ onMounted(() => {
               <span class="field-label small">{{ t('settings.detectFps') }}</span>
               <input type="number" :value="settings.cameraOverrides[cam.id]?.detectFps ?? ''" @input="setCameraOverride(cam.id, 'detectFps', ($event.target as HTMLInputElement).value)" step="1" min="1" max="30" class="input small" />
             </label>
-            <label class="field compact">
-              <span class="field-label small">{{ t('settings.inputWidth') }}</span>
-              <input type="number" :value="settings.cameraOverrides[cam.id]?.inputWidth ?? ''" @input="setCameraOverride(cam.id, 'inputWidth', ($event.target as HTMLInputElement).value)" step="64" min="0" max="3840" class="input small" :placeholder="String(settings.ai.inputWidth)" />
-            </label>
-            <label class="field compact">
-              <span class="field-label small">{{ t('settings.aiThreshold') }}</span>
-              <input type="number" :value="settings.cameraOverrides[cam.id]?.aiThreshold ?? ''" @input="setCameraOverride(cam.id, 'aiThreshold', ($event.target as HTMLInputElement).value)" step="0.05" min="0" max="1" class="input small" :placeholder="String(settings.ai.threshold)" />
-            </label>
-            <label class="field compact">
-              <span class="field-label small">{{ t('settings.aiInterval') }}</span>
-              <input type="number" :value="settings.cameraOverrides[cam.id]?.aiInterval ?? ''" @input="setCameraOverride(cam.id, 'aiInterval', ($event.target as HTMLInputElement).value)" step="100" min="200" max="60000" class="input small" :placeholder="String(settings.ai.interval)" />
-            </label>
           </div>
         </div>
       </section>
@@ -530,54 +484,67 @@ onMounted(() => {
         <h3>{{ t('settings.ai', 'AI 视觉分析') }}</h3>
         <p class="section-desc">使用视觉语言模型（VLM）分析摄像头画面，检测目标并生成语义描述。</p>
         <label class="field">
-          <span class="field-label">{{ t('settings.aiEnabled') }}</span>
-          <input type="checkbox" v-model="settings.ai.enabled" class="checkbox" />
+          <span class="field-label">{{ t('settings.llmApiUrl', 'VLM API 端点') }}</span>
+          <input type="url" v-model="settings.ai.llm.apiUrl" placeholder="http://localhost:1234/v1/chat/completions" class="input" />
+          <span class="field-hint">OpenAI 兼容格式（LM Studio / Ollama / vLLM）</span>
         </label>
-        <template v-if="settings.ai.enabled">
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmApiUrl', 'VLM API 端点') }}</span>
-            <input type="url" v-model="settings.ai.llm.apiUrl" placeholder="http://localhost:1234/v1/chat/completions" class="input" />
-            <span class="field-hint">OpenAI 兼容格式（LM Studio / Ollama / vLLM）</span>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmModel', '模型名称') }}</span>
-            <input type="text" v-model="settings.ai.llm.model" placeholder="qwen3.5-0.8b" class="input" />
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmMaxTokens', '最大 Token') }}</span>
-            <input type="number" v-model.number="settings.ai.llm.maxTokens" step="10" min="30" max="1000" class="input" />
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.aiMode') }}</span>
-            <select v-model="settings.ai.mode" class="input">
-              <option value="motion">{{ t('settings.aiModeMotion') }}</option>
-              <option value="continuous">{{ t('settings.aiModeContinuous') }}</option>
-            </select>
-          </label>
-          <label v-if="settings.ai.mode === 'continuous'" class="field">
-            <span class="field-label">{{ t('settings.aiInterval') }}</span>
-            <input type="number" v-model.number="settings.ai.interval" step="500" min="1000" max="60000" class="input" />
-            <span class="field-hint">VLM 推理较慢，建议 ≥ 5000ms</span>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmImageWidth', '推理图片宽度') }}</span>
-            <input type="number" v-model.number="settings.ai.llm.imageWidth" step="64" min="0" max="1920" class="input" />
-            <span class="field-hint">0=原始分辨率，建议 640</span>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.aiShowBoxes') }}</span>
-            <input type="checkbox" v-model="settings.ai.showBoxes" class="checkbox" />
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.importantLabels', '检测目标（逗号分隔）') }}</span>
-            <input type="text" :value="settings.ai.importantLabels?.join(', ') ?? ''" @change="settings.ai.importantLabels = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)" class="input" />
-            <span class="field-hint">{{ t('settings.importantLabelsHint', '留空=全部检测') }}</span>
-          </label>
-          <label class="field">
-            <span class="field-label">{{ t('settings.llmSystemPrompt', '系统提示词') }}</span>
-            <textarea v-model="settings.ai.llm.systemPrompt" class="input textarea" rows="3" :placeholder="'留空使用默认提示词'"></textarea>
-          </label>
-        </template>
+        <label class="field">
+          <span class="field-label">{{ t('settings.llmModel', '模型名称') }}</span>
+          <input type="text" v-model="settings.ai.llm.model" placeholder="qwen3.5-0.8b" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.llmMaxTokens', '最大 Token') }}</span>
+          <input type="number" v-model.number="settings.ai.llm.maxTokens" step="10" min="30" max="1000" class="input" />
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.llmImageWidth', '推理图片宽度') }}</span>
+          <input type="number" v-model.number="settings.ai.llm.imageWidth" step="64" min="0" max="1920" class="input" />
+          <span class="field-hint">0=原始分辨率，建议 640</span>
+        </label>
+        <label class="field">
+          <span class="field-label">{{ t('settings.llmSystemPrompt', '系统提示词') }}</span>
+          <textarea v-model="settings.ai.llm.systemPrompt" class="input textarea" rows="3" :placeholder="'留空使用默认提示词'"></textarea>
+        </label>
+
+        <!-- 多模型管理（始终可见，不受 AI enabled 限制） -->
+        <div class="models-section">
+          <div class="models-header">
+            <span class="field-label">模型列表</span>
+            <button class="add-btn compact" @click="addModel">+ 添加模型</button>
+          </div>
+          <p class="field-hint">列表中第一个模型为默认模型，检测规则可通过 modelId 指定使用哪个模型。</p>
+          <div v-if="settings.ai.models && settings.ai.models.length > 0" class="model-list">
+            <div v-for="(m, i) in settings.ai.models" :key="m.id" class="model-card">
+              <div class="model-card-header">
+                <span class="model-card-index">#{{ i + 1 }}</span>
+                <span v-if="i === 0" class="model-default-badge">默认</span>
+                <button class="remove-btn" @click="removeModel(i)">✕</button>
+              </div>
+              <div class="model-card-fields">
+                <label class="field compact">
+                  <span class="field-label small">ID</span>
+                  <input type="text" v-model="m.id" class="input" placeholder="model_0" />
+                </label>
+                <label class="field compact">
+                  <span class="field-label small">名称</span>
+                  <input type="text" v-model="m.name" class="input" placeholder="Qwen 3.5" />
+                </label>
+                <label class="field compact">
+                  <span class="field-label small">API 端点</span>
+                  <input type="url" v-model="m.apiUrl" class="input model-input-wide" placeholder="http://localhost:1234/v1/chat/completions" />
+                </label>
+                <label class="field compact">
+                  <span class="field-label small">模型</span>
+                  <input type="text" v-model="m.model" class="input" placeholder="qwen3.5-0.8b" />
+                </label>
+                <label class="field compact">
+                  <span class="field-label small">Max Tokens</span>
+                  <input type="number" v-model.number="m.maxTokens" step="10" min="30" max="4096" class="input" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- 录像 -->
@@ -1297,6 +1264,76 @@ onMounted(() => {
   color: #1a1a2e;
   border-color: #4ECDC4;
   font-weight: 600;
+}
+
+.models-section {
+  margin-top: 12px;
+}
+
+.models-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.add-btn.compact {
+  width: auto;
+  margin-top: 0;
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.model-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.model-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.model-card-index {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+}
+
+.model-default-badge {
+  font-size: 10px;
+  background: rgba(78, 205, 196, 0.15);
+  color: #4ECDC4;
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+
+.model-card-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.model-card-fields .field {
+  flex: 1 1 calc(50% - 6px);
+  min-width: 140px;
+}
+
+.model-input-wide {
+  width: 100% !important;
+  text-align: left;
 }
 
 .clip-candidates {

@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { type CameraManager } from "@/camera/manager";
 import { type EventBus, type EventName } from "@/event-bus";
-import { type Annotator } from "@/ai/annotator";
 import { type EventStorage } from "@/storage/events";
 import { type MotionRecorder } from "@/storage/recorder";
 import { TrackStorage } from "@/storage/tracks";
@@ -10,14 +9,13 @@ import { type RuntimeConfig } from "@/runtime-config";
 import { type SnapshotStorage } from "@/storage/snapshots";
 import { type RoiStorage } from "@/storage/roi";
 import { type AlertStorage } from "@/alert/storage";
-import { type DetectRuleStorage } from "@/detect-rule/storage";
+import { type DetectRuleStorage, type RuleCameraSource } from "@/detect-rule/storage";
 import { type DetectRuleEngine } from "@/detect-rule/engine";
 import { type StateStorage } from "@/state/storage";
 import { type ThumbnailGenerator } from "@/storage/thumbnails";
 import { type StorageCleaner } from "@/storage/cleaner";
 import { type DiskUsage } from "@/storage/disk-usage";
 import { type RecordingExporter } from "@/storage/export";
-import { type AiDetector } from "@/ai/detector";
 import { aiMetrics } from "@/ai/metrics";
 import { type PtzController } from "@/ptz";
 import { type PreferencesStorage } from "@/storage/preferences";
@@ -120,7 +118,7 @@ function corsify(res: Response): Response {
 }
 
 /** 要推送给前端的事件列表 */
-const PUSH_EVENTS: EventName[] = ["frame", "motion", "detect", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "state:changed"];
+const PUSH_EVENTS: EventName[] = ["frame", "motion", "camera:online", "camera:offline", "camera:lowfps", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:label-updated", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "track:line-cross", "track:loiter", "track:approach", "track:crowd", "track:match-suggest", "llm:scene", "llm:summary", "llm:patrol", "track:activity-summary", "state:changed"];
 
 /**
  * 启动 HTTP + WebSocket 服务
@@ -129,19 +127,16 @@ export function startServer(
   port: number,
   cameraManager: CameraManager,
   eventBus: EventBus,
-  annotator: Annotator,
   eventStorage: EventStorage,
   recorder: MotionRecorder,
   monitor: SystemMonitor,
   runtimeConfig: RuntimeConfig,
-  snapshotStorage: SnapshotStorage,
   roiStorage: RoiStorage,
   alertStorage: AlertStorage,
   thumbnailGenerator: ThumbnailGenerator,
   cleaner: StorageCleaner,
   diskUsage: DiskUsage,
   exporter: RecordingExporter,
-  aiDetector: AiDetector,
   authConfig: AuthConfig,
   ptzController: PtzController,
   trackLabelStorage: import("@/storage/track-labels").TrackLabelStorage,
@@ -549,10 +544,6 @@ export function startServer(
             const count = detectRuleStorage.purgeAll();
             results.detectRules = `已删除 ${count} 条检测记录`;
           }
-          if (opts.snapshots) {
-            const count = await snapshotStorage.purgeAll();
-            results.snapshots = `已删除 ${count} 个检测快照`;
-          }
           if (opts.alertSnapshots && alertSnapshotStorage) {
             const count = await alertSnapshotStorage.purgeAll();
             results.alertSnapshots = `已删除 ${count} 个告警快照`;
@@ -603,13 +594,8 @@ export function startServer(
 
         /**
          * 批量预加载快照路径和元数据，避免逐条异步 I/O
-         * detect 事件用 detect 快照，alert/detect:rule 用告警快照
+         * alert/detect:rule 用告警快照
          */
-        const detectEntries = rawEvents
-          .filter(ev => ev.type === "detect")
-          .map(ev => ({ cameraId: ev.camera_id, timestamp: ev.timestamp }));
-        const detectSnapPaths = snapshotStorage.batchFindSnapshotPaths(detectEntries);
-
         const alertEntries = rawEvents
           .filter(ev => ev.type === "alert" || ev.type === "detect:rule")
           .map(ev => ({ cameraId: ev.camera_id, timestamp: ev.timestamp }));
@@ -617,40 +603,12 @@ export function startServer(
           ? alertSnapshotStorage.batchFindSnapshotPaths(alertEntries)
           : new Map<string, string | null>();
 
-        /** 批量加载需要 meta 的快照（去重） */
-        const metaNeeded = [...detectSnapPaths.values()].filter((p): p is string => p != null);
-        const metaMap = new Map<string, Awaited<ReturnType<typeof snapshotStorage.getSnapshotMeta>>>();
-        if (metaNeeded.length > 0) {
-          const uniquePaths = [...new Set(metaNeeded)];
-          const metaResults = await Promise.all(uniquePaths.map(p => snapshotStorage.getSnapshotMeta(p).then(m => [p, m] as const)));
-          for (const [p, m] of metaResults) metaMap.set(p, m);
-        }
-
         /** 同步映射事件（无逐条 async，直接查预加载的数据） */
         const events = rawEvents.map(ev => {
           let summary: string | null = null;
           let snapshotUrl: string | null = null;
-          let detections: unknown = null;
 
-          if (ev.type === "detect" && ev.detail) {
-            const snapPath = detectSnapPaths.get(`${ev.camera_id}:${ev.timestamp}`) ?? null;
-            if (snapPath) {
-              snapshotUrl = `/api/snapshots/${snapPath}`;
-              const meta = metaMap.get(snapPath);
-              if (meta?.detections) detections = meta.detections;
-            }
-            const detailObj = JSON.parse(ev.detail);
-            if (detailObj?.labels && typeof detailObj.labels === "object") {
-              summary = Object.entries(detailObj.labels as Record<string, number>).map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
-            } else if (Array.isArray(detailObj?.detections)) {
-              const labelCounts = new Map<string, number>();
-              for (const d of detailObj.detections) {
-                const name = d.trackName ?? d.label;
-                labelCounts.set(name, (labelCounts.get(name) ?? 0) + 1);
-              }
-              summary = [...labelCounts.entries()].map(([l, c]) => c > 1 ? `${l} ×${c}` : l).join(", ");
-            }
-          } else if (ev.type === "alert" || ev.type === "detect:rule") {
+          if (ev.type === "alert" || ev.type === "detect:rule") {
             const snapPath = alertSnapPaths.get(`${ev.camera_id}:${ev.timestamp}`) ?? null;
             if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
             if (ev.detail) {
@@ -681,7 +639,6 @@ export function startServer(
             timestamp: ev.timestamp,
             summary,
             snapshotUrl,
-            detections,
             starred: ev.starred,
           };
         });
@@ -769,10 +726,7 @@ export function startServer(
         if (!ev) return new Response("Not Found", { status: 404 });
         /** 关联快照 */
         let snapshotUrl: string | null = null;
-        if (ev.type === "detect") {
-          const snapPath = snapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
-          if (snapPath) snapshotUrl = `/api/snapshots/${snapPath}`;
-        } else if (ev.type === "alert" && alertSnapshotStorage) {
+        if (ev.type === "alert" && alertSnapshotStorage) {
           const snapPath = alertSnapshotStorage.findSnapshotPath(ev.camera_id, ev.timestamp);
           if (snapPath) snapshotUrl = `/api/alert-snapshots/${snapPath}`;
         }
@@ -1108,29 +1062,6 @@ export function startServer(
         if (!resolved.startsWith(storageRoot)) return new Response("Forbidden", { status: 403 });
         await storageFs.deleteFile(relPath, { category: "recordings" });
         return Response.json({ ok: true });
-      }
-
-      /** 获取标注后的图片（按需生成） */
-      /** 标注图：优先使用已保存的快照文件，回退到按需生成 */
-      const annotatedMatch = url.pathname.match(/^\/api\/detection\/annotated\/(.+)$/);
-      if (annotatedMatch) {
-        const cameraId = annotatedMatch[1]!;
-        /** 优先返回最新保存的快照文件（零 CPU 开销） */
-        const latestSnap = snapshotStorage.getLatestSnapshotPath(cameraId);
-        if (latestSnap) {
-          const snapFilePath = snapshotStorage.getSnapshotPath(latestSnap);
-          if ((await Bun.file(snapFilePath).size) !== undefined) {
-            return new Response(Bun.file(snapFilePath), {
-              headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-cache" },
-            });
-          }
-        }
-        /** 回退：按需生成标注图 */
-        const image = await annotator.generateAnnotated(cameraId);
-        if (!image) return new Response("No annotated image", { status: 404 });
-        return new Response(image, {
-          headers: { "Content-Type": "image/jpeg" },
-        });
       }
 
       /** 录像缩略图 */
@@ -1488,41 +1419,6 @@ Be specific and factual. ${langInstruction}`;
         });
       }
 
-      /** 快照列表 */
-      if (url.pathname === "/api/snapshots") {
-        const cameraId = url.searchParams.get("cameraId") ?? undefined;
-        const limit = url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 50;
-        const snapshots = snapshotStorage.listSnapshots(cameraId);
-        return Response.json(snapshots.slice(0, limit));
-      }
-
-      /** 快照图片 */
-      const snapFileMatch = url.pathname.match(/^\/api\/snapshots\/([^/]+)\/(.+\.jpg)$/);
-      if (snapFileMatch) {
-        const camId = snapFileMatch[1]!;
-        const filename = snapFileMatch[2]!;
-        const filePath = snapshotStorage.getSnapshotPath(`${camId}/${filename}`);
-        if ((await Bun.file(filePath).size) === undefined) return new Response("Not Found", { status: 404 });
-        /** 防止路径遍历 */
-        const snapRoot = await realpath(snapshotStorage.getSnapshotPath("."));
-        const resolved = await realpath(filePath);
-        if (!resolved.startsWith(snapRoot)) return new Response("Forbidden", { status: 403 });
-        const file = Bun.file(filePath);
-        return new Response(file, {
-          headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
-        });
-      }
-
-      /** 快照检测结果元数据 */
-      const snapMetaMatch = url.pathname.match(/^\/api\/snapshots\/([^/]+)\/(.+\.json)$/);
-      if (snapMetaMatch) {
-        const camId = snapMetaMatch[1]!;
-        const filename = snapMetaMatch[2]!;
-        const meta = await snapshotStorage.getSnapshotMeta(`${camId}/${filename}`);
-        if (!meta) return new Response("Not Found", { status: 404 });
-        return Response.json(meta);
-      }
-
       /** 告警快照列表 */
       if (url.pathname === "/api/alert-snapshots" && alertSnapshotStorage) {
         const cameraId = url.searchParams.get("cameraId") ?? undefined;
@@ -1662,13 +1558,12 @@ Be specific and factual. ${langInstruction}`;
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
-          const cameraId = obj.cameraId as string | undefined;
           const prompt = obj.prompt as string | undefined;
-          if (!name || !cameraId || !prompt) return new Response("Missing name, cameraId or prompt", { status: 400 });
+          const cameras = (obj.cameras as Array<{ cameraId: string; roiId?: number; offsetSec?: number; videoClip?: unknown }>) ?? [];
+          if (!name || !prompt || cameras.length === 0) return new Response("Missing name, prompt or cameras", { status: 400 });
           const id = detectRuleStorage.addRule({
             name,
-            cameraId,
-            roiId: (obj.roiId as number) ?? 0,
+            cameras: cameras.map(c => ({ cameraId: c.cameraId, roiId: c.roiId ?? 0, offsetSec: c.offsetSec ?? 0, videoClip: c.videoClip as RuleCameraSource["videoClip"] })),
             prompt,
             intervalMs: (obj.intervalMs as number) ?? 5000,
             cooldownMs: (obj.cooldownMs as number) ?? 30000,
@@ -1677,7 +1572,8 @@ Be specific and factual. ${langInstruction}`;
             schedule: (obj.schedule as string) ?? "",
             saveOriginal: (obj.saveOriginal as boolean) ?? true,
             outputRegions: (obj.outputRegions as boolean) ?? false,
-            extraCameras: (obj.extraCameras as Array<{ cameraId: string; offsetSec: number }>) ?? [],
+            refImages: (obj.refImages as string[]) ?? [],
+            modelId: (obj.modelId as string) ?? "",
           });
           detectRuleEngine?.reloadRules();
           return Response.json({ id });
@@ -1691,7 +1587,7 @@ Be specific and factual. ${langInstruction}`;
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
           const updates: Record<string, unknown> = {};
-          for (const key of ["name", "cameraId", "roiId", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal", "outputRegions", "extraCameras"] as const) {
+          for (const key of ["name", "prompt", "intervalMs", "cooldownMs", "enabled", "imageWidth", "stateIds", "schedule", "saveOriginal", "outputRegions", "cameras", "refImages", "modelId"] as const) {
             if (obj[key] !== undefined) updates[key] = obj[key];
           }
           detectRuleStorage.updateRule(ruleId, updates as never);
@@ -1706,6 +1602,34 @@ Be specific and factual. ${langInstruction}`;
         detectRuleStorage.removeRule(ruleId);
         detectRuleEngine?.reloadRules();
         return Response.json({ ok: true });
+      }
+
+      /** 上传参考图片 */
+      if (url.pathname === "/api/detect-rules/ref-images" && req.method === "POST") {
+        const formData = await req.formData().catch(() => null);
+        const file = formData?.get("image") as File | null;
+        if (!file) return new Response("Missing image", { status: 400 });
+        const ext = file.name.split(".").pop() ?? "jpg";
+        const filename = `ref_${Date.now()}.${ext}`;
+        const buf = Buffer.from(await file.arrayBuffer());
+        await storageFs.writeFile(`ref-images/${filename}`, buf);
+        return Response.json({ filename });
+      }
+
+      /** 删除/获取参考图片 */
+      const refImageMatch = url.pathname.match(/^\/api\/detect-rules\/ref-images\/(.+)$/);
+      if (refImageMatch) {
+        const filename = refImageMatch[1]!;
+        const refPath = join(storageFs.root, "ref-images", filename);
+        if (req.method === "DELETE") {
+          await storageFs.deleteFile(`ref-images/${filename}`).catch(() => {});
+          return Response.json({ ok: true });
+        }
+        if (req.method === "GET") {
+          const file = Bun.file(refPath);
+          if (!(await file.exists())) return new Response("Not found", { status: 404 });
+          return new Response(file);
+        }
       }
 
       /** 检测规则历史记录 */
@@ -1902,17 +1826,6 @@ Be specific and factual. ${langInstruction}`;
         return Response.json(report);
       }
 
-      /** 获取当前 AI 模型信息 */
-      if (url.pathname === "/api/ai/model" && req.method === "GET") {
-        return Response.json(aiDetector.getModelInfo());
-      }
-
-      /** 重新加载 AI 模型（VLM 模式下为空操作，保留 API 兼容） */
-      if (url.pathname === "/api/ai/reload-model" && req.method === "POST") {
-        const result = await aiDetector.reloadModel();
-        return Response.json(result);
-      }
-
       /** 按需 AI 分析：前端点击按钮触发当前帧场景分析 */
       if (url.pathname === "/api/ai/analyze-frame" && req.method === "POST") {
         if (!multimodalAnalyzer) return Response.json({ error: "Multimodal analyzer not available" }, { status: 503 });
@@ -1939,20 +1852,7 @@ Be specific and factual. ${langInstruction}`;
         const lang = runtimeConfig.get().language;
         const langInstruction = lang.startsWith("zh") ? "用中文回复。" : "Reply in English.";
 
-        /** 收集当前检测结果作为上下文 */
-        const detections = annotator.getLatestDetections(body.cameraId);
-        const detectCtx = detections.length > 0
-          ? `\nCurrent detections: ${detections.map(d => {
-              const parts = [d.label];
-              if (d.trackName) parts.push(`name="${d.trackName}"`);
-              if (d.semanticLabel) parts.push(d.semanticLabel);
-              if (d.pose) parts.push(d.pose);
-              if (d.dominantColor) parts.push(d.dominantColor);
-              return parts.join(" ");
-            }).join("; ")}`
-          : "";
-
-        const systemPrompt = `You are a surveillance camera assistant. Answer questions about the image accurately and concisely. You can see tracked objects with names and descriptions. ${detectCtx}${langInstruction}`;
+        const systemPrompt = `You are a surveillance camera assistant. Answer questions about the image accurately and concisely. ${langInstruction}`;
 
         /** 构建消息列表（支持历史上下文） */
         const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [
@@ -2019,7 +1919,7 @@ Be specific and factual. ${langInstruction}`;
         if (!latestFrame) return Response.json({ error: "No frame available" }, { status: 404 });
 
         /** 获取该摄像头已有的规则名称，避免重复建议 */
-        const existingRules = detectRuleStorage?.listRules().filter(r => r.cameraId === body.cameraId) ?? [];
+        const existingRules = detectRuleStorage?.listRules().filter(r => r.cameras[0]?.cameraId === body.cameraId) ?? [];
         const existingNames = existingRules.map(r => r.name).join(", ");
 
         const lang = runtimeConfig.get().language;
@@ -2215,8 +2115,7 @@ User query: "${query}"`;
         const anomalyScore = Math.max(detectAnomaly.score, trackAnomaly.score);
 
         /** AI 性能指标 */
-        const vlmStatus = aiDetector.getVlmStatus();
-        const metrics = aiMetrics.snapshot(vlmStatus.current, vlmStatus.max);
+        const metrics = aiMetrics.snapshot(0, 0);
 
         return Response.json({
           vlm: { enabled: llm.enabled, model: llm.model, apiUrl: llm.apiUrl ? "***" : "", imageWidth: llm.imageWidth, contextIntervalMs: llm.contextIntervalMs },
@@ -2376,8 +2275,6 @@ User query: "${query}"`;
         /** 同步 customName 到 TrackStorage */
         if (body.trackId && body.name) {
           trackStorage.setCustomName(body.trackId, body.name);
-          /** 命名后反向关联外观相似的未命名目标 */
-          aiDetector.propagateName(body.trackId, body.name, body.cameraId);
         }
         /** 广播标签更新给其他客户端 */
         eventBus.emit("track:label-updated", {
@@ -2836,17 +2733,6 @@ User query: "${query}"`;
   /** 每路摄像头最新帧缓存 */
   const latestFrameByCamera = new Map<string, { data: Buffer; timestamp: number }>();
 
-  /** 缓存 importantLabels Set，避免每次 detect 事件重建 */
-  let cachedImportantSet: Set<string> | null = null;
-  let cachedImportantLabels = "";
-  function getImportantSet(): Set<string> | null {
-    const labels = runtimeConfig.get().ai.importantLabels.join(",");
-    if (labels !== cachedImportantLabels) {
-      cachedImportantLabels = labels;
-      cachedImportantSet = labels.length > 0 ? new Set(runtimeConfig.get().ai.importantLabels.map(l => l.toLowerCase())) : null;
-    }
-    return cachedImportantSet;
-  }
 
   /**
    * 根据客户端订阅摄像头数量计算帧推送节流间隔
@@ -2949,20 +2835,7 @@ User query: "${query}"`;
       /** 非帧事件：立即推送 */
       let header: Record<string, unknown>;
 
-      if (event === "detect") {
-        const detectPayload = payload as { cameraId: string; timestamp: number; detections: Array<{ label: string; score: number; box: unknown; trackId?: number; trackName?: string; semanticLabel?: string }>; changed?: boolean; inferMs?: number };
-        /** unchanged 时跳过完整推送，只发轻量心跳（减少 ~90% 带宽） */
-        if (detectPayload.changed === false) {
-          header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, changed: false, inferMs: detectPayload.inferMs };
-        } else {
-          /** 只推送 importantLabels 中的检测结果给前端，减少 WS 带宽 */
-          const importantSet = getImportantSet();
-          const filteredDetections = importantSet
-            ? detectPayload.detections.filter(d => importantSet.has((d.label as string).toLowerCase()))
-            : detectPayload.detections;
-          header = { event, cameraId: detectPayload.cameraId, timestamp: detectPayload.timestamp, detections: filteredDetections, changed: detectPayload.changed, inferMs: detectPayload.inferMs };
-        }
-      } else if (event === "detect:rule") {
+      if (event === "detect:rule") {
         /** detect:rule 事件：附加快照路径 */
         const dr = payload as { cameraId: string; timestamp: number; [k: string]: unknown };
         let snapshotUrl: string | null = null;

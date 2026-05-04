@@ -3,8 +3,6 @@ import { loadConfig, watchConfig } from "@/config";
 import { EventBus } from "@/event-bus";
 import { CameraManager } from "@/camera/manager";
 import { MotionDetector } from "@/detection/motion";
-import { AiDetector } from "@/ai/detector";
-import { Annotator } from "@/ai/annotator";
 import { startServer } from "@/api";
 import { EventStorage } from "@/storage/events";
 import { installLogBuffer } from "@/log-buffer";
@@ -103,8 +101,6 @@ for (const cam of config.cameras) {
 }
 recorder.start().catch(err => console.error("[Recorder] 启动失败:", err));
 
-/** AI 检测器（VLM 模式，使用 RuntimeConfig） */
-const annotator = new Annotator();
 const trackStorage = new TrackStorage(join(dataDir, "tracks"));
 const trackLabelStorage = new TrackLabelStorage(join(dataDir, "track-labels.db"));
 const trajectoryStorage = new TrackTrajectoryStorage(join(dataDir, "track-trajectory.db"));
@@ -114,8 +110,6 @@ const clipService = new ClipService(config.ai.clip, join(dataDir, "models"));
 if (config.ai.clip.candidates) {
   setCustomCandidates(config.ai.clip.candidates);
 }
-
-const aiDetector = new AiDetector(runtimeConfig, eventBus, annotator, join(dataDir, "models"), trackStorage, trackLabelStorage, trajectoryStorage, clipService);
 
 /** 摄像头管理器（主码流预览/检测 + 主码流注册给录像器） */
 const cameraManager = new CameraManager(config, eventBus, recorder, runtimeConfig);
@@ -129,8 +123,6 @@ const crossLineStorage = new CrossLineStorage(join(dataDir, "cross-lines.db"));
 /** 变动检测器（使用 RuntimeConfig + ROI 区域过滤） */
 const motionDetector = new MotionDetector(runtimeConfig, eventBus, roiStorage);
 
-/** 注入 MotionDetector 到 AiDetector（静态帧推理跳过） */
-aiDetector.setMotionDetector(motionDetector);
 
 /** 启动变动检测 */
 motionDetector.start();
@@ -138,12 +130,6 @@ motionDetector.start();
 /** 启动摄像头 */
 cameraManager.start();
 
-/** 异步初始化 AI 检测器（VLM 模式，不需要加载本地模型） */
-aiDetector.init().then(() => {
-  console.log("[App] AI 检测器初始化完成");
-}).catch((err) => {
-  console.error("[App] AI 检测器初始化失败:", err);
-});
 
 /** 异步初始化 CLIP 零样本分类（可选，默认禁用） */
 if (config.ai.clip.enabled) {
@@ -166,12 +152,9 @@ dingtalkNotifier.start();
 const emailNotifier = new EmailNotifier(runtimeConfig, eventBus);
 emailNotifier.start();
 
-/** 检测快照存储（保存标注图到磁盘） */
-const snapshotStorage = new SnapshotStorage(storageFs, eventBus, "detection-snapshots");
-snapshotStorage.start().catch(err => console.error("[Snapshot] 启动失败:", err));
 
 /** 告警快照存储（独立的目录，不监听 detect 事件） */
-const alertSnapshotStorage = new SnapshotStorage(storageFs, eventBus, "alert-snapshots", "alert-snapshots");
+const alertSnapshotStorage = new SnapshotStorage(storageFs, "alert-snapshots", "alert-snapshots");
 
 /** 告警存储与引擎 */
 const alertStorage = new AlertStorage(join(dataDir, "alerts.db"));
@@ -183,16 +166,14 @@ const detectRuleStorage = new DetectRuleStorage(join(dataDir, "detect-rules.db")
 const stateStorage = new StateStorage(join(dataDir, "state.db"));
 const detectRuleEngine = new DetectRuleEngine(eventBus, detectRuleStorage, cameraManager, runtimeConfig, roiStorage, stateStorage);
 detectRuleEngine.setRecorder(recorder);
+detectRuleEngine.setFfmpegPath(config.ffmpegPath);
+detectRuleEngine.setRefImagesDir(join(dataDir, "ref-images"));
 detectRuleEngine.setTrackStores(trajectoryStorage, trackStorage);
 detectRuleEngine.setSaveSnapshot((cameraId, timestamp, jpeg) => {
   alertSnapshotStorage.saveSnapshot(cameraId, timestamp, jpeg);
 });
 detectRuleEngine.start();
 
-/** 行为分析器（区域进入/离开/停留/越线语义事件） */
-import { BehaviorAnalyzer } from "@/ai/behavior";
-const behaviorAnalyzer = new BehaviorAnalyzer(eventBus, roiStorage, crossLineStorage, runtimeConfig);
-behaviorAnalyzer.start();
 
 /** 目标活动档案收集器（追踪目标全生命周期，消失时 AI 摘要） */
 import { TrackActivityCollector } from "@/ai/track-activity";
@@ -229,7 +210,7 @@ const eventStorage = new EventStorage(join(dataDir, "nvr.db"));
 const exporter = new RecordingExporter(join(dataDir, "exports"), config.ffmpegPath, storageFs, eventStorage);
 
 /** 统一存储清理管理器 */
-const cleaner = new StorageCleaner(runtimeConfig, eventStorage, detectRuleStorage, snapshotStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
+const cleaner = new StorageCleaner(runtimeConfig, eventStorage, detectRuleStorage, thumbnailGenerator, exporter, diskUsage, recorder, trackStorage, alertSnapshotStorage, trajectoryStorage, trackLabelStorage);
 cleaner.start();
 
 /** AI 事件摘要器（定期用 LLM 汇总事件流） */
@@ -278,7 +259,7 @@ void Promise.allSettled(ptzRegistrations);
 
 /** 启动 HTTP 服务 */
 const monitor = new SystemMonitor(eventBus);
-startServer(config.server.port, cameraManager, eventBus, annotator, eventStorage, recorder, monitor, runtimeConfig, snapshotStorage, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, aiDetector, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, detectRuleStorage, detectRuleEngine, stateStorage, patrolScanner);
+startServer(config.server.port, cameraManager, eventBus, eventStorage, recorder, monitor, runtimeConfig, roiStorage, alertStorage, thumbnailGenerator, cleaner, diskUsage, exporter, config.auth, ptzController, trackLabelStorage, trackStorage, preferencesStorage, crossLineStorage, storageFs, alertSnapshotStorage, trajectoryStorage, multimodalAnalyzer, clipService, detectRuleStorage, detectRuleEngine, stateStorage, patrolScanner);
 
 /** 自动记录事件到 SQLite */
 /** 事件收集缓冲区（同一微任务周期内的事件批量写入） */
@@ -293,31 +274,16 @@ function flushPendingEvents() {
 }
 
 /** 需要持久化到 SQLite 的事件类型（仅保留有查询价值的事件） */
-const RECORDED_EVENTS = ["detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "state:changed"] as const;
+const RECORDED_EVENTS = ["camera:online", "camera:offline", "detect:rule", "alert", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:line-cross", "track:loiter", "track:crowd", "llm:scene", "track:activity-summary", "state:changed"] as const;
 for (const eventType of RECORDED_EVENTS) {
   eventBus.on(eventType, (payload) => {
-    /** 0 目标或重复检测结果不记录事件 */
-    if (eventType === "detect") {
-      const p = payload as { detections: unknown[]; changed?: boolean };
-      if (p.detections.length === 0 || p.changed === false) return;
-    }
     /** dwell 事件只在停留超过 30 秒时持久化（减少高频写入） */
     if (eventType === "track:dwell") {
       const p = payload as { dwellMs: number };
       if (p.dwellMs < 30000) return;
     }
     let detail: string | undefined;
-    if (eventType === "detect") {
-      /** 精简存储：只保留标签摘要 + 计数，不保留完整检测框数据 */
-      const p = payload as { detections: Array<{ label: string; score: number; trackId?: number; trackName?: string }> };
-      const labelCounts: Record<string, number> = {};
-      const trackIds: number[] = [];
-      for (const d of p.detections) {
-        labelCounts[d.label] = (labelCounts[d.label] ?? 0) + 1;
-        if (d.trackId) trackIds.push(d.trackId);
-      }
-      detail = JSON.stringify({ labels: labelCounts, count: p.detections.length, trackIds });
-    } else if (eventType === "alert") {
+    if (eventType === "alert") {
       const p = payload as { ruleName: string; detail: string };
       detail = JSON.stringify({ ruleName: p.ruleName, detail: p.detail });
     } else if (eventType === "llm:scene") {
@@ -369,14 +335,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n[App] 收到 ${signal}，正在关闭...`);
   cameraManager.stop();
   recorder.stop();
-  behaviorAnalyzer.stop();
   trackActivityCollector.stop();
   multimodalAnalyzer.stop();
   eventSummarizer.stop();
   patrolScanner.stop();
   recordingSummarizer.stop();
   clipService.dispose();
-  aiDetector.dispose();
   cleaner.stop();
   alertEngine.stop();
   detectRuleEngine.stop();
@@ -433,13 +397,6 @@ setInterval(() => {
 eventBus.on("motion", ({ cameraId, ratio, timestamp }) => {
   const time = new Date(timestamp).toLocaleTimeString("zh-CN");
   console.log(`[Motion] ${time} | ${cameraId} | 变动比例 ${(ratio * 100).toFixed(1)}%`);
-});
-
-/** 控制台日志：打印 AI 检测事件 */
-eventBus.on("detect", ({ cameraId, detections, timestamp }) => {
-  const time = new Date(timestamp).toLocaleTimeString("zh-CN");
-  const labels = detections.map((d) => `${d.label}#${(d as { trackId?: number }).trackId ?? "?"}(${(d.score * 100).toFixed(0)}%)`).join(", ");
-  console.log(`[Detect] ${time} | ${cameraId} | ${detections.length} 个目标: ${labels}`);
 });
 
 /** 控制台日志：打印告警事件 */

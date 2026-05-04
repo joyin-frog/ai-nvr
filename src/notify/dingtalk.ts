@@ -17,7 +17,6 @@ interface DingTalkMessage {
 /** 事件类型中文映射 */
 const EVENT_LABELS: Record<string, string> = {
   motion: "画面变动",
-  detect: "AI 检测",
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
@@ -34,7 +33,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
+const PUSH_EVENTS: EventName[] = ["motion", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
 
 /**
  * 钉钉机器人通知推送
@@ -79,15 +78,6 @@ export class DingTalkNotifier {
     if (event === "motion") {
       const ratio = payload.ratio as number | undefined;
       body = ratio !== undefined ? `变动比例: ${(ratio * 100).toFixed(1)}%` : "";
-    } else if (event === "detect") {
-      const detections = payload.detections as Array<{ label: string; score: number; trackId?: number; trackName?: string; semanticLabel?: string }> | undefined;
-      if (detections && detections.length > 0) {
-        body = "检测目标:\n" + detections.map(d => {
-          const name = d.trackName || d.semanticLabel || d.label;
-          const id = d.trackId ? ` #${d.trackId}` : "";
-          return `- ${name}${id} (${(d.score * 100).toFixed(0)}%)`;
-        }).join("\n");
-      }
     } else if (event === "detect:rule") {
       const ruleName = payload.ruleName as string | undefined;
       const prompt = payload.prompt as string | undefined;

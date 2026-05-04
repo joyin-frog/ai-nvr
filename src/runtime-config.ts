@@ -11,10 +11,6 @@ export interface CameraOverride {
   detectFps?: number;
   /** AI 推理分辨率覆盖（0=使用全局配置） */
   inputWidth?: number;
-  /** AI 置信度阈值覆盖（0-1） */
-  aiThreshold?: number;
-  /** AI 连续检测间隔覆盖（ms） */
-  aiInterval?: number;
 }
 
 /** Webhook 通知配置 */
@@ -148,7 +144,7 @@ export class RuntimeConfig {
     this.settings = {
       language: "zh-CN",
       motion: { ...config.motion },
-      ai: { ...config.ai, llm: { ...config.ai.llm }, clip: { ...config.ai.clip } },
+      ai: { ...config.ai, llm: { ...config.ai.llm }, models: config.ai.models.map(m => ({ ...m })), clip: { ...config.ai.clip } },
       cameraOverrides: {},
       recording: {
         mode: "motion",
@@ -166,7 +162,7 @@ export class RuntimeConfig {
         eventPreMs: 15000,
         eventPostMs: 30000,
         bufferDurationMs: 30000,
-        eventTriggers: ["detect", "track:appeared", "track:enter-zone", "track:loiter", "track:line-cross", "alert"],
+        eventTriggers: ["detect:rule", "alert"],
       },
       webhook: {
         urls: [],
@@ -215,18 +211,6 @@ export class RuntimeConfig {
 
     if (obj.ai && typeof obj.ai === "object") {
       const a = obj.ai as Record<string, unknown>;
-      if (typeof a.enabled === "boolean") this.settings.ai.enabled = a.enabled;
-      if (typeof a.model === "string") this.settings.ai.model = a.model;
-      if (typeof a.threshold === "number") this.settings.ai.threshold = a.threshold;
-      if (typeof a.maxDetections === "number") this.settings.ai.maxDetections = a.maxDetections;
-      if (typeof a.inputWidth === "number") this.settings.ai.inputWidth = a.inputWidth;
-      if (typeof a.showBoxes === "boolean") this.settings.ai.showBoxes = a.showBoxes;
-      if (a.mode === "motion" || a.mode === "continuous") this.settings.ai.mode = a.mode;
-      if (typeof a.interval === "number") this.settings.ai.interval = a.interval;
-      if (typeof a.autoMatchThreshold === "number") this.settings.ai.autoMatchThreshold = a.autoMatchThreshold;
-      if (typeof a.speedThreshold === "number") this.settings.ai.speedThreshold = a.speedThreshold;
-      if (typeof a.loiterThreshold === "number") this.settings.ai.loiterThreshold = a.loiterThreshold;
-      if (Array.isArray(a.importantLabels)) this.settings.ai.importantLabels = a.importantLabels.filter((l: unknown): l is string => typeof l === "string");
       if (a.llm && typeof a.llm === "object") {
         const l = a.llm as Record<string, unknown>;
         if (typeof l.enabled === "boolean") this.settings.ai.llm.enabled = l.enabled;
@@ -236,8 +220,16 @@ export class RuntimeConfig {
         if (typeof l.interval === "number") this.settings.ai.llm.interval = l.interval;
         if (typeof l.imageWidth === "number") this.settings.ai.llm.imageWidth = l.imageWidth;
         if (typeof l.systemPrompt === "string") this.settings.ai.llm.systemPrompt = l.systemPrompt;
-        if (Array.isArray(l.triggers)) this.settings.ai.llm.triggers = l.triggers.filter((t: unknown): t is string => typeof t === "string");
         if (typeof l.contextIntervalMs === "number") this.settings.ai.llm.contextIntervalMs = l.contextIntervalMs;
+      }
+      if (Array.isArray(a.models)) {
+        this.settings.ai.models = (a.models as Array<Record<string, unknown>>).map((m, i) => ({
+          id: (m.id as string) ?? `model_${i}`,
+          name: (m.name as string) ?? `Model ${i + 1}`,
+          apiUrl: (m.apiUrl as string) ?? "",
+          model: (m.model as string) ?? "",
+          maxTokens: (m.maxTokens as number) ?? 150,
+        }));
       }
       if (a.clip && typeof a.clip === "object") {
         const c = a.clip as Record<string, unknown>;
@@ -369,27 +361,6 @@ export class RuntimeConfig {
       ...(override.motionThreshold !== undefined && { threshold: override.motionThreshold }),
       ...(override.motionCooldown !== undefined && { cooldown: override.motionCooldown }),
     };
-  }
-
-  /** 获取某个摄像头的有效 AI 推理分辨率（考虑覆盖） */
-  getAiInputWidth(cameraId: string): number {
-    const override = this.settings.cameraOverrides[cameraId];
-    if (override?.inputWidth) return override.inputWidth;
-    return this.settings.ai.inputWidth;
-  }
-
-  /** 获取某个摄像头的有效 AI 置信度阈值（考虑覆盖） */
-  getAiThreshold(cameraId: string): number {
-    const override = this.settings.cameraOverrides[cameraId];
-    if (override?.aiThreshold !== undefined) return override.aiThreshold;
-    return this.settings.ai.threshold;
-  }
-
-  /** 获取某个摄像头的有效 AI 检测间隔（考虑覆盖） */
-  getAiInterval(cameraId: string): number {
-    const override = this.settings.cameraOverrides[cameraId];
-    if (override?.aiInterval !== undefined) return override.aiInterval;
-    return this.settings.ai.interval;
   }
 
   /** 重置某个摄像头的覆盖 */

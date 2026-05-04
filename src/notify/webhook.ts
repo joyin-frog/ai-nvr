@@ -19,7 +19,7 @@ interface WebhookPayload {
  */
 export class WebhookNotifier {
   /** 要推送的事件类型 */
-  private static readonly EVENTS: EventName[] = ["motion", "detect", "camera:online", "camera:offline", "detect:rule", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:scene", "llm:patrol"];
+  private static readonly EVENTS: EventName[] = ["motion", "camera:online", "camera:offline", "detect:rule", "alert", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:scene", "llm:patrol"];
 
   /** 去抖：同一事件+摄像头在窗口内只推送一次 */
   private recentKeys = new Map<string, number>();
@@ -50,7 +50,7 @@ export class WebhookNotifier {
     const dedupKey = `${event}:${cameraId}`;
     const now = Date.now();
     const lastSent = this.recentKeys.get(dedupKey);
-    const isHighFreq = event.startsWith("track:") || event === "detect" || event === "motion";
+    const isHighFreq = event.startsWith("track:") || event === "motion";
     if (isHighFreq && lastSent && now - lastSent < WebhookNotifier.DEDUP_WINDOW_MS) return;
     if (isHighFreq) this.recentKeys.set(dedupKey, now);
 
@@ -81,13 +81,6 @@ export class WebhookNotifier {
 
     if (event === "motion") {
       detail.ratio = payload.ratio;
-    } else if (event === "detect") {
-      const detections = payload.detections as Array<{ label: string; score: number; box?: { xmin: number; ymin: number; xmax: number; ymax: number }; trackId?: number; trackName?: string; semanticLabel?: string }> | undefined;
-      detail.detections = detections?.map(d => ({ label: d.label, score: d.score, box: d.box, trackId: d.trackId, trackName: d.trackName, semanticLabel: d.semanticLabel }));
-      detail.count = detections?.length ?? 0;
-      /** 附带标注快照 URL（供外部系统展示） */
-      detail.snapshotUrl = `/api/detection/annotated/${cameraId}`;
-      detail.frameUrl = `/api/snapshot/${cameraId}`;
     } else if (event === "detect:rule") {
       detail.ruleId = payload.ruleId;
       detail.ruleName = payload.ruleName;

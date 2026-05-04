@@ -22,11 +22,7 @@ export interface RecordingInfo {
 
 /** event 模式下触发录像的事件类型列表 */
 const DEFAULT_EVENT_TRIGGERS = [
-  "detect",
-  "track:appeared",
-  "track:enter-zone",
-  "track:loiter",
-  "track:line-cross",
+  "detect:rule",
   "alert",
 ];
 
@@ -239,13 +235,10 @@ export class MotionRecorder {
     const config = this.runtimeConfig.get().recording;
     const triggers = config.eventTriggers.length > 0 ? config.eventTriggers : DEFAULT_EVENT_TRIGGERS;
 
-    if (triggers.includes("detect")) {
-      const unsub = this.eventBus.on("detect", ({ cameraId, timestamp, detections }) => {
-        if (detections && detections.length > 0) {
-          this.onEventTrigger(cameraId, timestamp, "detect");
-        }
-      });
-      this.unsubEvents.push(unsub);
+    if (triggers.includes("detect:rule")) {
+      this.unsubEvents.push(this.eventBus.on("detect:rule", ({ cameraId, timestamp }) => {
+        this.onEventTrigger(cameraId, timestamp, "detect:rule");
+      }));
     }
 
     if (triggers.includes("track:appeared")) {

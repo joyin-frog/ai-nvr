@@ -5,7 +5,6 @@ import { type RuntimeConfig, type EmailConfig } from "@/runtime-config";
 /** 事件类型中文映射 */
 const EVENT_LABELS: Record<string, string> = {
   motion: "画面变动",
-  detect: "AI 检测",
   "camera:online": "摄像头上线",
   "camera:offline": "摄像头离线",
   alert: "告警触发",
@@ -23,7 +22,6 @@ const EVENT_LABELS: Record<string, string> = {
 /** 事件类型对应 CSS 颜色 */
 const EVENT_COLORS: Record<string, string> = {
   motion: "#f0ad4e",
-  detect: "#5bc0de",
   "camera:online": "#5cb85c",
   "camera:offline": "#d9534f",
   alert: "#d9534f",
@@ -38,7 +36,7 @@ const EVENT_COLORS: Record<string, string> = {
 };
 
 /** 需要推送的事件类型 */
-const PUSH_EVENTS: EventName[] = ["motion", "detect", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
+const PUSH_EVENTS: EventName[] = ["motion", "camera:offline", "alert", "detect:rule", "track:appeared", "track:disappeared", "track:enter-zone", "track:leave-zone", "track:dwell", "track:speed", "state:changed", "llm:patrol"];
 
 /**
  * 邮件告警通知
@@ -86,14 +84,6 @@ export class EmailNotifier {
       detailHtml = ratio !== undefined
         ? `<tr><td>变动比例</td><td><strong>${(ratio * 100).toFixed(1)}%</strong></td></tr>`
         : "";
-    } else if (event === "detect") {
-      const detections = payload.detections as Array<{ label: string; score: number; trackName?: string; semanticLabel?: string }> | undefined;
-      if (detections && detections.length > 0) {
-        const rows = detections.map(d =>
-          `<tr><td>${d.trackName || d.semanticLabel || d.label}</td><td>${(d.score * 100).toFixed(0)}%</td></tr>`,
-        ).join("");
-        detailHtml = `<tr><td colspan="2"><strong>检测目标</strong></td></tr>${rows}`;
-      }
     } else if (event === "detect:rule") {
       const ruleName = payload.ruleName as string | undefined;
       const prompt = payload.prompt as string | undefined;

@@ -2,9 +2,9 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, provide, shallowReactive, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EventClient, type ConnectionState } from './services/events'
-import { isAuthEnabled, getToken, authFetch, authWsUrl, authUrl } from './services/auth'
+import { isAuthEnabled, getToken, authFetch, authWsUrl } from './services/auth'
 import { putFrame, removeFrameCache } from './services/ws-frame-cache'
-import { putDetections, pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions, putPatrolStatus, pushRuleMatch } from './services/ws-detect-cache'
+import { pushZoneNotification, pushMatchSuggestion, putLlmDescription, putRuleRegions, putPatrolStatus, pushRuleMatch } from './services/ws-detect-cache'
 import { registerShortcut, useKeyboardShortcuts } from './composables/useKeyboard'
 import { useToast } from './composables/useToast'
 import { usePreferences } from './composables/usePreferences'
@@ -212,8 +212,6 @@ let syncTimer = setInterval(() => {
 /** 摄像头排序（ID 数组，持久化到后端偏好） */
 const cameraOrder = ref<string[]>([])
 getPref<string[]>('nvr-camera-order', []).then(v => { if (v.length > 0) cameraOrder.value = v })
-/** 是否显示检测框（从 settings API 获取） */
-const showBoxes = ref(true)
 /** 每个摄像头的追踪标签映射：cameraId -> { trackId: name }
  *  使用 shallowReactive 避免整体替换触发所有 CameraView 重渲染 */
 const trackLabelsMap = shallowReactive<Record<string, Record<number, string>>>({})
@@ -257,7 +255,7 @@ let firstConnection = true
 
 /** 磁盘空间预警 */
 const diskWarn = ref<{ percent: number; free: string } | null>(null)
-const headerAiStatus = ref<{ vlm: { enabled: boolean; model: string; contextIntervalMs?: number }; stats5m?: { detectCount: number; alertCount: number; llmCount: number }; tracks?: { active: number; named?: number }; anomaly?: { score: number } } | null>(null)
+const headerAiStatus = ref<{ tracks?: { active: number; named?: number }; anomaly?: { score: number } } | null>(null)
 let headerAiTimer: ReturnType<typeof setInterval> | null = null
 let diskCheckTimer: ReturnType<typeof setInterval> | null = null
 /** PWA 更新检查定时器 */
@@ -654,15 +652,6 @@ function onLoginSuccess() {
   startApp()
 }
 
-/** 从 settings API 加载 showBoxes 配置 */
-async function loadShowBoxes() {
-  const res = await authFetch('/api/settings')
-  if (res.ok) {
-    const s = await res.json()
-    if (typeof s.ai?.showBoxes === 'boolean') showBoxes.value = s.ai.showBoxes
-  }
-}
-
 /** 加载所有摄像头的追踪标签（批量请求替代 N+1 串行） */
 async function loadTrackLabels() {
   const map: Record<string, Record<number, string>> = {}
@@ -710,7 +699,6 @@ async function refreshHeaderAi() {
 /** 启动应用主逻辑 */
 function startApp() {
   loadCameras().then(() => loadTrackLabels())
-  loadShowBoxes()
   setupEventListeners()
   client.connect()
   client.onStateChange((state) => {
@@ -721,7 +709,6 @@ function startApp() {
       } else {
         loadCameras().then(() => loadTrackLabels())
         loadRoiData()
-        loadShowBoxes()
         eventPanel.value?.loadHistory()
         recordingsPanel.value?.loadRecordings()
       }
@@ -750,8 +737,7 @@ function notify(title: string, body: string, cameraId?: string, eventType?: stri
     playAlertSound()
   }
   if ('Notification' in window && Notification.permission === 'granted') {
-    const icon = cameraId ? authUrl(`/api/detection/annotated/${cameraId}`) : undefined
-    const n = new Notification(title, { body, icon })
+    const n = new Notification(title, { body })
     n.onclick = () => {
       window.focus()
       if (cameraId) enterFullscreen(cameraId)
@@ -787,21 +773,6 @@ function setupEventListeners() {
     if (payload.jpegData) {
       putFrame(payload.cameraId, payload.jpegData)
     }
-  })
-
-  client.on('detect', (payload) => {
-    /** unchanged 时无 detections 字段，跳过缓存更新 */
-    if (payload.changed === false || !payload.detections) return
-    /** 存入非响应式缓存，CameraView 通过 rAF poll 消费 */
-    putDetections(payload.cameraId, payload.detections, payload.inferMs)
-    /** 0 目标时只更新 UI 状态，不记录事件/通知 */
-    if (payload.detections.length === 0) return
-
-    const labels = payload.detections.map((d) => d.label).join(', ')
-    const detail = labels
-    /** 关联标注快照 URL（后端 annotator 缓存了最新标注图） */
-    const snapshotUrl = authUrl(`/api/detection/annotated/${payload.cameraId}`)
-    eventPanel.value?.addDetectEvent('detect', payload.cameraId, detail, snapshotUrl, payload.detections)
   })
 
   client.on('camera:online', (payload) => {
@@ -1049,7 +1020,6 @@ onMounted(async () => {
   }})
   registerShortcut({ key: '?', description: t('shortcuts.help'), handler: () => { showShortcuts.value = !showShortcuts.value }})
   registerShortcut({ key: 'p', description: t('shortcuts.patrol'), handler: () => { togglePatrol() }})
-  registerShortcut({ key: 'b', description: t('shortcuts.toggleBoxes', '切换检测框'), handler: () => { showBoxes.value = !showBoxes.value }})
   registerShortcut({ key: 's', description: t('shortcuts.screenshot'), handler: async () => {
     /** 全屏模式：截当前摄像头；网格模式：Shift+S 截所有，否则截第一个 */
     if (fullscreenCamera.value) {
@@ -1096,8 +1066,8 @@ onUnmounted(() => {
     <header class="app-header">
       <h1>JK NVR</h1>
       <span class="status">{{ t('header.cameraCount', { count: cameras.length }) }}</span>
-      <span v-if="headerAiStatus" class="ai-header-badge" :title="`VLM: ${headerAiStatus.vlm.model}\n多帧: ${headerAiStatus.vlm.contextIntervalMs ? headerAiStatus.vlm.contextIntervalMs + 'ms' : '关闭'}\n检测: ${headerAiStatus.stats5m?.detectCount ?? 0}/5m\n告警: ${headerAiStatus.stats5m?.alertCount ?? 0}/5m\n追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃 / ${headerAiStatus.tracks?.named ?? 0} 已命名\n异常评分: ${Math.round((headerAiStatus.anomaly?.score ?? 0) * 100)}%`">
-        <span :class="['ai-dot', (headerAiStatus.anomaly?.score ?? 0) > 0.3 ? 'alert' : headerAiStatus.vlm.enabled ? 'on' : 'off']">AI</span>
+      <span v-if="headerAiStatus" class="ai-header-badge" :title="`追踪: ${headerAiStatus.tracks?.active ?? 0} 活跃 / ${headerAiStatus.tracks?.named ?? 0} 已命名\n异常评分: ${Math.round((headerAiStatus.anomaly?.score ?? 0) * 100)}%`">
+        <span :class="['ai-dot', (headerAiStatus.anomaly?.score ?? 0) > 0.3 ? 'alert' : (headerAiStatus.tracks?.active ?? 0) > 0 ? 'on' : 'off']">AI</span>
         <span v-if="headerAiStatus.tracks?.active" class="ai-active-count">{{ headerAiStatus.tracks.active }}</span>
       </span>
       <span :class="['ws-indicator', wsState]" :title="wsState === 'connected' ? t('header.wsConnected') : wsState === 'connecting' ? t('header.wsConnecting') : t('header.wsDisconnected')">
@@ -1184,7 +1154,6 @@ onUnmounted(() => {
                 :latency="frameLatency[cam.id] ?? 0"
                 :recording="cam.recording"
                 :recording-start="cam.recordingStart"
-                :show-boxes="showBoxes"
                 :track-labels="trackLabelsMap[cam.id]"
                 :dual-stream="cam.dualStream"
                 :detect-fps="cam.detectFps"
@@ -1259,7 +1228,7 @@ onUnmounted(() => {
             <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           </template>
           <StatePanel v-if="activeTab === 'states'" ref="statePanel" :cameras="cameras" @jump-to-detect-history="onJumpToDetectHistory" />
-          <SettingsPanel v-if="activeTab === 'settings'" @saved="loadShowBoxes" />
+          <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
     </main>

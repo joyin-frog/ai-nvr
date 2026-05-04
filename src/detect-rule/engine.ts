@@ -1,11 +1,15 @@
 import { type EventBus } from "@/event-bus";
-import { type DetectRule, DetectRuleStorage } from "@/detect-rule/storage";
+import { type DetectRule, type RuleCameraSource, DetectRuleStorage } from "@/detect-rule/storage";
 import { type RuntimeConfig } from "@/runtime-config";
 import { type RoiStorage } from "@/storage/roi";
 import { type StateStorage } from "@/state/storage";
 import { type TrackTrajectoryStorage } from "@/storage/track-trajectory";
 import { type TrackStorage } from "@/storage/tracks";
 import { aiMetrics } from "@/ai/metrics";
+import { extractClipFrames, CLIP_LIMITS } from "@/detect-rule/clip-extractor";
+import { resolveModel } from "@/ai/multimodal-analyzer";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import sharp from "sharp";
 
 /** 帧获取接口（由 CameraManager 实现） */
@@ -112,15 +116,35 @@ export class DetectRuleEngine {
   private started = false;
   /** 快照保存回调 */
   private saveSnapshot?: (cameraId: string, timestamp: number, jpeg: Buffer) => void;
-  /** Recorder 引用（用于获取上下文帧） */
-  private recorder: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> } | null = null;
-  /** 轨迹存储（用于生成目标运动上下文） */
+  /** Recorder 引用（用于获取上下文帧和录制文件查询） */
+  private recorder: {
+    getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }>;
+    listRecordings(cameraId?: string, since?: number, until?: number): Array<{ filename: string; cameraId: string; startTime: number; endTime: number; size: number }>;
+    getRecordingPath(relativePath: string): string;
+  } | null = null;
+  /** @ts-expect-error 轨迹存储（用于生成目标运动上下文，后续集成用） */
   private trajectoryStorage?: TrackTrajectoryStorage;
-  /** 追踪存储（用于获取目标名称和语义标签） */
+  /** @ts-expect-error 追踪存储（用于获取目标名称和语义标签，后续集成用） */
   private trackStorage?: TrackStorage;
+  /** ffmpeg 路径 */
+  private ffmpegPath = "";
+  /** 参考图片存储根目录 */
+  private refImagesDir = "";
 
-  setRecorder(rec: { getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }> }): void {
+  setRecorder(rec: {
+    getContextFrames(cameraId: string, now: number, intervalMs: number, maxFrames?: number): Array<{ data: Buffer; timestamp: number }>;
+    listRecordings(cameraId?: string, since?: number, until?: number): Array<{ filename: string; cameraId: string; startTime: number; endTime: number; size: number }>;
+    getRecordingPath(relativePath: string): string;
+  }): void {
     this.recorder = rec;
+  }
+
+  setFfmpegPath(path: string): void {
+    this.ffmpegPath = path;
+  }
+
+  setRefImagesDir(dir: string): void {
+    this.refImagesDir = dir;
   }
 
   setTrackStores(trajectory?: TrackTrajectoryStorage, track?: TrackStorage): void {
@@ -250,7 +274,7 @@ export class DetectRuleEngine {
     if (!this.isInSchedule(rule)) return;
 
     /** 帧存在检查 */
-    const frame = this.frameProvider.getLatestFrame(rule.cameraId);
+    const frame = this.frameProvider.getLatestFrame(rule.cameras[0]?.cameraId ?? "");
     if (!frame) return;
 
     if (this.concurrent >= MAX_CONCURRENT) {
@@ -300,7 +324,7 @@ export class DetectRuleEngine {
       const item = this.queue.shift()!;
       /** 时段检查 */
       if (!this.isInSchedule(item.rule)) continue;
-      const frame = this.frameProvider.getLatestFrame(item.rule.cameraId);
+      const frame = this.frameProvider.getLatestFrame(item.rule.cameras[0]?.cameraId ?? "");
       if (frame) {
         this.executeRule(item.rule, frame, item.timestamp);
       }
@@ -311,14 +335,17 @@ export class DetectRuleEngine {
   private async executeRule(rule: DetectRule, frame: Buffer, timestamp: number): Promise<void> {
     this.concurrent++;
     const t0 = performance.now();
+    const primaryCam = rule.cameras[0];
     try {
-      const llmConfig = this.runtimeConfig.get().ai.llm;
-      if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) return;
+      const aiCfg = this.runtimeConfig.get().ai;
+      const llmConfig = aiCfg.llm;
+      const resolved = resolveModel(aiCfg.models, llmConfig, rule.modelId || undefined);
+      if (!llmConfig.enabled || !resolved.apiUrl || !resolved.model) return;
 
-      /** 准备图片 */
+      /** 准备主摄像头图片：裁剪 ROI */
       let jpeg = frame;
-      if (rule.roiId > 0 && this.roiStorage) {
-        jpeg = await this.cropToRoi(frame, rule.roiId) ?? frame;
+      if (primaryCam && primaryCam.roiId > 0 && this.roiStorage) {
+        jpeg = await this.cropToRoi(frame, primaryCam.roiId) ?? frame;
       }
 
       /** 缩放图片（per-rule 分辨率覆盖全局配置） */
@@ -336,8 +363,8 @@ export class DetectRuleEngine {
 
       /** 获取上下文帧 */
       let contextFrames: Array<{ data: Buffer; timestamp: number }> = [];
-      if (this.recorder && llmConfig.contextIntervalMs > 0) {
-        contextFrames = this.recorder.getContextFrames(rule.cameraId, timestamp, llmConfig.contextIntervalMs);
+      if (this.recorder && llmConfig.contextIntervalMs > 0 && primaryCam) {
+        contextFrames = this.recorder.getContextFrames(primaryCam.cameraId, timestamp, llmConfig.contextIntervalMs);
       }
       const hasContext = contextFrames.length > 0;
 
@@ -364,15 +391,15 @@ export class DetectRuleEngine {
       const regionSlot = rule.outputRegions ? REGION_SLOT : "";
       const regionInstructions = rule.outputRegions ? REGION_INSTRUCTIONS : "";
 
-      /** 选择 prompt 模板：有上下文帧时使用多帧 prompt */
-      const basePrompt = hasContext ? RULE_MULTI_FRAME_SYSTEM_PROMPT : RULE_SYSTEM_PROMPT;
+      /** 选择 prompt 模板：有上下文帧或多摄像头时使用多帧 prompt */
+      const basePrompt = (hasContext || rule.cameras.length > 1) ? RULE_MULTI_FRAME_SYSTEM_PROMPT : RULE_SYSTEM_PROMPT;
       const systemPrompt = basePrompt
         .replace("{stateSlot}", stateSlot)
         .replace("{stateInstructions}", stateInstructions)
         .replace("{regionSlot}", regionSlot)
         .replace("{regionInstructions}", regionInstructions) + langInstruction;
 
-      /** 构建 user content：当前帧 + 上下文帧 */
+      /** 构建 user content：主摄像头帧 */
       const imageDataUrl = await resizeImage(jpeg);
       const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
@@ -389,31 +416,60 @@ export class DetectRuleEngine {
         }
       }
 
-      /** 附加其他摄像头帧 */
-      if (rule.extraCameras.length > 0) {
-        for (const src of rule.extraCameras) {
-          let camFrame: Buffer | undefined;
-          if (src.offsetSec > 0 && this.recorder) {
-            /** 取偏移帧：从 recorder 缓冲区获取指定时间之前的帧 */
-            const targetTime = timestamp - src.offsetSec * 1000;
-            const ctxFrames = this.recorder.getContextFrames(src.cameraId, targetTime, 0, 1);
-            if (ctxFrames.length > 0) camFrame = ctxFrames[0]!.data;
-          }
-          if (!camFrame) {
-            camFrame = this.frameProvider.getLatestFrame(src.cameraId);
-          }
-          if (camFrame) {
-            const camUrl = await resizeImage(camFrame);
-            const offsetLabel = src.offsetSec > 0 ? ` (${src.offsetSec}s ago)` : "";
-            userContent.push({ type: "text", text: `[Camera: ${src.cameraId}${offsetLabel}]` });
-            userContent.push({ type: "image_url", image_url: { url: camUrl } });
+      /** 附加其他摄像头源帧（cameras[1:] 及 cameras[0] 的不同偏移/裁剪） */
+      const extraSources = rule.cameras.slice(1);
+      if (extraSources.length > 0) {
+        for (const src of extraSources) {
+          if (src.videoClip) {
+            /** 视频片段模式：从录制文件抽帧 */
+            const clipFrames = await this.extractVideoClipFrames(src, timestamp, imageWidth);
+            if (clipFrames.length > 0) {
+              const { startOffsetSec, endOffsetSec } = src.videoClip;
+              userContent.push({ type: "text", text: `[Camera: ${src.cameraId}, Video clip: ${startOffsetSec}s~${endOffsetSec}s ago, ${clipFrames.length} frames]` });
+              for (const frame of clipFrames) {
+                userContent.push({ type: "image_url", image_url: { url: frame } });
+              }
+            }
+          } else {
+            /** 单帧模式 */
+            let camFrame: Buffer | undefined;
+            if (src.offsetSec > 0 && this.recorder) {
+              const targetTime = timestamp - src.offsetSec * 1000;
+              const ctxFrames = this.recorder.getContextFrames(src.cameraId, targetTime, 0, 1);
+              if (ctxFrames.length > 0) camFrame = ctxFrames[0]!.data;
+            }
+            if (!camFrame) {
+              camFrame = this.frameProvider.getLatestFrame(src.cameraId);
+            }
+            if (camFrame) {
+              if (src.roiId > 0 && this.roiStorage) {
+                camFrame = await this.cropToRoi(camFrame, src.roiId) ?? camFrame;
+              }
+              const camUrl = await resizeImage(camFrame);
+              const offsetLabel = src.offsetSec > 0 ? ` (${src.offsetSec}s ago)` : "";
+              userContent.push({ type: "text", text: `[Camera: ${src.cameraId}${offsetLabel}]` });
+              userContent.push({ type: "image_url", image_url: { url: camUrl } });
+            }
           }
         }
       }
 
-      /** 调用 VLM（有关联状态时增加 max_tokens） */
+      /** 附加参考图片 */
+      if (rule.refImages.length > 0 && this.refImagesDir) {
+        for (const imgName of rule.refImages) {
+          const imgPath = join(this.refImagesDir, imgName);
+          const imgData = await readFile(imgPath).catch(() => null);
+          if (imgData) {
+            const refUrl = await resizeImage(imgData);
+            userContent.push({ type: "text", text: "[Reference image]" });
+            userContent.push({ type: "image_url", image_url: { url: refUrl } });
+          }
+        }
+      }
+
+      /** 调用 VLM */
       const body = {
-        model: llmConfig.model,
+        model: resolved.model,
         messages: [
           { role: "system" as const, content: systemPrompt },
           {
@@ -421,7 +477,7 @@ export class DetectRuleEngine {
             content: userContent,
           },
         ],
-        max_tokens: (rule.stateIds.length > 0 || rule.outputRegions || rule.extraCameras.length > 0) ? 500 : 200,
+        max_tokens: resolved.maxTokens > 0 ? resolved.maxTokens : (rule.stateIds.length > 0 || rule.outputRegions || rule.cameras.length > 1) ? 500 : 200,
         temperature: 0.1,
       };
 
@@ -429,9 +485,9 @@ export class DetectRuleEngine {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15_000);
 
-      const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
-        ? llmConfig.apiUrl
-        : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+      const apiUrl = resolved.apiUrl.endsWith("/chat/completions")
+        ? resolved.apiUrl
+        : `${resolved.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
 
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -463,7 +519,7 @@ export class DetectRuleEngine {
 
       /** 写入记录 */
       this.storage.insertRecord(
-        rule.id, rule.name, rule.cameraId, timestamp,
+        rule.id, rule.name, rule.cameras[0]?.cameraId ?? "", timestamp,
         vlmResult.description,
         vlmResult.matched,
         JSON.stringify({ confidence: vlmResult.confidence, prompt: rule.prompt, rawResponse: content, regions: vlmResult.regions }),
@@ -501,9 +557,9 @@ export class DetectRuleEngine {
         if (this.saveSnapshot) {
           if (rule.saveOriginal) {
             /** 保存原图（未经 ROI 裁剪和缩放的帧） */
-            this.saveSnapshot(rule.cameraId, timestamp, frame);
+            this.saveSnapshot(rule.cameras[0]?.cameraId ?? "", timestamp, frame);
           } else {
-            this.saveSnapshot(rule.cameraId, timestamp, jpeg);
+            this.saveSnapshot(rule.cameras[0]?.cameraId ?? "", timestamp, jpeg);
           }
         }
 
@@ -512,7 +568,7 @@ export class DetectRuleEngine {
         this.eventBus.emit("detect:rule", {
           ruleId: rule.id,
           ruleName: rule.name,
-          cameraId: rule.cameraId,
+          cameraId: rule.cameras[0]?.cameraId ?? "",
           timestamp,
           prompt: rule.prompt,
           result: vlmResult.description,
@@ -532,6 +588,50 @@ export class DetectRuleEngine {
     }
   }
 
+  /** 从录制文件中抽取视频片段帧 */
+  private async extractVideoClipFrames(src: RuleCameraSource, triggerTimestamp: number, imageWidth: number): Promise<string[]> {
+    if (!src.videoClip || !this.recorder || !this.ffmpegPath) return [];
+
+    const { startOffsetSec, endOffsetSec, extraction } = src.videoClip;
+    const clampedStart = Math.min(startOffsetSec, CLIP_LIMITS.maxLookbackSec);
+    const clampedEnd = Math.max(endOffsetSec, 0);
+
+    if (clampedStart <= clampedEnd) return [];
+
+    const windowStartMs = triggerTimestamp - clampedStart * 1000;
+    const windowEndMs = triggerTimestamp - clampedEnd * 1000;
+
+    const recordings = this.recorder.listRecordings(src.cameraId, windowStartMs, windowEndMs);
+    if (recordings.length === 0) return [];
+
+    const result = await extractClipFrames(
+      {
+        recordingPaths: recordings.map(r => this.recorder!.getRecordingPath(r.filename)),
+        recordingStartTimes: recordings.map(r => r.startTime),
+        windowStartMs,
+        windowEndMs,
+        frameMode: extraction.mode,
+        fps: extraction.fps,
+        totalFrames: extraction.totalFrames,
+        targetWidth: imageWidth,
+        ffmpegPath: this.ffmpegPath,
+      },
+      recordings.map(r => r.endTime),
+    );
+
+    if (result.incomplete) {
+      console.warn(`[DetectRuleEngine] 视频片段抽帧不完整: ${src.cameraId} (${clampedStart}s~${clampedEnd}s)`);
+    }
+
+    /** 读取 JPEG 并转为 data URL */
+    const urls: string[] = [];
+    for (const f of result.frames) {
+      const base64 = f.data.toString("base64");
+      urls.push(`data:image/jpeg;base64,${base64}`);
+    }
+    return urls;
+  }
+
   /** 近匹配趋势检测：置信度连续上升时发出趋势警告 */
   private checkNearMatchTrend(rule: DetectRule, timestamp: number, confidence: number, description: string): void {
     const lastConf = this.nearMatchLastConf.get(rule.id) ?? 0;
@@ -548,7 +648,7 @@ export class DetectRuleEngine {
       this.eventBus.emit("detect:rule", {
         ruleId: rule.id,
         ruleName: `${rule.name} (趋势)`,
-        cameraId: rule.cameraId,
+        cameraId: rule.cameras[0]?.cameraId ?? "",
         timestamp,
         prompt: rule.prompt,
         result: `置信度持续上升: ${(lastConf * 100).toFixed(0)}% → ${(confidence * 100).toFixed(0)}% (${newCount}次连续上升)。${description}`,

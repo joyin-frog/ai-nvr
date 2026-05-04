@@ -15,19 +15,31 @@ interface RoiItem {
 }
 
 /** 检测规则 */
-/** 附加摄像头图片配置 */
-interface ExtraCameraSource {
+/** 规则摄像头源配置 */
+interface RuleCameraSource {
   /** 摄像头 ID */
   cameraId: string
+  /** 裁剪区域 ID（0=不裁剪） */
+  roiId: number
   /** 取多少秒前的帧（0=当前帧） */
   offsetSec: number
+  /** 视频片段配置 */
+  videoClip?: {
+    startOffsetSec: number
+    endOffsetSec: number
+    extraction: {
+      mode: 'fps' | 'total'
+      fps?: number
+      totalFrames?: number
+    }
+  }
 }
 
 interface DetectRule {
   id: number
   name: string
-  cameraId: string
-  roiId: number
+  /** 摄像头列表（第一个为主摄像头） */
+  cameras: RuleCameraSource[]
   prompt: string
   intervalMs: number
   cooldownMs: number
@@ -42,8 +54,10 @@ interface DetectRule {
   saveOriginal: boolean
   /** 是否输出目标区域坐标 */
   outputRegions: boolean
-  /** 附加摄像头图片源 */
-  extraCameras: ExtraCameraSource[]
+  /** 参考图片路径列表 */
+  refImages: string[]
+  /** 指定使用的模型 ID（空=默认模型） */
+  modelId: string
 }
 
 /** 检测记录 */
@@ -96,6 +110,18 @@ const cameraNameMap = computed(() => {
 interface StateItem { id: number; name: string; cameraId: string; valueType: string; currentValue: string }
 const stateList = ref<StateItem[]>([])
 
+/** 可用模型列表 */
+interface ModelOption { id: string; name: string; model: string }
+const availableModels = ref<ModelOption[]>([])
+
+async function loadModels() {
+  const res = await authFetch('/api/settings').catch(() => null)
+  if (res?.ok) {
+    const data = await res.json() as { ai?: { models?: ModelOption[] } }
+    availableModels.value = data.ai?.models ?? []
+  }
+}
+
 /** 表单状态 */
 const showAddForm = ref(false)
 const editingRuleId = ref<number | null>(null)
@@ -105,8 +131,7 @@ const roiList = ref<RoiItem[]>([])
 
 const form = ref({
   name: '',
-  cameraId: '',
-  roiId: 0,
+  cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as RuleCameraSource[],
   prompt: '',
   intervalMs: 5000,
   cooldownMs: 30000,
@@ -118,15 +143,15 @@ const form = ref({
   scheduleDays: [1, 2, 3, 4, 5] as number[],
   saveOriginal: true,
   outputRegions: false,
-  extraCameras: [] as ExtraCameraSource[],
+  refImages: [] as string[],
+  modelId: '',
 })
 
 const emptyForm = {
-  name: '', cameraId: '', roiId: 0, prompt: '', intervalMs: 5000, cooldownMs: 30000,
+  name: '', cameras: [{ cameraId: '', roiId: 0, offsetSec: 0 }] as RuleCameraSource[], prompt: '', intervalMs: 5000, cooldownMs: 30000,
   imageWidth: 0, stateIds: [] as number[], scheduleEnabled: false,
   scheduleStart: '08:00', scheduleEnd: '18:00', scheduleDays: [1, 2, 3, 4, 5] as number[],
-  saveOriginal: true, outputRegions: false,
-  extraCameras: [] as ExtraCameraSource[],
+  saveOriginal: true, outputRegions: false, refImages: [] as string[], modelId: '',
 }
 
 /** 星期选项 */
@@ -140,9 +165,12 @@ const dayOptions = [
   { value: 7, label: () => t('detectRule.daySun') },
 ]
 
-/** 可选的状态列表（按摄像头过滤） */
+/** 主摄像头 ID */
+const primaryCamId = computed(() => form.value.cameras[0]?.cameraId ?? '')
+
+/** 可选的状态列表（按主摄像头过滤） */
 const availableStates = computed(() => {
-  const camId = form.value.cameraId
+  const camId = primaryCamId.value
   return stateList.value.filter(s => !s.cameraId || s.cameraId === camId)
 })
 
@@ -165,7 +193,7 @@ async function quickCreateState() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name,
-        cameraId: form.value.cameraId || '',
+        cameraId: primaryCamId.value || '',
         valueType: 'boolean',
         initialValue: 'false',
         enabled: true,
@@ -216,11 +244,11 @@ function toggleStateId(id: number) {
   else form.value.stateIds.push(id)
 }
 
-/** 当前选中摄像头对应的 ROI */
-const cameraRoiOptions = computed(() => {
-  if (!form.value.cameraId) return roiList.value
-  return roiList.value.filter(r => r.cameraId === form.value.cameraId)
-})
+/** 获取指定摄像头对应的 ROI 列表 */
+function getRoiOptionsForCamera(cameraId: string): RoiItem[] {
+  if (!cameraId) return roiList.value
+  return roiList.value.filter(r => r.cameraId === cameraId)
+}
 
 /** 加载 ROI 列表 */
 async function loadRoiList() {
@@ -290,7 +318,7 @@ const hasMore = computed(() => records.value.length < recordTotal.value)
 
 /** 添加规则 */
 async function addRule() {
-  if (!form.value.name || !form.value.cameraId || !form.value.prompt) return
+  if (!form.value.name || !form.value.cameras[0]?.cameraId || !form.value.prompt) return
   try {
     const body = { ...form.value, schedule: buildScheduleJson() }
     delete (body as Record<string, unknown>).scheduleEnabled
@@ -320,8 +348,7 @@ function startEdit(rule: DetectRule) {
   showAddForm.value = false
   form.value = {
     name: rule.name,
-    cameraId: rule.cameraId,
-    roiId: rule.roiId,
+    cameras: rule.cameras.length > 0 ? rule.cameras.map(c => ({ ...c })) : [{ cameraId: '', roiId: 0, offsetSec: 0 }],
     prompt: rule.prompt,
     intervalMs: rule.intervalMs,
     cooldownMs: rule.cooldownMs,
@@ -333,11 +360,11 @@ function startEdit(rule: DetectRule) {
     scheduleDays: [1, 2, 3, 4, 5],
     saveOriginal: rule.saveOriginal ?? true,
     outputRegions: rule.outputRegions ?? false,
-    extraCameras: rule.extraCameras ?? [],
+    refImages: rule.refImages ?? [],
+    modelId: rule.modelId ?? '',
   }
   parseScheduleJson(rule.schedule ?? '')
-  /** 有高级配置时自动展开 */
-  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions || (rule.extraCameras?.length ?? 0) > 0
+  showAdvanced.value = (rule.imageWidth > 0) || (rule.stateIds?.length > 0) || !!rule.schedule || !rule.saveOriginal || rule.outputRegions || rule.cameras.length > 1 || (rule.refImages?.length ?? 0) > 0
 }
 
 async function saveEdit() {
@@ -424,13 +451,13 @@ const aiSuggestions = ref<AiRuleSuggestion[]>([])
 const aiSuggestLoading = ref(false)
 
 async function fetchAiSuggestions() {
-  if (!form.value.cameraId) return
+  if (!primaryCamId.value) return
   aiSuggestLoading.value = true
   aiSuggestions.value = []
   const res = await authFetch('/api/ai/suggest-rules', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cameraId: form.value.cameraId }),
+    body: JSON.stringify({ cameraId: primaryCamId.value }),
   }).catch(() => null)
   if (res?.ok) {
     const data = await res.json() as { suggestions?: AiRuleSuggestion[] }
@@ -452,6 +479,48 @@ function autoGrowTextarea(e: Event) {
   const el = e.target as HTMLTextAreaElement
   el.style.height = 'auto'
   el.style.height = `${Math.max(80, el.scrollHeight)}px`
+}
+
+/** 切换摄像头源的视频片段模式 */
+function toggleClipMode(src: RuleCameraSource) {
+  if (src.videoClip) {
+    delete src.videoClip
+  } else {
+    src.videoClip = {
+      startOffsetSec: 30,
+      endOffsetSec: 5,
+      extraction: { mode: 'total', totalFrames: 5 },
+    }
+  }
+}
+
+/** 上传参考图片 */
+const refImageUploading = ref(false)
+async function uploadRefImage(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  refImageUploading.value = true
+  const formData = new FormData()
+  formData.append('image', file)
+  const res = await authFetch('/api/detect-rules/ref-images', {
+    method: 'POST',
+    body: formData,
+  }).catch(() => null)
+  if (res?.ok) {
+    const data = await res.json() as { filename: string }
+    form.value.refImages.push(data.filename)
+  }
+  refImageUploading.value = false
+  input.value = ''
+}
+
+/** 删除参考图片 */
+async function removeRefImage(idx: number) {
+  const filename = form.value.refImages[idx]
+  if (!filename) return
+  form.value.refImages.splice(idx, 1)
+  await authFetch(`/api/detect-rules/ref-images/${filename}`, { method: 'DELETE' }).catch(() => {})
 }
 
 /** 展开的记录 ID */
@@ -566,6 +635,7 @@ onMounted(() => {
   loadRecords()
   loadRoiList()
   loadStateList()
+  loadModels()
 })
 
 defineExpose({ loadRecords, addRecord, switchToHistory })
@@ -590,19 +660,44 @@ function switchToHistory() {
         <label>{{ t('detectRule.name') }}</label>
         <input v-model="form.name" :placeholder="t('detectRule.namePlaceholder')" class="input" />
       </div>
-      <div class="form-field">
+      <!-- 摄像头源列表 -->
+      <div class="cameras-section">
         <label>{{ t('detectRule.camera') }}</label>
-        <select v-model="form.cameraId" class="input">
-          <option value="" disabled>{{ t('detectRule.cameraPlaceholder') }}</option>
-          <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
-        </select>
-      </div>
-      <div class="form-field" v-if="cameraRoiOptions.length > 0">
-        <label>ROI</label>
-        <select v-model.number="form.roiId" class="input">
-          <option :value="0">{{ t('detectRule.allRegions') }}</option>
-          <option v-for="roi in cameraRoiOptions" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
-        </select>
+        <div v-for="(src, idx) in form.cameras" :key="idx" class="cam-source-item">
+          <div class="cam-row">
+            <select v-model="src.cameraId" class="input cam-select">
+              <option value="" disabled>{{ t('detectRule.cameraPlaceholder') }}</option>
+              <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+            </select>
+            <select v-if="getRoiOptionsForCamera(src.cameraId).length > 0 && !src.videoClip" v-model.number="src.roiId" class="input cam-roi-select">
+              <option :value="0">{{ t('detectRule.allRegions') }}</option>
+              <option v-for="roi in getRoiOptionsForCamera(src.cameraId)" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
+            </select>
+            <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" placeholder="秒前" title="取多少秒前的帧，0=当前帧" />
+            <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" title="切换视频片段模式">▶</button>
+            <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" title="移除">&#x2715;</button>
+          </div>
+          <!-- 视频片段配置 -->
+          <div v-if="src.videoClip" class="clip-config">
+            <div class="clip-time-row">
+              <span class="clip-label">回溯</span>
+              <input v-model.number="src.videoClip.startOffsetSec" type="number" min="1" max="300" step="1" class="input clip-num" />
+              <span class="clip-sep">~</span>
+              <input v-model.number="src.videoClip.endOffsetSec" type="number" min="0" max="300" step="1" class="input clip-num" />
+              <span class="clip-label">秒前</span>
+            </div>
+            <div class="clip-extract-row">
+              <select v-model="src.videoClip.extraction.mode" class="input clip-mode-select">
+                <option value="total">均匀抽帧</option>
+                <option value="fps">按帧率</option>
+              </select>
+              <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" placeholder="帧数" />
+              <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" placeholder="帧/秒" />
+              <span class="clip-hint">从录制文件抽帧</span>
+            </div>
+          </div>
+        </div>
+        <button class="add-extra-cam-btn" @click="form.cameras.push({ cameraId: '', roiId: 0, offsetSec: 0 })">{{ t('detectRule.addExtraCamera', '+ 添加摄像头画面') }}</button>
       </div>
       <div class="form-field">
         <label>{{ t('detectRule.prompt') }}</label>
@@ -611,7 +706,7 @@ function switchToHistory() {
       <div class="prompt-templates">
         <div class="template-chips">
           <button v-for="tpl in promptTemplates" :key="tpl.label" :class="['tpl-chip', { active: form.prompt === tpl.prompt }]" @click="applyTemplate(tpl.prompt)">{{ tpl.label }}</button>
-          <button class="tpl-chip ai-suggest-btn" @click="fetchAiSuggestions" :disabled="aiSuggestLoading || !form.cameraId" :title="!form.cameraId ? '请先选择摄像头' : 'AI 分析当前画面并建议规则'">✨ AI 建议</button>
+          <button class="tpl-chip ai-suggest-btn" @click="fetchAiSuggestions" :disabled="aiSuggestLoading || !primaryCamId" :title="!primaryCamId ? '请先选择摄像头' : 'AI 分析当前画面并建议规则'">✨ AI 建议</button>
         </div>
         <div v-if="aiSuggestLoading" class="ai-suggest-loading">AI 正在分析画面...</div>
         <div v-if="aiSuggestions.length > 0" class="ai-suggestions">
@@ -676,19 +771,27 @@ function switchToHistory() {
             </label>
           </div>
         </div>
-        <!-- 附加摄像头图片 -->
-        <div class="extra-cameras-section">
-          <label>{{ t('detectRule.extraCameras', '附加摄像头') }}</label>
-          <span class="hint-inline">{{ t('detectRule.extraCamerasHint', '额外发送其他摄像头的帧给 AI 分析') }}</span>
-          <div v-for="(src, idx) in form.extraCameras" :key="idx" class="extra-cam-row">
-            <select v-model="src.cameraId" class="input extra-cam-select">
-              <option value="" disabled>{{ t('detectRule.selectCamera', '选择摄像头') }}</option>
-              <option v-for="cam in (cameras ?? []).filter(c => c.id !== form.cameraId)" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
-            </select>
-            <input v-model.number="src.offsetSec" type="number" min="0" step="1" class="input extra-cam-offset" :placeholder="t('detectRule.offsetSec', '秒前 (0=当前)')" />
-            <button class="remove-btn" @click="form.extraCameras.splice(idx, 1)" :title="t('detectRule.remove', '移除')">&#x2715;</button>
+        <div v-if="availableModels.length > 0" class="form-field">
+          <label>AI 模型</label>
+          <select v-model="form.modelId" class="input">
+            <option value="">默认模型</option>
+            <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }} ({{ m.model }})</option>
+          </select>
+        </div>
+        <!-- 参考图片 -->
+        <div class="ref-images-section">
+          <label>参考图片</label>
+          <span class="hint-inline">随每次检测一起发送给 AI（如目标人物/物体照片）</span>
+          <div class="ref-images-grid">
+            <div v-for="(img, idx) in form.refImages" :key="img" class="ref-image-item">
+              <img :src="authUrl(`/api/detect-rules/ref-images/${img}`)" class="ref-thumb" />
+              <button class="ref-remove-btn" @click="removeRefImage(idx)" title="删除">&#x2715;</button>
+            </div>
+            <label class="ref-upload-btn" :class="{ disabled: refImageUploading }">
+              <input type="file" accept="image/*" @change="uploadRefImage" :disabled="refImageUploading" hidden />
+              {{ refImageUploading ? '上传中...' : '+ 上传' }}
+            </label>
           </div>
-          <button class="add-extra-cam-btn" @click="form.extraCameras.push({ cameraId: '', offsetSec: 0 })" :disabled="!(cameras ?? []).some(c => c.id !== form.cameraId)">{{ t('detectRule.addExtraCamera', '+ 添加摄像头') }}</button>
         </div>
         <!-- 启用时段 -->
         <div class="schedule-section">
@@ -731,18 +834,43 @@ function switchToHistory() {
               <label>{{ t('detectRule.name') }}</label>
               <input v-model="form.name" class="input" />
             </div>
-            <div class="form-field">
+            <!-- 摄像头源列表（编辑） -->
+            <div class="cameras-section">
               <label>{{ t('detectRule.camera') }}</label>
-              <select v-model="form.cameraId" class="input">
-                <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
-              </select>
-            </div>
-            <div class="form-field" v-if="cameraRoiOptions.length > 0">
-              <label>ROI</label>
-              <select v-model.number="form.roiId" class="input">
-                <option :value="0">{{ t('detectRule.allRegions') }}</option>
-                <option v-for="roi in cameraRoiOptions" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
-              </select>
+              <div v-for="(src, idx) in form.cameras" :key="idx" class="cam-source-item">
+                <div class="cam-row">
+                  <select v-model="src.cameraId" class="input cam-select">
+                    <option value="" disabled>{{ t('detectRule.cameraPlaceholder') }}</option>
+                    <option v-for="cam in (cameras ?? [])" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
+                  </select>
+                  <select v-if="getRoiOptionsForCamera(src.cameraId).length > 0 && !src.videoClip" v-model.number="src.roiId" class="input cam-roi-select">
+                    <option :value="0">{{ t('detectRule.allRegions') }}</option>
+                    <option v-for="roi in getRoiOptionsForCamera(src.cameraId)" :key="roi.id" :value="roi.id">{{ roi.name || `ROI #${roi.id}` }}</option>
+                  </select>
+                  <input v-if="!src.videoClip" v-model.number="src.offsetSec" type="number" min="0" step="1" class="input cam-offset" placeholder="秒前" title="取多少秒前的帧，0=当前帧" />
+                  <button class="clip-toggle-btn" :class="{ active: !!src.videoClip }" @click="toggleClipMode(src)" title="切换视频片段模式">▶</button>
+                  <button v-if="form.cameras.length > 1" class="remove-btn" @click="form.cameras.splice(idx, 1)" title="移除">&#x2715;</button>
+                </div>
+                <div v-if="src.videoClip" class="clip-config">
+                  <div class="clip-time-row">
+                    <span class="clip-label">回溯</span>
+                    <input v-model.number="src.videoClip.startOffsetSec" type="number" min="1" max="300" step="1" class="input clip-num" />
+                    <span class="clip-sep">~</span>
+                    <input v-model.number="src.videoClip.endOffsetSec" type="number" min="0" max="300" step="1" class="input clip-num" />
+                    <span class="clip-label">秒前</span>
+                  </div>
+                  <div class="clip-extract-row">
+                    <select v-model="src.videoClip.extraction.mode" class="input clip-mode-select">
+                      <option value="total">均匀抽帧</option>
+                      <option value="fps">按帧率</option>
+                    </select>
+                    <input v-if="src.videoClip.extraction.mode === 'total'" v-model.number="src.videoClip.extraction.totalFrames" type="number" min="1" max="20" step="1" class="input clip-num" placeholder="帧数" />
+                    <input v-else v-model.number="src.videoClip.extraction.fps" type="number" min="1" max="5" step="1" class="input clip-num" placeholder="帧/秒" />
+                    <span class="clip-hint">从录制文件抽帧</span>
+                  </div>
+                </div>
+              </div>
+              <button class="add-extra-cam-btn" @click="form.cameras.push({ cameraId: '', roiId: 0, offsetSec: 0 })">{{ t('detectRule.addExtraCamera', '+ 添加摄像头画面') }}</button>
             </div>
             <div class="form-field">
               <label>{{ t('detectRule.prompt') }}</label>
@@ -807,19 +935,27 @@ function switchToHistory() {
                   </label>
                 </div>
               </div>
-              <!-- 附加摄像头图片（编辑） -->
-              <div class="extra-cameras-section">
-                <label>{{ t('detectRule.extraCameras', '附加摄像头') }}</label>
-                <span class="hint-inline">{{ t('detectRule.extraCamerasHint', '额外发送其他摄像头的帧给 AI 分析') }}</span>
-                <div v-for="(src, idx) in form.extraCameras" :key="idx" class="extra-cam-row">
-                  <select v-model="src.cameraId" class="input extra-cam-select">
-                    <option value="" disabled>{{ t('detectRule.selectCamera', '选择摄像头') }}</option>
-                    <option v-for="cam in (cameras ?? []).filter(c => c.id !== form.cameraId)" :key="cam.id" :value="cam.id">{{ cam.name }}</option>
-                  </select>
-                  <input v-model.number="src.offsetSec" type="number" min="0" step="1" class="input extra-cam-offset" :placeholder="t('detectRule.offsetSec', '秒前 (0=当前)')" />
-                  <button class="remove-btn" @click="form.extraCameras.splice(idx, 1)" :title="t('detectRule.remove', '移除')">&#x2715;</button>
+              <div v-if="availableModels.length > 0" class="form-field">
+                <label>AI 模型</label>
+                <select v-model="form.modelId" class="input">
+                  <option value="">默认模型</option>
+                  <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name }} ({{ m.model }})</option>
+                </select>
+              </div>
+              <!-- 参考图片（编辑） -->
+              <div class="ref-images-section">
+                <label>参考图片</label>
+                <span class="hint-inline">随每次检测一起发送给 AI</span>
+                <div class="ref-images-grid">
+                  <div v-for="(img, idx) in form.refImages" :key="img" class="ref-image-item">
+                    <img :src="authUrl(`/api/detect-rules/ref-images/${img}`)" class="ref-thumb" />
+                    <button class="ref-remove-btn" @click="removeRefImage(idx)" title="删除">&#x2715;</button>
+                  </div>
+                  <label class="ref-upload-btn" :class="{ disabled: refImageUploading }">
+                    <input type="file" accept="image/*" @change="uploadRefImage" :disabled="refImageUploading" hidden />
+                    {{ refImageUploading ? '上传中...' : '+ 上传' }}
+                  </label>
                 </div>
-                <button class="add-extra-cam-btn" @click="form.extraCameras.push({ cameraId: '', offsetSec: 0 })" :disabled="!(cameras ?? []).some(c => c.id !== form.cameraId)">{{ t('detectRule.addExtraCamera', '+ 添加摄像头') }}</button>
               </div>
               <div class="schedule-section">
                 <label class="checkbox-label">
@@ -850,16 +986,21 @@ function switchToHistory() {
         <!-- 显示模式 -->
         <template v-else>
           <div class="rule-header">
-            <button class="toggle-btn" @click="toggleRule(rule)">
-              {{ rule.enabled ? '●' : '○' }}
-            </button>
+            <label class="toggle-switch" @click.prevent="toggleRule(rule)">
+              <input type="checkbox" :checked="rule.enabled" />
+              <span class="toggle-slider"></span>
+            </label>
             <span class="rule-name" :class="{ disabled: !rule.enabled }">{{ rule.name }}</span>
             <button class="edit-btn" @click="startEdit(rule)">{{ t('alert.edit') }}</button>
             <button class="delete-btn" @click="deleteRule(rule.id)">{{ t('alert.delete') }}</button>
           </div>
           <div class="rule-meta">
-            <span class="meta-tag cam">{{ cameraNameMap[rule.cameraId] ?? rule.cameraId }}</span>
-            <span v-if="rule.roiId > 0" class="meta-tag roi">ROI #{{ rule.roiId }}</span>
+            <template v-for="(cam, idx) in rule.cameras" :key="idx">
+              <span class="meta-tag cam">{{ cameraNameMap[cam.cameraId] ?? cam.cameraId }}<template v-if="cam.videoClip"> (片段 {{ cam.videoClip.startOffsetSec }}s~{{ cam.videoClip.endOffsetSec }}s)</template><template v-else-if="cam.offsetSec > 0"> (-{{ cam.offsetSec }}s)</template></span>
+              <span v-if="!cam.videoClip && cam.roiId > 0" class="meta-tag roi">ROI #{{ cam.roiId }}</span>
+            </template>
+            <span v-if="rule.refImages?.length > 0" class="meta-tag ref">📷 x{{ rule.refImages.length }}</span>
+            <span v-if="rule.modelId" class="meta-tag model">{{ availableModels.find(m => m.id === rule.modelId)?.name ?? rule.modelId }}</span>
             <span class="meta-info">{{ rule.intervalMs / 1000 }}{{ t('detectRule.secondsUnit') }} · {{ t('detectRule.cooldownLabel') }}{{ rule.cooldownMs / 1000 }}{{ t('detectRule.secondsUnit') }}</span>
             <template v-if="rule.stateIds?.length > 0">
               <span v-for="sid in rule.stateIds" :key="sid" class="meta-tag state">{{ stateNameMap[sid] ?? `#${sid}` }}</span>
@@ -1097,13 +1238,48 @@ select.input {
   gap: 6px;
 }
 
-.toggle-btn {
-  background: none;
-  border: none;
-  font-size: 12px;
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
   cursor: pointer;
-  padding: 0;
-  color: #4ECDC4;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #333;
+  border-radius: 9px;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  background: #888;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(78, 205, 196, 0.3);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(14px);
+  background: #4ECDC4;
 }
 
 .rule-name {
@@ -1674,30 +1850,135 @@ select.input {
   margin-top: 2px;
 }
 
-/** 附加摄像头 */
-.extra-cameras-section {
+/** 摄像头源列表 */
+.cameras-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.cameras-section > label {
+  font-size: 12px;
+  color: #888;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+.cam-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: 80px;
+}
+.cam-select {
+  flex: 1;
+  min-width: 0;
+}
+.cam-roi-select {
+  width: 100px;
+}
+.cam-offset {
+  width: 60px;
+}
+.cam-source-item {
+  margin-bottom: 4px;
+}
+.clip-toggle-btn {
+  background: none;
+  border: 1px solid #3a3a5a;
+  border-radius: 3px;
+  color: #666;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+.clip-toggle-btn:hover { border-color: #3498db; color: #3498db; }
+.clip-toggle-btn.active { border-color: #3498db; background: rgba(52, 152, 219, 0.15); color: #3498db; }
+.clip-config {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 80px;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  background: rgba(52, 152, 219, 0.06);
+  border: 1px solid rgba(52, 152, 219, 0.2);
+  border-radius: 4px;
+}
+.clip-time-row, .clip-extract-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.clip-label { font-size: 11px; color: #888; }
+.clip-sep { font-size: 11px; color: #555; }
+.clip-hint { font-size: 10px; color: #555; font-style: italic; }
+.clip-num { width: 50px; }
+.clip-mode-select { width: 90px; }
+.meta-tag.ref { color: #f0ad4e; border-color: #f0ad4e; }
+.meta-tag.model { color: #5bc0de; border-color: #5bc0de; }
+/** 参考图片 */
+.ref-images-section {
   margin-bottom: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.extra-cameras-section > label {
+.ref-images-section > label {
   font-size: 11px;
   color: #aaa;
   font-weight: 600;
 }
-.extra-cam-row {
+.ref-images-grid {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ref-image-item {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+.ref-thumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #2a2a4a;
+}
+.ref-remove-btn {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #e74c3c;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  font-size: 10px;
+  width: 16px;
+  height: 16px;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
-.extra-cam-select {
-  flex: 1;
-  min-width: 0;
+.ref-upload-btn {
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #3a3a5a;
+  border-radius: 4px;
+  color: #888;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.extra-cam-offset {
-  width: 80px;
-}
+.ref-upload-btn:hover { border-color: #4ECDC4; color: #4ECDC4; }
+.ref-upload-btn.disabled { opacity: 0.5; cursor: not-allowed; }
 .remove-btn {
   background: none;
   border: none;

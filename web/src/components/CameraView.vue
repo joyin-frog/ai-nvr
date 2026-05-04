@@ -42,8 +42,6 @@ const props = defineProps<{
   recording?: boolean
   /** 录像开始时间戳 */
   recordingStart?: number
-  /** 是否显示检测框叠加层 */
-  showBoxes?: boolean
   /** 追踪标签映射：trackId -> 自定义名称 */
   trackLabels?: Record<number, string>
   /** 是否双流模式 */
@@ -327,7 +325,7 @@ function drawOverlayOnce() {
   /** 动态 OSD（时钟 + FPS/延迟/AI指标 + 检测摘要，始终显示） */
   drawDynamicOSD(ctx, cssW, cssH)
 
-  if (hasFrame.value && props.showBoxes) {
+  if (hasFrame.value) {
     drawDynamicOverlay(ctx, cssW, cssH)
   }
 
@@ -1051,7 +1049,7 @@ function drawDynamicOSD(ctx: CanvasRenderingContext2D, width: number, height: nu
 
   /** 右上角：检测目标摘要（如 "张三 · 李四 +1 · car"） */
   const summary = detectionSummary.value
-  if (summary && props.showBoxes !== false) {
+  if (summary) {
     ctx.font = 'bold 11px monospace'
     ctx.textBaseline = 'top'
     const pad = 5
@@ -1250,11 +1248,6 @@ function drawHeatmapCache(width: number, height: number): OffscreenCanvas | null
 /** Canvas overlay 绘制检测框 + OSD */
 function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height: number) {
   if (!hasFrame.value) {
-    trackTrails.clear()
-    return
-  }
-
-  if (!props.showBoxes) {
     trackTrails.clear()
     return
   }
@@ -2364,7 +2357,7 @@ onUnmounted(() => {
       <span v-if="recording" class="rec-indicator" :title="`REC ${recordingDuration}`">
         <span class="rec-dot" />{{ recordingDuration }}
       </span>
-      <span v-if="showBoxes && online && detectCount > 0" class="detection-count">
+      <span v-if="online && detectCount > 0" class="detection-count">
         {{ detectCount }}
       </span>
       <span v-if="zoomLevel > 1" class="zoom-badge" @click="resetZoom" :title="t('camera.resetZoom')">{{ zoomLevel.toFixed(1) }}x</span>
@@ -2496,12 +2489,12 @@ onUnmounted(() => {
       </div>
 
       <!-- 实时目标计数 -->
-      <div v-if="online && hasFrame && showBoxes && detectCount > 0" class="detect-count-badge">
+      <div v-if="online && hasFrame && detectCount > 0" class="detect-count-badge">
         {{ detectionSummary }}
       </div>
     </div>
 
-    <div class="camera-footer" v-if="showBoxes && detectCount > 0">
+    <div class="camera-footer" v-if="detectCount > 0">
       <span class="detection-summary">{{ detectionSummary }}</span>
     </div>
 

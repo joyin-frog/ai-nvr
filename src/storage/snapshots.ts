@@ -1,4 +1,3 @@
-import { type EventBus } from "@/event-bus";
 import { type Detection } from "@/ai/types";
 import { type StorageFs } from "@/storage/storage-fs";
 import { join } from "node:path";
@@ -40,26 +39,18 @@ export class SnapshotStorage {
 
   /**
    * @param storageFs 存储文件系统
-   * @param eventBus 事件总线
    * @param category SQLite 索引的 category 名称
    * @param dirName 磁盘上的子目录名（默认与 category 相同）
    */
-  constructor(storageFs: StorageFs, private eventBus: EventBus, category: string = "detection-snapshots", dirName?: string) {
+  constructor(storageFs: StorageFs, category: string = "detection-snapshots", dirName?: string) {
     this.storageFs = storageFs;
     this.category = category;
     this.dirName = dirName ?? category;
   }
 
-  /** 启动：监听 detect 事件保存原始帧和元数据 */
+  /** 启动：初始化存储目录 */
   async start(): Promise<void> {
     await this.storageFs.ensureDir(`${this.dirName}/.keep`);
-
-    this.eventBus.on("detect", ({ cameraId, timestamp, frameImage, detections }) => {
-      if (!detections || detections.length === 0) return;
-      this.saveSnapshot(cameraId, timestamp, frameImage, detections).catch(err => {
-        console.error(`[Snapshot] 保存失败 [${cameraId}]:`, err);
-      });
-    });
     console.log("[Snapshot] 快照存储已启动");
   }
 

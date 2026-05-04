@@ -2,6 +2,7 @@ import { type EventBus } from "@/event-bus";
 import { type RuntimeConfig } from "@/runtime-config";
 import { aiMetrics } from "./metrics";
 import { type EventStorage } from "@/storage/events";
+import { resolveModel } from "./multimodal-analyzer";
 import sharp from "sharp";
 
 /** 摄像头信息接口 */
@@ -98,8 +99,10 @@ export class AiPatrolScanner {
   start(): void {
     if (this.started) return;
     this.started = true;
-    const llmConfig = this.runtimeConfig.get().ai.llm;
-    if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) return;
+    const aiCfg = this.runtimeConfig.get().ai;
+    const llmConfig = aiCfg.llm;
+    const resolved = resolveModel(aiCfg.models, aiCfg.llm);
+    if (!llmConfig.enabled || !resolved.apiUrl || !resolved.model) return;
 
     this.timer = setInterval(() => this.patrol(), AiPatrolScanner.PATROL_INTERVAL);
     console.log(`[AiPatrol] AI 主动巡逻已启动 (间隔 ${AiPatrolScanner.PATROL_INTERVAL / 1000}s)`);
@@ -117,8 +120,10 @@ export class AiPatrolScanner {
 
   /** 手动触发一轮巡逻（前端按钮触发） */
   async triggerNow(): Promise<{ triggered: boolean; message: string }> {
-    const llmConfig = this.runtimeConfig.get().ai.llm;
-    if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) {
+    const aiCfg = this.runtimeConfig.get().ai;
+    const llmConfig = aiCfg.llm;
+    const resolved = resolveModel(aiCfg.models, aiCfg.llm);
+    if (!llmConfig.enabled || !resolved.apiUrl || !resolved.model) {
       return { triggered: false, message: "LLM not enabled" };
     }
     if (this.patrolling) {
@@ -139,7 +144,9 @@ export class AiPatrolScanner {
       return;
     }
 
-    const llmConfig = this.runtimeConfig.get().ai.llm;
+    const aiCfg = this.runtimeConfig.get().ai;
+    const llmConfig = aiCfg.llm;
+    const resolved = resolveModel(aiCfg.models, aiCfg.llm);
 
     /** 依次扫描每个摄像头（受并发限制） */
     for (const cam of cameras) {
@@ -152,7 +159,7 @@ export class AiPatrolScanner {
       if (Date.now() - frameInfo.timestamp > 30_000) continue;
 
       await this.acquireSlot();
-      this.analyzeCamera(cam, frameInfo.data, frameInfo.timestamp, llmConfig)
+      this.analyzeCamera(cam, frameInfo.data, frameInfo.timestamp, { ...resolved, imageWidth: llmConfig.imageWidth, contextIntervalMs: llmConfig.contextIntervalMs })
         .catch(err => {
           console.warn(`[AiPatrol] ${cam.name} 分析失败:`, err instanceof Error ? err.message : String(err));
         })

@@ -18,10 +18,48 @@ export interface LlmConfig {
   imageWidth: number;
   /** 系统提示词 */
   systemPrompt: string;
-  /** 分析触发条件：哪些事件触发 LLM 分析 */
-  triggers: string[];
   /** 检测时附带上文帧的间隔（ms，0=仅当前帧，如 3000=同时发送前 3s/6s/9s 的帧） */
   contextIntervalMs: number;
+}
+
+/** 单个 LLM 模型配置（纯连接信息） */
+export interface LlmModelConfig {
+  /** 模型唯一 ID */
+  id: string;
+  /** 显示名称 */
+  name: string;
+  /** LLM API 端点 URL（OpenAI 兼容格式） */
+  apiUrl: string;
+  /** 模型名称 */
+  model: string;
+  /** 生成最大 token 数 */
+  maxTokens: number;
+}
+
+/** 已解析的模型连接信息（用于 VLM 调用） */
+export interface ResolvedModel {
+  apiUrl: string;
+  model: string;
+  maxTokens: number;
+}
+
+/** 根据 modelId 从 models 列表中解析模型配置，找不到时 fallback 到 llm 默认值 */
+export function resolveModel(
+  models: LlmModelConfig[],
+  llm: LlmConfig,
+  modelId?: string,
+): ResolvedModel {
+  if (modelId) {
+    const found = models.find(m => m.id === modelId);
+    if (found) return { apiUrl: found.apiUrl, model: found.model, maxTokens: found.maxTokens };
+  }
+  /** fallback: models[0] 或 llm 默认值 */
+  const primary = models[0];
+  return {
+    apiUrl: primary?.apiUrl || llm.apiUrl,
+    model: primary?.model || llm.model,
+    maxTokens: primary?.maxTokens || llm.maxTokens,
+  };
 }
 
 /** LLM 场景分析结果 */
@@ -44,7 +82,6 @@ const DEFAULT_SYSTEM_PROMPT = `Describe this surveillance scene. Objects, people
 /** 多帧场景分析 prompt（精简版） */
 const MULTI_FRAME_SYSTEM_PROMPT = `Multiple frames from same camera. First=latest, rest=older. Describe current scene. Note any movement or changes. Max 2 sentences.`;
 
-const DEFAULT_TRIGGERS = ["track:appeared", "track:enter-zone", "track:loiter"];
 
 /**
  * 多模态 LLM 分析器
@@ -110,8 +147,7 @@ export class MultimodalAnalyzer {
       || this.config.maxTokens !== config.maxTokens
       || this.config.interval !== config.interval
       || this.config.imageWidth !== config.imageWidth
-      || this.config.systemPrompt !== config.systemPrompt
-      || JSON.stringify(this.config.triggers) !== JSON.stringify(config.triggers);
+      || this.config.systemPrompt !== config.systemPrompt;
     this.config = config;
     if (changed && this.started) {
       this.stop();
@@ -128,26 +164,23 @@ export class MultimodalAnalyzer {
     this.started = true;
 
     /** 缓存检测帧（用于后续 LLM 分析时获取最新图像） */
-    this.unsubFrame = this.eventBus.on("detect", (payload) => {
+    this.unsubFrame = this.eventBus.on("detect:frame", (payload) => {
       this.latestFrames.set(payload.cameraId, {
-        data: payload.frameImage,
+        data: payload.data,
         timestamp: payload.timestamp,
       });
     });
 
-    /** 订阅配置的触发事件 */
-    const triggers = this.config.triggers.length > 0 ? this.config.triggers : DEFAULT_TRIGGERS;
-    for (const trigger of triggers) {
-      const unsub = this.eventBus.on(trigger as keyof import("@/event-bus").EventPayloads, (payload) => {
-        const camId = (payload as Record<string, unknown>).cameraId as string;
-        const ts = (payload as Record<string, unknown>).timestamp as number | undefined;
-        if (!camId) return;
-        this.scheduleAnalysis(camId, trigger, ts ?? Date.now());
-      });
-      this.unsubs.push(unsub);
-    }
+    /** 订阅检测规则触发的事件 */
+    const unsubRule = this.eventBus.on("detect:rule" as keyof import("@/event-bus").EventPayloads, (payload) => {
+      const camId = (payload as Record<string, unknown>).cameraId as string;
+      const ts = (payload as Record<string, unknown>).timestamp as number | undefined;
+      if (!camId) return;
+      this.scheduleAnalysis(camId, "detect:rule", ts ?? Date.now());
+    });
+    this.unsubs.push(unsubRule);
 
-    console.log(`[MultimodalAnalyzer] 已启动 (model=${this.config.model}, triggers=[${triggers.join(",")}], interval=${this.config.interval}ms)`);
+    console.log(`[MultimodalAnalyzer] 已启动 (model=${this.config.model}, interval=${this.config.interval}ms)`);
   }
 
   /** 停止分析器 */

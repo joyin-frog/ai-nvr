@@ -2,12 +2,30 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-/** 附加摄像头图片配置 */
-export interface ExtraCameraSource {
+/** 规则摄像头源配置 */
+export interface RuleCameraSource {
   /** 摄像头 ID */
   cameraId: string;
+  /** 裁剪区域 ID（0=不裁剪，发送完整画面） */
+  roiId: number;
   /** 取多少秒前的帧（0=当前帧） */
   offsetSec: number;
+  /** 视频片段配置（存在时从录制文件抽帧，而非取单帧） */
+  videoClip?: {
+    /** 开始偏移秒数（正值=过去，如 30=触发前30秒） */
+    startOffsetSec: number;
+    /** 结束偏移秒数（如 5=触发前5秒） */
+    endOffsetSec: number;
+    /** 抽帧配置 */
+    extraction: {
+      /** 模式：fps=按帧率抽帧，total=均匀抽指定总数 */
+      mode: "fps" | "total";
+      /** fps 模式时每秒帧数（1-5） */
+      fps?: number;
+      /** total 模式时总帧数（1-20） */
+      totalFrames?: number;
+    };
+  };
 }
 
 /** 检测规则 */
@@ -15,10 +33,8 @@ export interface DetectRule {
   id: number;
   /** 规则名称 */
   name: string;
-  /** 主摄像头 ID（必选） */
-  cameraId: string;
-  /** ROI 区域 ID（0=不限制） */
-  roiId: number;
+  /** 摄像头列表（至少一个，第一个为主摄像头，决定检测触发时机） */
+  cameras: RuleCameraSource[];
   /** 用户提示词 */
   prompt: string;
   /** 检测间隔（毫秒） */
@@ -35,10 +51,32 @@ export interface DetectRule {
   schedule: string;
   /** 匹配时是否保存原图 */
   saveOriginal: boolean;
+  /** 指定使用的模型 ID（空字符串=使用默认模型） */
+  modelId: string;
   /** 是否输出目标区域坐标 */
   outputRegions: boolean;
-  /** 附加摄像头图片源（额外发送给 VLM 的其他摄像头帧） */
-  extraCameras: ExtraCameraSource[];
+  /** 参考图片路径列表（存储在 dataDir/ref-images/ 下） */
+  refImages: string[];
+}
+
+/** 数据库原始行类型（含 JSON 列） */
+interface DbRow {
+  id: number;
+  cameraId: string;
+  roiId: number;
+  prompt: string;
+  intervalMs: number;
+  cooldownMs: number;
+  enabled: number;
+  imageWidth: number;
+  stateIdsJson: string;
+  schedule: string;
+  saveOriginal: number;
+  outputRegions: number;
+  camerasJson: string;
+  name: string;
+  refImagesJson: string;
+  modelId: string;
 }
 
 /** 检测规则匹配记录 */
@@ -120,7 +158,7 @@ export class DetectRuleStorage {
         interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
         image_width as imageWidth, state_ids as stateIdsJson,
         schedule, save_original as saveOriginal, output_regions as outputRegions,
-        extra_cameras as extraCamerasJson
+        cameras_json as camerasJson, ref_images as refImagesJson, model_id as modelId
       FROM detect_rules WHERE enabled = 1`
     );
   }
@@ -146,8 +184,14 @@ export class DetectRuleStorage {
     if (!columns.has("output_regions")) {
       this.db.run("ALTER TABLE detect_rules ADD COLUMN output_regions INTEGER NOT NULL DEFAULT 0");
     }
-    if (!columns.has("extra_cameras")) {
-      this.db.run("ALTER TABLE detect_rules ADD COLUMN extra_cameras TEXT NOT NULL DEFAULT '[]'");
+    if (!columns.has("cameras_json")) {
+      this.db.run("ALTER TABLE detect_rules ADD COLUMN cameras_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!columns.has("ref_images")) {
+      this.db.run("ALTER TABLE detect_rules ADD COLUMN ref_images TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (!columns.has("model_id")) {
+      this.db.run("ALTER TABLE detect_rules ADD COLUMN model_id TEXT NOT NULL DEFAULT ''");
     }
   }
 
@@ -158,42 +202,43 @@ export class DetectRuleStorage {
         interval_ms as intervalMs, cooldown_ms as cooldownMs, enabled,
         image_width as imageWidth, state_ids as stateIdsJson,
         schedule, save_original as saveOriginal, output_regions as outputRegions,
-        extra_cameras as extraCamerasJson
+        cameras_json as camerasJson, ref_images as refImagesJson, model_id as modelId
       FROM detect_rules ORDER BY id`
-    ).all() as Array<DetectRule & { stateIdsJson: string; extraCamerasJson: string }>).map(this.mapRule);
+    ).all() as Array<DbRow>).map(this.mapRule);
   }
 
   /** 获取启用的规则（预编译查询） */
   getEnabledRules(): DetectRule[] {
-    return (this.stmtGetEnabledRules.all() as Array<DetectRule & { stateIdsJson: string; extraCamerasJson: string }>).map(this.mapRule);
+    return (this.stmtGetEnabledRules.all() as Array<DbRow>).map(this.mapRule);
   }
 
   /** 添加规则 */
   addRule(rule: Omit<DetectRule, "id" | "enabled">): number {
     const stateIdsJson = JSON.stringify(rule.stateIds ?? []);
-    const extraCamerasJson = JSON.stringify(rule.extraCameras ?? []);
+    const camerasJson = JSON.stringify(rule.cameras ?? []);
+    const refImagesJson = JSON.stringify(rule.refImages ?? []);
+    /** 兼容旧列：取第一个摄像头作为主摄像头 */
+    const primaryCam = rule.cameras[0];
     const row = this.db.query(
-      `INSERT INTO detect_rules (name, camera_id, roi_id, prompt, interval_ms, cooldown_ms, enabled, image_width, state_ids, schedule, save_original, output_regions, extra_cameras)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO detect_rules (name, camera_id, roi_id, prompt, interval_ms, cooldown_ms, enabled, image_width, state_ids, schedule, save_original, output_regions, cameras_json, ref_images)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     ).get(
-      rule.name, rule.cameraId, rule.roiId ?? 0, rule.prompt,
+      rule.name, primaryCam?.cameraId ?? "", primaryCam?.roiId ?? 0, rule.prompt,
       rule.intervalMs, rule.cooldownMs,
       rule.imageWidth ?? 0, stateIdsJson, rule.schedule ?? "",
       rule.saveOriginal !== false ? 1 : 0,
       rule.outputRegions ? 1 : 0,
-      extraCamerasJson,
+      camerasJson, refImagesJson,
     );
     return (row as { id: number }).id;
   }
 
   /** 更新规则 */
-  updateRule(id: number, updates: Partial<Pick<DetectRule, "name" | "cameraId" | "roiId" | "prompt" | "intervalMs" | "cooldownMs" | "enabled" | "imageWidth" | "stateIds" | "schedule" | "saveOriginal" | "outputRegions" | "extraCameras">>): boolean {
+  updateRule(id: number, updates: Partial<Omit<DetectRule, "id">>): boolean {
     const sets: string[] = [];
     const params: (string | number)[] = [];
 
     if (updates.name !== undefined) { sets.push("name = ?"); params.push(updates.name); }
-    if (updates.cameraId !== undefined) { sets.push("camera_id = ?"); params.push(updates.cameraId); }
-    if (updates.roiId !== undefined) { sets.push("roi_id = ?"); params.push(updates.roiId); }
     if (updates.prompt !== undefined) { sets.push("prompt = ?"); params.push(updates.prompt); }
     if (updates.intervalMs !== undefined) { sets.push("interval_ms = ?"); params.push(updates.intervalMs); }
     if (updates.cooldownMs !== undefined) { sets.push("cooldown_ms = ?"); params.push(updates.cooldownMs); }
@@ -203,7 +248,20 @@ export class DetectRuleStorage {
     if (updates.schedule !== undefined) { sets.push("schedule = ?"); params.push(updates.schedule); }
     if (updates.saveOriginal !== undefined) { sets.push("save_original = ?"); params.push(updates.saveOriginal ? 1 : 0); }
     if (updates.outputRegions !== undefined) { sets.push("output_regions = ?"); params.push(updates.outputRegions ? 1 : 0); }
-    if (updates.extraCameras !== undefined) { sets.push("extra_cameras = ?"); params.push(JSON.stringify(updates.extraCameras)); }
+    if (updates.refImages !== undefined) { sets.push("ref_images = ?"); params.push(JSON.stringify(updates.refImages)); }
+    if (updates.modelId !== undefined) { sets.push("model_id = ?"); params.push(updates.modelId); }
+    if (updates.cameras !== undefined) {
+      sets.push("cameras_json = ?");
+      params.push(JSON.stringify(updates.cameras));
+      /** 兼容旧列 */
+      const primary = updates.cameras[0];
+      if (primary) {
+        sets.push("camera_id = ?");
+        params.push(primary.cameraId);
+        sets.push("roi_id = ?");
+        params.push(primary.roiId ?? 0);
+      }
+    }
 
     if (sets.length === 0) return false;
     params.push(id);
@@ -281,23 +339,39 @@ export class DetectRuleStorage {
     return count;
   }
 
-  /** 将数据库行映射为 DetectRule（解析 JSON 字段） */
-  private mapRule(row: DetectRule & { stateIdsJson: string; extraCamerasJson?: string }): DetectRule {
-    const { stateIdsJson, extraCamerasJson, ...rest } = row;
+  /** 将数据库行映射为 DetectRule（解析 JSON 字段，兼容旧数据） */
+  private mapRule(row: DbRow): DetectRule {
     let stateIds: number[] = [];
-    try {
-      stateIds = JSON.parse(stateIdsJson);
-    } catch { /* 使用默认空数组 */ }
-    let extraCameras: ExtraCameraSource[] = [];
-    if (extraCamerasJson) {
-      try { extraCameras = JSON.parse(extraCamerasJson); } catch { /* 空数组 */ }
+    try { stateIds = JSON.parse(row.stateIdsJson); } catch { /* 空数组 */ }
+
+    /** 解析 cameras 列表 */
+    let cameras: RuleCameraSource[] = [];
+    if (row.camerasJson) {
+      try { cameras = JSON.parse(row.camerasJson); } catch { /* 空数组 */ }
     }
+    /** 兼容旧数据：cameras_json 为空时从旧列构建 */
+    if (cameras.length === 0 && row.cameraId) {
+      cameras = [{ cameraId: row.cameraId, roiId: row.roiId ?? 0, offsetSec: 0 }];
+    }
+
+    let refImages: string[] = [];
+    try { refImages = JSON.parse(row.refImagesJson ?? "[]"); } catch { /* 空数组 */ }
+
     return {
-      ...rest,
+      id: row.id,
+      name: row.name,
+      cameras,
+      prompt: row.prompt,
+      intervalMs: row.intervalMs,
+      cooldownMs: row.cooldownMs,
+      enabled: !!row.enabled,
+      imageWidth: row.imageWidth,
       stateIds,
-      saveOriginal: !!rest.saveOriginal,
-      outputRegions: !!rest.outputRegions,
-      extraCameras,
+      schedule: row.schedule,
+      saveOriginal: !!row.saveOriginal,
+      outputRegions: !!row.outputRegions,
+      refImages,
+      modelId: row.modelId ?? "",
     };
   }
 

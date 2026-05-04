@@ -2,6 +2,7 @@ import { type EventBus } from "@/event-bus";
 import { type EventStorage } from "@/storage/events";
 import { type RuntimeConfig } from "@/runtime-config";
 import { aiMetrics } from "./metrics";
+import { resolveModel } from "./multimodal-analyzer";
 
 /** 录像 AI 摘要结果 */
 export interface RecordingSummary {
@@ -52,8 +53,9 @@ export class RecordingSummarizer {
     const key = `${cameraId}:${filename}`;
     if (this.generating.has(key)) return;
 
-    const llmConfig = this.runtimeConfig.get().ai.llm;
-    if (!llmConfig.enabled || !llmConfig.apiUrl || !llmConfig.model) return;
+    const aiCfg = this.runtimeConfig.get().ai;
+    const resolved = resolveModel(aiCfg.models, aiCfg.llm);
+    if (!aiCfg.llm.enabled || !resolved.apiUrl || !resolved.model) return;
 
     /** 查询录像期间的事件 */
     const events = this.eventStorage.query({
@@ -90,7 +92,7 @@ export class RecordingSummarizer {
       const systemPrompt = `Summarize this surveillance recording. Max 2 sentences. Be factual. ${langInstruction}`;
 
       const body = {
-        model: llmConfig.model,
+        model: resolved.model,
         messages: [
           { role: "system" as const, content: systemPrompt },
           {
@@ -104,9 +106,9 @@ export class RecordingSummarizer {
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
-      const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
-        ? llmConfig.apiUrl
-        : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+      const apiUrl = resolved.apiUrl.endsWith("/chat/completions")
+        ? resolved.apiUrl
+        : `${resolved.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -25,7 +25,6 @@ export class StorageCleaner {
     private runtimeConfig: RuntimeConfig,
     private eventStorage: EventStorage,
     private detectRuleStorage: DetectRuleStorage,
-    private snapshotStorage: SnapshotStorage,
     private thumbnailGenerator: ThumbnailGenerator,
     private exporter: RecordingExporter,
     private diskUsage: DiskUsage,
@@ -101,8 +100,6 @@ export class StorageCleaner {
     const alertsCutoff = now - alertsDays * 86_400_000;
     report.alerts = this.detectRuleStorage.purge(alertsCutoff);
 
-    /** 清理检测快照 */
-    report.snapshots = await this.snapshotStorage.purge(snapshotsDays);
 
     /** 清理告警快照（复用快照保留天数配置） */
     if (this.alertSnapshotStorage) {

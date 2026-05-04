@@ -2,6 +2,7 @@ import { type EventBus } from "@/event-bus";
 import { type EventStorage } from "@/storage/events";
 import { type RuntimeConfig } from "@/runtime-config";
 import { aiMetrics } from "./metrics";
+import { resolveModel } from "./multimodal-analyzer";
 
 /** AI 事件摘要配置 */
 export interface EventSummarizerConfig {
@@ -96,7 +97,8 @@ export class EventSummarizer {
     const config = this.getConfig();
     if (!config.enabled) return;
 
-    const llmConfig = this.runtimeConfig.get().ai.llm;
+    const aiCfg = this.runtimeConfig.get().ai;
+    const resolved = resolveModel(aiCfg.models, aiCfg.llm);
     const now = Date.now();
     const from = now - config.windowMs;
 
@@ -128,7 +130,7 @@ export class EventSummarizer {
       const systemPrompt = DEFAULT_SUMMARY_PROMPT + langInstruction;
 
       const body = {
-        model: llmConfig.model,
+        model: resolved.model,
         messages: [
           { role: "system" as const, content: systemPrompt },
           {
@@ -142,9 +144,9 @@ export class EventSummarizer {
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
-      const apiUrl = llmConfig.apiUrl.endsWith("/chat/completions")
-        ? llmConfig.apiUrl
-        : `${llmConfig.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
+      const apiUrl = resolved.apiUrl.endsWith("/chat/completions")
+        ? resolved.apiUrl
+        : `${resolved.apiUrl.replace(/\/$/, "")}/v1/chat/completions`;
 
       const response = await fetch(apiUrl, {
         method: "POST",
