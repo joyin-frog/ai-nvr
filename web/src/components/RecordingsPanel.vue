@@ -2305,25 +2305,6 @@ defineExpose({ loadRecordings, playAtTime })
   background: #3a3a5a;
 }
 
-.refresh-btn {
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.refresh-btn:hover {
-  background: #3a3a5a;
-}
-
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .sort-btn {
   background: #2a2a4a;
   color: #4ECDC4;

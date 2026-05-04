@@ -62,7 +62,7 @@ body {
 }
 
 .refresh-btn:hover { background: #3a3a5a; }
-.refresh-btn:disabled { opacity: 0.5; }
+.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .add-btn {
   background: #4ECDC4;

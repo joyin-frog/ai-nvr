@@ -101,7 +101,10 @@ export class FramePrep {
     if (obs.refImages.length > 0 && this.refImagesDir) {
       for (const imgName of obs.refImages) {
         const imgPath = join(this.refImagesDir, imgName);
-        const imgData = await readFile(imgPath).catch(() => null);
+        const imgData = await readFile(imgPath).catch((e) => {
+          console.warn(`[FramePrep] 参考图片读取失败: ${imgPath}`, e);
+          return null;
+        });
         if (imgData) {
           const refUrl = await resizeImage(imgData);
           userContent.push({ type: "text", text: "[Reference image]" });

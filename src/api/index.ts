@@ -1836,11 +1836,15 @@ Be specific and factual. ${langInstruction}`;
           const obj = body as Record<string, unknown>;
           const name = obj.name as string | undefined;
           if (!name) return new Response("Missing name", { status: 400 });
+          const valueType = obj.valueType as string | undefined;
+          if (valueType && !["boolean", "string", "number"].includes(valueType)) {
+            return new Response("Invalid valueType", { status: 400 });
+          }
           const id = signalStore.addSignal({
             name,
             description: (obj.description as string) ?? "",
             cameraId: (obj.cameraId as string) ?? "",
-            valueType: (obj.valueType as "boolean" | "string" | "number") ?? "boolean",
+            valueType: (valueType as "boolean" | "string" | "number") ?? "boolean",
             initialValue: (obj.initialValue as string) ?? "",
             notifyOnChange: (obj.notifyOnChange as boolean) ?? false,
             enabled: (obj.enabled as boolean) ?? true,
@@ -1855,7 +1859,15 @@ Be specific and factual. ${langInstruction}`;
         const stateId = Number(signalMatch[1]!);
         return req.json().then((body: unknown) => {
           const obj = body as Record<string, unknown>;
-          signalStore.updateSignal(stateId, obj as Partial<Pick<Signal, "name" | "description" | "cameraId" | "valueType" | "initialValue" | "notifyOnChange" | "enabled">>);
+          /** 白名单过滤，防止客户端注入非法字段 */
+          const updates: Record<string, unknown> = {};
+          for (const key of ["name", "description", "cameraId", "valueType", "initialValue", "notifyOnChange", "enabled"] as const) {
+            if (obj[key] !== undefined) updates[key] = obj[key];
+          }
+          if (updates.valueType !== undefined && !["boolean", "string", "number"].includes(updates.valueType as string)) {
+            return new Response("Invalid valueType", { status: 400 });
+          }
+          signalStore.updateSignal(stateId, updates as Partial<Pick<Signal, "name" | "description" | "cameraId" | "valueType" | "initialValue" | "notifyOnChange" | "enabled">>);
           return Response.json({ ok: true });
         }).catch(() => new Response("Invalid JSON", { status: 400 }));
       }

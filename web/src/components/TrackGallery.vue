@@ -865,19 +865,6 @@ defineExpose({ loadTracks, selectTrack })
 
 .label-filter:focus { border-color: #4ECDC4; }
 
-.refresh-btn {
-  background: #2a2a4a;
-  color: #e0e0e0;
-  border: none;
-  border-radius: 3px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.refresh-btn:hover { background: #3a3a5a; }
-.refresh-btn:disabled { opacity: 0.5; }
-
 .unnamed-filter-btn {
   background: #2a2a4a;
   color: #FFC107;
@@ -954,12 +941,6 @@ defineExpose({ loadTracks, selectTrack })
   100% { box-shadow: none; }
 }
 
-.empty {
-  color: #555;
-  text-align: center;
-  padding: 24px;
-  font-size: 13px;
-}
 
 .track-grid {
   display: grid;
