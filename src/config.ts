@@ -1,6 +1,6 @@
-import { readFileSync, watchFile } from "node:fs";
+import { existsSync, readFileSync, watchFile } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import yaml from "js-yaml";
 import { type AiConfig } from "@/ai/types";
 import { type ClipConfig } from "@/ai/clip-service";
@@ -16,6 +16,35 @@ function withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
     resolve_();
     return result;
   });
+}
+
+function getHomeDir(): string | undefined {
+  return process.env.HOME
+    ?? process.env.USERPROFILE
+    ?? (process.env.HOMEDRIVE && process.env.HOMEPATH
+      ? `${process.env.HOMEDRIVE}${process.env.HOMEPATH}`
+      : undefined);
+}
+
+function expandHome(path: string): string {
+  if (path === "~" || path.startsWith("~/") || path.startsWith("~\\")) {
+    const home = getHomeDir();
+    if (!home) return path;
+    return resolve(home, path.slice(2));
+  }
+  return path;
+}
+
+function resolveExecutablePath(path: string): string {
+  const expanded = expandHome(path);
+  const resolved = isAbsolute(expanded) || expanded.includes("/") || expanded.includes("\\")
+    ? resolve(expanded)
+    : expanded;
+
+  if (process.platform === "win32" && !resolved.toLowerCase().endsWith(".exe") && existsSync(`${resolved}.exe`)) {
+    return `${resolved}.exe`;
+  }
+  return resolved;
 }
 
 /** RTSP 流地址来源（直接连摄像机） */
@@ -147,9 +176,10 @@ export function loadConfig(configPath?: string): AppConfig {
 
   const camerasNode = doc.cameras as Record<string, Record<string, unknown>>;
 
-  const ffmpegPath = (doc.ffmpeg_path as string)
-    ? resolve((doc.ffmpeg_path as string).replace(/^~/, process.env.HOME!))
-    : resolve(process.env.HOME!, "tools/ffmpeg/bin/ffmpeg");
+  const defaultFfmpegPath = getHomeDir()
+    ? resolve(getHomeDir()!, "tools/ffmpeg/bin/ffmpeg")
+    : "ffmpeg";
+  const ffmpegPath = resolveExecutablePath((doc.ffmpeg_path as string) || defaultFfmpegPath);
 
   const cameras: CameraConfig[] = [];
   for (const [id, cam] of Object.entries(camerasNode)) {

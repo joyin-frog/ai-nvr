@@ -186,7 +186,15 @@ export class EventStorage {
    */
   countByDetectionLabel(options: { since?: number; until?: number } = {}): Array<{ label: string; count: number }> {
     const { conditions, params } = this.buildConditions({ ...options, type: "detect" });
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const scopedConditions = conditions.map(condition =>
+      condition
+        .replace(/\btype\b/g, "events.type")
+        .replace(/\btimestamp\b/g, "events.timestamp")
+        .replace(/\bcamera_id\b/g, "events.camera_id")
+        .replace(/\bdetail\b/g, "events.detail")
+        .replace(/\bstarred\b/g, "events.starred")
+    );
+    const where = scopedConditions.length > 0 ? `WHERE ${scopedConditions.join(" AND ")}` : "";
     try {
       /** 新格式：从 labels object 的 keys + values 汇总 */
       const newRows = this.db.query(
