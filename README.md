@@ -32,6 +32,10 @@ bun run src/index.ts
 
 参考 [nvr_config.yml.example](nvr_config.yml.example)。
 
+## 致谢
+
+感谢 [LINUX DO](https://linux.do) 社区的佬友们，这个项目的成长离不开社区的交流与支持。
+
 ## License
 
 MIT
