@@ -42,7 +42,7 @@ function playAlertSound() {
 }
 
 export function useNotification() {
-  const { t } = useI18n()
+  useI18n()
   const { getPref, setPref } = usePreferences()
 
   /** 从后端恢复声音配置 */

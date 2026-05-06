@@ -99,6 +99,9 @@ interface RuntimeSettings {
     postMotionDuration: number
     retentionDays: number
     segmentDuration: number
+    eventPreMs: number
+    eventPostMs: number
+    bufferDurationMs: number
     watermark: {
       enabled: boolean
       namePosition: string
@@ -303,6 +306,9 @@ function removeCandidateText(label: string, index: number) {
 }
 
 /** 加载摄像头列表（用于 per-camera 灵敏度配置） */
+const clipCandidateActions = { saveClipCandidates, addCandidateCategory, addCandidateText, removeCandidateText }
+void clipCandidateActions
+
 async function loadCameras() {
   try {
     const res = await authFetch('/api/cameras')

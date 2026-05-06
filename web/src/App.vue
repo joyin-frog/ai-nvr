@@ -234,7 +234,6 @@ const recordingsPanel = ref<any>(null)
 const cameraManagePanel = ref<any>(null)
 const alertPanel = ref<any>(null)
 const detectRulePanel = ref<any>(null)
-const signalPanel = ref<any>(null)
 const showShortcuts = ref(false)
 
 /** 认证状态 */
@@ -1211,7 +1210,7 @@ onUnmounted(() => {
             <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
             <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           </template>
-          <SignalPanel v-if="activeTab === 'states'" ref="signalPanel" :cameras="cameras" @jump-to-observer-history="onJumpToObserverHistory" />
+          <SignalPanel v-if="activeTab === 'states'" :cameras="cameras" @jump-to-observer-history="onJumpToObserverHistory" />
           <SettingsPanel v-if="activeTab === 'settings'" />
         </div>
       </div>
@@ -1273,7 +1272,7 @@ onUnmounted(() => {
           <DetectRulePanel v-show="alertSubTab === 'detect'" ref="detectRulePanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
           <AlertPanel v-show="alertSubTab === 'alert'" ref="alertPanel" :cameras="cameras" @jump-to-recording="onPlayRecording" />
         </template>
-        <SignalPanel v-if="activeTab === 'states'" ref="signalPanel" :cameras="cameras" @jump-to-observer-history="onJumpToObserverHistory" />
+        <SignalPanel v-if="activeTab === 'states'" :cameras="cameras" @jump-to-observer-history="onJumpToObserverHistory" />
         <SettingsPanel v-if="activeTab === 'settings'" />
       </div>
     </div>

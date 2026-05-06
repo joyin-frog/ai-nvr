@@ -54,15 +54,6 @@ getPref<string>('nvr-event-filter-type', '').then(v => { filterType.value = v })
 getPref<string>('nvr-event-filter-camera', '').then(v => { filterCamera.value = v })
 
 /** 事件记录 */
-interface EventRecord {
-  id: number
-  type: string
-  camera_id: string
-  timestamp: number
-  detail: string | null
-  starred: number
-}
-
 interface EventItem {
   id: number
   time: string

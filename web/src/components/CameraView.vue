@@ -91,14 +91,12 @@ function getSharedViewportObserver(): IntersectionObserver {
 }
 
 /** 视口可见性管理：不可见时暂停 fMP4 流 + 停止 overlay 绘制节省 CPU */
-let isInViewport = true
 onMounted(() => {
   const observer = getSharedViewportObserver()
   sharedViewportRefCount++
   const el = rootEl.value
   if (el) {
     viewportCallbacks.set(el, (visible) => {
-      isInViewport = visible
       fmp4.setVisible(visible)
       if (visible && props.online) {
         startOverlayLoop()
@@ -118,7 +116,6 @@ watch(rootEl, (el, oldEl) => {
   }
   if (el && observer) {
     viewportCallbacks.set(el, (visible) => {
-      isInViewport = visible
       fmp4.setVisible(visible)
       if (visible && props.online) {
         startOverlayLoop()
@@ -936,7 +933,7 @@ function drawLlmDescription(ctx: CanvasRenderingContext2D, width: number, height
 }
 
 /** 绘制静态 OSD（摄像头名称，几乎不变） */
-function drawStaticOSD(ctx: CanvasRenderingContext2D, width: number, _height: number) {
+function drawStaticOSD(ctx: CanvasRenderingContext2D, _width: number, _height: number) {
   ctx.save()
   if (props.name) {
     ctx.font = 'bold 13px monospace'
@@ -1234,7 +1231,7 @@ function drawDynamicOverlay(ctx: CanvasRenderingContext2D, width: number, height
 
   /** 绘制消失目标的淡出框（即使无活跃目标也需要绘制） */
   if (fadeOutBoxes.size > 0) {
-    for (const [id, state] of fadeOutBoxes) {
+    for (const state of fadeOutBoxes.values()) {
       const elapsed = now - state.startTime
       const alpha = Math.max(0, 1 - elapsed / FADE_OUT_DURATION)
       if (alpha <= 0) continue
@@ -1685,9 +1682,7 @@ const namingSuggestion = computed(() => {
 /** 当前命名目标的 CLIP 语义标签（作为快速命名建议） */
 const namingSemanticLabel = computed(() => {
   if (!namingBox.value) return null
-  const dets = takeDetections(props.cameraId)
-  if (!dets) return null
-  const det = dets.find(d => d.trackId === namingBox.value!.trackId)
+  const det = getSortedDetections().find(d => d.trackId === namingBox.value!.trackId)
   if (!det?.semanticLabel) return null
   /** 去掉 "a " 前缀，首字母大写 */
   const raw = det.semanticLabel.startsWith('a ') ? det.semanticLabel.slice(2) : det.semanticLabel
@@ -1739,7 +1734,7 @@ function onOverlayDblClick(e: MouseEvent) {
 function onBodyDblClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   if (target.tagName === 'CANVAS' || target.tagName === 'VIDEO') return
-  emit('fullscreen', cameraId)
+  emit('fullscreen', props.cameraId)
 }
 
 /** 查找点击位置对应的检测框 */

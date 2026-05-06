@@ -523,6 +523,11 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     }
   }
 
+  function bufferSourceBytes(data: BufferSource): Uint8Array {
+    if (data instanceof ArrayBuffer) return new Uint8Array(data)
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  }
+
   /** SourceBuffer error 事件处理 */
   function onBufferError(): void {
     console.warn('[fMP4] SourceBuffer error，尝试清理缓冲区')
@@ -607,7 +612,7 @@ export function useFmp4Stream(cameraId: Ref<string>) {
     const merged = new Uint8Array(total)
     let offset = 0
     for (const buf of batch) {
-      merged.set(new Uint8Array(buf), offset)
+      merged.set(bufferSourceBytes(buf), offset)
       offset += buf.byteLength
     }
     doAppend(merged.buffer)
