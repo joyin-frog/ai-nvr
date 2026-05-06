@@ -1,0 +1,112 @@
+ffmpeg_path: ~/tools/ffmpeg/bin/ffmpeg
+storage:
+  data_dir: /path/to/data
+
+cameras:
+  camera_1:
+    enabled: true
+    friendly_name: 摄像头1
+    stream:
+      hd: rtsp://username:password@192.168.1.100:554/stream1
+      sd: rtsp://username:password@192.168.1.100:554/stream2
+    record:
+      enabled: true
+      continuous:
+        days: 0
+      motion:
+        days: 7
+    detect:
+      enabled: true
+      width: 0
+      height: 0
+      fps: 0
+
+  # camera_with_ptz:
+  #   enabled: true
+  #   friendly_name: 球机
+  #   stream:
+  #     hd: rtsp://username:password@192.168.1.101:554/stream1&channel=2
+  #     sd: rtsp://username:password@192.168.1.101:554/stream2&channel=2
+  #   ptz:
+  #     enabled: true
+  #     driver: tplink
+  #     host: 192.168.1.101
+  #     port: 80
+  #     username: admin
+  #     password: your_password
+  #   record:
+  #     enabled: true
+  #     continuous:
+  #       days: 0
+  #     motion:
+  #       days: 7
+  #   detect:
+  #     enabled: true
+  #     width: 0
+  #     height: 0
+  #     fps: 0
+ai:
+  llm:
+    enabled: true
+    api_url: http://localhost:1234/v1/chat/completions
+    model: qwen3.5-0.8b
+    max_tokens: 300
+    interval: 10000
+    image_width: 640
+    system_prompt: ""
+    context_interval_ms: 2000
+  clip:
+    enabled: false
+    model: jinaai/jina-clip-v2
+    embedding_dim: 512
+  models:
+    - id: default
+      name: qwen3.5-0.8b
+      api_url: http://localhost:1234/v1/chat/completions
+      model: qwen3.5-0.8b
+      max_tokens: 300
+language: zh-CN
+motion:
+  threshold: 0.03
+  cooldown: 1000
+  compare_width: 160
+  compare_height: 120
+recording:
+  mode: motion
+  post_motion_duration: 5000
+  retention_days: 7
+  segment_duration: 300
+  encoder: auto
+  vaapi_device: /dev/dri/renderD128
+  watermark:
+    enabled: true
+    name_position: top-left
+    time_position: bottom-left
+    font_size: 24
+  event_pre_ms: 15000
+  event_post_ms: 30000
+  buffer_duration_ms: 30000
+  event_triggers:
+    - alert
+webhook:
+  urls: []
+notify:
+  dingtalk:
+    enabled: false
+    webhook_url: ""
+    secret: ""
+  email:
+    enabled: false
+    smtp:
+      host: ""
+      port: 465
+      secure: true
+      user: ""
+      pass: ""
+    from: ""
+    to: ""
+cleanup:
+  events_retention_days: 30
+  alerts_retention_days: 90
+  snapshots_retention_days: 30
+  thumbnails_retention_days: 7
